@@ -324,6 +324,491 @@ describe("Sync Routes", { concurrency: false }, () => {
     });
   });
 
+  describe("Sync Pull Route Integration", { concurrency: false }, () => {
+    // Note: These tests verify the canonical runtime path for /api/sync/pull
+    // They complement the module-level tests in pos-sync-module.integration.test.ts
+
+    test("GET /api/sync/pull returns data_version in response (sync contract)", async () => {
+      const response = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${testOutletId}&since_version=0`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      assert.equal(response.status, 200, "Should return 200 OK");
+
+      const body = await response.json() as { success: boolean; data?: { data_version: number } };
+      assert.equal(body.success, true, "Response should indicate success");
+      assert.ok(body.data, "Response should have data object");
+      assert.ok(typeof body.data!.data_version === "number", "data_version should be a number");
+      assert.ok(body.data!.data_version >= 0, "data_version should be non-negative");
+    });
+
+    test("GET /api/sync/pull respects since_version parameter (incremental sync)", async () => {
+      // First, get current data_version
+      const fullSyncResponse = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${testOutletId}&since_version=0`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      assert.equal(fullSyncResponse.status, 200);
+      const fullBody = await fullSyncResponse.json() as { success: boolean; data?: { data_version: number } };
+      const fullSyncVersion = fullBody.data!.data_version;
+
+      // Now call with since_version = fullSyncVersion (should return same or higher)
+      const incrementalResponse = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${testOutletId}&since_version=${fullSyncVersion}`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      assert.equal(incrementalResponse.status, 200);
+      const incrementalBody = await incrementalResponse.json() as { success: boolean; data?: { data_version: number } };
+      assert.ok(
+        incrementalBody.data!.data_version >= fullSyncVersion,
+        "Subsequent sync version should be >= previous version"
+      );
+    });
+
+    test("GET /api/sync/pull returns variants array in payload", async () => {
+      const response = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${testOutletId}&since_version=0`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      assert.equal(response.status, 200);
+      const body = await response.json() as {
+        success: boolean;
+        data?: {
+          variants: Array<{
+            id: number;
+            item_id: number;
+            sku: string;
+            variant_name: string;
+            price: number;
+            stock_quantity: number;
+            barcode: string | null;
+            is_active: boolean;
+            attributes: Record<string, string>;
+          }>;
+        };
+      };
+
+      assert.ok(Array.isArray(body.data!.variants), "variants should be an array");
+      // Variants may be empty in test DB, but structure should be correct
+      for (const variant of body.data!.variants) {
+        assert.ok(typeof variant.id === "number", "variant.id should be a number");
+        assert.ok(typeof variant.item_id === "number", "variant.item_id should be a number");
+        assert.ok(typeof variant.sku === "string", "variant.sku should be a string");
+        assert.ok(typeof variant.variant_name === "string", "variant.variant_name should be a string");
+        assert.ok(typeof variant.price === "number", "variant.price should be a number");
+        assert.ok(typeof variant.stock_quantity === "number", "variant.stock_quantity should be a number");
+        assert.ok(typeof variant.is_active === "boolean", "variant.is_active should be a boolean");
+        assert.ok(typeof variant.attributes === "object", "variant.attributes should be an object");
+      }
+    });
+
+    test("GET /api/sync/pull returns variant_prices array in payload", async () => {
+      const response = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${testOutletId}&since_version=0`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      assert.equal(response.status, 200);
+      const body = await response.json() as {
+        success: boolean;
+        data?: {
+          variant_prices: Array<{
+            id: number;
+            item_id: number;
+            variant_id: number | null;
+            outlet_id: number;
+            price: number;
+            is_active: boolean;
+          }>;
+        };
+      };
+
+      assert.ok(Array.isArray(body.data!.variant_prices), "variant_prices should be an array");
+      for (const vp of body.data!.variant_prices) {
+        assert.ok(typeof vp.id === "number", "variant_prices[].id should be a number");
+        assert.ok(typeof vp.item_id === "number", "variant_prices[].item_id should be a number");
+        assert.ok(typeof vp.outlet_id === "number", "variant_prices[].outlet_id should be a number");
+        assert.ok(typeof vp.price === "number", "variant_prices[].price should be a number");
+        assert.ok(typeof vp.is_active === "boolean", "variant_prices[].is_active should be a boolean");
+      }
+    });
+
+    test("GET /api/sync/pull thumbnail_url is null (thumbnails fetched separately)", async () => {
+      // Per canonical sync contract, thumbnails are NOT included in pull payload
+      // They are fetched via separate endpoint/flow
+      const response = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${testOutletId}&since_version=0`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      assert.equal(response.status, 200);
+      const body = await response.json() as {
+        success: boolean;
+        data?: {
+          items: Array<{ thumbnail_url: string | null }>;
+        };
+      };
+
+      // Verify thumbnail_url is null in items (canonical behavior)
+      for (const item of body.data!.items) {
+        assert.ok(
+          item.thumbnail_url === null,
+          "Item thumbnail_url should be null (thumbnails fetched separately)"
+        );
+      }
+    });
+
+    test("GET /api/sync/pull returns created variants and variant_prices for requested outlet", async () => {
+      // Use test fixtures library to create item + variant
+      const { createTestItem, createTestVariant } = await import("../../lib/test-fixtures.js");
+
+      const testItem = await createTestItem(testCompanyId, {
+        sku: `SYNC-TEST-${Date.now().toString(36)}`,
+        name: `Sync Test Item ${Date.now().toString(36)}`,
+      });
+
+      const testVariant = await createTestVariant(testItem.id);
+
+      // Create variant price for requested outlet (using item_prices table with variant_id)
+      const vpInsert = await sql`
+        INSERT INTO item_prices (company_id, item_id, variant_id, outlet_id, price, is_active)
+        VALUES (${testCompanyId}, ${testItem.id}, ${testVariant.id}, ${testOutletId}, 15000, 1)
+      `.execute(db);
+      const testVariantPriceId = Number(vpInsert.insertId);
+
+      try {
+        // Pull sync and verify our created data is returned
+        const response = await fetch(
+          `${baseUrl}/api/sync/pull?outlet_id=${testOutletId}&since_version=0`,
+          {
+            headers: {
+              authorization: `Bearer ${accessToken}`,
+            },
+          }
+        );
+
+        assert.equal(response.status, 200);
+        const body = await response.json() as {
+          success: boolean;
+          data?: {
+            variants: Array<{ id: number; item_id: number; sku: string }>;
+            variant_prices: Array<{ id: number; item_id: number; variant_id: number | null; outlet_id: number; price: number }>;
+          };
+        };
+
+        assert.ok(Array.isArray(body.data!.variants), "variants should be an array");
+        assert.ok(Array.isArray(body.data!.variant_prices), "variant_prices should be an array");
+
+        // Verify our created variant is in the response
+        const ourVariant = body.data!.variants.find((v) => v.id === testVariant.id);
+        assert.ok(ourVariant, `Created variant ${testVariant.id} should be in response`);
+        assert.equal(ourVariant!.item_id, testItem.id, "Variant should belong to our item");
+
+        // Verify our created variant price is in the response
+        const ourVariantPrice = body.data!.variant_prices.find((vp) => vp.id === testVariantPriceId);
+        assert.ok(ourVariantPrice, `Created variant price ${testVariantPriceId} should be in response`);
+        assert.equal(ourVariantPrice!.item_id, testItem.id, "Variant price should belong to our item");
+        assert.equal(ourVariantPrice!.variant_id, testVariant.id, "Variant price should belong to our variant");
+        assert.equal(ourVariantPrice!.outlet_id, testOutletId, "Variant price should belong to requested outlet");
+        assert.equal(ourVariantPrice!.price, 15000, "Variant price should have correct price");
+      } finally {
+        // Cleanup variant price
+        await sql`DELETE FROM item_prices WHERE id = ${testVariantPriceId}`.execute(db);
+      }
+    });
+
+    test("GET /api/sync/pull excludes variant_prices from other outlets (outlet scoping)", async () => {
+      // Find or create a second outlet to prove exclusion deterministically
+      let createdOutletId: number | null = null;
+      const otherOutletRows = await sql`SELECT id FROM outlets WHERE company_id = ${testCompanyId} AND id != ${testOutletId} LIMIT 1`.execute(db);
+      let otherOutletId: number;
+      if (otherOutletRows.rows.length > 0) {
+        otherOutletId = Number((otherOutletRows.rows[0] as { id: number }).id);
+      } else {
+        const { createTestOutletMinimal } = await import("../../lib/test-fixtures.js");
+        const createdOutlet = await createTestOutletMinimal(testCompanyId);
+        otherOutletId = createdOutlet.id;
+        createdOutletId = createdOutlet.id;
+      }
+
+      // Use test fixtures library to create item + variant for other outlet
+      const { createTestItem, createTestVariant } = await import("../../lib/test-fixtures.js");
+
+      const testItem = await createTestItem(testCompanyId, {
+        sku: `SYNC-OTHER-${Date.now().toString(36)}`,
+        name: `Sync Other Outlet Item ${Date.now().toString(36)}`,
+      });
+
+      const testVariant = await createTestVariant(testItem.id);
+
+      // Create variant price for OTHER outlet (not the requested one)
+      const vpInsert = await sql`
+        INSERT INTO item_prices (company_id, item_id, variant_id, outlet_id, price, is_active)
+        VALUES (${testCompanyId}, ${testItem.id}, ${testVariant.id}, ${otherOutletId}, 20000, 1)
+      `.execute(db);
+      const otherOutletVariantPriceId = Number(vpInsert.insertId);
+
+      try {
+        // Pull sync for the REQUESTED outlet (not otherOutletId)
+        const response = await fetch(
+          `${baseUrl}/api/sync/pull?outlet_id=${testOutletId}&since_version=0`,
+          {
+            headers: {
+              authorization: `Bearer ${accessToken}`,
+            },
+          }
+        );
+
+        assert.equal(response.status, 200);
+        const body = await response.json() as {
+          success: boolean;
+          data?: {
+            variant_prices: Array<{ id: number; outlet_id: number }>;
+          };
+        };
+
+        // Verify the variant price from other outlet is NOT in the response
+        const otherOutletVp = body.data!.variant_prices.find((vp) => vp.id === otherOutletVariantPriceId);
+        assert.ok(
+          otherOutletVp === undefined,
+          `Variant price ${otherOutletVariantPriceId} from other outlet ${otherOutletId} should be excluded`
+        );
+
+        // Verify all returned variant_prices belong to the requested outlet
+        for (const vp of body.data!.variant_prices) {
+          assert.equal(
+            vp.outlet_id,
+            testOutletId,
+            `All variant_prices should belong to requested outlet ${testOutletId}, but found outlet ${vp.outlet_id}`
+          );
+        }
+      } finally {
+        // Cleanup variant price
+        await sql`DELETE FROM item_prices WHERE id = ${otherOutletVariantPriceId}`.execute(db);
+        if (createdOutletId !== null) {
+          await sql`DELETE FROM outlets WHERE id = ${createdOutletId}`.execute(db);
+        }
+      }
+    });
+
+    test("GET /api/sync/pull incremental sync gates change-based sections but preserves always-present arrays", async () => {
+      // First pull to get baseline version
+      const firstResponse = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${testOutletId}&since_version=0`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      assert.equal(firstResponse.status, 200);
+      const firstBody = await firstResponse.json() as {
+        success: boolean;
+        data?: {
+          data_version: number;
+          items: unknown[];
+          item_groups: unknown[];
+          prices: unknown[];
+          variant_prices: unknown[];
+          config: unknown;
+          tables: unknown[];
+          reservations: unknown[];
+          variants: unknown[];
+          open_orders: unknown[];
+          open_order_lines: unknown[];
+          order_updates: unknown[];
+          orders_cursor: number | null;
+        };
+      };
+
+      const sinceVersion = firstBody.data!.data_version;
+
+      // Second pull with since_version should return same version (no changes)
+      const secondResponse = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${testOutletId}&since_version=${sinceVersion}`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      assert.equal(secondResponse.status, 200);
+      const secondBody = await secondResponse.json() as {
+        success: boolean;
+        data?: {
+          data_version: number;
+          items: unknown[];
+          item_groups: unknown[];
+          prices: unknown[];
+          variant_prices: unknown[];
+          config: unknown;
+          tables: unknown[];
+          reservations: unknown[];
+          variants: unknown[];
+          open_orders: unknown[];
+          open_order_lines: unknown[];
+          order_updates: unknown[];
+          orders_cursor: number | null;
+        };
+      };
+
+      // Version should be >= sinceVersion (canonical contract)
+      assert.ok(
+        secondBody.data!.data_version >= sinceVersion,
+        `data_version ${secondBody.data!.data_version} should be >= since_version ${sinceVersion}`
+      );
+
+      // Change-gated sections (items, item_groups) should be empty arrays when no changes occurred
+      // Per runtime behavior, these sections are gated by changes since version
+      assert.ok(
+        Array.isArray(secondBody.data!.items) && secondBody.data!.items.length === 0,
+        "items should be empty array for incremental sync with no changes"
+      );
+      assert.ok(
+        Array.isArray(secondBody.data!.item_groups) && secondBody.data!.item_groups.length === 0,
+        "item_groups should be empty array for incremental sync with no changes"
+      );
+
+      // Required always-present sections should remain arrays (even if empty)
+      assert.ok(Array.isArray(secondBody.data!.prices), "prices should always be an array");
+      assert.ok(Array.isArray(secondBody.data!.variant_prices), "variant_prices should always be an array");
+      assert.ok(Array.isArray(secondBody.data!.tables), "tables should always be an array");
+      assert.ok(Array.isArray(secondBody.data!.reservations), "reservations should always be an array");
+      assert.ok(Array.isArray(secondBody.data!.variants), "variants should always be an array");
+      assert.ok(Array.isArray(secondBody.data!.open_orders), "open_orders should always be an array");
+      assert.ok(Array.isArray(secondBody.data!.open_order_lines), "open_order_lines should always be an array");
+      assert.ok(Array.isArray(secondBody.data!.order_updates), "order_updates should always be an array");
+    });
+
+    test("GET /api/sync/pull enforces outlet scoping (tables scoped to outlet)", async () => {
+      const response = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${testOutletId}&since_version=0`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      assert.equal(response.status, 200);
+      const body = await response.json() as {
+        success: boolean;
+        data?: {
+          tables: Array<{ table_id: number; code: string }>;
+        };
+      };
+
+      assert.ok(Array.isArray(body.data!.tables), "tables should be an array");
+
+      for (const table of body.data!.tables) {
+        const tableRows = await sql<{ outlet_id: number }>`
+          SELECT outlet_id
+          FROM outlet_tables
+          WHERE id = ${table.table_id}
+          LIMIT 1
+        `.execute(db);
+
+        assert.equal(tableRows.rows.length, 1, "Table should exist in outlet_tables");
+        assert.equal(
+          Number(tableRows.rows[0].outlet_id),
+          testOutletId,
+          "Returned table must belong to requested outlet"
+        );
+      }
+    });
+
+    test("GET /api/sync/pull returns all required payload sections", async () => {
+      const response = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${testOutletId}&since_version=0`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      assert.equal(response.status, 200);
+      const body = await response.json() as {
+        success: boolean;
+        data?: Record<string, unknown>;
+      };
+
+      // Verify all required sections per SyncPullPayloadSchema
+      const requiredSections = [
+        "data_version",
+        "items",
+        "item_groups",
+        "prices",
+        "variant_prices",
+        "config",
+        "tables",
+        "reservations",
+        "variants",
+        "open_orders",
+        "open_order_lines",
+        "order_updates",
+        "orders_cursor",
+      ];
+
+      for (const section of requiredSections) {
+        assert.ok(
+          section in body.data!,
+          `Payload should contain '${section}' section`
+        );
+      }
+    });
+
+    test("GET /api/sync/pull rejects request without outlet_id", async () => {
+      const response = await fetch(`${baseUrl}/api/sync/pull`, {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      // Should return 400 Bad Request
+      assert.equal(response.status, 400, "Should return 400 for missing outlet_id");
+    });
+
+    test("GET /api/sync/pull rejects request without authentication", async () => {
+      const response = await fetch(
+        `${baseUrl}/api/sync/pull?outlet_id=${testOutletId}&since_version=0`
+      );
+
+      // Should return 401 Unauthorized
+      assert.equal(response.status, 401, "Should return 401 without auth");
+    });
+  });
+
   describe("Sync Module Health Check", () => {
     test("checkSyncModuleHealth function exists and returns expected structure", async () => {
       const { checkSyncModuleHealth } = await import("../../lib/sync-modules");

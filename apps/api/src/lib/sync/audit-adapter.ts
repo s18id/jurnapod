@@ -12,6 +12,7 @@
  */
 
 import type { Pool } from "mysql2/promise";
+import { sql } from "kysely";
 import { SyncAuditService, type AuditDbClient } from "@jurnapod/modules-platform/sync";
 import type { KyselySchema } from "@/lib/db";
 
@@ -29,7 +30,54 @@ import type { KyselySchema } from "@/lib/db";
 export function createSyncAuditService(db: Pool | KyselySchema): SyncAuditService {
   // Check if it's a KyselySchema (has selectFrom method)
   if (typeof (db as KyselySchema).selectFrom === "function") {
-    return new SyncAuditService(db as unknown as AuditDbClient);
+    const kyselyDb = db as KyselySchema;
+
+    const toRawQuery = (sqlText: string, params: unknown[] = []) => {
+      if (params.length === 0) {
+        return sql.raw(sqlText);
+      }
+
+      let built = sql``;
+      let cursor = 0;
+
+      for (let i = 0; i < params.length; i += 1) {
+        const qIndex = sqlText.indexOf("?", cursor);
+        if (qIndex === -1) {
+          break;
+        }
+        const segment = sqlText.slice(cursor, qIndex);
+        built = sql`${built}${sql.raw(segment)}${params[i]}`;
+        cursor = qIndex + 1;
+      }
+
+      const tail = sqlText.slice(cursor);
+      built = sql`${built}${sql.raw(tail)}`;
+      return built;
+    };
+
+    const client: AuditDbClient = {
+      query: async <T = unknown>(queryText: string, params?: unknown[]): Promise<T[]> => {
+        const result = await toRawQuery(queryText, params ?? []).execute(kyselyDb);
+        return result.rows as T[];
+      },
+      execute: async (
+        queryText: string,
+        params?: unknown[]
+      ): Promise<{ affectedRows: number; insertId?: number }> => {
+        const result = await toRawQuery(queryText, params ?? []).execute(kyselyDb) as {
+          numAffectedRows?: bigint | number;
+          insertId?: bigint | number;
+        };
+
+        const affectedRows = Number(result.numAffectedRows ?? 0);
+        const insertId =
+          result.insertId == null ? undefined : Number(result.insertId);
+
+        return { affectedRows, insertId };
+      },
+    };
+
+    return new SyncAuditService(client);
   }
 
   // Otherwise wrap mysql2 Pool

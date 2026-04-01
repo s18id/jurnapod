@@ -35,7 +35,10 @@ export async function getTaxRatesForSync(db: KyselySchema, companyId: number): P
     is_inclusive: row.is_inclusive === 1,
     account_id: row.account_id == null ? null : Number(row.account_id),
     is_active: row.is_active === 1,
-    updated_at: row.updated_at.toISOString()
+    updated_at:
+      typeof row.updated_at === "string"
+        ? row.updated_at
+        : row.updated_at.toISOString()
   }));
 }
 
@@ -64,7 +67,10 @@ export async function getTaxRatesChangedSince(
     is_inclusive: row.is_inclusive === 1,
     account_id: row.account_id == null ? null : Number(row.account_id),
     is_active: row.is_active === 1,
-    updated_at: row.updated_at.toISOString()
+    updated_at:
+      typeof row.updated_at === "string"
+        ? row.updated_at
+        : row.updated_at.toISOString()
   }));
 }
 
