@@ -1,126 +1,188 @@
-// Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
-//
-// Unit tests for tax utilities.
-// Run with: node --test --import tsx apps/api/src/lib/taxes.test.ts
-
 import assert from "node:assert/strict";
-import { describe, mock, test } from "node:test";
-import type { FieldPacket, RowDataPacket } from "mysql2";
+import { after, afterEach, before, describe, test } from "node:test";
+import { closeDbPool, getDb, type KyselySchema } from "./db";
+import { createTestCompanyMinimal } from "./test-fixtures";
 import { listCompanyDefaultTaxRates } from "./taxes";
 
-type QueryExecutor = Parameters<typeof listCompanyDefaultTaxRates>[0];
-
-function makeExecutor(impl: (sql: string, params: unknown[]) => [unknown[], unknown[]]) {
-  const execute = mock.fn(async (sql: string, params?: unknown[]) => impl(sql, params ?? []) as [RowDataPacket[], FieldPacket[]]);
-  return { execute } as unknown as QueryExecutor;
-}
-
 describe("listCompanyDefaultTaxRates company_id scoping", () => {
-  test("enforces company_id on both company_tax_defaults and tax_rates", async () => {
-    const captured: { sql: string; params: unknown[] }[] = [];
+  let db: KyselySchema;
+  let companyAId: number;
+  let companyBId: number;
 
-    const db = makeExecutor((sql, params) => {
-      captured.push({ sql, params });
-      return [[], []];
+  before(async () => {
+    db = getDb();
+    const companyA = await createTestCompanyMinimal({
+      code: `TAXA-${Date.now().toString(36)}`,
+      name: "Tax Company A",
+    });
+    const companyB = await createTestCompanyMinimal({
+      code: `TAXB-${Date.now().toString(36)}`,
+      name: "Tax Company B",
     });
 
-    await listCompanyDefaultTaxRates(db, 42);
+    companyAId = companyA.id;
+    companyBId = companyB.id;
+  });
 
-    assert.equal(captured.length, 1, "should execute exactly one query");
-    const { sql, params } = captured[0];
+  afterEach(async () => {
+    await db.deleteFrom("company_tax_defaults").where("company_id", "in", [companyAId, companyBId]).execute();
+    await db.deleteFrom("tax_rates").where("company_id", "in", [companyAId, companyBId]).execute();
+  });
 
-    assert.ok(
-      sql.includes("ctd.company_id = ?"),
-      "query should filter company_tax_defaults by company_id"
-    );
-    assert.ok(
-      sql.includes("tr.company_id = ?"),
-      "query should filter tax_rates by company_id"
-    );
-    assert.ok(
-      sql.includes("tr.company_id = ctd.company_id"),
-      "query should join on matching company_id"
-    );
+  after(async () => {
+    await db.deleteFrom("outlets").where("company_id", "in", [companyAId, companyBId]).execute();
+    await db.deleteFrom("companies").where("id", "in", [companyAId, companyBId]).execute();
+    await closeDbPool();
+  });
 
-    assert.equal(params.length, 2, "should pass companyId twice");
-    assert.equal(params[0], 42, "first param should be companyId");
-    assert.equal(params[1], 42, "second param should be companyId");
+  test("enforces company_id on both company_tax_defaults and tax_rates", async () => {
+    const firstTax = await db
+      .insertInto("tax_rates")
+      .values({
+        company_id: companyAId,
+        code: `A-TAX-${Date.now()}`,
+        name: "Company A Tax",
+        rate_percent: 10,
+        account_id: null,
+        is_inclusive: 0,
+        is_active: 1,
+      })
+      .executeTakeFirstOrThrow();
+
+    const secondTax = await db
+      .insertInto("tax_rates")
+      .values({
+        company_id: companyBId,
+        code: `B-TAX-${Date.now()}`,
+        name: "Company B Tax",
+        rate_percent: 12,
+        account_id: null,
+        is_inclusive: 0,
+        is_active: 1,
+      })
+      .executeTakeFirstOrThrow();
+
+    await db
+      .insertInto("company_tax_defaults")
+      .values({
+        company_id: companyAId,
+        tax_rate_id: Number(firstTax.insertId),
+        created_by_user_id: null,
+        updated_by_user_id: null,
+      })
+      .execute();
+
+    await db
+      .insertInto("company_tax_defaults")
+      .values({
+        company_id: companyBId,
+        tax_rate_id: Number(secondTax.insertId),
+        created_by_user_id: null,
+        updated_by_user_id: null,
+      })
+      .execute();
+
+    const result = await listCompanyDefaultTaxRates(db, companyAId);
+
+    assert.equal(result.length, 1);
+    assert.equal(result[0].company_id, companyAId);
+    assert.equal(result[0].name, "Company A Tax");
   });
 
   test("returns tax rates with correct shape when found", async () => {
-    const db = makeExecutor(() => [[
-      {
-        id: 1,
-        company_id: 5,
-        code: "TAX01",
+    const tax = await db
+      .insertInto("tax_rates")
+      .values({
+        company_id: companyAId,
+        code: `TAX01-${Date.now()}`,
         name: "Test Tax",
         rate_percent: 10,
-        account_id: 100,
+        account_id: null,
         is_inclusive: 0,
-        is_active: 1
-      }
-    ], []]);
+        is_active: 1,
+      })
+      .executeTakeFirstOrThrow();
 
-    const result = await listCompanyDefaultTaxRates(db, 5);
+    await db
+      .insertInto("company_tax_defaults")
+      .values({
+        company_id: companyAId,
+        tax_rate_id: Number(tax.insertId),
+        created_by_user_id: null,
+        updated_by_user_id: null,
+      })
+      .execute();
+
+    const result = await listCompanyDefaultTaxRates(db, companyAId);
 
     assert.equal(result.length, 1);
-    assert.equal(result[0].id, 1);
-    assert.equal(result[0].company_id, 5);
-    assert.equal(result[0].code, "TAX01");
+    assert.equal(result[0].company_id, companyAId);
+    assert.equal(result[0].code.startsWith("TAX01"), true);
+    assert.equal(result[0].name, "Test Tax");
     assert.equal(result[0].rate_percent, 10);
-    assert.equal(result[0].account_id, 100);
+    assert.equal(result[0].account_id, null);
     assert.equal(result[0].is_inclusive, false);
     assert.equal(result[0].is_active, true);
   });
 
   test("returns empty array when no defaults configured", async () => {
-    const db = makeExecutor(() => [[], []]);
-
-    const result = await listCompanyDefaultTaxRates(db, 99);
-
+    const result = await listCompanyDefaultTaxRates(db, companyAId);
     assert.equal(result.length, 0);
   });
 
   test("filters out inactive tax rates", async () => {
-    const db = makeExecutor((sql) => {
-      if (sql.includes("tr.is_active = 1")) {
-        return [[], []];
-      }
-      return [[
-        {
-          id: 2,
-          company_id: 7,
-          code: "INACTIVE",
-          name: "Inactive Tax",
-          rate_percent: 5,
-          account_id: 200,
-          is_inclusive: 0,
-          is_active: 0
-        }
-      ], []];
-    });
+    const tax = await db
+      .insertInto("tax_rates")
+      .values({
+        company_id: companyAId,
+        code: `INACTIVE-${Date.now()}`,
+        name: "Inactive Tax",
+        rate_percent: 5,
+        account_id: null,
+        is_inclusive: 0,
+        is_active: 0,
+      })
+      .executeTakeFirstOrThrow();
 
-    const result = await listCompanyDefaultTaxRates(db, 7);
+    await db
+      .insertInto("company_tax_defaults")
+      .values({
+        company_id: companyAId,
+        tax_rate_id: Number(tax.insertId),
+        created_by_user_id: null,
+        updated_by_user_id: null,
+      })
+      .execute();
 
+    const result = await listCompanyDefaultTaxRates(db, companyAId);
     assert.equal(result.length, 0);
   });
 
   test("preserves null account_id as null", async () => {
-    const db = makeExecutor(() => [[
-      {
-        id: 3,
-        company_id: 8,
-        code: "NULL_ACCOUNT",
+    const tax = await db
+      .insertInto("tax_rates")
+      .values({
+        company_id: companyAId,
+        code: `NULLACC-${Date.now()}`,
         name: "Tax Without Account",
         rate_percent: 15,
         account_id: null,
         is_inclusive: 0,
-        is_active: 1
-      }
-    ], []]);
+        is_active: 1,
+      })
+      .executeTakeFirstOrThrow();
 
-    const result = await listCompanyDefaultTaxRates(db, 8);
+    await db
+      .insertInto("company_tax_defaults")
+      .values({
+        company_id: companyAId,
+        tax_rate_id: Number(tax.insertId),
+        created_by_user_id: null,
+        updated_by_user_id: null,
+      })
+      .execute();
 
+    const result = await listCompanyDefaultTaxRates(db, companyAId);
     assert.equal(result.length, 1);
     assert.equal(result[0].account_id, null);
   });
