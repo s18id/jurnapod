@@ -1,6 +1,6 @@
 # Story 20.8: Data Import Count Columns
 
-**Status:** review  
+**Status:** done  
 **Epic:** Epic 20  
 **Story Points:** 2  
 **Priority:** P2  

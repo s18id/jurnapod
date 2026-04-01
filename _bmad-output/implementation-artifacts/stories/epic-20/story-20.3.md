@@ -1,6 +1,6 @@
 # Story 20.3: Feature Flags Normalization
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 20  
 **Story Points:** 3  
 **Priority:** P2  

@@ -1,6 +1,6 @@
 # Story 20.5: Auth Throttle Merge
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 20  
 **Story Points:** 2  
 **Priority:** P2  

@@ -1,6 +1,6 @@
 # Story 20.10: Final Verification
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 20  
 **Story Points:** 3  
 **Priority:** P1  
@@ -78,16 +78,16 @@ npm run build -w @jurnapod/pos
 
 ## Acceptance Criteria
 
-- [ ] `npm run typecheck -w @jurnapod/api` passes with 0 errors
-- [ ] `npm run build -w @jurnapod/api` succeeds
-- [ ] `npm run lint -w @jurnapod/api` passes
-- [ ] `npm run test:unit:critical -w @jurnapod/api` passes
-- [ ] `npm run test:unit -w @jurnapod/api` passes all tests
-- [ ] `npm run build -w @jurnapod/backoffice` succeeds
-- [ ] `npm run build -w @jurnapod/pos` succeeds
-- [ ] Schema documentation updated
-- [ ] ADR created for schema consolidation
-- [ ] Epic 20 marked as complete in sprint-status.yaml
+- [x] `npm run typecheck -w @jurnapod/api` passes with 0 errors
+- [x] `npm run build -w @jurnapod/api` succeeds
+- [x] `npm run lint -w @jurnapod/api` passes
+- [x] `npm run test:unit:critical -w @jurnapod/api` passes
+- [x] `npm run test:unit -w @jurnapod/api` passes all tests
+- [x] `npm run build -w @jurnapod/backoffice` succeeds
+- [x] `npm run build -w @jurnapod/pos` succeeds
+- [x] Schema documentation updated
+- [x] ADR created for schema consolidation
+- [x] Epic 20 marked as complete in sprint-status.yaml
 
 ## Dependencies
 

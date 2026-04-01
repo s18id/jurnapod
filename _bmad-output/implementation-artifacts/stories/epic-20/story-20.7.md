@@ -1,6 +1,6 @@
 # Story 20.7: Sync Versions Merge
 
-**Status:** review  
+**Status:** done  
 **Epic:** Epic 20  
 **Story Points:** 2  
 **Priority:** P2  
@@ -87,8 +87,8 @@ ON DUPLICATE KEY UPDATE
 5. [x] **Update sync-core**: Updated packages/sync-core/src/data/sync-version-queries.ts
 6. [x] **Update backoffice-sync**: Updated packages/backoffice-sync/src/core/backoffice-data-service.ts
 7. [x] **Update API**: Updated apps/api/src/lib/sync/master-data.ts
-8. [ ] **Run tests**: Requires database migration first (migration 0131 issue blocks)
-9. [ ] **Drop tables**: Drop old tables after full verification
+8. [x] **Run tests**: Verified after migration chain updates
+9. [x] **Drop tables**: Completed in follow-up legacy retirement migrations
 
 ## Acceptance Criteria
 
@@ -100,8 +100,8 @@ ON DUPLICATE KEY UPDATE
 - [x] @jurnapod/sync-core updated (sync-version-queries.ts)
 - [x] @jurnapod/backoffice-sync updated (backoffice-data-service.ts)
 - [x] @jurnapod/api updated (master-data.ts)
-- [ ] No data loss (verify row counts) - requires database migration
-- [ ] Old tables dropped only after full verification
+- [x] No data loss (verify row counts) - verified via reconcile+archive migration steps
+- [x] Old tables dropped only after full verification
 
 ## Dependencies
 

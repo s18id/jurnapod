@@ -1,6 +1,6 @@
 # Story 20.6: Item Variant EAV Cleanup
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 20  
 **Story Points:** 5  
 **Priority:** P2  

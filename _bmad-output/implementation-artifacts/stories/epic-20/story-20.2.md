@@ -1,6 +1,6 @@
 # Story 20.2: Module Configuration Normalization
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 20  
 **Story Points:** 5  
 **Priority:** P2  

@@ -1,6 +1,6 @@
 # Story 20.1: Settings System Migration
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 20  
 **Story Points:** 8  
 **Priority:** P1  

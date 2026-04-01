@@ -1,6 +1,6 @@
 # Story 20.4: Mappings Consolidation
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 20  
 **Story Points:** 5  
 **Priority:** P2  

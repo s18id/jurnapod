@@ -1,4 +1,4 @@
-last_updated: 2026-03-31
+last_updated: 2026-04-01
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -221,14 +221,14 @@ development_status:
   19-13-final-verification: done (0 type errors)
 
   # Epic 20: Schema Consolidation & JSON Normalization
-  epic-20: backlog
-  20-1-settings-system-migration: backlog
-  20-2-module-config-normalization: backlog
-  20-3-feature-flags-normalization: backlog
-  20-4-mappings-consolidation: backlog
-  20-5-auth-throttle-merge: backlog
-  20-6-item-variant-eav-cleanup: backlog
-  20-7-sync-versions-merge: review
-  20-8-data-import-count-columns: backlog
-  20-9-legacy-table-drops: in-progress
-  20-10-final-verification: backlog
+  epic-20: done
+  20-1-settings-system-migration: done
+  20-2-module-config-normalization: done
+  20-3-feature-flags-normalization: done
+  20-4-mappings-consolidation: done
+  20-5-auth-throttle-merge: done
+  20-6-item-variant-eav-cleanup: done
+  20-7-sync-versions-merge: done
+  20-8-data-import-count-columns: done
+  20-9-legacy-table-drops: done
+  20-10-final-verification: done
