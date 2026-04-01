@@ -44,8 +44,9 @@ export class LoginThrottle {
     if (keys.length === 0) return 0;
 
     const rows = await this.adapter.db
-      .selectFrom('auth_login_throttles')
+      .selectFrom('auth_throttles')
       .where('key_hash', 'in', keys.map((k) => k.hash))
+      .where('throttle_type', '=', 'login')
       .select(['key_hash', 'failure_count'])
       .execute();
 
@@ -74,9 +75,10 @@ export class LoginThrottle {
     // Use Kysely's onDuplicateKeyUpdate for MySQL/MariaDB
     for (const k of params.keys) {
       await this.adapter.db
-        .insertInto('auth_login_throttles')
+        .insertInto('auth_throttles')
         .values({
           key_hash: k.hash,
+          throttle_type: 'login',
           failure_count: 1,
           last_failed_at: new Date(),
           last_ip: ipAddress,
@@ -96,8 +98,9 @@ export class LoginThrottle {
     if (keys.length === 0) return;
 
     await this.adapter.db
-      .deleteFrom('auth_login_throttles')
+      .deleteFrom('auth_throttles')
       .where('key_hash', 'in', keys.map((k) => k.hash))
+      .where('throttle_type', '=', 'login')
       .execute();
   }
 }

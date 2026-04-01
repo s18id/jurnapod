@@ -1,6 +1,7 @@
 /**
  * RBAC access check implementation using Kysely query builder
  */
+import { sql } from 'kysely';
 import type {
   AuthDbAdapter,
   AuthConfig,
@@ -116,7 +117,7 @@ export class RBACManager {
       const permissionBit = MODULE_PERMISSION_BITS[permission];
       
       if (typeof outletId === 'number') {
-        // Check global permission
+        // Check global permission with bitmask check
         const globalPermMatch = await this.adapter.db
           .selectFrom('user_role_assignments as ura')
           .innerJoin('roles as r', 'r.id', 'ura.role_id')
@@ -127,10 +128,11 @@ export class RBACManager {
           .where('ura.outlet_id', 'is', null)
           .where('mr.module', '=', module)
           .where('mr.company_id', '=', companyId)
+          .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
           .select(['mr.id'])
           .executeTakeFirst();
 
-        // Check outlet permission
+        // Check outlet permission with bitmask check
         const outletPermMatch = await this.adapter.db
           .selectFrom('user_role_assignments as ura')
           .innerJoin('roles as r', 'r.id', 'ura.role_id')
@@ -140,12 +142,13 @@ export class RBACManager {
           .where('ura.outlet_id', '=', outletId)
           .where('mr.module', '=', module)
           .where('mr.company_id', '=', companyId)
+          .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
           .select(['mr.id'])
           .executeTakeFirst();
 
         hasPermission = Boolean(globalPermMatch) || Boolean(outletPermMatch);
       } else {
-        // No outletId - check global permissions
+        // No outletId - check global permissions with bitmask check
         const globalPermMatch = await this.adapter.db
           .selectFrom('user_role_assignments as ura')
           .innerJoin('roles as r', 'r.id', 'ura.role_id')
@@ -154,6 +157,7 @@ export class RBACManager {
           .where('ura.company_id', '=', companyId)
           .where('mr.module', '=', module)
           .where('mr.company_id', '=', companyId)
+          .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
           .select(['mr.id'])
           .executeTakeFirst();
 

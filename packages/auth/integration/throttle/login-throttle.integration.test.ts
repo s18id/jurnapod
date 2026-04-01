@@ -68,10 +68,11 @@ test('LoginThrottle Integration - recordFailure() creates throttle record', { sk
     userAgent: 'test-agent'
   });
 
-  // Verify record exists in auth_login_throttles table
+  // Verify record exists in auth_throttles table
   const rows = await adapter.db
-    .selectFrom('auth_login_throttles')
+    .selectFrom('auth_throttles')
     .where('key_hash', 'in', keys.map(k => k.hash))
+    .where('throttle_type', '=', 'login')
     .select(['key_hash', 'failure_count', 'last_ip', 'last_user_agent'])
     .execute();
 
@@ -113,8 +114,9 @@ test('LoginThrottle Integration - recordFailure() increments failure count', { s
 
   // Verify failure_count = 3 in database
   const rows = await adapter.db
-    .selectFrom('auth_login_throttles')
+    .selectFrom('auth_throttles')
     .where('key_hash', 'in', keys.map(k => k.hash))
+    .where('throttle_type', '=', 'login')
     .select(['key_hash', 'failure_count'])
     .execute();
 
@@ -226,8 +228,9 @@ test('LoginThrottle Integration - recordSuccess() clears throttle entries', { sk
 
   // Verify we have records
   let rows = await adapter.db
-    .selectFrom('auth_login_throttles')
+    .selectFrom('auth_throttles')
     .where('key_hash', 'in', keys.map(k => k.hash))
+    .where('throttle_type', '=', 'login')
     .select(['key_hash'])
     .execute();
   assert.strictEqual(rows.length, 2, 'Should have 2 throttle records before clear');
@@ -237,8 +240,9 @@ test('LoginThrottle Integration - recordSuccess() clears throttle entries', { sk
 
   // Verify entries deleted from database
   rows = await adapter.db
-    .selectFrom('auth_login_throttles')
+    .selectFrom('auth_throttles')
     .where('key_hash', 'in', keys.map(k => k.hash))
+    .where('throttle_type', '=', 'login')
     .select(['key_hash'])
     .execute();
   assert.strictEqual(rows.length, 0, 'All throttle entries should be deleted');
