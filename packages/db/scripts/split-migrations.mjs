@@ -15,7 +15,9 @@ const __dirname = path.dirname(__filename);
 const sourceFile = path.resolve(__dirname, "../migrations/0000_version_1.sql");
 const outputDir = path.resolve(__dirname, "../migrations");
 
-// Table creation order based on dependency analysis
+// Table creation order based on dependency analysis.
+// NOTE: keep this list aligned with canonical active schema. If the source dump
+// contains legacy tables, they are handled automatically via `extraTables` below.
 const tableOrder = [
   // Tier 0: Root tables (no dependencies)
   "companies",
@@ -38,8 +40,6 @@ const tableOrder = [
   "supplies",
   "feature_flags",
   "backoffice_sync_queue",
-  "sync_data_versions",
-  "sync_tier_versions",
   "data_imports",
   "static_pages",
   
@@ -57,7 +57,6 @@ const tableOrder = [
   // Tier 3: Outlet-scoped master data
   "outlet_tables",
   "item_prices",
-  "user_outlets",
   "user_role_assignments",
   "inventory_stock",
   "company_settings",
@@ -110,11 +109,9 @@ const tableOrder = [
   "pos_item_cancellations",
   
   // Tier 12: Analytics and remaining
-  "analytics_insights",
   "sales_forecasts",
   "scheduled_exports",
   "export_files",
-  "sync_operations",
   "pos_sync_metadata",
   "inventory_transactions",
   "cash_bank_transactions",

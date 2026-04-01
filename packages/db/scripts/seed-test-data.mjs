@@ -264,27 +264,11 @@ async function seedUsers(connection, companyId, outlets, roles, count) {
       // Assign global role (OWNER or COMPANY_ADMIN)
       const globalRole = randomPick(globalRoles);
       await connection.execute(
-        `INSERT INTO user_role_assignments (user_id, role_id, outlet_id)
-         VALUES (?, ?, NULL)`,
-        [userId, globalRole.id]
+        `INSERT INTO user_role_assignments (user_id, role_id, company_id, outlet_id)
+         VALUES (?, ?, ?, NULL)`,
+        [userId, globalRole.id, companyId]
       );
       assignedRoles.push({ role: globalRole.code, scope: 'global' });
-
-      // Global users get access to all outlets
-      for (const outlet of outlets) {
-        try {
-          await connection.execute(
-            `INSERT IGNORE INTO user_outlets (user_id, outlet_id)
-             VALUES (?, ?)`,
-            [userId, outlet.id]
-          );
-        } catch (error) {
-          // Ignore duplicate key errors
-          if (!error.message.includes('Duplicate entry')) {
-            throw error;
-          }
-        }
-      }
     } else if (outletRoles.length > 0) {
       // Assign outlet-specific role(s)
       const primaryRole = randomPick(outletRoles);
@@ -305,16 +289,9 @@ async function seedUsers(connection, companyId, outlets, roles, count) {
       for (const outlet of selectedOutlets) {
         // Assign role to this outlet
         await connection.execute(
-          `INSERT IGNORE INTO user_role_assignments (user_id, role_id, outlet_id)
-           VALUES (?, ?, ?)`,
-          [userId, primaryRole.id, outlet.id]
-        );
-        
-        // Give user access to this outlet
-        await connection.execute(
-          `INSERT IGNORE INTO user_outlets (user_id, outlet_id)
-           VALUES (?, ?)`,
-          [userId, outlet.id]
+          `INSERT IGNORE INTO user_role_assignments (user_id, role_id, company_id, outlet_id)
+           VALUES (?, ?, ?, ?)`,
+          [userId, primaryRole.id, companyId, outlet.id]
         );
         
         assignedOutlets.push(outlet.code);

@@ -435,17 +435,10 @@ async function main() {
     );
 
     await connection.execute(
-      `INSERT INTO user_role_assignments (user_id, role_id)
-       VALUES (?, ?)
+      `INSERT INTO user_role_assignments (user_id, role_id, company_id, outlet_id)
+       VALUES (?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)`,
-      [ownerUserId, ownerRoleId]
-    );
-
-    await connection.execute(
-      `INSERT INTO user_outlets (user_id, outlet_id)
-       VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)`,
-      [ownerUserId, outletId]
+      [ownerUserId, ownerRoleId, companyId, outletId]
     );
 
     // Create SUPER_ADMIN user if configured
@@ -479,10 +472,10 @@ async function main() {
         const superAdminUserId = superAdminResult.insertId;
 
         await connection.execute(
-          `INSERT INTO user_role_assignments (user_id, role_id)
-           VALUES (?, ?)
+          `INSERT INTO user_role_assignments (user_id, role_id, company_id, outlet_id)
+           VALUES (?, ?, ?, NULL)
            ON DUPLICATE KEY UPDATE role_id = VALUES(role_id)`,
-          [superAdminUserId, superAdminRoleId]
+          [superAdminUserId, superAdminRoleId, companyId]
         );
         console.log(`superadmin=${seedConfig.superAdminEmail}`);
       }
