@@ -277,10 +277,9 @@ export async function insertPosTransaction(
       payload_sha256: tx.payload_sha256,
       payload_hash_version: tx.payload_hash_version ?? 2
     })
-    .returning(['id'])
-    .executeTakeFirst();
+    .executeTakeFirstOrThrow();
 
-  return Number(result!.id);
+  return Number(result.insertId);
 }
 
 /**
@@ -303,10 +302,9 @@ export async function insertPosTransactionItem(
       price_snapshot: item.price_snapshot,
       name_snapshot: item.name_snapshot
     })
-    .returning(['id'])
-    .executeTakeFirst();
+    .executeTakeFirstOrThrow();
 
-  return Number(result!.id);
+  return Number(result.insertId);
 }
 
 /**
@@ -326,10 +324,9 @@ export async function insertPosTransactionPayment(
       method: payment.method,
       amount: payment.amount
     })
-    .returning(['id'])
-    .executeTakeFirst();
+    .executeTakeFirstOrThrow();
 
-  return Number(result!.id);
+  return Number(result.insertId);
 }
 
 /**
@@ -348,8 +345,7 @@ export async function insertPosTransactionTax(
       tax_rate_id: tax.tax_rate_id,
       amount: tax.amount
     })
-    .returning(['id'])
-    .executeTakeFirst();
+    .executeTakeFirstOrThrow();
 
-  return Number(result!.id);
+  return Number(result.insertId);
 }

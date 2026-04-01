@@ -16,6 +16,13 @@ Backoffice sync module for Jurnapod ERP - handles comprehensive data synchroniza
 - ✅ In: Backoffice data sync, batch processing, export scheduling, analytics queries
 - ❌ Out: Business logic (tax calculation, COGS, journal posting stays in API layer), payment processing
 
+## Canonical Sync Contract (MANDATORY)
+- Sync request cursor must use `since_version`.
+- Sync response cursor must use `data_version`.
+- Do **NOT** introduce alias protocol fields like `sync_data_version` without an explicit versioned API migration plan.
+- Sync version storage must use `sync_versions` as single source of truth.
+- Runtime code must not depend on `sync_data_versions` or `sync_tier_versions`.
+
 ---
 
 ## Quick Commands

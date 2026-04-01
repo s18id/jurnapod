@@ -13,6 +13,7 @@ import { syncAuditor } from "@jurnapod/sync-core";
 import { PosDataService } from "./core/pos-data-service.js";
 import { createPosSyncEndpoints } from "./endpoints/pos-sync-endpoints.js";
 import type { KyselySchema } from "@jurnapod/db";
+import { sql } from "kysely";
 import { handlePullSync, type PullSyncParams, type PullSyncResult } from "./pull/index.js";
 import { handlePushSync, type PushSyncParams, type PushSyncResult } from "./push/index.js";
 
@@ -163,8 +164,8 @@ export class PosSyncModule implements SyncModule {
         return { healthy: false, message: "Module not initialized" };
       }
 
-      // Test database connectivity with a simple query
-      await (this.dataService as any).db.query('SELECT 1');
+      // Test database connectivity with a simple query using Kysely
+      await sql`SELECT 1`.execute((this.dataService as any).db);
 
       return { healthy: true, message: "POS sync module operational" };
     } catch (error) {

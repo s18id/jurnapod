@@ -5,7 +5,7 @@
 --   - payment_method_mappings (replaces company_payment_method_mappings + outlet_payment_method_mappings)
 -- Compatible with: MySQL 8.0+, MariaDB 10.2+
 -- Collation: utf8mb4_unicode_ci
--- Idempotent: Yes (uses IF NOT EXISTS, INSERT IGNORE, and DROP IF EXISTS patterns)
+-- Idempotent: Yes (uses IF NOT EXISTS, guarded source-table SELECT, and DROP IF EXISTS patterns)
 
 SET FOREIGN_KEY_CHECKS=0;
 SET UNIQUE_CHECKS=0;
@@ -63,85 +63,75 @@ CREATE TABLE IF NOT EXISTS `payment_method_mappings` (
 
 -- =============================================================================
 -- Step 3: Migrate data from company_account_mappings
--- =============================================================================
+-- Guard: only migrate if source table exists (idempotent on rerun after drop)
 -- Company-wide mappings get NULL outlet_id
-
-INSERT IGNORE INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id, created_at, updated_at)
-SELECT 
-  company_id, 
-  NULL AS outlet_id, 
-  COALESCE(mapping_type_id, 0) AS mapping_type_id, 
-  mapping_key, 
-  account_id, 
-  created_at, 
-  updated_at
-FROM company_account_mappings
-ON DUPLICATE KEY UPDATE 
-  account_id = VALUES(account_id),
-  updated_at = VALUES(updated_at);
+-- =============================================================================
+SET @src_exists = (
+  SELECT COUNT(*) FROM information_schema.tables
+  WHERE table_schema = DATABASE()
+    AND table_name = 'company_account_mappings'
+);
+SET @sql = IF(@src_exists = 1,
+  'INSERT IGNORE INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id, created_at, updated_at) SELECT company_id, NULL AS outlet_id, COALESCE(mapping_type_id, 0) AS mapping_type_id, mapping_key, account_id, created_at, updated_at FROM company_account_mappings ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), updated_at = VALUES(updated_at)',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- =============================================================================
 -- Step 4: Migrate data from outlet_account_mappings
--- =============================================================================
+-- Guard: only migrate if source table exists (idempotent on rerun after drop)
 -- Outlet-specific mappings keep their outlet_id
-
-INSERT IGNORE INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id, created_at, updated_at)
-SELECT 
-  company_id, 
-  outlet_id, 
-  COALESCE(mapping_type_id, 0) AS mapping_type_id, 
-  mapping_key, 
-  account_id, 
-  created_at, 
-  updated_at
-FROM outlet_account_mappings
-ON DUPLICATE KEY UPDATE 
-  account_id = VALUES(account_id),
-  updated_at = VALUES(updated_at);
+-- =============================================================================
+SET @src_exists = (
+  SELECT COUNT(*) FROM information_schema.tables
+  WHERE table_schema = DATABASE()
+    AND table_name = 'outlet_account_mappings'
+);
+SET @sql = IF(@src_exists = 1,
+  'INSERT IGNORE INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id, created_at, updated_at) SELECT company_id, outlet_id, COALESCE(mapping_type_id, 0) AS mapping_type_id, mapping_key, account_id, created_at, updated_at FROM outlet_account_mappings ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), updated_at = VALUES(updated_at)',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- =============================================================================
 -- Step 5: Migrate data from company_payment_method_mappings
--- =============================================================================
+-- Guard: only migrate if source table exists (idempotent on rerun after drop)
 -- Company-wide payment method mappings get NULL outlet_id
-
-INSERT IGNORE INTO payment_method_mappings (company_id, outlet_id, method_code, account_id, label, is_invoice_default, created_at, updated_at)
-SELECT 
-  company_id, 
-  NULL AS outlet_id, 
-  method_code, 
-  account_id, 
-  label, 
-  is_invoice_default, 
-  created_at, 
-  updated_at
-FROM company_payment_method_mappings
-ON DUPLICATE KEY UPDATE 
-  account_id = VALUES(account_id),
-  label = VALUES(label),
-  is_invoice_default = VALUES(is_invoice_default),
-  updated_at = VALUES(updated_at);
+-- =============================================================================
+SET @src_exists = (
+  SELECT COUNT(*) FROM information_schema.tables
+  WHERE table_schema = DATABASE()
+    AND table_name = 'company_payment_method_mappings'
+);
+SET @sql = IF(@src_exists = 1,
+  'INSERT IGNORE INTO payment_method_mappings (company_id, outlet_id, method_code, account_id, label, is_invoice_default, created_at, updated_at) SELECT company_id, NULL AS outlet_id, method_code, account_id, label, is_invoice_default, created_at, updated_at FROM company_payment_method_mappings ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), label = VALUES(label), is_invoice_default = VALUES(is_invoice_default), updated_at = VALUES(updated_at)',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- =============================================================================
 -- Step 6: Migrate data from outlet_payment_method_mappings
--- =============================================================================
+-- Guard: only migrate if source table exists (idempotent on rerun after drop)
 -- Outlet-specific payment method mappings keep their outlet_id
-
-INSERT IGNORE INTO payment_method_mappings (company_id, outlet_id, method_code, account_id, label, is_invoice_default, created_at, updated_at)
-SELECT 
-  company_id, 
-  outlet_id, 
-  method_code, 
-  account_id, 
-  label, 
-  is_invoice_default, 
-  created_at, 
-  updated_at
-FROM outlet_payment_method_mappings
-ON DUPLICATE KEY UPDATE 
-  account_id = VALUES(account_id),
-  label = VALUES(label),
-  is_invoice_default = VALUES(is_invoice_default),
-  updated_at = VALUES(updated_at);
+-- =============================================================================
+SET @src_exists = (
+  SELECT COUNT(*) FROM information_schema.tables
+  WHERE table_schema = DATABASE()
+    AND table_name = 'outlet_payment_method_mappings'
+);
+SET @sql = IF(@src_exists = 1,
+  'INSERT IGNORE INTO payment_method_mappings (company_id, outlet_id, method_code, account_id, label, is_invoice_default, created_at, updated_at) SELECT company_id, outlet_id, method_code, account_id, label, is_invoice_default, created_at, updated_at FROM outlet_payment_method_mappings ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), label = VALUES(label), is_invoice_default = VALUES(is_invoice_default), updated_at = VALUES(updated_at)',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- =============================================================================
 -- Step 7: Create view aliases for backward compatibility during transition

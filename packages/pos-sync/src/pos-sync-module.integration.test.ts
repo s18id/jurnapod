@@ -71,24 +71,38 @@ async function setupTestFixtures(): Promise<TestFixtures> {
     database: process.env.DB_NAME ?? 'jurnapod',
   });
 
-  // Find test user fixture using Kysely query builder
+  // Find test user fixture using Kysely query builder (user_outlets replaced by user_role_assignments)
   const userRows = await db
     .selectFrom('users as u')
     .innerJoin('companies as c', 'c.id', 'u.company_id')
-    .innerJoin('user_outlets as uo', 'uo.user_id', 'u.id')
-    .innerJoin('outlets as o', 'o.id', 'uo.outlet_id')
-    .select(['u.id as user_id', 'u.company_id', 'o.id as outlet_id'])
+    .select(['u.id as user_id', 'u.company_id'])
     .where('c.code', '=', config.companyCode)
     .where('u.email', '=', config.ownerEmail)
     .where('u.is_active', '=', 1)
-    .where('o.code', '=', config.outletCode)
     .limit(1)
     .execute();
 
   if (userRows.length === 0) {
     throw new Error(
       `Owner fixture not found; run database seed first. ` +
-      `Looking for company=${config.companyCode}, email=${config.ownerEmail}, outlet=${config.outletCode}`
+      `Looking for company=${config.companyCode}, email=${config.ownerEmail}`
+    );
+  }
+
+  // Get outlet by code
+  const outletRows = await db
+    .selectFrom('outlets as o')
+    .innerJoin('companies as c', 'c.id', 'o.company_id')
+    .select(['o.id as outlet_id'])
+    .where('c.code', '=', config.companyCode)
+    .where('o.code', '=', config.outletCode)
+    .limit(1)
+    .execute();
+
+  if (outletRows.length === 0) {
+    throw new Error(
+      `Outlet fixture not found; run database seed first. ` +
+      `Looking for company=${config.companyCode}, outlet=${config.outletCode}`
     );
   }
 
@@ -96,7 +110,7 @@ async function setupTestFixtures(): Promise<TestFixtures> {
     db,
     testUserId: Number(userRows[0].user_id),
     testCompanyId: Number(userRows[0].company_id),
-    testOutletId: Number(userRows[0].outlet_id),
+    testOutletId: Number(outletRows[0].outlet_id),
   };
 }
 

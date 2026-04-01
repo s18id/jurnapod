@@ -40,6 +40,16 @@ Routing:
 - Shared contracts should stay aligned across apps and packages.
 - Favor correctness, auditability, and tenant isolation over cosmetic cleanup.
 
+## Sync contract and versioning (canonical)
+- **Single protocol source of truth:**
+  - Sync pull request cursor: `since_version`
+  - Sync pull response cursor: `data_version`
+- Do **NOT** introduce alternative/alias protocol fields such as `sync_data_version` unless there is an explicit versioned API migration plan approved in architecture docs.
+- **Single storage source of truth:** `sync_versions` table.
+  - Data-sync version row uses `tier IS NULL`.
+  - Tiered sync rows use explicit tier values (`MASTER`, `OPERATIONAL`, `REALTIME`, `ADMIN`, `ANALYTICS`).
+- New code, tests, and migrations must not reintroduce runtime dependency on legacy tables `sync_data_versions` or `sync_tier_versions`.
+
 ## Database compatibility
 - All schema and migration SQL must run on both MySQL 8.0+ and MariaDB.
 - Keep migrations rerunnable/idempotent because MySQL-family DDL is non-atomic.

@@ -1,3 +1,4 @@
+-- Migration: 0137_story_20_1_settings_system_migration.sql
 -- Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 -- Ownership: Ahmad Faruk (Signal18 ID)
 --
@@ -7,6 +8,7 @@
 --
 -- This migration is IDEMPOTENT - safe to run multiple times
 -- Migration order: Create new tables -> Migrate data -> Verify counts -> Code updates
+-- Rerun safety: guards source table access by existence checks
 
 -- =============================================================================
 -- STEP 1: Create new settings_strings table
@@ -97,50 +99,48 @@ DEALLOCATE PREPARE stmt;
 
 -- =============================================================================
 -- STEP 4: Migrate data from company_settings to settings_strings
+-- Guard: only migrate if source table exists (idempotent on rerun after drop)
+-- Note: company_settings rows must have non-NULL company_id to satisfy FK constraint
 -- =============================================================================
 
--- Insert string settings from company_settings
-INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value, created_at, updated_at)
-SELECT company_id, outlet_id, `key`, value_json, created_at, updated_at
-FROM company_settings
-WHERE value_type = 'string'
-ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
+SET @src_exists = (
+  SELECT COUNT(*) FROM information_schema.tables
+  WHERE table_schema = DATABASE()
+    AND table_name = 'company_settings'
+);
+SET @sql = IF(@src_exists = 1,
+  'INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value, created_at, updated_at) SELECT company_id, outlet_id, `key`, value_json, created_at, updated_at FROM company_settings WHERE value_type = ''string'' AND company_id IS NOT NULL ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
--- Insert number settings from company_settings
-INSERT INTO settings_numbers (company_id, outlet_id, setting_key, setting_value, created_at, updated_at)
-SELECT company_id, outlet_id, `key`, CAST(value_json AS DECIMAL(20, 6)), created_at, updated_at
-FROM company_settings
-WHERE value_type = 'number'
-ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
+SET @sql = IF(@src_exists = 1,
+  'INSERT INTO settings_numbers (company_id, outlet_id, setting_key, setting_value, created_at, updated_at) SELECT company_id, outlet_id, `key`, CAST(value_json AS DECIMAL(20, 6)), created_at, updated_at FROM company_settings WHERE value_type = ''number'' AND company_id IS NOT NULL ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
--- Insert boolean settings from company_settings
--- value_json stores JSON strings like '"true"' or '"false"', so we need to extract and convert
-INSERT INTO settings_booleans (company_id, outlet_id, setting_key, setting_value, created_at, updated_at)
-SELECT 
-  company_id, 
-  outlet_id, 
-  `key`, 
-  CASE 
-    WHEN JSON_EXTRACT(value_json, '$') = true THEN 1
-    WHEN JSON_EXTRACT(value_json, '$') = false THEN 0
-    ELSE NULL
-  END AS setting_value, 
-  created_at, 
-  updated_at
-FROM company_settings
-WHERE value_type = 'boolean'
-ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
+SET @sql = IF(@src_exists = 1,
+  'INSERT INTO settings_booleans (company_id, outlet_id, setting_key, setting_value, created_at, updated_at) SELECT company_id, outlet_id, `key`, CASE WHEN JSON_EXTRACT(value_json, ''$'') = true THEN 1 WHEN JSON_EXTRACT(value_json, ''$'') = false THEN 0 ELSE NULL END, created_at, updated_at FROM company_settings WHERE value_type = ''boolean'' AND company_id IS NOT NULL ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- =============================================================================
--- STEP 5: Migrate data from platform_settings to settings_strings (NULL company/outlet)
+-- STEP 5: Platform settings migration is intentionally deferred
+-- platform_settings rows are global (no company_id), while settings_* tables are company-scoped.
+-- To avoid invalid NULL company_id writes and duplicate NULL-key semantics on reruns,
+-- we skip automatic migration here.
+-- A later dedicated migration must define canonical platform scope behavior.
 -- =============================================================================
 
--- Platform settings have NULL company_id and NULL outlet_id (no actor for platform settings)
-INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value, created_at, updated_at)
-SELECT NULL, NULL, `key`, value_json, created_at, updated_at
-FROM platform_settings
-WHERE value_json IS NOT NULL
-ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
+SELECT 1;
 
 -- =============================================================================
 -- STEP 6: Verification queries (run manually to verify)

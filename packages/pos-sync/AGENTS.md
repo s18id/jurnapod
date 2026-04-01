@@ -15,6 +15,13 @@ POS sync module for Jurnapod ERP - handles offline-first data synchronization be
 - ✅ In: POS data sync, order processing, inventory tracking
 - ❌ Out: Real-time WebSocket/SSE (handled at API layer), payment processing
 
+## Canonical Sync Contract (MANDATORY)
+- POS pull request cursor must use `since_version`.
+- POS pull response cursor must use `data_version`.
+- Do **NOT** add alias fields (e.g. `sync_data_version`) in transport, schemas, or module payloads unless there is an explicit versioned API migration plan.
+- Version storage authority is `sync_versions` only (`tier IS NULL` for data version).
+- Do **NOT** reintroduce runtime dependency on legacy tables `sync_data_versions` or `sync_tier_versions`.
+
 ---
 
 ## Quick Commands

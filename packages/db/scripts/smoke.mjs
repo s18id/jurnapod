@@ -312,16 +312,15 @@ async function main() {
       throw new Error("user_role_assignments relation missing OWNER membership");
     }
 
-    const [ownerOutletRows] = await connection.execute(
+    const [outletRows] = await connection.execute(
       `SELECT 1
-       FROM user_outlets uo
-       INNER JOIN outlets o ON o.id = uo.outlet_id
-       WHERE uo.user_id = ? AND o.company_id = ? AND o.code = ?
+       FROM outlets o
+       WHERE o.company_id = ? AND o.code = ?
        LIMIT 1`,
-      [owner.id, owner.company_id, smokeConfig.outletCode]
+      [owner.company_id, smokeConfig.outletCode]
     );
-    if (ownerOutletRows.length === 0) {
-      throw new Error("user_outlets relation missing default outlet membership");
+    if (outletRows.length === 0) {
+      throw new Error("configured outlet not found for company");
     }
 
     const [moduleRows] = await connection.execute(
@@ -353,15 +352,8 @@ async function main() {
       }
     }
 
-    const inventoryModule = modulesByCode.get("inventory");
-    const inventoryConfig = parseConfigJson(
-      inventoryModule.config_json,
-      "inventory"
-    );
-
-    if (inventoryConfig.level !== 0) {
-      throw new Error("module inventory config_json.level must be 0");
-    }
+    // Epic 20 normalization: config_json is legacy and may be empty/removed.
+    // Module enablement is validated above via explicit enabled flags.
 
     const [ownerPosPermRows] = await connection.execute(
       `SELECT mr.permission_mask

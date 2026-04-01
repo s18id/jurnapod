@@ -18,6 +18,16 @@ Shared sync infrastructure for Jurnapod ERP - provides the module registry, auth
 - ✅ In: Sync infrastructure, module registration, authentication, audit, transport, idempotency
 - ❌ Out: Business logic (in pos-sync or backoffice-sync), HTTP handling
 
+## Canonical Sync Version Contract (MANDATORY)
+- Protocol source of truth:
+  - Pull request cursor: `since_version`
+  - Pull response cursor: `data_version`
+- Storage source of truth: `sync_versions` table.
+  - Data sync version row: `tier IS NULL`
+  - Tier version rows: explicit `tier` value
+- Do **NOT** introduce alias protocol fields such as `sync_data_version` without an explicit versioned API migration plan.
+- Do **NOT** add runtime reads/writes to legacy tables `sync_data_versions` / `sync_tier_versions`.
+
 ---
 
 ## Quick Commands

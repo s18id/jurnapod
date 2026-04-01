@@ -5,8 +5,8 @@
  * DataRetentionJob Integration Tests
  *
  * Tests for DataRetentionJob using real database connections from .env.
- * These tests verify actual purge behavior against sync_operations,
- * backoffice_sync_queue, and sync_audit_events tables.
+ * These tests verify actual purge behavior against
+ * backoffice_sync_queue and sync_audit_events tables.
  *
  * CRITICAL: All tests must close the DB pool after completion.
  */
@@ -90,34 +90,6 @@ async function setupTestFixtures(): Promise<TestFixtures> {
 // ============================================================================
 
 /**
- * Insert a sync_operation record with a specific started_at date
- */
-async function insertSyncOperation(
-  db: KyselySchema,
-  companyId: number,
-  outletId: number | null,
-  startedAt: Date,
-  status: 'SUCCESS' | 'FAILED' | 'RUNNING' | 'CANCELLED' = 'SUCCESS'
-): Promise<number> {
-  const result = await db
-    .insertInto('sync_operations')
-    .values({
-      company_id: companyId,
-      outlet_id: outletId,
-      sync_module: 'POS',
-      tier: 'OPERATIONAL',
-      operation_type: 'PUSH',
-      request_id: `test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      started_at: startedAt,
-      completed_at: startedAt,
-      status,
-    })
-    .returning(['id'])
-    .executeTakeFirst();
-  return Number(result!.id);
-}
-
-/**
  * Insert a backoffice_sync_queue record with a specific created_at date
  */
 async function insertBackofficeSyncQueue(
@@ -137,9 +109,8 @@ async function insertBackofficeSyncQueue(
       scheduled_at: createdAt,
       created_at: createdAt,
     })
-    .returning(['id'])
-    .executeTakeFirst();
-  return Number(result!.id);
+    .executeTakeFirstOrThrow();
+  return Number(result.insertId);
 }
 
 /**
@@ -161,9 +132,8 @@ async function insertSyncAuditEvent(
       completed_at: createdAt,
       created_at: createdAt,
     })
-    .returning(['id'])
-    .executeTakeFirst();
-  return Number(result!.id);
+    .executeTakeFirstOrThrow();
+  return Number(result.insertId);
 }
 
 /**
@@ -217,10 +187,6 @@ describe('DataRetentionJob Integration', () => {
   beforeEach(async () => {
     // Clean up test data before each test to ensure isolation
     await fixtures.db
-      .deleteFrom('sync_operations')
-      .where('request_id', 'like', 'test-%')
-      .execute();
-    await fixtures.db
       .deleteFrom('backoffice_sync_queue')
       .where('document_id', '=', 99999)
       .execute();
@@ -233,40 +199,6 @@ describe('DataRetentionJob Integration', () => {
   });
 
   describe('purgeTable', () => {
-    test('should delete sync_operations older than 30 days', async () => {
-      const companyId = fixtures.testCompanyId;
-      
-      // Insert old records (35 days old)
-      const oldDate = new Date();
-      oldDate.setDate(oldDate.getDate() - 35);
-      
-      await insertSyncOperation(fixtures.db, companyId, null, oldDate, 'SUCCESS');
-      await insertSyncOperation(fixtures.db, companyId, null, oldDate, 'SUCCESS');
-      
-      // Insert recent records (5 days old) - should NOT be deleted
-      const recentDate = new Date();
-      recentDate.setDate(recentDate.getDate() - 5);
-      
-      await insertSyncOperation(fixtures.db, companyId, null, recentDate, 'SUCCESS');
-      
-      const oldCountBefore = await getOldRecordsCount(fixtures.db, 'sync_operations', 'started_at', 30);
-      
-      const job = new DataRetentionJob(fixtures.db);
-      const result = await (job as any).purgeTable({
-        table: 'sync_operations',
-        retentionDays: 30,
-        dateColumn: 'started_at',
-      });
-      
-      expect(result.table).toBe('sync_operations');
-      expect(result.recordsAffected).toBeGreaterThanOrEqual(2);
-      expect(result.archived).toBe(false);
-      
-      // Verify old records are gone
-      const oldCountAfter = await getOldRecordsCount(fixtures.db, 'sync_operations', 'started_at', 30);
-      expect(oldCountAfter).toBeLessThan(oldCountBefore);
-    });
-
     test('should respect additional WHERE clauses', async () => {
       const companyId = fixtures.testCompanyId;
       
@@ -377,9 +309,6 @@ describe('DataRetentionJob Integration', () => {
       const oldDate = new Date();
       oldDate.setDate(oldDate.getDate() - 40);
       
-      // Old sync_operation
-      await insertSyncOperation(fixtures.db, companyId, null, oldDate, 'SUCCESS');
-      
       // Old backoffice_sync_queue (SUCCESS status)
       await insertBackofficeSyncQueue(fixtures.db, companyId, oldDate, 'SUCCESS');
       
@@ -390,14 +319,13 @@ describe('DataRetentionJob Integration', () => {
       const result = await job.run();
       
       expect(result.success).toBe(true);
-      expect(result.results).toHaveLength(3); // 3 default policies
+      expect(result.results).toHaveLength(2); // 2 default policies (sync_operations dropped)
       expect(result.timestamp).toBeInstanceOf(Date);
       expect(result.totalRecordsAffected).toBeGreaterThanOrEqual(0);
       expect(result.errors).toHaveLength(0);
       
-      // Verify all three policies were executed
+      // Verify all two policies were executed
       const tablesExecuted = result.results.map(r => r.table);
-      expect(tablesExecuted).toContain('sync_operations');
       expect(tablesExecuted).toContain('backoffice_sync_queue');
       expect(tablesExecuted).toContain('sync_audit_events');
     });
@@ -427,31 +355,25 @@ describe('DataRetentionJob Integration', () => {
     test('should include date ranges in results', async () => {
       const companyId = fixtures.testCompanyId;
       
-      // Insert old sync_operation
+      // Insert old backoffice_sync_queue
       const oldDate = new Date();
       oldDate.setDate(oldDate.getDate() - 40);
-      await insertSyncOperation(fixtures.db, companyId, null, oldDate, 'SUCCESS');
+      await insertBackofficeSyncQueue(fixtures.db, companyId, oldDate, 'SUCCESS');
       
       const job = new DataRetentionJob(fixtures.db);
       const result = await job.run();
       
-      const syncOpResult = result.results.find(r => r.table === 'sync_operations');
-      expect(syncOpResult).toBeDefined();
-      expect(syncOpResult!.dateRange.from).toBeInstanceOf(Date);
-      expect(syncOpResult!.dateRange.to).toBeInstanceOf(Date);
-      expect(syncOpResult!.dateRange.from.getTime()).toBeLessThan(syncOpResult!.dateRange.to.getTime());
+      const backofficeResult = result.results.find(r => r.table === 'backoffice_sync_queue');
+      expect(backofficeResult).toBeDefined();
+      expect(backofficeResult!.dateRange.from).toBeInstanceOf(Date);
+      expect(backofficeResult!.dateRange.to).toBeInstanceOf(Date);
+      expect(backofficeResult!.dateRange.from.getTime()).toBeLessThan(backofficeResult!.dateRange.to.getTime());
     });
   });
 
   describe('Retention Policies', () => {
     test('should have correct default policies defined', () => {
-      expect(DEFAULT_RETENTION_POLICIES).toHaveLength(3);
-      
-      const syncOpsPolicy = DEFAULT_RETENTION_POLICIES.find(p => p.table === 'sync_operations');
-      expect(syncOpsPolicy).toBeDefined();
-      expect(syncOpsPolicy!.retentionDays).toBe(30);
-      expect(syncOpsPolicy!.dateColumn).toBe('started_at');
-      expect(syncOpsPolicy!.archiveTable).toBeUndefined();
+      expect(DEFAULT_RETENTION_POLICIES).toHaveLength(2); // sync_operations dropped
       
       const backofficePolicy = DEFAULT_RETENTION_POLICIES.find(p => p.table === 'backoffice_sync_queue');
       expect(backofficePolicy).toBeDefined();

@@ -1301,38 +1301,6 @@ export interface SyncAuditEvents {
   version_before: Generated<number | null>;
 }
 
-export interface SyncDataVersions {
-  company_id: number;
-  current_version: Generated<number>;
-  updated_at: Generated<Date>;
-}
-
-export interface SyncOperations {
-  company_id: number;
-  completed_at: Generated<Date | null>;
-  data_version_after: Generated<number | null>;
-  data_version_before: Generated<number | null>;
-  duration_ms: Generated<number | null>;
-  error_message: Generated<string | null>;
-  id: Generated<number>;
-  operation_type: "BATCH" | "PULL" | "PUSH" | "RECONCILE";
-  outlet_id: Generated<number | null>;
-  records_processed: Generated<number | null>;
-  request_id: string;
-  result_summary: Generated<string | null>;
-  started_at: Generated<Date>;
-  status: Generated<"CANCELLED" | "FAILED" | "RUNNING" | "SUCCESS">;
-  sync_module: "BACKOFFICE" | "POS";
-  tier: "ADMIN" | "ANALYTICS" | "MASTER" | "OPERATIONAL" | "REALTIME";
-}
-
-export interface SyncTierVersions {
-  company_id: number;
-  current_version: Generated<number>;
-  last_updated_at: Generated<Date>;
-  tier: "ADMIN" | "ANALYTICS" | "MASTER" | "OPERATIONAL" | "REALTIME";
-}
-
 export interface SyncVersions {
   company_id: number;
   created_at: Generated<Date>;
@@ -1341,6 +1309,7 @@ export interface SyncVersions {
   last_synced_at: Generated<Date | null>;
   min_version: Generated<number>;
   tier: Generated<string | null>;
+  tier_key: Generated<string>;
   updated_at: Generated<Date>;
 }
 
@@ -1463,12 +1432,6 @@ export interface TaxRates {
   rate_percent: Generated<Decimal>;
   updated_at: Generated<Date>;
   updated_by_user_id: Generated<number | null>;
-}
-
-export interface UserOutlets {
-  created_at: Generated<Date>;
-  outlet_id: number;
-  user_id: number;
 }
 
 export interface UserRoleAssignments {
@@ -1621,9 +1584,6 @@ export interface DB {
   static_pages: StaticPages;
   supplies: Supplies;
   sync_audit_events: SyncAuditEvents;
-  sync_data_versions: SyncDataVersions;
-  sync_operations: SyncOperations;
-  sync_tier_versions: SyncTierVersions;
   sync_versions: SyncVersions;
   table_events: TableEvents;
   table_occupancy: TableOccupancy;
@@ -1631,7 +1591,6 @@ export interface DB {
   table_service_session_lines: TableServiceSessionLines;
   table_service_sessions: TableServiceSessions;
   tax_rates: TaxRates;
-  user_outlets: UserOutlets;
   user_role_assignments: UserRoleAssignments;
   users: Users;
   v_pos_daily_totals: VPosDailyTotals;

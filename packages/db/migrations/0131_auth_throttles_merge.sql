@@ -2,7 +2,7 @@
 -- Story 20.5: Auth Throttle Merge
 -- Merge auth_login_throttles and auth_password_reset_throttles into unified auth_throttles table
 -- Compatible with: MySQL 8.0+, MariaDB 10.2+
--- Idempotent: safe to rerun
+-- Idempotent: safe to rerun (uses PREPARE/EXECUTE pattern, no top-level IF...THEN blocks)
 
 -- ============================================================================
 -- Step 1: Create unified auth_throttles table
@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS `auth_throttles` (
 -- ============================================================================
 -- Step 2: Migrate login throttle data (type='login')
 -- Only migrate if source table exists and target is empty for this type
+-- Uses portable PREPARE/EXECUTE pattern - no top-level IF...THEN blocks
 -- ============================================================================
 SET @src_exists = (
   SELECT COUNT(*) FROM information_schema.tables
@@ -38,27 +39,20 @@ SET @src_exists = (
 SET @dst_exists = (
   SELECT COUNT(*) FROM auth_throttles WHERE throttle_type = 'login'
 );
+SET @should_migrate = (@src_exists = 1 AND @dst_exists = 0);
 
-IF @src_exists = 1 AND @dst_exists = 0 THEN
-  INSERT INTO auth_throttles (`key_hash`, `throttle_type`, `failure_count`, `request_count`, `last_failed_at`, `last_ip`, `last_user_agent`, `created_at`, `updated_at`)
-  SELECT
-    `key_hash`,
-    'login' AS `throttle_type`,
-    COALESCE(`failure_count`, 0) AS `failure_count`,
-    0 AS `request_count`,
-    `last_failed_at`,
-    `last_ip`,
-    `last_user_agent`,
-    `created_at`,
-    `updated_at`
-  FROM auth_login_throttles
-  ON DUPLICATE KEY UPDATE
-    `failure_count` = VALUES(`failure_count`);
-END IF;
+SET @sql = IF(@should_migrate,
+  'INSERT INTO auth_throttles (`key_hash`, `throttle_type`, `failure_count`, `request_count`, `last_failed_at`, `last_ip`, `last_user_agent`, `created_at`, `updated_at`) SELECT `key_hash`, ''login'' AS `throttle_type`, COALESCE(`failure_count`, 0) AS `failure_count`, 0 AS `request_count`, `last_failed_at`, `last_ip`, `last_user_agent`, `created_at`, `updated_at` FROM auth_login_throttles ON DUPLICATE KEY UPDATE `failure_count` = VALUES(`failure_count`)',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- ============================================================================
 -- Step 3: Migrate password reset throttle data (type='password_reset')
 -- Only migrate if source table exists and target is empty for this type
+-- Uses portable PREPARE/EXECUTE pattern - no top-level IF...THEN blocks
 -- ============================================================================
 SET @src_exists = (
   SELECT COUNT(*) FROM information_schema.tables
@@ -68,23 +62,15 @@ SET @src_exists = (
 SET @dst_exists = (
   SELECT COUNT(*) FROM auth_throttles WHERE throttle_type = 'password_reset'
 );
+SET @should_migrate = (@src_exists = 1 AND @dst_exists = 0);
 
-IF @src_exists = 1 AND @dst_exists = 0 THEN
-  INSERT INTO auth_throttles (`key_hash`, `throttle_type`, `failure_count`, `request_count`, `last_failed_at`, `last_ip`, `last_user_agent`, `created_at`, `updated_at`)
-  SELECT
-    `key_hash`,
-    'password_reset' AS `throttle_type`,
-    0 AS `failure_count`,
-    COALESCE(`request_count`, 0) AS `request_count`,
-    `window_started_at` AS `last_failed_at`,
-    `last_ip`,
-    `last_user_agent`,
-    `created_at`,
-    `updated_at`
-  FROM auth_password_reset_throttles
-  ON DUPLICATE KEY UPDATE
-    `request_count` = VALUES(`request_count`);
-END IF;
+SET @sql = IF(@should_migrate,
+  'INSERT INTO auth_throttles (`key_hash`, `throttle_type`, `failure_count`, `request_count`, `last_failed_at`, `last_ip`, `last_user_agent`, `created_at`, `updated_at`) SELECT `key_hash`, ''password_reset'' AS `throttle_type`, 0 AS `failure_count`, COALESCE(`request_count`, 0) AS `request_count`, `window_started_at` AS `last_failed_at`, `last_ip`, `last_user_agent`, `created_at`, `updated_at` FROM auth_password_reset_throttles ON DUPLICATE KEY UPDATE `request_count` = VALUES(`request_count`)',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- ============================================================================
 -- Step 4: Drop old tables (only after verification is complete)

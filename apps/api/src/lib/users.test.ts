@@ -47,23 +47,31 @@ test(
 
     try {
       const ownerRows = await sql`
-        SELECT u.id, u.company_id, o.id AS outlet_id
+        SELECT u.id, u.company_id
         FROM users u
         INNER JOIN companies c ON c.id = u.company_id
-        INNER JOIN user_outlets uo ON uo.user_id = u.id
-        INNER JOIN outlets o ON o.id = uo.outlet_id
         WHERE c.code = ${companyCode}
           AND u.email = ${ownerEmail}
           AND u.is_active = 1
-          AND o.code = ${outletCode}
         LIMIT 1
       `.execute(db);
 
       assert.ok(ownerRows.rows.length > 0, "Owner fixture not found");
-      const owner = ownerRows.rows[0] as { company_id: number; id: number; outlet_id: number };
+      const owner = ownerRows.rows[0] as { company_id: number; id: number };
       companyId = Number(owner.company_id);
       ownerUserId = Number(owner.id);
-      outletId = Number(owner.outlet_id);
+
+      // Get outlet by code (user_outlets replaced by user_role_assignments for access)
+      const outletRows = await sql`
+        SELECT o.id
+        FROM outlets o
+        INNER JOIN companies c ON c.id = o.company_id
+        WHERE c.code = ${companyCode}
+          AND o.code = ${outletCode}
+        LIMIT 1
+      `.execute(db);
+      assert.ok(outletRows.rows.length > 0, "Outlet fixture not found");
+      outletId = Number((outletRows.rows[0] as { id: number }).id);
 
       const roleRows = await sql`
         SELECT id, code FROM roles WHERE code IN ('ADMIN', 'CASHIER') AND (company_id = ${companyId} OR company_id IS NULL)
@@ -76,12 +84,6 @@ test(
       }
 
       assert.ok(adminRoleId > 0, "ADMIN role not found");
-
-      const outletRows = await sql`
-        SELECT id FROM outlets WHERE company_id = ${companyId} LIMIT 1
-      `.execute(db);
-      assert.ok(outletRows.rows.length > 0, "No outlets found");
-      outletId = Number((outletRows.rows[0] as { id: number }).id);
 
       const created = await createUser({
         companyId,
@@ -152,12 +154,9 @@ test(
         SELECT u.id, u.company_id
         FROM users u
         INNER JOIN companies c ON c.id = u.company_id
-        INNER JOIN user_outlets uo ON uo.user_id = u.id
-        INNER JOIN outlets o ON o.id = uo.outlet_id
         WHERE c.code = ${companyCode}
           AND u.email = ${ownerEmail}
           AND u.is_active = 1
-          AND o.code = ${outletCode}
         LIMIT 1
       `.execute(db);
 
@@ -211,12 +210,9 @@ test(
         SELECT u.id, u.company_id
         FROM users u
         INNER JOIN companies c ON c.id = u.company_id
-        INNER JOIN user_outlets uo ON uo.user_id = u.id
-        INNER JOIN outlets o ON o.id = uo.outlet_id
         WHERE c.code = ${companyCode}
           AND u.email = ${ownerEmail}
           AND u.is_active = 1
-          AND o.code = ${outletCode}
         LIMIT 1
       `.execute(db);
 
@@ -225,10 +221,16 @@ test(
       companyId = Number(owner.company_id);
       ownerUserId = Number(owner.id);
 
+      // Get outlet by code for this company
       const outletRows = await sql`
-        SELECT id FROM outlets WHERE company_id = ${companyId} LIMIT 1
+        SELECT o.id
+        FROM outlets o
+        INNER JOIN companies c ON c.id = o.company_id
+        WHERE c.code = ${companyCode}
+          AND o.code = ${outletCode}
+        LIMIT 1
       `.execute(db);
-      assert.ok(outletRows.rows.length > 0, "No outlets found");
+      assert.ok(outletRows.rows.length > 0, "Outlet fixture not found");
       outletId = Number((outletRows.rows[0] as { id: number }).id);
 
       const roleRows = await sql`

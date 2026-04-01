@@ -48,13 +48,9 @@ export interface RetentionResult {
 
 /**
  * Default retention policies for sync tables
+ * Note: sync_operations was dropped in Epic 20 closeout - no longer needed
  */
 export const DEFAULT_RETENTION_POLICIES: RetentionPolicy[] = [
-  {
-    table: "sync_operations",
-    retentionDays: 30,
-    dateColumn: "started_at",
-  },
   {
     table: "backoffice_sync_queue",
     retentionDays: 7,

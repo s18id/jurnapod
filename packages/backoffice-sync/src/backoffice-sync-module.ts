@@ -13,6 +13,7 @@ import { BackofficeDataService } from "./core/backoffice-data-service.js";
 import { createBackofficeSyncEndpoints } from "./endpoints/backoffice-sync-endpoints.js";
 import { BatchProcessor, type BatchProcessorConfig } from "./batch/batch-processor.js";
 import { ExportScheduler } from "./scheduler/export-scheduler.js";
+import { sql } from "kysely";
 
 export class BackofficeSyncModule implements SyncModule {
   readonly moduleId = "backoffice";
@@ -83,8 +84,8 @@ export class BackofficeSyncModule implements SyncModule {
         return { healthy: false, message: "Module not initialized" };
       }
 
-      // Test database connectivity with a simple query
-      await (this.dataService as any).db.query('SELECT 1');
+      // Test database connectivity with a simple query using Kysely
+      await sql`SELECT 1`.execute((this.dataService as any).db);
       
       const batchStatus = this.getBatchProcessorStatus();
       const message = batchStatus 

@@ -3,6 +3,13 @@
 ## Scope
 API server rules for auth, validation, posting triggers, persistence safety, and sync endpoints.
 
+## Sync Contract Canonical Rules (MANDATORY)
+- **Request cursor field:** `since_version`
+- **Response cursor field:** `data_version`
+- Do **NOT** add alias fields (for example `sync_data_version`) in API payloads unless there is an explicit versioned migration plan.
+- API sync code must treat `sync_versions` as the only runtime version store.
+- API routes/libs must not depend on legacy tables `sync_data_versions` or `sync_tier_versions`.
+
 ---
 
 ## Review Guidelines
