@@ -3,10 +3,21 @@
 
 /**
  * Sync Duplicate Detection Library
- * 
+ *
  * Lightweight duplicate checking for client transaction IDs.
  * These functions have zero HTTP knowledge.
- * 
+ *
+ * ## Semantic Boundary (CRITICAL)
+ *
+ * This library provides preflight-only duplicate detection.
+ *
+ * IMPORTANT:
+ * - This is NOT the authoritative idempotency check
+ * - Authoritative idempotency lives in sync push processing
+ * - This function is read-only; it does not acquire locks or modify state
+ * - Results may be stale due to replication lag
+ * - Callers must still handle the case where push returns DUPLICATE
+ *
  * Used for simple duplicate detection without full idempotency hashing.
  */
 

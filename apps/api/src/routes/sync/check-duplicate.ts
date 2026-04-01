@@ -4,7 +4,24 @@
 /**
  * Sync Check-Duplicate Routes
  *
- * POST /sync/check-duplicate - Check for duplicate transactions
+ * POST /sync/check-duplicate - Preflight duplicate check for client transaction IDs
+ *
+ * ## Semantic Boundary (CRITICAL - READ ONLY)
+ *
+ * This endpoint is a preflight helper only. It provides a lightweight duplicate
+ * existence check to help POS clients decide whether to attempt a push.
+ *
+ * IMPORTANT:
+ * - This endpoint does NOT claim idempotency authority
+ * - Authoritative idempotency is maintained exclusively in `/sync/push` processing
+ * - Push processing handles race conditions, retry deduplication, and conflict resolution
+ * - This endpoint may return stale results due to replication lag
+ * - Clients MUST still handle DUPLICATE responses from push endpoint
+ *
+ * ## Security Model
+ *
+ * - Company-scoped: requests are rejected if company_id does not match authenticated user
+ * - Read-only: no writes are performed; no state is modified
  */
 
 import { Hono } from "hono";
