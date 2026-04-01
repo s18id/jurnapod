@@ -1,4 +1,4 @@
-last_updated: 2026-04-01
+last_updated: 2026-04-02
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -234,8 +234,8 @@ development_status:
   20-10-final-verification: done
 
   # Epic 21: API Sync Runtime Consolidation (Package-First)
-  epic-21: in-progress
+  epic-21: done
   21-1-centralize-pos-sync-module-lifecycle: done
   21-2-extract-sync-push-adapters-from-route: done
-  21-3-retire-legacy-api-pull-builder-runtime-path: review
+  21-3-retire-legacy-api-pull-builder-runtime-path: done
   21-4-keep-and-bound-sync-check-duplicate-semantics: done

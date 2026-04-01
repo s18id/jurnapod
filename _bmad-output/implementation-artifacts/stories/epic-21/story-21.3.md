@@ -1,6 +1,6 @@
 # Story 21.3: Retire Legacy API Pull Builder Runtime Path
 
-**Status:** review  
+**Status:** done  
 **Epic:** Epic 21  
 **Story Points:** 5  
 **Priority:** P1  
@@ -37,8 +37,11 @@ Retire duplicated API pull-runtime implementation in `lib/sync/master-data.ts` f
 ## Validation
 
 - `npm run test:unit:single -w @jurnapod/api src/routes/sync/pull.test.ts` ✅ 23 tests pass
-- `npm run test:unit:sync -w @jurnapod/api` ✅ 83 tests pass
-- `npm run test:unit:critical -w @jurnapod/api` ✅ 202 tests pass
+- `npm run test:unit:sync -w @jurnapod/api` ✅ 96 tests pass
+- `npm run test:unit:critical -w @jurnapod/api` ✅ 214 tests pass
+- `npm run typecheck -w @jurnapod/sync-core && npm run build -w @jurnapod/sync-core` ✅ pass
+- `npm run typecheck -w @jurnapod/pos-sync && npm run build -w @jurnapod/pos-sync && npm run test:run -w @jurnapod/pos-sync` ✅ 44 tests pass
+- `npm run typecheck -w @jurnapod/backoffice-sync && npm run build -w @jurnapod/backoffice-sync && npm run test:run -w @jurnapod/backoffice-sync` ✅ 30 tests pass
 
 ---
 
@@ -88,4 +91,5 @@ The legacy `master-data.ts` file contained `buildSyncPullPayload()` which includ
 
 ### Change Log
 
+- 2026-04-02: Exit checks passed for API sync/critical and sync packages. Story promoted from review to done.
 - 2026-04-01: Deleted `master-data.ts` and its direct test imports. Added route-level coverage migration, Kysely audit adapter compatibility fix, and tax timestamp normalization fix. Verified validation gates pass.

@@ -1,6 +1,6 @@
 # Epic 21: API Sync Runtime Consolidation (Package-First)
 
-**Status:** backlog  
+**Status:** done  
 **Epic Number:** 21  
 **Story Count:** 4  
 **Priority:** P1  
@@ -57,10 +57,10 @@ Remove redundant sync runtime code in API and enforce package-first ownership wi
 
 | Story | Title | Status | Priority | Risk |
 |-------|-------|--------|----------|------|
-| 21.1 | Centralize PosSyncModule lifecycle | backlog | P1 | LOW |
-| 21.2 | Extract sync push adapters from route | backlog | P1 | MEDIUM |
-| 21.3 | Retire legacy API pull builder runtime path | backlog | P1 | HIGH |
-| 21.4 | Keep and bound `/sync/check-duplicate` semantics | backlog | P2 | LOW |
+| 21.1 | Centralize PosSyncModule lifecycle | done | P1 | LOW |
+| 21.2 | Extract sync push adapters from route | done | P1 | MEDIUM |
+| 21.3 | Retire legacy API pull builder runtime path | done | P1 | HIGH |
+| 21.4 | Keep and bound `/sync/check-duplicate` semantics | done | P2 | LOW |
 
 ---
 
@@ -78,18 +78,18 @@ Reason: establish stable shared route infrastructure and endpoint boundaries fir
 ## Acceptance Gates (Epic)
 
 ### API
-- [ ] `npm run test:unit:sync -w @jurnapod/api`
-- [ ] `npm run test:unit:critical -w @jurnapod/api`
+- [x] `npm run test:unit:sync -w @jurnapod/api`
+- [x] `npm run test:unit:critical -w @jurnapod/api`
 
 ### Sync packages
-- [ ] `npm run test -w @jurnapod/sync-core`
-- [ ] `npm run test:run -w @jurnapod/pos-sync`
-- [ ] `npm run test:run -w @jurnapod/backoffice-sync`
+- [x] `npm run typecheck -w @jurnapod/sync-core && npm run build -w @jurnapod/sync-core`
+- [x] `npm run test:run -w @jurnapod/pos-sync`
+- [x] `npm run test:run -w @jurnapod/backoffice-sync`
 
 ### Contract/Storage invariants
-- [ ] No runtime usage of `sync_data_version` as protocol field
-- [ ] No runtime usage of legacy tables `sync_data_versions` / `sync_tier_versions`
-- [ ] `since_version`/`data_version` behavior unchanged
+- [x] No runtime usage of `sync_data_version` as protocol field
+- [x] No runtime usage of legacy tables `sync_data_versions` / `sync_tier_versions`
+- [x] `since_version`/`data_version` behavior unchanged
 
 ---
 
