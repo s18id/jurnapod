@@ -23,23 +23,28 @@ async function resolveFixtureContext(): Promise<FixtureContext> {
   const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
   const ownerEmail = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
-  const rows = await sql`
-    SELECT c.id AS company_id, o.id AS outlet_id, u.id AS user_id
+  // Global owner has outlet_id = NULL in user_role_assignments
+  const userRows = await sql`
+    SELECT c.id AS company_id, u.id AS user_id
      FROM companies c
-     INNER JOIN outlets o ON o.company_id = c.id
      INNER JOIN users u ON u.company_id = c.id
-     INNER JOIN user_outlets uo ON uo.user_id = u.id AND uo.outlet_id = o.id
-     WHERE c.code = ${companyCode} AND o.code = ${outletCode} AND u.email = ${ownerEmail}
+     INNER JOIN user_role_assignments ura ON ura.user_id = u.id
+     WHERE c.code = ${companyCode} AND u.email = ${ownerEmail} AND ura.outlet_id IS NULL
      LIMIT 1
   `.execute(db);
 
-  assert.ok(rows.rows.length > 0, "Fixture company/outlet/user not found; run seed first");
-  const row = rows.rows[0] as { company_id: number; outlet_id: number; user_id: number };
-  return {
-    companyId: Number(row.company_id),
-    outletId: Number(row.outlet_id),
-    userId: Number(row.user_id)
-  };
+  assert.ok(userRows.rows.length > 0, "Fixture company/outlet/user not found; run seed first");
+  const companyId = Number((userRows.rows[0] as { company_id: number }).company_id);
+  const userId = Number((userRows.rows[0] as { user_id: number }).user_id);
+
+  // Get outlet ID from outlets table
+  const outletRows = await sql`
+    SELECT id FROM outlets WHERE company_id = ${companyId} AND code = ${outletCode} LIMIT 1
+  `.execute(db);
+  assert.ok(outletRows.rows.length > 0, "Outlet not found");
+  const outletId = Number((outletRows.rows[0] as { id: number }).id);
+
+  return { companyId, outletId, userId };
 }
 
 async function readTableStatus(companyId: number, outletId: number, tableId: number): Promise<string | null> {

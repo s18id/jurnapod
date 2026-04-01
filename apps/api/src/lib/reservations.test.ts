@@ -38,22 +38,29 @@ async function resolveFixtureContext(): Promise<FixtureContext> {
   const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
   const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
   const ownerEmail = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
-  const rows = await sql<{ company_id: number; outlet_id: number; user_id: number }>`
-    SELECT c.id AS company_id, o.id AS outlet_id, u.id AS user_id
+  
+  // Global owner has outlet_id = NULL in user_role_assignments
+  const userRows = await sql<{ company_id: number; user_id: number }>`
+    SELECT c.id AS company_id, u.id AS user_id
      FROM companies c
-     INNER JOIN outlets o ON o.company_id = c.id
      INNER JOIN users u ON u.company_id = c.id
-     INNER JOIN user_outlets uo ON uo.user_id = u.id AND uo.outlet_id = o.id
-     WHERE c.code = ${companyCode} AND o.code = ${outletCode} AND u.email = ${ownerEmail}
+     INNER JOIN user_role_assignments ura ON ura.user_id = u.id
+     WHERE c.code = ${companyCode} AND u.email = ${ownerEmail} AND ura.outlet_id IS NULL
      LIMIT 1
   `.execute(db);
 
-  assert.ok(rows.rows.length > 0, "Fixture company/outlet/user not found; run seed first");
-  return {
-    companyId: Number(rows.rows[0]!.company_id),
-    outletId: Number(rows.rows[0]!.outlet_id),
-    userId: Number(rows.rows[0]!.user_id)
-  };
+  assert.ok(userRows.rows.length > 0, "Fixture company/outlet/user not found; run seed first");
+  const companyId = Number(userRows.rows[0]!.company_id);
+  const userId = Number(userRows.rows[0]!.user_id);
+
+  // Get outlet ID from outlets table
+  const outletRows = await sql<{ id: number }>`
+    SELECT id FROM outlets WHERE company_id = ${companyId} AND code = ${outletCode} LIMIT 1
+  `.execute(db);
+  assert.ok(outletRows.rows.length > 0, "Outlet not found");
+  const outletId = Number(outletRows.rows[0]!.id);
+
+  return { companyId, outletId, userId };
 }
 
 async function readTableStatus(
@@ -373,8 +380,8 @@ test(
 
       assert.strictEqual(rows.rows.length, 2, "both adjacent reservations should be persisted");
 
-      const firstRow = rows.rows.find((row) => row.id === firstReservation.id);
-      const secondRow = rows.rows.find((row) => row.id === secondReservation.id);
+      const firstRow = rows.rows.find((row) => Number(row.id) === Number(firstReservation.id));
+      const secondRow = rows.rows.find((row) => Number(row.id) === Number(secondReservation.id));
       assert.ok(firstRow, "first reservation row should exist");
       assert.ok(secondRow, "second reservation row should exist");
 

@@ -34,26 +34,36 @@ describe("Dine-in Routes", { concurrency: false }, () => {
     const db = getDb();
 
     // Find test user fixture using Kysely query builder
+    // Global owner has outlet_id = NULL in user_role_assignments
     const userRows = await db
       .selectFrom("users as u")
       .innerJoin("companies as c", "c.id", "u.company_id")
-      .innerJoin("user_outlets as uo", "uo.user_id", "u.id")
-      .innerJoin("outlets as o", "o.id", "uo.outlet_id")
+      .innerJoin("user_role_assignments as ura", "ura.user_id", "u.id")
       .where("c.code", "=", TEST_COMPANY_CODE)
       .where("u.email", "=", TEST_OWNER_EMAIL)
       .where("u.is_active", "=", 1)
-      .where("o.code", "=", TEST_OUTLET_CODE)
-      .select(["u.id as user_id", "u.company_id", "o.id as outlet_id"])
+      .where("ura.outlet_id", "is", null)
+      .select(["u.id as user_id", "u.company_id"])
       .limit(1)
       .execute();
 
     assert.ok(
       userRows.length > 0,
-      `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}, outlet=${TEST_OUTLET_CODE}`
+      `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}`
     );
     testUserId = Number(userRows[0].user_id);
     testCompanyId = Number(userRows[0].company_id);
-    testOutletId = Number(userRows[0].outlet_id);
+
+    // Get outlet ID from outlets table
+    const outletRows = await db
+      .selectFrom("outlets")
+      .where("company_id", "=", testCompanyId)
+      .where("code", "=", TEST_OUTLET_CODE)
+      .select(["id"])
+      .limit(1)
+      .execute();
+    assert.ok(outletRows.length > 0, `Outlet ${TEST_OUTLET_CODE} not found`);
+    testOutletId = Number(outletRows[0].id);
   });
 
   after(async () => {

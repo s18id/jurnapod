@@ -16,8 +16,9 @@
  */
 
 import assert from 'node:assert/strict';
-import { test, describe } from 'node:test';
+import { after, test, describe } from 'node:test';
 import type { FkLookupRequest } from './types.js';
+import { closeDbPool } from '../db.js';
 
 // ============================================================================
 // batchValidateForeignKeys Tests
@@ -99,11 +100,26 @@ describe('N+1 Anti-Pattern Documentation', () => {
     const { batchValidateForeignKeys } = await import('./validator.js');
     
     const requests: FkLookupRequest[] = [
-      { table: 'test_table', ids: new Set([1, 2, 3]), companyId: 1 },
+      { table: 'item_groups', ids: new Set([1, 2, 3]), companyId: 1 },
     ];
     
     // Function should exist and be callable
     const results = await batchValidateForeignKeys(requests);
     assert.ok(results instanceof Map, 'Function should return Map as documented');
   });
+
+  test('rejects unknown FK table names with explicit error', async () => {
+    const { batchValidateForeignKeys } = await import('./validator.js');
+
+    await assert.rejects(
+      batchValidateForeignKeys([
+        { table: 'test_table', ids: new Set([1]), companyId: 1 },
+      ]),
+      /INVALID_FK_TABLE:test_table/
+    );
+  });
+});
+
+after(async () => {
+  await closeDbPool();
 });

@@ -2,7 +2,8 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 // Phase 3 Batch Processor Tests
-// Tests for SCHEDULED_EXPORT, FORECAST_GENERATION, and INSIGHTS_CALCULATION job handlers
+// Tests for SCHEDULED_EXPORT and FORECAST_GENERATION job handlers
+// NOTE: INSIGHTS_CALCULATION was removed in Epic 20 (analytics_insights table dropped)
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -69,26 +70,6 @@ test("Phase3: sales_forecasts table exists with required columns", { timeout: 30
   
   for (const col of required) {
     assert.ok(columnNames.includes(col), `Column ${col} should exist in sales_forecasts`);
-  }
-});
-
-test("Phase3: analytics_insights table exists with required columns", { timeout: 30000 }, async () => {
-  const db = getDb();
-  
-  const columns = await sql`
-    SELECT COLUMN_NAME 
-    FROM INFORMATION_SCHEMA.COLUMNS 
-    WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'analytics_insights'
-    ORDER BY ORDINAL_POSITION
-  `.execute(db);
-  
-  const columnNames = (columns.rows as Array<{ COLUMN_NAME: string }>).map(c => c.COLUMN_NAME);
-  
-  const required = ['id', 'company_id', 'insight_type', 'metric_name', 'metric_value', 'severity', 'description', 'expires_at'];
-  
-  for (const col of required) {
-    assert.ok(columnNames.includes(col), `Column ${col} should exist in analytics_insights`);
   }
 });
 
@@ -177,25 +158,6 @@ test("Phase3: Can queue FORECAST_GENERATION job", { timeout: 60000 }, async () =
   `.execute(db);
   
   assert.ok(columns.rows.length > 0, "sales_forecasts should have predicted_amount column");
-  
-  console.log("Phase 3 job types require migration 0108 to be applied");
-});
-
-test("Phase3: Can queue INSIGHTS_CALCULATION job", { timeout: 60000 }, async () => {
-  // NOTE: This test requires migration 0108 to add new job types to document_type enum
-  // For now, we verify the analytics_insights table exists and has correct structure
-  const db = getDb();
-  
-  // Check we can query the insights table
-  const columns = await sql`
-    SELECT COLUMN_NAME 
-    FROM INFORMATION_SCHEMA.COLUMNS 
-    WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'analytics_insights'
-    AND COLUMN_NAME = 'insight_type'
-  `.execute(db);
-  
-  assert.ok(columns.rows.length > 0, "analytics_insights should have insight_type column");
   
   console.log("Phase 3 job types require migration 0108 to be applied");
 });

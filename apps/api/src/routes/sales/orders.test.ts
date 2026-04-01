@@ -35,27 +35,32 @@ describe("Sales Order Routes", { concurrency: false }, () => {
   before(async () => {
     const db = getDb();
 
-    // Find test user fixture
-    const userRows = await sql<{ user_id: number; company_id: number; outlet_id: number }>`
-      SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
+    // Find test user fixture - global owner has outlet_id = NULL in user_role_assignments
+    const userRows = await sql<{ user_id: number; company_id: number }>`
+      SELECT u.id AS user_id, u.company_id
        FROM users u
        INNER JOIN companies c ON c.id = u.company_id
-       INNER JOIN user_outlets uo ON uo.user_id = u.id
-       INNER JOIN outlets o ON o.id = uo.outlet_id
+       INNER JOIN user_role_assignments ura ON ura.user_id = u.id
        WHERE c.code = ${TEST_COMPANY_CODE}
          AND u.email = ${TEST_OWNER_EMAIL}
          AND u.is_active = 1
-         AND o.code = ${TEST_OUTLET_CODE}
+         AND ura.outlet_id IS NULL
        LIMIT 1
     `.execute(db);
 
     assert.ok(
       userRows.rows.length > 0,
-      `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}, outlet=${TEST_OUTLET_CODE}`
+      `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}`
     );
     testUserId = Number(userRows.rows[0].user_id);
     testCompanyId = Number(userRows.rows[0].company_id);
-    testOutletId = Number(userRows.rows[0].outlet_id);
+
+    // Get outlet ID from outlets table
+    const outletRows = await sql<{ id: number }>`
+      SELECT id FROM outlets WHERE company_id = ${testCompanyId} AND code = ${TEST_OUTLET_CODE} LIMIT 1
+    `.execute(db);
+    assert.ok(outletRows.rows.length > 0, `Outlet ${TEST_OUTLET_CODE} not found`);
+    testOutletId = Number(outletRows.rows[0].id);
   });
 
   after(async () => {
@@ -250,6 +255,81 @@ describe("Sales Order Routes", { concurrency: false }, () => {
 
       assert.equal(order.lines[0].line_type, "SERVICE", "Line type should be SERVICE");
       assert.equal(order.lines[0].item_id, null, "Service should have null item_id");
+
+      // Store for cleanup
+      testOrderId = order.id;
+    });
+
+    test("tax_amount is zero and grand_total equals subtotal plus tax_amount", async () => {
+      const order = await createOrder(testCompanyId, {
+        outlet_id: testOutletId,
+        order_date: new Date().toISOString().slice(0, 10),
+        lines: [
+          {
+            description: "No Tax Item",
+            qty: 2,
+            unit_price: 50000
+          }
+        ]
+      }, { userId: testUserId });
+
+      // tax_amount should be 0 when no tax is applied
+      assert.equal(order.tax_amount, 0, "tax_amount should be 0 for order without tax");
+
+      // grand_total should equal subtotal + tax_amount
+      assert.equal(order.grand_total, order.subtotal + order.tax_amount, "grand_total should equal subtotal + tax_amount");
+
+      // Persisted DB row validation
+      const db = getDb();
+      const rows = await sql<{ subtotal: string; tax_amount: string; grand_total: string }>`
+        SELECT subtotal, tax_amount, grand_total FROM sales_orders WHERE id = ${order.id}
+      `.execute(db);
+
+      assert.ok(rows.rows.length > 0, "Order should exist in database");
+      const row = rows.rows[0];
+      assert.equal(Number(row.subtotal), order.subtotal, "Persisted subtotal should match returned subtotal");
+      assert.equal(Number(row.tax_amount), order.tax_amount, "Persisted tax_amount should match returned tax_amount");
+      assert.equal(Number(row.grand_total), order.grand_total, "Persisted grand_total should match returned grand_total");
+
+      // Store for cleanup
+      testOrderId = order.id;
+    });
+
+    test("maintains subtotal/tax/grand total invariant for fractional prices", async () => {
+      const order = await createOrder(testCompanyId, {
+        outlet_id: testOutletId,
+        order_date: new Date().toISOString().slice(0, 10),
+        lines: [
+          {
+            description: "Fractional Item A",
+            qty: 3,
+            unit_price: 33.33
+          },
+          {
+            description: "Fractional Item B",
+            qty: 2,
+            unit_price: 12.34
+          }
+        ]
+      }, { userId: testUserId });
+
+      // 3 * 33.33 + 2 * 12.34 = 99.99 + 24.68 = 124.67
+      assert.equal(order.subtotal, 124.67, "Subtotal should preserve decimal precision");
+      assert.equal(order.tax_amount, 0, "tax_amount should remain 0 when tax is not provided");
+      assert.equal(order.grand_total, 124.67, "grand_total should equal subtotal when tax_amount is 0");
+      assert.equal(order.grand_total, order.subtotal + order.tax_amount, "grand_total invariant must hold");
+
+      // Persisted DB row validation
+      const db = getDb();
+      const rows = await sql<{ subtotal: string; tax_amount: string; grand_total: string }>`
+        SELECT subtotal, tax_amount, grand_total FROM sales_orders WHERE id = ${order.id}
+      `.execute(db);
+
+      assert.ok(rows.rows.length > 0, "Order should exist in database");
+      const row = rows.rows[0];
+      assert.equal(Number(row.subtotal), order.subtotal, "Persisted subtotal should match returned subtotal");
+      assert.equal(Number(row.tax_amount), order.tax_amount, "Persisted tax_amount should match returned tax_amount");
+      assert.equal(Number(row.grand_total), order.grand_total, "Persisted grand_total should match returned grand_total");
 
       // Store for cleanup
       testOrderId = order.id;

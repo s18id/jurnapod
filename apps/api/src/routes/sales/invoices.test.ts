@@ -35,27 +35,32 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
   before(async () => {
     const db = getDb();
 
-    // Find test user fixture
-    const userRows = await sql<{ user_id: number; company_id: number; outlet_id: number }>`
-      SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
+    // Find test user fixture - global owner has outlet_id = NULL in user_role_assignments
+    const userRows = await sql<{ user_id: number; company_id: number }>`
+      SELECT u.id AS user_id, u.company_id
        FROM users u
        INNER JOIN companies c ON c.id = u.company_id
-       INNER JOIN user_outlets uo ON uo.user_id = u.id
-       INNER JOIN outlets o ON o.id = uo.outlet_id
+       INNER JOIN user_role_assignments ura ON ura.user_id = u.id
        WHERE c.code = ${TEST_COMPANY_CODE}
          AND u.email = ${TEST_OWNER_EMAIL}
          AND u.is_active = 1
-         AND o.code = ${TEST_OUTLET_CODE}
+         AND ura.outlet_id IS NULL
        LIMIT 1
     `.execute(db);
 
     assert.ok(
       userRows.rows.length > 0,
-      `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}, outlet=${TEST_OUTLET_CODE}`
+      `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}`
     );
     testUserId = Number(userRows.rows[0].user_id);
     testCompanyId = Number(userRows.rows[0].company_id);
-    testOutletId = Number(userRows.rows[0].outlet_id);
+
+    // Get outlet ID from outlets table
+    const outletRows = await sql<{ id: number }>`
+      SELECT id FROM outlets WHERE company_id = ${testCompanyId} AND code = ${TEST_OUTLET_CODE} LIMIT 1
+    `.execute(db);
+    assert.ok(outletRows.rows.length > 0, `Outlet ${TEST_OUTLET_CODE} not found`);
+    testOutletId = Number(outletRows.rows[0].id);
   });
 
   after(async () => {

@@ -93,7 +93,9 @@ describe("Stock Routes", { concurrency: false }, () => {
         SELECT COUNT(*) as count FROM inventory_transactions WHERE company_id = ${TEST_COMPANY_ID}
       `.execute(db);
 
-      assert.ok(typeof result.rows[0].count === "string");
+      const count = Number(result.rows[0].count);
+      assert.ok(Number.isFinite(count));
+      assert.ok(count >= 0);
     });
 
     test("should identify low stock products", async () => {

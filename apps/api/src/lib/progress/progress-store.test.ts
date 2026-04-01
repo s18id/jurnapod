@@ -1196,7 +1196,7 @@ describe("SSE Configuration Constants", () => {
     
     // In a real scenario, we'd re-import the module
     // Here we verify the Number() conversion behavior
-    const customKeepalive = Number(process.env.SEE_KEEPALIVE_INTERVAL_MS || 30000);
+    const customKeepalive = Number(process.env.SSE_KEEPALIVE_INTERVAL_MS || 30000);
     assert.strictEqual(customKeepalive, 60000);
   });
 

@@ -31,7 +31,6 @@ const RUN_ID = Date.now().toString(36);
 // Shared state
 let db: KyselySchema;
 let supportsUnitCost: boolean;
-let supportsMappingTypeId: boolean;
 let cogsAccountId: number;
 let inventoryAccountId: number;
 let testItemId: number;
@@ -46,7 +45,12 @@ async function createTestAccount(
   normalBalance: 'D' | 'C'
 ): Promise<number> {
   const typeResult = await sql`
-    SELECT id FROM account_types WHERE UPPER(name) = ${accountType.toUpperCase()}
+    SELECT id
+    FROM account_types
+    WHERE UPPER(name) = ${accountType.toUpperCase()}
+      AND (company_id = ${companyId} OR company_id IS NULL)
+    ORDER BY company_id IS NULL ASC, id ASC
+    LIMIT 1
   `.execute(db);
 
   if ((typeResult.rows as any[]).length === 0) {
@@ -55,13 +59,18 @@ async function createTestAccount(
       VALUES (${companyId}, ${accountType.toUpperCase()}, ${accountType.toUpperCase()}, ${normalBalance}, ${accountType.toUpperCase() === "REVENUE" || accountType.toUpperCase() === "EXPENSE" ? "PL" : "NRC"}, 1)
     `.execute(db);
 
-    const rows = await sql`
+    await sql`
       SELECT id FROM account_types WHERE company_id = ${companyId} AND UPPER(name) = ${accountType.toUpperCase()} LIMIT 1
     `.execute(db);
   }
 
   const accountTypeResult = await sql`
-    SELECT id FROM account_types WHERE company_id = ${companyId} AND UPPER(name) = ${accountType.toUpperCase()} LIMIT 1
+    SELECT id
+    FROM account_types
+    WHERE UPPER(name) = ${accountType.toUpperCase()}
+      AND (company_id = ${companyId} OR company_id IS NULL)
+    ORDER BY company_id IS NULL ASC, id ASC
+    LIMIT 1
   `.execute(db);
 
   if ((accountTypeResult.rows as any[]).length === 0) {
@@ -143,6 +152,12 @@ async function cleanupTestData(db: KyselySchema, companyId: number): Promise<voi
     // May fail if table doesn't exist
   }
   
+  try {
+    await sql`DELETE FROM account_mappings WHERE company_id = ${companyId}`.execute(db);
+  } catch (e) {
+    // May fail if table doesn't exist
+  }
+  
   // Accounts may have journal_lines referencing them - use try/catch
   try {
     await sql`DELETE FROM accounts WHERE company_id = ${companyId}`.execute(db);
@@ -174,14 +189,7 @@ before(async () => {
   `.execute(db);
   supportsUnitCost = Number((unitCostColumnResult.rows[0] as any)?.column_exists ?? 0) > 0;
   
-  const mappingTypeColumnResult = await sql`
-    SELECT COUNT(*) AS column_exists
-    FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'company_account_mappings'
-      AND COLUMN_NAME = 'mapping_type_id'
-  `.execute(db);
-  supportsMappingTypeId = Number((mappingTypeColumnResult.rows[0] as any)?.column_exists ?? 0) > 0;
+
 
   await cleanupTestData(db, 0);
 
@@ -212,17 +220,12 @@ before(async () => {
   cogsAccountId = await createTestAccount(db, TEST_COMPANY_ID, '6100-TEST', 'Test COGS', 'EXPENSE', 'D');
   inventoryAccountId = await createTestAccount(db, TEST_COMPANY_ID, '1100-TEST', 'Test Inventory', 'ASSET', 'D');
 
-  if (supportsMappingTypeId) {
-    await sql`
-      INSERT INTO company_account_mappings (company_id, mapping_key, mapping_type_id, account_id)
-      VALUES (${TEST_COMPANY_ID}, ${'COGS_DEFAULT'}, 7, ${cogsAccountId}), (${TEST_COMPANY_ID}, ${'INVENTORY_ASSET_DEFAULT'}, 8, ${inventoryAccountId})
-    `.execute(db);
-  } else {
-    await sql`
-      INSERT INTO company_account_mappings (company_id, mapping_key, account_id)
-      VALUES (${TEST_COMPANY_ID}, ${'COGS_DEFAULT'}, ${cogsAccountId}), (${TEST_COMPANY_ID}, ${'INVENTORY_ASSET_DEFAULT'}, ${inventoryAccountId})
-    `.execute(db);
-  }
+  // Insert into the consolidated account_mappings table (cogs-posting.ts reads from here).
+  // COGS_DEFAULT=7, INVENTORY_ASSET_DEFAULT=8; outlet_id IS NULL for company-wide defaults.
+  await sql`
+    INSERT INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id)
+    VALUES (${TEST_COMPANY_ID}, NULL, 7, 'COGS_DEFAULT', ${cogsAccountId}), (${TEST_COMPANY_ID}, NULL, 8, 'INVENTORY_ASSET_DEFAULT', ${inventoryAccountId})
+  `.execute(db);
 });
 
 // Cleanup
@@ -441,7 +444,9 @@ test("getItemAccounts - should throw error when inventory account is not asset t
 });
 
 test("getItemAccounts - should throw error when no accounts are configured", async () => {
-  await sql`DELETE FROM company_account_mappings WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
+  // Delete from account_mappings (the consolidated table the code reads from),
+  // not company_account_mappings which is a legacy/archived table.
+  await sql`DELETE FROM account_mappings WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
   
   const noAccountItem = await createItem(TEST_COMPANY_ID, {
     name: 'No Account Item',
@@ -455,18 +460,11 @@ test("getItemAccounts - should throw error when no accounts are configured", asy
     CogsAccountConfigError
   );
   
-  // Restore defaults
-  if (supportsMappingTypeId) {
-    await sql`
-      INSERT INTO company_account_mappings (company_id, mapping_key, mapping_type_id, account_id)
-      VALUES (${TEST_COMPANY_ID}, ${'COGS_DEFAULT'}, 7, ${cogsAccountId}), (${TEST_COMPANY_ID}, ${'INVENTORY_ASSET_DEFAULT'}, 8, ${inventoryAccountId})
-    `.execute(db);
-  } else {
-    await sql`
-      INSERT INTO company_account_mappings (company_id, mapping_key, account_id)
-      VALUES (${TEST_COMPANY_ID}, ${'COGS_DEFAULT'}, ${cogsAccountId}), (${TEST_COMPANY_ID}, ${'INVENTORY_ASSET_DEFAULT'}, ${inventoryAccountId})
-    `.execute(db);
-  }
+  // Restore defaults into the consolidated account_mappings table
+  await sql`
+    INSERT INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id)
+    VALUES (${TEST_COMPANY_ID}, NULL, 7, 'COGS_DEFAULT', ${cogsAccountId}), (${TEST_COMPANY_ID}, NULL, 8, 'INVENTORY_ASSET_DEFAULT', ${inventoryAccountId})
+  `.execute(db);
 });
 
 test("getItemAccountsBatch - should resolve mixed item-specific and default accounts in one call", async () => {

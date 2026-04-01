@@ -45,22 +45,39 @@ test(
 
     try {
       // Find owner fixture user
+      // Note: user_outlets was dropped in Epic 20, use user_role_assignments + outlets instead
+      // OWNER has global role (outlet_id IS NULL), so we need to find by outlet code separately
       const ownerRows = await db
         .selectFrom("users as u")
         .innerJoin("companies as c", "c.id", "u.company_id")
-        .innerJoin("user_outlets as uo", "uo.user_id", "u.id")
-        .innerJoin("outlets as o", "o.id", "uo.outlet_id")
         .where("c.code", "=", companyCode)
         .where("u.email", "=", ownerEmail)
         .where("u.is_active", "=", 1)
-        .where("o.code", "=", outletCode)
-        .select(["u.id", "u.company_id", "u.password_hash", "o.id as outlet_id"])
+        .select(["u.id", "u.company_id", "u.password_hash"])
         .limit(1)
         .execute();
 
-      assert.ok(ownerRows.length > 0, "Owner fixture not found; run database seed first");
+      if (ownerRows.length === 0) {
+        throw new Error("Owner fixture not found; run database seed first");
+      }
+
+      // Get outlet id for the test
+      const outletRows = await db
+        .selectFrom("outlets as o")
+        .innerJoin("companies as c", "c.id", "o.company_id")
+        .where("c.code", "=", companyCode)
+        .where("o.code", "=", outletCode)
+        .select(["o.id"])
+        .limit(1)
+        .execute();
+
+      if (outletRows.length === 0) {
+        throw new Error("Outlet fixture not found; run database seed first");
+      }
+
       const owner = ownerRows[0];
       companyId = Number(owner.company_id);
+      console.log("DEBUG: companyId after Number():", companyId, "isNaN?", Number.isNaN(companyId));
       const ownerPasswordHash = String(owner.password_hash);
 
       // Get role IDs
@@ -113,10 +130,9 @@ test(
           password_hash: ownerPasswordHash,
           is_active: 1
         })
-        .returningAll()
         .executeTakeFirst();
       
-      globalOwnerUserId = Number(globalOwnerInsert!.id);
+      globalOwnerUserId = Number(globalOwnerInsert!.insertId);
       createdUserIds.push(globalOwnerUserId);
       
       await db
@@ -138,10 +154,9 @@ test(
           password_hash: ownerPasswordHash,
           is_active: 1
         })
-        .returningAll()
         .executeTakeFirst();
       
-      outletAdminUserId = Number(outletAdminInsert!.id);
+      outletAdminUserId = Number(outletAdminInsert!.insertId);
       createdUserIds.push(outletAdminUserId);
       
       await db
@@ -163,10 +178,9 @@ test(
           password_hash: ownerPasswordHash,
           is_active: 1
         })
-        .returningAll()
         .executeTakeFirst();
       
-      superAdminUserId = Number(superAdminInsert!.id);
+      superAdminUserId = Number(superAdminInsert!.insertId);
       createdUserIds.push(superAdminUserId);
       
       await db
@@ -188,10 +202,9 @@ test(
           password_hash: ownerPasswordHash,
           is_active: 0
         })
-        .returningAll()
         .executeTakeFirst();
       
-      inactiveUserId = Number(inactiveInsert!.id);
+      inactiveUserId = Number(inactiveInsert!.insertId);
       createdUserIds.push(inactiveUserId);
       
       await db
@@ -227,10 +240,9 @@ test(
           password_hash: ownerPasswordHash,
           is_active: 1
         })
-        .returningAll()
         .executeTakeFirst();
       
-      deletedCompanyUserId = Number(deletedCompanyUserInsert!.id);
+      deletedCompanyUserId = Number(deletedCompanyUserInsert!.insertId);
       createdUserIds.push(deletedCompanyUserId);
       
       await db

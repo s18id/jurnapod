@@ -9,6 +9,7 @@ import { createItem } from "./items/index.js";
 import { createItemPrice } from "./item-prices/index.js";
 import { closeDbPool, getDb } from "./db";
 import { sql } from "kysely";
+import { DatabaseConflictError, DatabaseReferenceError } from "./master-data-errors.js";
 
 loadEnvIfPresent();
 
@@ -208,6 +209,196 @@ test(
       if (itemId) {
         await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
       }
+    }
+  }
+);
+
+test(
+  "createItemPrice successfully creates and retrieves price",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const db = getDb();
+    const runId = Date.now().toString(36);
+
+    let companyId = 0;
+    let itemId = 0;
+    let priceId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
+
+    try {
+      const companyRows = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
+
+      const item = await createItem(companyId, {
+        name: `Test Item Create ${runId}`,
+        type: "PRODUCT"
+      });
+      itemId = item.id;
+
+      // Create a company-default item price
+      const created = await createItemPrice(companyId, {
+        item_id: itemId,
+        outlet_id: null,
+        price: 2500,
+        is_active: true
+      });
+      priceId = created.id;
+
+      // Verify the returned price has expected fields
+      assert.ok(created.id > 0, "Should return a numeric id");
+      assert.strictEqual(created.company_id, companyId, "company_id should match");
+      assert.strictEqual(created.item_id, itemId, "item_id should match");
+      assert.strictEqual(created.outlet_id, null, "outlet_id should be null for company default");
+      assert.strictEqual(created.variant_id, null, "variant_id should be null");
+      assert.strictEqual(created.price, 2500, "price should match");
+      assert.strictEqual(created.is_active, true, "is_active should match");
+
+      // Verify the record can be retrieved from DB
+      const retrieved = await sql`
+        SELECT id, company_id, item_id, outlet_id, variant_id, price, is_active
+        FROM item_prices
+        WHERE id = ${priceId}
+      `.execute(db);
+
+      assert.ok(retrieved.rows.length === 1, "Created price should be retrievable from DB");
+      const row = retrieved.rows[0] as {
+        id: number;
+        company_id: number;
+        item_id: number;
+        outlet_id: number | null;
+        variant_id: number | null;
+        price: string | number;
+        is_active: number;
+      };
+      assert.strictEqual(Number(row.id), priceId, "id should match");
+      assert.strictEqual(Number(row.company_id), companyId, "company_id should match");
+      assert.strictEqual(Number(row.item_id), itemId, "item_id should match");
+      assert.strictEqual(row.outlet_id, null, "outlet_id should be null");
+      assert.strictEqual(row.variant_id, null, "variant_id should be null");
+      assert.strictEqual(Number(row.price), 2500, "price should match");
+      assert.strictEqual(row.is_active, 1, "is_active should be 1");
+
+    } finally {
+      if (priceId) {
+        await sql`DELETE FROM item_prices WHERE id = ${priceId}`.execute(db);
+      }
+      if (itemId) {
+        await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
+      }
+    }
+  }
+);
+
+test(
+  "createItemPrice throws DatabaseConflictError for duplicate (item_id, outlet_id, variant_id)",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const db = getDb();
+    const runId = Date.now().toString(36);
+
+    let companyId = 0;
+    let itemId = 0;
+    let priceId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
+
+    try {
+      const companyRows = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
+
+      const item = await createItem(companyId, {
+        name: `Test Item Dup ${runId}`,
+        type: "PRODUCT"
+      });
+      itemId = item.id;
+
+      // Create first price with specific combination
+      const first = await createItemPrice(companyId, {
+        item_id: itemId,
+        outlet_id: null,  // company default
+        variant_id: null,
+        price: 1000,
+        is_active: true
+      });
+      priceId = first.id;
+
+      // Attempt to create duplicate - should throw DatabaseConflictError
+      let conflictThrown = false;
+      try {
+        await createItemPrice(companyId, {
+          item_id: itemId,
+          outlet_id: null,  // same company default
+          variant_id: null, // same variant (both null)
+          price: 2000,
+          is_active: true
+        });
+      } catch (err) {
+        if (err instanceof DatabaseConflictError) {
+          conflictThrown = true;
+        } else {
+          throw err;
+        }
+      }
+      assert.strictEqual(conflictThrown, true, "Should throw DatabaseConflictError for duplicate price");
+
+    } finally {
+      if (priceId) {
+        await sql`DELETE FROM item_prices WHERE id = ${priceId}`.execute(db);
+      }
+      if (itemId) {
+        await sql`DELETE FROM items WHERE id = ${itemId}`.execute(db);
+      }
+    }
+  }
+);
+
+test(
+  "createItemPrice throws DatabaseReferenceError for invalid item_id",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const db = getDb();
+    const runId = Date.now().toString(36);
+
+    let companyId = 0;
+
+    const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
+
+    try {
+      const companyRows = await sql`
+        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
+      `.execute(db);
+      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
+      companyId = Number((companyRows.rows[0] as { id: number }).id);
+
+      // Use a high non-existent item_id to trigger FK violation
+      const nonExistentItemId = 999999999;
+
+      let refErrorThrown = false;
+      try {
+        await createItemPrice(companyId, {
+          item_id: nonExistentItemId,
+          outlet_id: null,
+          price: 1000,
+          is_active: true
+        });
+      } catch (err) {
+        if (err instanceof DatabaseReferenceError) {
+          refErrorThrown = true;
+        } else {
+          throw err;
+        }
+      }
+      assert.strictEqual(refErrorThrown, true, "Should throw DatabaseReferenceError for invalid item_id");
+
+    } finally {
+      // No cleanup needed - the create should have failed
     }
   }
 );

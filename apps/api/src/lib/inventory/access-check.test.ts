@@ -24,16 +24,15 @@ test(
     let testItemId = 0;
 
     try {
-      // Get company ID from fixtures
+      // Get company ID from fixtures - global owner has outlet_id = NULL
       const companyResult = await sql`SELECT c.id
          FROM companies c
          INNER JOIN users u ON u.company_id = c.id
-         INNER JOIN user_outlets uo ON uo.user_id = u.id
-         INNER JOIN outlets o ON o.id = uo.outlet_id
+         INNER JOIN user_role_assignments ura ON ura.user_id = u.id
          WHERE c.code = ${companyCode}
            AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ${outletCode}
+           AND ura.outlet_id IS NULL
          LIMIT 1`.execute(db);
 
       assert.ok(companyResult.rows.length > 0, "Company fixture not found");
@@ -89,16 +88,15 @@ test(
     let testItemId = 0;
 
     try {
-      // Get company ID
+      // Get company ID - global owner has outlet_id = NULL
       const companyResult = await sql`SELECT c.id
          FROM companies c
          INNER JOIN users u ON u.company_id = c.id
-         INNER JOIN user_outlets uo ON uo.user_id = u.id
-         INNER JOIN outlets o ON o.id = uo.outlet_id
+         INNER JOIN user_role_assignments ura ON ura.user_id = u.id
          WHERE c.code = ${companyCode}
            AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ${outletCode}
+           AND ura.outlet_id IS NULL
          LIMIT 1`.execute(db);
 
       assert.ok(companyResult.rows.length > 0, "Company fixture not found");

@@ -7,9 +7,34 @@ import { loadEnvIfPresent } from "../../tests/integration/integration-harness.mj
 import { createSupply, deleteSupply, findSupplyById, listSupplies, updateSupply } from "./supplies/index.js";
 import { DatabaseConflictError } from "./master-data-errors.js";
 import { closeDbPool, getDb } from "./db";
-import { sql } from "kysely";
 
 loadEnvIfPresent();
+
+async function getCompanyIdByCode(companyCode: string): Promise<number> {
+  const db = getDb();
+  const row = await db
+    .selectFrom("companies")
+    .where("code", "=", companyCode)
+    .select(["id"])
+    .limit(1)
+    .executeTakeFirst();
+
+  assert.ok(row, "Company fixture not found");
+  return Number(row.id);
+}
+
+async function getOtherCompanyId(companyCode: string): Promise<number> {
+  const db = getDb();
+  const row = await db
+    .selectFrom("companies")
+    .where("code", "!=", companyCode)
+    .where("deleted_at", "is", null)
+    .select(["id"])
+    .limit(1)
+    .executeTakeFirst();
+
+  return row ? Number(row.id) : 0;
+}
 
 test(
   "listSupplies respects company scope and isActive filter",
@@ -27,18 +52,8 @@ test(
     const companyCode = process.env.JP_COMPANY_CODE ?? "JP";
 
     try {
-      const companyRows = await sql`
-        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
-      `.execute(db);
-      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
-      companyId = Number((companyRows.rows[0] as { id: number }).id);
-
-      const otherCompanyRows = await sql`
-        SELECT id FROM companies WHERE code != ${companyCode} AND deleted_at IS NULL LIMIT 1
-      `.execute(db);
-      if (otherCompanyRows.rows.length > 0) {
-        otherCompanyId = Number((otherCompanyRows.rows[0] as { id: number }).id);
-      }
+      companyId = await getCompanyIdByCode(companyCode);
+      otherCompanyId = await getOtherCompanyId(companyCode);
 
       const supply1 = await createSupply(companyId, {
         sku: `LIST-${runId}-1`,
@@ -91,13 +106,13 @@ test(
       }
     } finally {
       if (supplyId1 > 0) {
-        await sql`DELETE FROM supplies WHERE id = ${supplyId1}`.execute(db);
+        await db.deleteFrom("supplies").where("id", "=", supplyId1).execute();
       }
       if (supplyId2 > 0) {
-        await sql`DELETE FROM supplies WHERE id = ${supplyId2}`.execute(db);
+        await db.deleteFrom("supplies").where("id", "=", supplyId2).execute();
       }
       if (supplyId3 > 0) {
-        await sql`DELETE FROM supplies WHERE id = ${supplyId3}`.execute(db);
+        await db.deleteFrom("supplies").where("id", "=", supplyId3).execute();
       }
     }
   }
@@ -116,11 +131,7 @@ test(
     const companyCode = process.env.JP_COMPANY_CODE ?? "JP";
 
     try {
-      const companyRows = await sql`
-        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
-      `.execute(db);
-      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
-      companyId = Number((companyRows.rows[0] as { id: number }).id);
+      companyId = await getCompanyIdByCode(companyCode);
 
       const supply = await createSupply(companyId, {
         name: `Default Test Supply ${runId}`
@@ -136,7 +147,7 @@ test(
       assert.equal(fromDb!.is_active, true);
     } finally {
       if (supplyId > 0) {
-        await sql`DELETE FROM supplies WHERE id = ${supplyId}`.execute(db);
+        await db.deleteFrom("supplies").where("id", "=", supplyId).execute();
       }
     }
   }
@@ -155,11 +166,7 @@ test(
     const companyCode = process.env.JP_COMPANY_CODE ?? "JP";
 
     try {
-      const companyRows = await sql`
-        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
-      `.execute(db);
-      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
-      companyId = Number((companyRows.rows[0] as { id: number }).id);
+      companyId = await getCompanyIdByCode(companyCode);
 
       const supply = await createSupply(companyId, {
         sku: `DUP-${runId}`,
@@ -183,7 +190,7 @@ test(
       assert.equal(conflictThrown, true, "Should throw DatabaseConflictError for duplicate SKU");
     } finally {
       if (supplyId > 0) {
-        await sql`DELETE FROM supplies WHERE id = ${supplyId}`.execute(db);
+        await db.deleteFrom("supplies").where("id", "=", supplyId).execute();
       }
     }
   }
@@ -203,18 +210,8 @@ test(
     const companyCode = process.env.JP_COMPANY_CODE ?? "JP";
 
     try {
-      const companyRows = await sql`
-        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
-      `.execute(db);
-      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
-      companyId = Number((companyRows.rows[0] as { id: number }).id);
-
-      const otherCompanyRows = await sql`
-        SELECT id FROM companies WHERE code != ${companyCode} AND deleted_at IS NULL LIMIT 1
-      `.execute(db);
-      if (otherCompanyRows.rows.length > 0) {
-        otherCompanyId = Number((otherCompanyRows.rows[0] as { id: number }).id);
-      }
+      companyId = await getCompanyIdByCode(companyCode);
+      otherCompanyId = await getOtherCompanyId(companyCode);
 
       if (otherCompanyId === 0) {
         return;
@@ -232,7 +229,7 @@ test(
       assert.equal(foundInOtherCompany, null, "Should NOT find supply in other company");
     } finally {
       if (supplyId > 0) {
-        await sql`DELETE FROM supplies WHERE id = ${supplyId}`.execute(db);
+        await db.deleteFrom("supplies").where("id", "=", supplyId).execute();
       }
     }
   }
@@ -242,25 +239,16 @@ test(
   "updateSupply returns null for missing id",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const db = getDb();
-
     let companyId = 0;
 
     const companyCode = process.env.JP_COMPANY_CODE ?? "JP";
 
-    try {
-      const companyRows = await sql`
-        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
-      `.execute(db);
-      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
-      companyId = Number((companyRows.rows[0] as { id: number }).id);
+    companyId = await getCompanyIdByCode(companyCode);
 
-      const result = await updateSupply(companyId, 999999999, {
-        name: "Non-existent Supply"
-      });
-      assert.equal(result, null, "Should return null for non-existent supply");
-    } finally {
-    }
+    const result = await updateSupply(companyId, 999999999, {
+      name: "Non-existent Supply"
+    });
+    assert.equal(result, null, "Should return null for non-existent supply");
   }
 );
 
@@ -268,23 +256,14 @@ test(
   "deleteSupply returns false for missing id",
   { concurrency: false, timeout: 60000 },
   async () => {
-    const db = getDb();
-
     let companyId = 0;
 
     const companyCode = process.env.JP_COMPANY_CODE ?? "JP";
 
-    try {
-      const companyRows = await sql`
-        SELECT id FROM companies WHERE code = ${companyCode} LIMIT 1
-      `.execute(db);
-      assert.ok(companyRows.rows.length > 0, "Company fixture not found");
-      companyId = Number((companyRows.rows[0] as { id: number }).id);
+    companyId = await getCompanyIdByCode(companyCode);
 
-      const result = await deleteSupply(companyId, 999999999);
-      assert.equal(result, false, "Should return false for non-existent supply");
-    } finally {
-    }
+    const result = await deleteSupply(companyId, 999999999);
+    assert.equal(result, false, "Should return false for non-existent supply");
   }
 );
 

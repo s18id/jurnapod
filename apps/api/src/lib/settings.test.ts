@@ -38,12 +38,11 @@ test(
         SELECT u.id, u.company_id
          FROM users u
          INNER JOIN companies c ON c.id = u.company_id
-         INNER JOIN user_outlets uo ON uo.user_id = u.id
-         INNER JOIN outlets o ON o.id = uo.outlet_id
+         INNER JOIN user_role_assignments ura ON ura.user_id = u.id
          WHERE c.code = ${companyCode}
            AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ${outletCode}
+           AND ura.outlet_id IS NULL
          LIMIT 1
       `.execute(db);
 
@@ -53,15 +52,13 @@ test(
       ownerUserId = Number(owner.id);
 
       const testKey = `test_setting_${runId}`;
-      const actor = { userId: ownerUserId, ipAddress: "127.0.0.1" };
 
       const created = await setSetting({
         companyId,
         key: testKey,
         value: "test_value",
         valueType: "string",
-        outletId: null,
-        actor
+        outletId: null
       });
       assert.ok(created.id > 0);
       assert.strictEqual(created.key, testKey);
@@ -82,13 +79,16 @@ test(
 
       console.log("✅ settings CRUD test passed");
     } finally {
-      await sql`DELETE FROM company_settings WHERE company_id = ${companyId} AND \`key\` LIKE ${`%${runId}%`}`.execute(db);
+      // Cleanup from new typed tables
+      await sql`DELETE FROM settings_strings WHERE company_id = ${companyId} AND setting_key LIKE ${`%${runId}%`}`.execute(db);
+      await sql`DELETE FROM settings_numbers WHERE company_id = ${companyId} AND setting_key LIKE ${`%${runId}%`}`.execute(db);
+      await sql`DELETE FROM settings_booleans WHERE company_id = ${companyId} AND setting_key LIKE ${`%${runId}%`}`.execute(db);
     }
   }
 );
 
 test(
-  "settings - JSON value validation",
+  "settings - number value validation",
   { concurrency: false, timeout: 60000 },
   async () => {
     const db = getDb();
@@ -106,12 +106,11 @@ test(
         SELECT u.id, u.company_id
          FROM users u
          INNER JOIN companies c ON c.id = u.company_id
-         INNER JOIN user_outlets uo ON uo.user_id = u.id
-         INNER JOIN outlets o ON o.id = uo.outlet_id
+         INNER JOIN user_role_assignments ura ON ura.user_id = u.id
          WHERE c.code = ${companyCode}
            AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ${outletCode}
+           AND ura.outlet_id IS NULL
          LIMIT 1
       `.execute(db);
 
@@ -120,27 +119,84 @@ test(
       companyId = Number(owner.company_id);
       ownerUserId = Number(owner.id);
 
-      const testKey = `test_json_${runId}`;
-      const actor = { userId: ownerUserId, ipAddress: "127.0.0.1" };
+      const testKey = `test_number_${runId}`;
 
-      const jsonValue = { template: "invoice", fields: ["amount", "date"] };
+      const numValue = 42.5;
       const created = await setSetting({
         companyId,
         key: testKey,
-        value: jsonValue,
-        valueType: "json",
-        outletId: null,
-        actor
+        value: numValue,
+        valueType: "number",
+        outletId: null
       });
 
-      assert.deepStrictEqual(created.value, jsonValue);
+      assert.strictEqual(created.value, numValue);
 
       const fetched = await getSetting({ companyId, key: testKey, outletId: null });
-      assert.deepStrictEqual(fetched?.value, jsonValue);
+      assert.strictEqual(fetched?.value, numValue);
 
-      console.log("✅ JSON validation test passed");
+      console.log("✅ number validation test passed");
     } finally {
-      await sql`DELETE FROM company_settings WHERE company_id = ${companyId} AND \`key\` LIKE ${`%${runId}%`}`.execute(db);
+      await sql`DELETE FROM settings_strings WHERE company_id = ${companyId} AND setting_key LIKE ${`%${runId}%`}`.execute(db);
+      await sql`DELETE FROM settings_numbers WHERE company_id = ${companyId} AND setting_key LIKE ${`%${runId}%`}`.execute(db);
+      await sql`DELETE FROM settings_booleans WHERE company_id = ${companyId} AND setting_key LIKE ${`%${runId}%`}`.execute(db);
+    }
+  }
+);
+
+test(
+  "settings - boolean value validation",
+  { concurrency: false, timeout: 60000 },
+  async () => {
+    const db = getDb();
+    const runId = Date.now().toString(36);
+
+    const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
+    const outletCode = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
+    const ownerEmail = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
+
+    let companyId = 0;
+    let ownerUserId = 0;
+
+    try {
+      const ownerRows = await sql`
+        SELECT u.id, u.company_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN user_role_assignments ura ON ura.user_id = u.id
+         WHERE c.code = ${companyCode}
+           AND u.email = ${ownerEmail}
+           AND u.is_active = 1
+           AND ura.outlet_id IS NULL
+         LIMIT 1
+      `.execute(db);
+
+      assert.ok(ownerRows.rows.length > 0, "Owner fixture not found");
+      const owner = ownerRows.rows[0] as { company_id: number; id: number };
+      companyId = Number(owner.company_id);
+      ownerUserId = Number(owner.id);
+
+      const testKey = `test_bool_${runId}`;
+
+      const boolValue = true;
+      const created = await setSetting({
+        companyId,
+        key: testKey,
+        value: boolValue,
+        valueType: "boolean",
+        outletId: null
+      });
+
+      assert.strictEqual(created.value, boolValue);
+
+      const fetched = await getSetting({ companyId, key: testKey, outletId: null });
+      assert.strictEqual(fetched?.value, boolValue);
+
+      console.log("✅ boolean validation test passed");
+    } finally {
+      await sql`DELETE FROM settings_strings WHERE company_id = ${companyId} AND setting_key LIKE ${`%${runId}%`}`.execute(db);
+      await sql`DELETE FROM settings_numbers WHERE company_id = ${companyId} AND setting_key LIKE ${`%${runId}%`}`.execute(db);
+      await sql`DELETE FROM settings_booleans WHERE company_id = ${companyId} AND setting_key LIKE ${`%${runId}%`}`.execute(db);
     }
   }
 );
@@ -165,12 +221,11 @@ test(
         SELECT u.id, u.company_id
          FROM users u
          INNER JOIN companies c ON c.id = u.company_id
-         INNER JOIN user_outlets uo ON uo.user_id = u.id
-         INNER JOIN outlets o ON o.id = uo.outlet_id
+         INNER JOIN user_role_assignments ura ON ura.user_id = u.id
          WHERE c.code = ${companyCode}
            AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ${outletCode}
+           AND ura.outlet_id IS NULL
          LIMIT 1
       `.execute(db);
 
@@ -215,34 +270,44 @@ test(
     let ownerUserId = 0;
 
     try {
+      // Global owner has outlet_id = NULL in user_role_assignments
+      // So we don't need user_outlets - just join through user_role_assignments
       const ownerRows = await sql`
-        SELECT u.id, u.company_id, o.id AS outlet_id
+        SELECT u.id, u.company_id
          FROM users u
          INNER JOIN companies c ON c.id = u.company_id
-         INNER JOIN user_outlets uo ON uo.user_id = u.id
-         INNER JOIN outlets o ON o.id = uo.outlet_id
+         INNER JOIN user_role_assignments ura ON ura.user_id = u.id
          WHERE c.code = ${companyCode}
            AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ${outletCode}
+           AND ura.outlet_id IS NULL
          LIMIT 1
       `.execute(db);
 
       assert.ok(ownerRows.rows.length > 0, "Owner fixture not found");
-      const owner = ownerRows.rows[0] as { company_id: number; id: number; outlet_id: number };
+      const owner = ownerRows.rows[0] as { company_id: number; id: number };
       companyId = Number(owner.company_id);
       ownerUserId = Number(owner.id);
-      outletId = Number(owner.outlet_id);
 
-      const actor = { userId: ownerUserId, ipAddress: "127.0.0.1" };
+      // Get outlet ID from outlets table
+      const outletRows = await sql`
+        SELECT o.id
+         FROM outlets o
+         INNER JOIN companies c ON c.id = o.company_id
+         WHERE c.code = ${companyCode}
+           AND o.code = ${outletCode}
+         LIMIT 1
+      `.execute(db);
+
+      assert.ok(outletRows.rows.length > 0, "Outlet fixture not found");
+      outletId = Number((outletRows.rows[0] as { id: number }).id);
 
       await setSetting({
         companyId,
         key: `cascade_test_${runId}`,
         value: "company_value",
         valueType: "string",
-        outletId: null,
-        actor
+        outletId: null
       });
 
       const resolved = await getResolvedSetting(companyId, `cascade_test_${runId}`, outletId);
@@ -253,8 +318,7 @@ test(
         key: `cascade_test_${runId}`,
         value: "outlet_value",
         valueType: "string",
-        outletId,
-        actor
+        outletId
       });
 
       const resolvedWithOutlet = await getResolvedSetting(companyId, `cascade_test_${runId}`, outletId);
@@ -262,7 +326,9 @@ test(
 
       console.log("✅ cascade resolution test passed");
     } finally {
-      await sql`DELETE FROM company_settings WHERE company_id = ${companyId} AND \`key\` LIKE ${`%${runId}%`}`.execute(db);
+      await sql`DELETE FROM settings_strings WHERE company_id = ${companyId} AND setting_key LIKE ${`%${runId}%`}`.execute(db);
+      await sql`DELETE FROM settings_numbers WHERE company_id = ${companyId} AND setting_key LIKE ${`%${runId}%`}`.execute(db);
+      await sql`DELETE FROM settings_booleans WHERE company_id = ${companyId} AND setting_key LIKE ${`%${runId}%`}`.execute(db);
     }
   }
 );

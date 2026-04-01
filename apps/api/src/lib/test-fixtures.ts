@@ -611,7 +611,13 @@ export async function assignUserGlobalRole(
   roleId: number
 ): Promise<void> {
   const db = getDb();
-  await sql`INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (${userId}, ${roleId}, NULL)`.execute(db);
+  // Get company_id from the user
+  const userResult = await sql`SELECT company_id FROM users WHERE id = ${userId} LIMIT 1`.execute(db);
+  if (userResult.rows.length === 0) {
+    throw new Error(`User ${userId} not found`);
+  }
+  const companyId = Number((userResult.rows[0] as { company_id: number }).company_id);
+  await sql`INSERT INTO user_role_assignments (company_id, user_id, role_id, outlet_id) VALUES (${companyId}, ${userId}, ${roleId}, NULL)`.execute(db);
 }
 
 /**
@@ -628,7 +634,13 @@ export async function assignUserOutletRole(
   outletId: number
 ): Promise<void> {
   const db = getDb();
-  await sql`INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (${userId}, ${roleId}, ${outletId})`.execute(db);
+  // Get company_id from the outlet
+  const outletResult = await sql`SELECT company_id FROM outlets WHERE id = ${outletId} LIMIT 1`.execute(db);
+  if (outletResult.rows.length === 0) {
+    throw new Error(`Outlet ${outletId} not found`);
+  }
+  const companyId = Number((outletResult.rows[0] as { company_id: number }).company_id);
+  await sql`INSERT INTO user_role_assignments (company_id, user_id, role_id, outlet_id) VALUES (${companyId}, ${userId}, ${roleId}, ${outletId})`.execute(db);
 }
 
 /**

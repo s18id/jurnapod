@@ -30,20 +30,20 @@ describe("Auth Routes", { concurrency: false }, () => {
     const db = getDb();
 
     // Find test user fixture using Kysely query builder
+    // Global owner has outlet_id = NULL in user_role_assignments
     const userRows = await db
       .selectFrom("users as u")
       .innerJoin("companies as c", "c.id", "u.company_id")
-      .innerJoin("user_outlets as uo", "uo.user_id", "u.id")
-      .innerJoin("outlets as o", "o.id", "uo.outlet_id")
+      .innerJoin("user_role_assignments as ura", "ura.user_id", "u.id")
       .where("c.code", "=", TEST_COMPANY_CODE)
       .where("u.email", "=", TEST_OWNER_EMAIL)
       .where("u.is_active", "=", 1)
-      .where("o.code", "=", TEST_OUTLET_CODE)
+      .where("ura.outlet_id", "is", null)
       .select(["u.id", "u.company_id", "u.password_hash"])
       .limit(1)
       .execute();
 
-    assert.ok(userRows.length > 0, `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}, outlet=${TEST_OUTLET_CODE}`);
+    assert.ok(userRows.length > 0, `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}`);
     testUserId = Number(userRows[0].id);
     testCompanyId = Number(userRows[0].company_id);
     testPasswordHash = String(userRows[0].password_hash);
@@ -98,8 +98,9 @@ describe("Auth Routes", { concurrency: false }, () => {
       // Verify throttle record exists
       const db = getDb();
       const rows = await db
-        .selectFrom("auth_login_throttles")
+        .selectFrom("auth_throttles")
         .where("key_hash", "=", keys[0].hash)
+        .where("throttle_type", "=", "login")
         .select(["failure_count"])
         .execute();
 
@@ -127,8 +128,9 @@ describe("Auth Routes", { concurrency: false }, () => {
       // Verify throttle record is deleted
       const db = getDb();
       const rows = await db
-        .selectFrom("auth_login_throttles")
+        .selectFrom("auth_throttles")
         .where("key_hash", "=", keys[0].hash)
+        .where("throttle_type", "=", "login")
         .select(["failure_count"])
         .execute();
 

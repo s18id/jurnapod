@@ -39,24 +39,29 @@ test(
     const createdPaymentIds: number[] = [];
 
     try {
-      // Find existing company/outlet/user
+      // Find existing company/outlet/user - global owner has outlet_id = NULL
       const ownerRows = await sql`
-        SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
+        SELECT u.id AS user_id, u.company_id
          FROM users u
          INNER JOIN companies c ON c.id = u.company_id
-         INNER JOIN user_outlets uo ON uo.user_id = u.id
-         INNER JOIN outlets o ON o.id = uo.outlet_id
+         INNER JOIN user_role_assignments ura ON ura.user_id = u.id
          WHERE c.code = ${companyCode}
            AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ${outletCode}
+           AND ura.outlet_id IS NULL
          LIMIT 1
-      `.execute(db);
+       `.execute(db);
 
       assert.ok(ownerRows.rows.length > 0, "Owner fixture not found; run database seed first");
       userId = Number((ownerRows.rows[0] as { user_id: number }).user_id);
       companyId = Number((ownerRows.rows[0] as { company_id: number }).company_id);
-      outletId = Number((ownerRows.rows[0] as { outlet_id: number }).outlet_id);
+
+      // Get outlet ID from outlets table
+      const outletRows = await sql`
+        SELECT id FROM outlets WHERE company_id = ${companyId} AND code = ${outletCode} LIMIT 1
+      `.execute(db);
+      assert.ok(outletRows.rows.length > 0, "Outlet not found");
+      outletId = Number((outletRows.rows[0] as { id: number }).id);
 
       // Create two payable accounts for split tests
       const accountA = await createAccount({
@@ -284,24 +289,29 @@ test(
     const createdPaymentIds: number[] = [];
 
     try {
-      // Find existing company/outlet/user
+      // Find existing company/outlet/user - global owner has outlet_id = NULL
       const ownerRows = await sql`
-        SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
+        SELECT u.id AS user_id, u.company_id
          FROM users u
          INNER JOIN companies c ON c.id = u.company_id
-         INNER JOIN user_outlets uo ON uo.user_id = u.id
-         INNER JOIN outlets o ON o.id = uo.outlet_id
+         INNER JOIN user_role_assignments ura ON ura.user_id = u.id
          WHERE c.code = ${companyCode}
            AND u.email = ${ownerEmail}
            AND u.is_active = 1
-           AND o.code = ${outletCode}
+           AND ura.outlet_id IS NULL
          LIMIT 1
-      `.execute(db);
+       `.execute(db);
 
       assert.ok(ownerRows.rows.length > 0, "Owner fixture not found");
       userId = Number((ownerRows.rows[0] as { user_id: number }).user_id);
       companyId = Number((ownerRows.rows[0] as { company_id: number }).company_id);
-      outletId = Number((ownerRows.rows[0] as { outlet_id: number }).outlet_id);
+
+      // Get outlet ID from outlets table
+      const outletRows = await sql`
+        SELECT id FROM outlets WHERE company_id = ${companyId} AND code = ${outletCode} LIMIT 1
+      `.execute(db);
+      assert.ok(outletRows.rows.length > 0, "Outlet not found");
+      outletId = Number((outletRows.rows[0] as { id: number }).id);
 
       // Create payable account
       const account = await createAccount({

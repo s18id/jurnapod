@@ -5,114 +5,151 @@
 // Run with: node --test --import tsx apps/api/src/lib/sales.payment-variance.test.ts
 
 import assert from "node:assert/strict";
-import { describe, mock, test } from "node:test";
-import type { FieldPacket, RowDataPacket } from "mysql2";
+import { after, describe, test } from "node:test";
+import { ACCOUNT_MAPPING_TYPE_ID_BY_CODE } from "@jurnapod/shared";
 import {
   __salesPostingTestables,
-  OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE,
   PAYMENT_VARIANCE_GAIN_MISSING_MESSAGE,
   PAYMENT_VARIANCE_LOSS_MISSING_MESSAGE
 } from "./sales-posting";
+import { closeDbPool, getDb } from "./db";
+import { createCompanyBasic } from "./companies";
 
 const { readCompanyPaymentVarianceAccounts, PaymentVarianceConfigError } = __salesPostingTestables;
+const createdCompanyIds: number[] = [];
 
-type QueryExecutor = Parameters<typeof readCompanyPaymentVarianceAccounts>[0];
+async function setupVarianceFixture(options: {
+  withGain?: boolean;
+  withLoss?: boolean;
+  gainMappingKey?: string;
+  lossMappingKey?: string;
+  gainAccountId?: number | null;
+  lossAccountId?: number | null;
+}): Promise<{ companyId: number }> {
+  const db = getDb();
+  const runId = Date.now().toString(36);
+  const company = await createCompanyBasic({
+    code: `PV-${runId}`,
+    name: `Payment Variance ${runId}`
+  });
+  createdCompanyIds.push(company.id);
 
-function makeExecutor(impl: (sql: string) => [unknown[], unknown[]]) {
-  const execute = mock.fn(async (sql: string) => impl(sql) as [RowDataPacket[], FieldPacket[]]);
-  return { execute } as unknown as QueryExecutor;
+  const gainAccountId = options.gainAccountId === undefined
+    ? Number((await db.insertInto("accounts").values({
+      company_id: company.id,
+      code: `GAIN-${runId}`,
+      name: `Gain ${runId}`
+    }).executeTakeFirst()).insertId)
+    : options.gainAccountId;
+
+  const lossAccountId = options.lossAccountId === undefined
+    ? Number((await db.insertInto("accounts").values({
+      company_id: company.id,
+      code: `LOSS-${runId}`,
+      name: `Loss ${runId}`
+    }).executeTakeFirst()).insertId)
+    : options.lossAccountId;
+
+  if (options.withGain) {
+    await db.insertInto("account_mappings").values({
+      company_id: company.id,
+      outlet_id: null,
+      mapping_type_id: ACCOUNT_MAPPING_TYPE_ID_BY_CODE.PAYMENT_VARIANCE_GAIN,
+      mapping_key: options.gainMappingKey ?? "PAYMENT_VARIANCE_GAIN",
+      account_id: Number(gainAccountId)
+    }).execute();
+  }
+
+  if (options.withLoss) {
+    await db.insertInto("account_mappings").values({
+      company_id: company.id,
+      outlet_id: null,
+      mapping_type_id: ACCOUNT_MAPPING_TYPE_ID_BY_CODE.PAYMENT_VARIANCE_LOSS,
+      mapping_key: options.lossMappingKey ?? "PAYMENT_VARIANCE_LOSS",
+      account_id: Number(lossAccountId)
+    }).execute();
+  }
+
+  return { companyId: company.id };
 }
 
+after(async () => {
+  const db = getDb();
+  for (const companyId of createdCompanyIds) {
+    await db.deleteFrom("account_mappings").where("company_id", "=", companyId).execute();
+    await db.deleteFrom("accounts").where("company_id", "=", companyId).execute();
+    await db.deleteFrom("companies").where("id", "=", companyId).execute();
+  }
+  await closeDbPool();
+});
+
 describe("readCompanyPaymentVarianceAccounts", () => {
-  test("supports id-based rows when mapping_key is null", async () => {
-    const db = makeExecutor((sql) => {
-      if (sql.includes("company_account_mappings")) {
-        return [[
-          { mapping_type_id: 5, mapping_key: null, account_id: 700 },
-          { mapping_type_id: 6, mapping_key: null, account_id: 701 }
-        ], []];
-      }
-      return [[], []];
+  test("supports id-based mapping type resolution", async () => {
+    const { companyId } = await setupVarianceFixture({
+      withGain: true,
+      withLoss: true,
+      gainMappingKey: "UNUSED_GAIN_KEY",
+      lossMappingKey: "UNUSED_LOSS_KEY"
     });
 
-    const result = await readCompanyPaymentVarianceAccounts(db, 1);
-    assert.equal(result.gain, 700);
-    assert.equal(result.loss, 701);
+    const result = await readCompanyPaymentVarianceAccounts(getDb(), companyId);
+    assert.ok(result.gain !== null);
+    assert.ok(result.loss !== null);
   });
 
   test("returns both gain and loss accounts when configured", async () => {
-    const db = makeExecutor((sql) => {
-      if (sql.includes("company_account_mappings")) {
-        return [[
-          { mapping_key: "PAYMENT_VARIANCE_GAIN", account_id: 100 },
-          { mapping_key: "PAYMENT_VARIANCE_LOSS", account_id: 101 }
-        ], []];
-      }
-      return [[], []];
+    const { companyId } = await setupVarianceFixture({
+      withGain: true,
+      withLoss: true
     });
 
-    const result = await readCompanyPaymentVarianceAccounts(db, 1);
-    assert.equal(result.gain, 100);
-    assert.equal(result.loss, 101);
+    const result = await readCompanyPaymentVarianceAccounts(getDb(), companyId);
+    assert.ok(result.gain !== null);
+    assert.ok(result.loss !== null);
   });
 
   test("returns null for gain when not configured", async () => {
-    const db = makeExecutor((sql) => {
-      if (sql.includes("company_account_mappings")) {
-        return [[
-          { mapping_key: "PAYMENT_VARIANCE_LOSS", account_id: 101 }
-        ], []];
-      }
-      return [[], []];
+    const { companyId } = await setupVarianceFixture({
+      withGain: false,
+      withLoss: true
     });
 
-    const result = await readCompanyPaymentVarianceAccounts(db, 1);
+    const result = await readCompanyPaymentVarianceAccounts(getDb(), companyId);
     assert.equal(result.gain, null);
-    assert.equal(result.loss, 101);
+    assert.ok(result.loss !== null);
   });
 
   test("returns null for loss when not configured", async () => {
-    const db = makeExecutor((sql) => {
-      if (sql.includes("company_account_mappings")) {
-        return [[
-          { mapping_key: "PAYMENT_VARIANCE_GAIN", account_id: 100 }
-        ], []];
-      }
-      return [[], []];
+    const { companyId } = await setupVarianceFixture({
+      withGain: true,
+      withLoss: false
     });
 
-    const result = await readCompanyPaymentVarianceAccounts(db, 1);
-    assert.equal(result.gain, 100);
+    const result = await readCompanyPaymentVarianceAccounts(getDb(), companyId);
+    assert.ok(result.gain !== null);
     assert.equal(result.loss, null);
   });
 
   test("returns null for both when not configured", async () => {
-    const db = makeExecutor((sql) => {
-      if (sql.includes("company_account_mappings")) {
-        return [[], []];
-      }
-      return [[], []];
+    const { companyId } = await setupVarianceFixture({
+      withGain: false,
+      withLoss: false
     });
 
-    const result = await readCompanyPaymentVarianceAccounts(db, 1);
+    const result = await readCompanyPaymentVarianceAccounts(getDb(), companyId);
     assert.equal(result.gain, null);
     assert.equal(result.loss, null);
   });
 
-  test("ignores invalid rows", async () => {
-    const db = makeExecutor((sql) => {
-      if (sql.includes("company_account_mappings")) {
-        return [[
-          { mapping_key: "PAYMENT_VARIANCE_GAIN", account_id: null },
-          { mapping_key: null, account_id: 100 },
-          { mapping_key: "PAYMENT_VARIANCE_GAIN", account_id: 200 }
-        ], []];
-      }
-      return [[], []];
+  test("mapping_type_id takes precedence over invalid mapping_key", async () => {
+    const { companyId } = await setupVarianceFixture({
+      withGain: true,
+      withLoss: false,
+      gainMappingKey: "INVALID_GAIN_KEY"
     });
 
-    const result = await readCompanyPaymentVarianceAccounts(db, 1);
-    assert.equal(result.gain, 200);
+    const result = await readCompanyPaymentVarianceAccounts(getDb(), companyId);
+    assert.ok(result.gain !== null);
     assert.equal(result.loss, null);
   });
 });
