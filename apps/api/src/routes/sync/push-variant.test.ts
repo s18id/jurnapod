@@ -29,37 +29,45 @@ const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
 describe("Sync Push Variant Routes", { concurrency: false }, () => {
+  const testRunId = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
   let db: ReturnType<typeof getDb>;
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
   let testItemId = 0;
   let testVariantId = 0;
+  let testVariantSku = "";
+  let variantCreatedByTest = false;
 
   before(async () => {
     db = getDb();
 
-    // Find test user fixture
-    const userRows = await sql<{ user_id: number; company_id: number; outlet_id: number }>`
-      SELECT u.id AS user_id, u.company_id, o.id AS outlet_id
+    // Find test user fixture - global owner has outlet_id = NULL in user_role_assignments
+    const userRows = await sql<{ user_id: number; company_id: number }>`
+      SELECT u.id AS user_id, u.company_id
        FROM users u
        INNER JOIN companies c ON c.id = u.company_id
-       INNER JOIN user_outlets uo ON uo.user_id = u.id
-       INNER JOIN outlets o ON o.id = uo.outlet_id
+       INNER JOIN user_role_assignments ura ON ura.user_id = u.id
        WHERE c.code = ${TEST_COMPANY_CODE}
          AND u.email = ${TEST_OWNER_EMAIL}
          AND u.is_active = 1
-         AND o.code = ${TEST_OUTLET_CODE}
+         AND ura.outlet_id IS NULL
        LIMIT 1
     `.execute(db);
 
     assert.ok(
       userRows.rows.length > 0,
-      `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}, outlet=${TEST_OUTLET_CODE}`
+      `Owner fixture not found; run database seed first. Looking for company=${TEST_COMPANY_CODE}, email=${TEST_OWNER_EMAIL}`
     );
     testUserId = Number(userRows.rows[0].user_id);
     testCompanyId = Number(userRows.rows[0].company_id);
-    testOutletId = Number(userRows.rows[0].outlet_id);
+
+    // Get outlet ID from outlets table
+    const outletRows = await sql<{ id: number }>`
+      SELECT id FROM outlets WHERE company_id = ${testCompanyId} AND code = ${TEST_OUTLET_CODE} LIMIT 1
+    `.execute(db);
+    assert.ok(outletRows.rows.length > 0, `Outlet ${TEST_OUTLET_CODE} not found`);
+    testOutletId = Number(outletRows.rows[0].id);
 
     // Find or create test item
     const itemRows = await sql<{ id: number }>`
@@ -81,8 +89,9 @@ describe("Sync Push Variant Routes", { concurrency: false }, () => {
     }
 
     // Find or create test variant
+    testVariantSku = `TEST-VARIANT-SYNC-${testRunId}`;
     const variantRows = await sql<{ id: number }>`
-      SELECT id FROM item_variants WHERE company_id = ${testCompanyId} AND item_id = ${testItemId} AND is_active = 1 LIMIT 1
+      SELECT id FROM item_variants WHERE company_id = ${testCompanyId} AND sku = ${testVariantSku} LIMIT 1
     `.execute(db);
 
     if (variantRows.rows.length > 0) {
@@ -93,9 +102,10 @@ describe("Sync Push Variant Routes", { concurrency: false }, () => {
       // Create test variant
       const insertResult = await sql`
         INSERT INTO item_variants (company_id, item_id, sku, variant_name, stock_quantity, is_active, created_at, updated_at)
-         VALUES (${testCompanyId}, ${testItemId}, 'TEST-VARIANT-SYNC-1', 'Test Variant', 100, 1, NOW(), NOW())
+         VALUES (${testCompanyId}, ${testItemId}, ${testVariantSku}, 'Test Variant', 100, 1, NOW(), NOW())
       `.execute(db);
       testVariantId = Number(insertResult.insertId);
+      variantCreatedByTest = true;
     }
   });
 
@@ -104,6 +114,9 @@ describe("Sync Push Variant Routes", { concurrency: false }, () => {
     if (testVariantId > 0) {
       await sql`DELETE FROM variant_sales WHERE variant_id = ${testVariantId}`.execute(db);
       await sql`DELETE FROM variant_stock_adjustments WHERE variant_id = ${testVariantId}`.execute(db);
+      if (variantCreatedByTest) {
+        await sql`DELETE FROM item_variants WHERE id = ${testVariantId}`.execute(db);
+      }
     }
     await closeDbPool();
   });
