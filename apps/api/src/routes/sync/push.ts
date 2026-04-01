@@ -16,12 +16,12 @@ import { getRequestCorrelationId } from "../../lib/correlation-id.js";
 import { getDbPool } from "../../lib/db.js";
 import { errorResponse, successResponse } from "../../lib/response.js";
 import { SyncIdempotencyMetricsCollector } from "@jurnapod/sync-core";
-import { PosSyncModule } from "@jurnapod/pos-sync";
 import type { KyselySchema } from "@jurnapod/db";
 import { sql } from "kysely";
 import { processSyncPushTransactionPhase2 } from "../../lib/sync/push/transactions.js";
 import type { SyncPushTaxContext, SyncPushTransactionPayload } from "../../lib/sync/push/types.js";
 import { shouldUseNewPushSync, getPushSyncModeDescription } from "../../lib/feature-flags.js";
+import { getPosSyncModule } from "../../lib/sync-modules.js";
 import type {
   TransactionPush,
   ActiveOrderPush,
@@ -45,45 +45,6 @@ const DEFAULT_SYNC_PUSH_CONCURRENCY = 3;
 const MAX_SYNC_PUSH_CONCURRENCY = 5;
 const MYSQL_LOCK_WAIT_TIMEOUT_ERROR_CODE = 1205;
 const MYSQL_DEADLOCK_ERROR_CODE = 1213;
-
-// Global PosSyncModule instance (initialized once at app startup)
-let posSyncModule: PosSyncModule | null = null;
-
-/**
- * Initialize the PosSyncModule singleton.
- * Called during app startup.
- */
-export async function initializePosSyncModule(): Promise<void> {
-  if (posSyncModule) {
-    return;
-  }
-
-  const dbPool = getDbPool();
-  posSyncModule = new PosSyncModule({
-    module_id: "pos",
-    client_type: "POS",
-    enabled: true
-  });
-
-  await posSyncModule.initialize({
-    database: dbPool,
-    logger: console,
-    config: { env: process.env.NODE_ENV }
-  });
-
-  console.info("PosSyncModule initialized for sync push route");
-}
-
-/**
- * Get the PosSyncModule instance.
- * Throws if not initialized.
- */
-function getPosSyncModule(): PosSyncModule {
-  if (!posSyncModule) {
-    throw new Error("PosSyncModule not initialized. Call initializePosSyncModule() first.");
-  }
-  return posSyncModule;
-}
 
 function isSyncPushTestHookEnabled(): boolean {
   return process.env.NODE_ENV !== "production" && process.env[SYNC_PUSH_TEST_HOOKS_ENV] === "1";

@@ -23,7 +23,7 @@ import { errorResponse, successResponse } from "../../lib/response.js";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
 import { getDbPool } from "../../lib/db.js";
 import { createSyncAuditService } from "../../lib/sync/audit-adapter.js";
-import { PosSyncModule } from "@jurnapod/pos-sync";
+import { getPosSyncModule } from "../../lib/sync-modules.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -44,48 +44,6 @@ const syncPullRequestSchema = z.object({
 });
 
 type SyncPullRequest = z.infer<typeof syncPullRequestSchema>;
-
-// =============================================================================
-// PosSyncModule singleton
-// =============================================================================
-
-let posSyncModule: PosSyncModule | null = null;
-
-/**
- * Initialize the PosSyncModule singleton.
- * Called during app startup.
- */
-export async function initializePosSyncModule(): Promise<void> {
-  if (posSyncModule) {
-    return;
-  }
-
-  const dbPool = getDbPool();
-  posSyncModule = new PosSyncModule({
-    module_id: "pos",
-    client_type: "POS",
-    enabled: true
-  });
-
-  await posSyncModule.initialize({
-    database: dbPool,
-    logger: console,
-    config: { env: process.env.NODE_ENV }
-  });
-
-  console.info("PosSyncModule initialized for sync pull route");
-}
-
-/**
- * Get the PosSyncModule instance.
- * Throws if not initialized.
- */
-function getPosSyncModule(): PosSyncModule {
-  if (!posSyncModule) {
-    throw new Error("PosSyncModule not initialized. Call initializePosSyncModule() first.");
-  }
-  return posSyncModule;
-}
 
 // =============================================================================
 // Helper Functions
