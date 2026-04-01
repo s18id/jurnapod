@@ -419,16 +419,16 @@ export async function listUsers(
   }));
 }
 
-export async function findUserById(companyId: number, userId: number): Promise<UserProfile | null> {
-  const db = getDb();
-  const user = await findUserRowById(db, companyId, userId);
+export async function findUserById(companyId: number, userId: number, db?: KyselySchema): Promise<UserProfile | null> {
+  const database = db ?? getDb();
+  const user = await findUserRowById(database, companyId, userId);
   if (!user) {
     return null;
   }
 
   const [globalRolesMap, outletRolesMap] = await Promise.all([
-    hydrateUserGlobalRoles(db, [user.id]),
-    hydrateUserOutletRoleAssignments(db, [user.id])
+    hydrateUserGlobalRoles(database, [user.id]),
+    hydrateUserOutletRoleAssignments(database, [user.id])
   ]);
 
   return {
@@ -650,7 +650,7 @@ export async function createUser(params: {
       outlet_role_assignments: outletRoleAssignments
     });
 
-    const user = await findUserById(params.companyId, userId);
+    const user = await findUserById(params.companyId, userId, trx);
     if (!user) {
       throw new UserNotFoundError("User not found after creation");
     }
@@ -709,7 +709,7 @@ export async function updateUserEmail(params: {
       );
     }
 
-    const updated = await findUserById(params.companyId, params.userId);
+    const updated = await findUserById(params.companyId, params.userId, trx);
     if (!updated) {
       throw new UserNotFoundError("User not found after update");
     }
@@ -861,7 +861,7 @@ export async function setUserRoles(params: {
 
     await sendRoleChangeNotification(params.companyId, params.userId, roleCodes);
 
-    const updated = await findUserById(params.companyId, params.userId);
+    const updated = await findUserById(params.companyId, params.userId, trx);
     if (!updated) {
       throw new UserNotFoundError("User not found after role update");
     }
@@ -926,7 +926,7 @@ export async function setUserOutlets(params: {
       { outlet_ids: outletIds }
     );
 
-    const updated = await findUserById(params.companyId, params.userId);
+    const updated = await findUserById(params.companyId, params.userId, trx);
     if (!updated) {
       throw new UserNotFoundError("User not found after outlet update");
     }
@@ -1042,7 +1042,7 @@ export async function setUserActiveState(params: {
       });
     }
 
-    const updated = await findUserById(params.companyId, params.userId);
+    const updated = await findUserById(params.companyId, params.userId, trx);
     if (!updated) {
       throw new UserNotFoundError("User not found after update");
     }

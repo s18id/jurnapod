@@ -727,9 +727,16 @@ export async function importAccountingCsv(input: {
     await insertJournalLines(trx, input.companyId, alkRows, batchMap, accountIdByCode, transactionMap);
     await updateCurrentBalances(trx, input.companyId, alkRows, accountIdByCode);
 
+    // Calculate total rows (accounts + transactions + allocations)
+    const totalRows = accounts.length + trnsRows.length + alkRows.length;
+
     await sql`
       UPDATE data_imports
       SET status = 'COMPLETED',
+          total_rows = ${totalRows},
+          success_count = ${totalRows},
+          error_count = 0,
+          warning_count = 0,
           counts_json = ${JSON.stringify({
             accounts: accounts.length,
             trns: trnsRows.length,

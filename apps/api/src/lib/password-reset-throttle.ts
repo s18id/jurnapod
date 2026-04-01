@@ -65,9 +65,10 @@ export async function checkPasswordResetAllowed(
   const windowStartThreshold = new Date(Date.now() - 60 * 60 * 1000); // 1 hour ago
 
   const rows = await db
-    .selectFrom("auth_password_reset_throttles")
+    .selectFrom("auth_throttles")
     .where("key_hash", "in", keys.map((key) => key.hash))
-    .select(["key_hash", "request_count", "window_started_at"])
+    .where("throttle_type", "=", "password_reset")
+    .select(["key_hash", "request_count", "last_failed_at"])
     .execute();
 
   const limits = {
@@ -79,10 +80,10 @@ export async function checkPasswordResetAllowed(
     const key = keys.find((k) => k.hash === row.key_hash);
     if (!key) continue;
 
-    const windowStart = new Date(row.window_started_at);
+    const windowStart = row.last_failed_at ? new Date(row.last_failed_at) : null;
     
-    // If window is expired, allow (will be reset on record)
-    if (windowStart < windowStartThreshold) {
+    // If no last_failed_at or window is expired, allow (will be reset on record)
+    if (!windowStart || windowStart < windowStartThreshold) {
       continue;
     }
 
@@ -116,23 +117,24 @@ export async function recordPasswordResetAttempt(params: {
   // Otherwise, increment count
   for (const key of params.keys) {
     await sql`
-      INSERT INTO auth_password_reset_throttles (
+      INSERT INTO auth_throttles (
         key_hash,
+        throttle_type,
         request_count,
-        window_started_at,
+        last_failed_at,
         last_ip,
         last_user_agent
-      ) VALUES (${key.hash}, 1, NOW(), ${ipAddress}, ${userAgent})
+      ) VALUES (${key.hash}, 'password_reset', 1, NOW(), ${ipAddress}, ${userAgent})
       ON DUPLICATE KEY UPDATE
         request_count = IF(
-          window_started_at < DATE_SUB(NOW(), INTERVAL 1 HOUR),
+          last_failed_at < DATE_SUB(NOW(), INTERVAL 1 HOUR),
           1,
           request_count + 1
         ),
-        window_started_at = IF(
-          window_started_at < DATE_SUB(NOW(), INTERVAL 1 HOUR),
+        last_failed_at = IF(
+          last_failed_at < DATE_SUB(NOW(), INTERVAL 1 HOUR),
           NOW(),
-          window_started_at
+          last_failed_at
         ),
         last_ip = VALUES(last_ip),
         last_user_agent = VALUES(last_user_agent)

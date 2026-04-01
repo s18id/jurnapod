@@ -620,10 +620,25 @@ export async function batchValidateForeignKeys(
 ): Promise<FkLookupResults> {
   const db = getDb();
   const results: FkLookupResults = new Map();
+  const allowedFkTables = new Set([
+    "item_groups",
+    "outlets",
+    "items",
+    "tax_rates",
+    "accounts",
+    "users",
+    "suppliers",
+    "customers",
+    "tables"
+  ]);
   
   // Filter out empty ID sets and group by table
   const requestsByTable = new Map<string, FkLookupRequest[]>();
   for (const request of requests) {
+    if (!allowedFkTables.has(request.table)) {
+      throw new Error(`INVALID_FK_TABLE:${request.table}`);
+    }
+
     if (request.ids.size === 0) {
       // Empty set - no lookup needed, all IDs are "not found" but valid case
       // Only add to results if we want to track this table

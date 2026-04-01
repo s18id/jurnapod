@@ -45,10 +45,14 @@ function buildPlatformSettingsSeedValues(env: ReturnType<typeof getAppEnv>): Rec
   };
 }
 
+/**
+ * Platform settings are stored in settings_strings with NULL company_id and NULL outlet_id.
+ * Sensitive values are encrypted before storage.
+ */
 export async function ensurePlatformSettingsSeeded(): Promise<void> {
   const db = getDb();
-  const markerRows = await sql<{ key: string }>`
-    SELECT \`key\` FROM platform_settings WHERE \`key\` = ${PLATFORM_SETTINGS_SEED_MARKER_KEY} LIMIT 1
+  const markerRows = await sql<{ setting_key: string }>`
+    SELECT setting_key FROM settings_strings WHERE setting_key = ${PLATFORM_SETTINGS_SEED_MARKER_KEY} AND company_id IS NULL AND outlet_id IS NULL LIMIT 1
   `.execute(db);
 
   if (markerRows.rows.length > 0) {
@@ -56,8 +60,8 @@ export async function ensurePlatformSettingsSeeded(): Promise<void> {
   }
 
   await db.transaction().execute(async (trx) => {
-    const markerRowsInTx = await sql<{ key: string }>`
-      SELECT \`key\` FROM platform_settings WHERE \`key\` = ${PLATFORM_SETTINGS_SEED_MARKER_KEY} LIMIT 1
+    const markerRowsInTx = await sql<{ setting_key: string }>`
+      SELECT setting_key FROM settings_strings WHERE setting_key = ${PLATFORM_SETTINGS_SEED_MARKER_KEY} AND company_id IS NULL AND outlet_id IS NULL LIMIT 1
     `.execute(trx);
 
     if (markerRowsInTx.rows.length > 0) {
@@ -82,14 +86,14 @@ export async function ensurePlatformSettingsSeeded(): Promise<void> {
       }
 
       await sql`
-        INSERT IGNORE INTO platform_settings (\`key\`, value_json, is_sensitive, updated_by)
-        VALUES (${key}, ${valueToStore}, ${isSensitive ? 1 : 0}, NULL)
+        INSERT IGNORE INTO settings_strings (company_id, outlet_id, setting_key, setting_value)
+        VALUES (NULL, NULL, ${key}, ${valueToStore})
       `.execute(trx);
     }
 
     await sql`
-      INSERT IGNORE INTO platform_settings (\`key\`, value_json, is_sensitive, updated_by)
-      VALUES (${PLATFORM_SETTINGS_SEED_MARKER_KEY}, "true", 0, NULL)
+      INSERT IGNORE INTO settings_strings (company_id, outlet_id, setting_key, setting_value)
+      VALUES (NULL, NULL, ${PLATFORM_SETTINGS_SEED_MARKER_KEY}, "true")
     `.execute(trx);
   });
 }
@@ -99,23 +103,47 @@ export async function ensurePlatformSettingsSeeded(): Promise<void> {
  */
 export async function getPlatformSetting(key: string): Promise<string | null> {
   const db = getDb();
-  const rows = await sql<{ key: string; value_json: string; is_sensitive: number }>`
-    SELECT \`key\`, value_json, is_sensitive
-    FROM platform_settings
-    WHERE \`key\` = ${key}
+  const rows = await sql<{ setting_key: string; setting_value: string }>`
+    SELECT setting_key, setting_value
+    FROM settings_strings
+    WHERE setting_key = ${key} AND company_id IS NULL AND outlet_id IS NULL
     LIMIT 1
   `.execute(db);
 
   if (rows.rows.length === 0) {
-    return null;
+    // Fallback to old platform_settings table if new table is empty
+    const legacyRows = await sql<{ key: string; value_json: string; is_sensitive: number }>`
+      SELECT \`key\`, value_json, is_sensitive
+      FROM platform_settings
+      WHERE \`key\` = ${key}
+      LIMIT 1
+    `.execute(db);
+
+    if (legacyRows.rows.length === 0) {
+      return null;
+    }
+
+    const row = legacyRows.rows[0];
+    if (row.is_sensitive === 1) {
+      const env = getAppEnv();
+      try {
+        const payload = JSON.parse(row.value_json) as EncryptedPayload;
+        return decrypt(payload, env.platformSettings.encryptionKey);
+      } catch (error) {
+        console.error(`Failed to decrypt sensitive setting: ${key}`, error);
+        throw new Error(`Failed to decrypt sensitive setting: ${key}`);
+      }
+    }
+    return row.value_json;
   }
 
   const row = rows.rows[0];
   
-  if (row.is_sensitive === 1) {
+  // Check if this is a sensitive key that needs decryption
+  if (isSensitiveKey(key)) {
     const env = getAppEnv();
     try {
-      const payload = JSON.parse(row.value_json) as EncryptedPayload;
+      const payload = JSON.parse(row.setting_value) as EncryptedPayload;
       return decrypt(payload, env.platformSettings.encryptionKey);
     } catch (error) {
       console.error(`Failed to decrypt sensitive setting: ${key}`, error);
@@ -123,7 +151,7 @@ export async function getPlatformSetting(key: string): Promise<string | null> {
     }
   }
 
-  return row.value_json;
+  return row.setting_value;
 }
 
 /**
@@ -131,28 +159,55 @@ export async function getPlatformSetting(key: string): Promise<string | null> {
  */
 export async function getAllPlatformSettings(): Promise<Record<string, { value: string; is_set: boolean; is_sensitive: boolean }>> {
   const db = getDb();
-  const rows = await sql<{ key: string; value_json: string; is_sensitive: number }>`
-    SELECT \`key\`, value_json, is_sensitive
-    FROM platform_settings
-    ORDER BY \`key\` ASC
+  
+  // First try the new settings_strings table
+  const rows = await sql<{ setting_key: string; setting_value: string }>`
+    SELECT setting_key, setting_value
+    FROM settings_strings
+    WHERE company_id IS NULL AND outlet_id IS NULL
+    ORDER BY setting_key ASC
   `.execute(db);
 
   const settings: Record<string, { value: string; is_set: boolean; is_sensitive: boolean }> = {};
 
   for (const row of rows.rows) {
-    const isSensitive = row.is_sensitive === 1;
-    let value = row.value_json;
+    const isSensitive = isSensitiveKey(row.setting_key);
+    let value = row.setting_value;
 
     if (isSensitive) {
       // Mask sensitive values in output
       value = "*****";
     }
 
-    settings[row.key] = {
+    settings[row.setting_key] = {
       value,
       is_set: true,
       is_sensitive: isSensitive
     };
+  }
+
+  // If new table is empty, fall back to legacy platform_settings table
+  if (Object.keys(settings).length === 0) {
+    const legacyRows = await sql<{ key: string; value_json: string; is_sensitive: number }>`
+      SELECT \`key\`, value_json, is_sensitive
+      FROM platform_settings
+      ORDER BY \`key\` ASC
+    `.execute(db);
+
+    for (const row of legacyRows.rows) {
+      const isSensitive = row.is_sensitive === 1;
+      let value = row.value_json;
+
+      if (isSensitive) {
+        value = "*****";
+      }
+
+      settings[row.key] = {
+        value,
+        is_set: true,
+        is_sensitive: isSensitive
+      };
+    }
   }
 
   return settings;
@@ -179,15 +234,25 @@ export async function setPlatformSetting(params: {
       valueToStore = JSON.stringify(encrypted);
     }
 
-    // Upsert
+    // First try to update in new table
     await sql`
-      INSERT INTO platform_settings (\`key\`, value_json, is_sensitive, updated_by)
-      VALUES (${params.key}, ${valueToStore}, ${isSensitive ? 1 : 0}, ${params.updatedBy})
-      ON DUPLICATE KEY UPDATE
-        value_json = VALUES(value_json),
-        updated_by = VALUES(updated_by),
-        updated_at = CURRENT_TIMESTAMP
+      UPDATE settings_strings 
+      SET setting_value = ${valueToStore}
+      WHERE setting_key = ${params.key} AND company_id IS NULL AND outlet_id IS NULL
     `.execute(trx);
+
+    // If no rows updated, insert
+    const updated = await sql<{ cnt: number }>`
+      SELECT COUNT(*) as cnt FROM settings_strings 
+      WHERE setting_key = ${params.key} AND company_id IS NULL AND outlet_id IS NULL
+    `.execute(trx);
+
+    if ((updated.rows[0]?.cnt ?? 0) === 0) {
+      await sql`
+        INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value)
+        VALUES (NULL, NULL, ${params.key}, ${valueToStore})
+      `.execute(trx);
+    }
   });
 }
 
@@ -204,6 +269,10 @@ export async function setBulkPlatformSettings(params: {
   await db.transaction().execute(async (trx) => {
     for (const [key, value] of Object.entries(params.settings)) {
       if (key === "mailer.smtp.pass" && (value === "" || value === null)) {
+        // Delete from both tables
+        await sql`
+          DELETE FROM settings_strings WHERE setting_key = ${key} AND company_id IS NULL AND outlet_id IS NULL
+        `.execute(trx);
         await sql`
           DELETE FROM platform_settings WHERE \`key\` = ${key}
         `.execute(trx);
@@ -225,14 +294,24 @@ export async function setBulkPlatformSettings(params: {
         valueToStore = JSON.stringify(encrypted);
       }
 
+      // Update or insert in new table
       await sql`
-        INSERT INTO platform_settings (\`key\`, value_json, is_sensitive, updated_by)
-        VALUES (${key}, ${valueToStore}, ${isSensitive ? 1 : 0}, ${params.updatedBy})
-        ON DUPLICATE KEY UPDATE
-          value_json = VALUES(value_json),
-          updated_by = VALUES(updated_by),
-          updated_at = CURRENT_TIMESTAMP
+        UPDATE settings_strings 
+        SET setting_value = ${valueToStore}
+        WHERE setting_key = ${key} AND company_id IS NULL AND outlet_id IS NULL
       `.execute(trx);
+
+      const updated = await sql<{ cnt: number }>`
+        SELECT COUNT(*) as cnt FROM settings_strings 
+        WHERE setting_key = ${key} AND company_id IS NULL AND outlet_id IS NULL
+      `.execute(trx);
+
+      if ((updated.rows[0]?.cnt ?? 0) === 0) {
+        await sql`
+          INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value)
+          VALUES (NULL, NULL, ${key}, ${valueToStore})
+        `.execute(trx);
+      }
     }
   });
 }
@@ -242,6 +321,12 @@ export async function setBulkPlatformSettings(params: {
  */
 export async function deletePlatformSetting(key: string): Promise<void> {
   const db = getDb();
+  
+  // Delete from both tables for safety during migration period
+  await sql`
+    DELETE FROM settings_strings WHERE setting_key = ${key} AND company_id IS NULL AND outlet_id IS NULL
+  `.execute(db);
+  
   await sql`
     DELETE FROM platform_settings WHERE \`key\` = ${key}
   `.execute(db);

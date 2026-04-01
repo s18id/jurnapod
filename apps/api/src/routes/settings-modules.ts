@@ -6,7 +6,9 @@
  *
  * Routes for company module settings:
  * - GET /settings/modules - List modules for company
- * - PUT /settings/modules - Update module settings
+ * - PUT /settings/modules - Update module settings (legacy config_json)
+ * - GET /settings/modules/extended - List modules with explicit typed settings
+ * - PUT /settings/modules/extended - Update module settings with explicit columns
  */
 
 import { Hono } from "hono";
@@ -20,11 +22,18 @@ import {
 import { errorResponse, successResponse } from "../lib/response.js";
 import {
   listCompanyModules,
+  listCompanyModulesExtended,
   updateCompanyModule,
+  updateCompanyModuleExplicit,
   ModuleNotFoundError
 } from "../lib/settings-modules.js";
 import { setModuleRolePermission } from "../lib/users.js";
 import { readClientIp } from "../lib/request-meta.js";
+import {
+  ExtendedCompanyModulesUpdateSchema,
+  ExtendedCompanyModulesResponseSchema,
+  ModuleCodeSchema
+} from "@jurnapod/shared";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -63,7 +72,7 @@ modulesRoutes.use("/*", async (c, next) => {
   await next();
 });
 
-// GET /settings/modules - List modules for company
+// GET /settings/modules - List modules for company (legacy)
 modulesRoutes.get("/", async (c) => {
   try {
     const auth = c.get("auth");
@@ -87,7 +96,7 @@ modulesRoutes.get("/", async (c) => {
   }
 });
 
-// PUT /settings/modules - Update module settings
+// PUT /settings/modules - Update module settings (legacy config_json)
 modulesRoutes.put("/", async (c) => {
   try {
     const auth = c.get("auth");
@@ -129,6 +138,76 @@ modulesRoutes.put("/", async (c) => {
 
     console.error("PUT /settings/modules failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to update modules", 500);
+  }
+});
+
+// GET /settings/modules/extended - List modules with explicit typed settings
+modulesRoutes.get("/extended", async (c) => {
+  try {
+    const auth = c.get("auth");
+
+    // Check access permission using bitmask
+    const accessResult = await requireAccess({
+      module: "settings",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const modules = await listCompanyModulesExtended(auth.companyId);
+
+    return successResponse(modules);
+  } catch (error) {
+    console.error("GET /settings/modules/extended failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to list extended modules", 500);
+  }
+});
+
+// PUT /settings/modules/extended - Update module settings with explicit columns
+modulesRoutes.put("/extended", async (c) => {
+  try {
+    const auth = c.get("auth");
+
+    // Check access permission using bitmask
+    const accessResult = await requireAccess({
+      module: "settings",
+      permission: "update"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const payload = await c.req.json();
+    const input = ExtendedCompanyModulesUpdateSchema.parse(payload);
+
+    for (const module of input.modules) {
+      try {
+        await updateCompanyModuleExplicit(auth.companyId, module.code, {
+          enabled: module.enabled,
+          pos_settings: module.pos_settings,
+          inventory_settings: module.inventory_settings,
+          sales_settings: module.sales_settings,
+          purchasing_settings: module.purchasing_settings
+        });
+      } catch (error) {
+        if (error instanceof ModuleNotFoundError) {
+          return errorResponse("NOT_FOUND", error.message, 404);
+        }
+        throw error;
+      }
+    }
+
+    return successResponse({ success: true });
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    console.error("PUT /settings/modules/extended failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to update extended modules", 500);
   }
 });
 

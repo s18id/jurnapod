@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { sql } from "kysely";
 import { toRfc3339Required } from "@jurnapod/shared";
 import { getDb, type KyselySchema } from "../db.js";
 import { DatabaseConflictError } from "../master-data-errors.js";
@@ -11,7 +10,6 @@ import {
   recordMasterDataAuditLog,
   withTransaction
 } from "../shared/master-data-utils.js";
-import type { Transaction } from "@jurnapod/db";
 
 type MutationAuditActor = {
   userId: number;
@@ -49,7 +47,7 @@ type SupplyRow = {
   name: string;
   unit: string;
   is_active: number;
-  updated_at: string;
+  updated_at: string | Date;
 };
 
 function normalizeSupply(row: SupplyRow) {
@@ -70,44 +68,40 @@ async function findSupplyByIdWithExecutor(
   supplyId: number,
   options?: { forUpdate?: boolean }
 ) {
-  const forUpdateClause = options?.forUpdate ? sql` FOR UPDATE` : sql``;
+  let query = db
+    .selectFrom("supplies")
+    .where("company_id", "=", companyId)
+    .where("id", "=", supplyId)
+    .select(["id", "company_id", "sku", "name", "unit", "is_active", "updated_at"]);
 
-  const rows = await sql<SupplyRow>`
-    SELECT id, company_id, sku, name, unit, is_active, updated_at
-    FROM supplies
-    WHERE company_id = ${companyId}
-      AND id = ${supplyId}
-    LIMIT 1${forUpdateClause}
-  `.execute(db);
+  if (options?.forUpdate) {
+    query = query.forUpdate();
+  }
 
-  if (rows.rows.length === 0) {
+  const row = await query.executeTakeFirst();
+
+  if (!row) {
     return null;
   }
 
-  return normalizeSupply(rows.rows[0]!);
+  return normalizeSupply(row as SupplyRow);
 }
 
 export async function listSupplies(companyId: number, filters?: { isActive?: boolean }) {
   const db = getDb();
 
+  let query = db
+    .selectFrom("supplies")
+    .where("company_id", "=", companyId)
+    .select(["id", "company_id", "sku", "name", "unit", "is_active", "updated_at"])
+    .orderBy("id", "asc");
+
   if (typeof filters?.isActive === "boolean") {
-    const rows = await sql<SupplyRow>`
-      SELECT id, company_id, sku, name, unit, is_active, updated_at 
-      FROM supplies 
-      WHERE company_id = ${companyId} 
-        AND is_active = ${filters.isActive ? 1 : 0}
-      ORDER BY id ASC
-    `.execute(db);
-    return rows.rows.map(normalizeSupply);
+    query = query.where("is_active", "=", filters.isActive ? 1 : 0);
   }
 
-  const rows = await sql<SupplyRow>`
-    SELECT id, company_id, sku, name, unit, is_active, updated_at 
-    FROM supplies 
-    WHERE company_id = ${companyId}
-    ORDER BY id ASC
-  `.execute(db);
-  return rows.rows.map(normalizeSupply);
+  const rows = await query.execute();
+  return rows.map((row) => normalizeSupply(row as SupplyRow));
 }
 
 export async function findSupplyById(companyId: number, supplyId: number) {
@@ -137,14 +131,13 @@ export async function createSupply(
           unit: input.unit?.trim() || "unit",
           is_active: input.is_active === false ? 0 : 1
         })
-        .returningAll()
         .executeTakeFirst();
 
       if (!result) {
         throw new Error("Created supply not found");
       }
 
-      const supply = await findSupplyByIdWithExecutor(trx, companyId, Number(result.id));
+      const supply = await findSupplyByIdWithExecutor(trx, companyId, Number(result.insertId));
       if (!supply) {
         throw new Error("Created supply not found");
       }
@@ -191,7 +184,6 @@ export async function updateSupply(
     }
 
     const fields: Record<string, unknown> = {};
-    const values: Array<string | number | null> = [];
 
     if (Object.hasOwn(input, "sku")) {
       fields["sku"] = input.sku ?? null;

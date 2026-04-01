@@ -22,7 +22,7 @@ import {
   type AuthContext
 } from "../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../lib/response.js";
-import { listSettings, getSetting, setSetting } from "../lib/settings.js";
+import { getSetting, setSetting } from "../lib/settings.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -188,10 +188,10 @@ settingsConfigRoutes.patch("/", async (c) => {
 
       const registryEntry = SETTINGS_REGISTRY[item.key as SettingKey];
 
-      // Validate and coerce value
-      let validatedValue: string | number | boolean | Record<string, unknown>;
+      // Validate and coerce value using registry schema
+      let validatedValue: string | number | boolean;
       try {
-        validatedValue = registryEntry.schema.parse(item.value) as string | number | boolean | Record<string, unknown>;
+        validatedValue = registryEntry.schema.parse(item.value) as string | number | boolean;
       } catch {
         return errorResponse(
           "INVALID_REQUEST",
@@ -201,7 +201,7 @@ settingsConfigRoutes.patch("/", async (c) => {
       }
 
       // Map registry value types to storage value types
-      let valueType: "string" | "number" | "boolean" | "json" = "string";
+      let valueType: "string" | "number" | "boolean" = "string";
       if (registryEntry.valueType === "boolean") {
         valueType = "boolean";
       } else if (registryEntry.valueType === "int") {
@@ -217,10 +217,7 @@ settingsConfigRoutes.patch("/", async (c) => {
         value: validatedValue,
         valueType,
         outletId: input.outlet_id,
-        actor: {
-          userId: auth.userId,
-          ipAddress: c.req.raw.headers.get("x-forwarded-for") ?? "unknown"
-        }
+        
       });
 
       results.push({
@@ -271,10 +268,10 @@ settingsConfigRoutes.put("/", async (c) => {
 
       const registryEntry = SETTINGS_REGISTRY[item.key as SettingKey];
 
-      // Validate and coerce value
-      let validatedValue: string | number | boolean | Record<string, unknown>;
+      // Validate and coerce value using registry schema
+      let validatedValue: string | number | boolean;
       try {
-        validatedValue = registryEntry.schema.parse(item.value) as string | number | boolean | Record<string, unknown>;
+        validatedValue = registryEntry.schema.parse(item.value) as string | number | boolean;
       } catch {
         return errorResponse(
           "INVALID_REQUEST",
@@ -284,7 +281,7 @@ settingsConfigRoutes.put("/", async (c) => {
       }
 
       // Map registry value types to storage value types
-      let valueType: "string" | "number" | "boolean" | "json" = "string";
+      let valueType: "string" | "number" | "boolean" = "string";
       if (registryEntry.valueType === "boolean") {
         valueType = "boolean";
       } else if (registryEntry.valueType === "int") {
@@ -300,10 +297,7 @@ settingsConfigRoutes.put("/", async (c) => {
         value: validatedValue,
         valueType,
         outletId: input.outlet_id,
-        actor: {
-          userId: auth.userId,
-          ipAddress: c.req.raw.headers.get("x-forwarded-for") ?? "unknown"
-        }
+        
       });
 
       results.push({

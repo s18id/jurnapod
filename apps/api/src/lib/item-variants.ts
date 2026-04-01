@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { sql } from "kysely";
 import { getDb, type KyselySchema } from "./db";
 import type {
   CreateVariantAttributeRequest,
@@ -134,10 +133,9 @@ export async function createVariantAttribute(
         attribute_name: input.attribute_name,
         sort_order: 0
       })
-      .returningAll()
       .executeTakeFirst();
     
-    const attributeId = Number(attrResult!.id);
+    const attributeId = Number(attrResult!.insertId);
 
     // Create values
     const valueIds: number[] = [];
@@ -150,9 +148,8 @@ export async function createVariantAttribute(
           value: input.values[i],
           sort_order: i
         })
-        .returningAll()
         .executeTakeFirst();
-      valueIds.push(Number(valResult!.id));
+      valueIds.push(Number(valResult!.insertId));
     }
 
     // Get all existing attributes for this item to regenerate combinations
@@ -189,11 +186,13 @@ export async function createVariantAttribute(
 
     // Archive all existing variants before generating new combinations
     // This ensures old single-attribute variants are retired when multi-attribute variants are created
-    await sql`
-      UPDATE item_variants
-      SET is_active = FALSE, archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-      WHERE item_id = ${itemId} AND company_id = ${companyId} AND archived_at IS NULL
-    `.execute(trx);
+    await trx
+      .updateTable("item_variants")
+      .set({ is_active: 0, archived_at: new Date(), updated_at: new Date() })
+      .where("item_id", "=", itemId)
+      .where("company_id", "=", companyId)
+      .where("archived_at", "is", null)
+      .execute();
 
     // Check existing variants (including archived ones to preserve stock history)
     const existingVariants = await trx
@@ -202,7 +201,6 @@ export async function createVariantAttribute(
       .where("company_id", "=", companyId)
       .select(["id", "sku", "variant_name", "is_active"])
       .execute();
-    const existingSkus = new Set(existingVariants.map((v) => (v as { sku: string }).sku));
 
     // Create or reactivate variants for valid combinations
     for (const combo of combinations) {
@@ -235,10 +233,9 @@ export async function createVariantAttribute(
             stock_quantity: 0,
             is_active: 1
           })
-          .returningAll()
           .executeTakeFirst();
         
-        const variantId = Number(variantResult!.id);
+        const variantId = Number(variantResult!.insertId);
 
         // Link to attribute values
         for (const attrCombo of combo) {
@@ -329,13 +326,18 @@ export async function updateVariantAttribute(
       for (const [value, valueId] of existingValueMap) {
         if (!newValueSet.has(value)) {
           // Archive variants using this value
-          await sql`
-            UPDATE item_variants SET is_active = FALSE
-            WHERE id IN (
-              SELECT variant_id FROM item_variant_combinations
-              WHERE value_id = ${valueId} AND company_id = ${companyId}
-            ) AND company_id = ${companyId}
-          `.execute(trx);
+          await trx
+            .updateTable("item_variants")
+            .set({ is_active: 0 })
+            .where("company_id", "=", companyId)
+            .where((eb) => eb.exists(
+              trx
+                .selectFrom("item_variant_combinations")
+                .select("variant_id")
+                .where("value_id", "=", valueId)
+                .where("company_id", "=", companyId)
+            ))
+            .execute();
 
           await trx
             .deleteFrom("item_variant_attribute_values")
@@ -406,11 +408,13 @@ export async function updateVariantAttribute(
       );
 
       // Archive all existing variants before generating new combinations
-      await sql`
-        UPDATE item_variants
-        SET is_active = FALSE, archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-        WHERE item_id = ${attr.item_id} AND company_id = ${companyId} AND archived_at IS NULL
-      `.execute(trx);
+      await trx
+        .updateTable("item_variants")
+        .set({ is_active: 0, archived_at: new Date(), updated_at: new Date() })
+        .where("item_id", "=", attr.item_id)
+        .where("company_id", "=", companyId)
+        .where("archived_at", "is", null)
+        .execute();
 
       const existingVariants = await trx
         .selectFrom("item_variants")
@@ -449,10 +453,9 @@ export async function updateVariantAttribute(
               stock_quantity: 0,
               is_active: 1
             })
-            .returningAll()
             .executeTakeFirst();
           
-          const variantId = Number(variantResult!.id);
+          const variantId = Number(variantResult!.insertId);
 
           for (const attrCombo of combo) {
             const a = allAttributes.find((x) => x.name === attrCombo.name);
@@ -511,21 +514,27 @@ export async function deleteVariantAttribute(
   const db = getDb();
   return withTransaction(db, async (trx) => {
     // Archive variants using this attribute
-    await sql`
-      UPDATE item_variants SET is_active = FALSE
-      WHERE id IN (
-        SELECT variant_id FROM item_variant_combinations
-        WHERE attribute_id = ${attributeId} AND company_id = ${companyId}
-      ) AND company_id = ${companyId}
-    `.execute(trx);
+    await trx
+      .updateTable("item_variants")
+      .set({ is_active: 0 })
+      .where("company_id", "=", companyId)
+      .where((eb) => eb.exists(
+        trx
+          .selectFrom("item_variant_combinations")
+          .select("variant_id")
+          .where("attribute_id", "=", attributeId)
+          .where("company_id", "=", companyId)
+      ))
+      .execute();
 
     // Delete attribute (cascade will handle values and combinations)
-    const result = await sql`
-      DELETE FROM item_variant_attributes
-      WHERE id = ${attributeId} AND company_id = ${companyId}
-    `.execute(trx);
+    const result = await trx
+      .deleteFrom("item_variant_attributes")
+      .where("id", "=", attributeId)
+      .where("company_id", "=", companyId)
+      .execute();
 
-    if (result.numAffectedRows === BigInt(0)) {
+    if (result[0].numDeletedRows === BigInt(0)) {
       throw new AttributeNotFoundError(attributeId);
     }
   });
@@ -643,18 +652,21 @@ export async function getVariantEffectivePricesBatch(
   const db = getDb();
 
   // Fetch all variant data with price overrides and item_ids
-  const variantRows = await sql<{ id: number; price_override: string | null; item_id: number }>`
-    SELECT id, price_override, item_id FROM item_variants
-    WHERE id IN (${sql.join(variantIds.map(id => sql`${id}`))}) AND company_id = ${companyId}
-  `.execute(db);
+  const variantRows = await db
+    .selectFrom("item_variants")
+    .where("id", "in", variantIds)
+    .where("company_id", "=", companyId)
+    .select(["id", "price_override", "item_id"])
+    .execute();
 
   const priceMap = new Map<number, number>();
   const variantsNeedingParentPrice: Array<{ variantId: number; itemId: number }> = [];
 
   // First pass: handle price overrides
-  for (const row of variantRows.rows) {
-    if (row.price_override !== null) {
-      priceMap.set(row.id, Number(row.price_override));
+  for (const row of variantRows) {
+    const priceOverride = (row as { price_override: string | null }).price_override;
+    if (priceOverride !== null) {
+      priceMap.set(row.id, Number(priceOverride));
     } else {
       variantsNeedingParentPrice.push({ variantId: row.id, itemId: row.item_id });
     }
@@ -669,14 +681,18 @@ export async function getVariantEffectivePricesBatch(
 
   // Batch fetch outlet-specific prices first
   if (outletId !== undefined) {
-    const outletPriceRows = await sql<{ item_id: number; price: number }>`
-      SELECT item_id, price FROM item_prices
-      WHERE item_id IN (${sql.join(uniqueItemIds.map(id => sql`${id}`))}) AND outlet_id = ${outletId} AND is_active = 1 AND company_id = ${companyId}
-    `.execute(db);
+    const outletPriceRows = await db
+      .selectFrom("item_prices")
+      .where("item_id", "in", uniqueItemIds)
+      .where("outlet_id", "=", outletId)
+      .where("is_active", "=", 1)
+      .where("company_id", "=", companyId)
+      .select(["item_id", "price"])
+      .execute();
 
     const outletPriceMap = new Map<number, number>();
-    for (const row of outletPriceRows.rows) {
-      outletPriceMap.set(row.item_id, Number(row.price));
+    for (const row of outletPriceRows) {
+      outletPriceMap.set((row as { item_id: number }).item_id, Number((row as { price: number | string }).price));
     }
 
     // Assign outlet prices where available
@@ -694,14 +710,18 @@ export async function getVariantEffectivePricesBatch(
     }
 
     // Fetch default prices for remaining items
-    const defaultPriceRows = await sql<{ item_id: number; price: number }>`
-      SELECT item_id, price FROM item_prices
-      WHERE item_id IN (${sql.join(itemsNeedingDefaultPrice.map(id => sql`${id}`))}) AND outlet_id IS NULL AND is_active = 1 AND company_id = ${companyId}
-    `.execute(db);
+    const defaultPriceRows = await db
+      .selectFrom("item_prices")
+      .where("item_id", "in", itemsNeedingDefaultPrice)
+      .where("outlet_id", "is", null)
+      .where("is_active", "=", 1)
+      .where("company_id", "=", companyId)
+      .select(["item_id", "price"])
+      .execute();
 
     const defaultPriceMap = new Map<number, number>();
-    for (const row of defaultPriceRows.rows) {
-      defaultPriceMap.set(row.item_id, Number(row.price));
+    for (const row of defaultPriceRows) {
+      defaultPriceMap.set((row as { item_id: number }).item_id, Number((row as { price: number | string }).price));
     }
 
     // Assign default prices
@@ -712,14 +732,18 @@ export async function getVariantEffectivePricesBatch(
     }
   } else {
     // No outlet specified, fetch default prices for all
-    const defaultPriceRows = await sql<{ item_id: number; price: number }>`
-      SELECT item_id, price FROM item_prices
-      WHERE item_id IN (${sql.join(uniqueItemIds.map(id => sql`${id}`))}) AND outlet_id IS NULL AND is_active = 1 AND company_id = ${companyId}
-    `.execute(db);
+    const defaultPriceRows = await db
+      .selectFrom("item_prices")
+      .where("item_id", "in", uniqueItemIds)
+      .where("outlet_id", "is", null)
+      .where("is_active", "=", 1)
+      .where("company_id", "=", companyId)
+      .select(["item_id", "price"])
+      .execute();
 
     const defaultPriceMap = new Map<number, number>();
-    for (const row of defaultPriceRows.rows) {
-      defaultPriceMap.set(row.item_id, Number(row.price));
+    for (const row of defaultPriceRows) {
+      defaultPriceMap.set((row as { item_id: number }).item_id, Number((row as { price: number | string }).price));
     }
 
     // Assign default prices
@@ -731,6 +755,42 @@ export async function getVariantEffectivePricesBatch(
   return priceMap;
 }
 
+/**
+ * Parse JSON attributes column into array format.
+ * JSON column stores: { "size": "Large", "color": "Red" }
+ * Returns: [{ attribute_name: "size", value: "Large" }, { attribute_name: "color", value: "Red" }]
+ */
+function parseJsonAttributes(attributesJson: string | null): Array<{ attribute_name: string; value: string }> {
+  if (!attributesJson) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(attributesJson);
+    if (typeof parsed !== 'object' || parsed === null) {
+      return [];
+    }
+    return Object.entries(parsed).map(([attribute_name, value]) => ({
+      attribute_name,
+      value: String(value)
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function toIsoString(value: Date | string | number): string {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("Invalid datetime value");
+  }
+
+  return parsed.toISOString();
+}
+
 export async function getItemVariants(
   companyId: number,
   itemId: number
@@ -740,23 +800,14 @@ export async function getItemVariants(
     .selectFrom("item_variants")
     .where("item_id", "=", itemId)
     .where("company_id", "=", companyId)
-    .select(["id", "item_id", "sku", "variant_name", "price_override", "stock_quantity", "barcode", "is_active", "created_at", "updated_at"])
+    .select(["id", "item_id", "sku", "variant_name", "price_override", "stock_quantity", "barcode", "is_active", "attributes", "created_at", "updated_at"])
     .orderBy("sku", "asc")
     .execute();
 
   const responses: ItemVariantResponse[] = [];
   for (const v of variants) {
-    const combos = await db
-      .selectFrom("item_variant_combinations as ivc")
-      .innerJoin("item_variant_attributes as iva", "iva.id", "ivc.attribute_id")
-      .innerJoin("item_variant_attribute_values as ivav", "ivav.id", "ivc.value_id")
-      .where("ivc.variant_id", "=", v.id)
-      .where("ivc.company_id", "=", companyId)
-      .select(["ivc.variant_id", "iva.attribute_name", "ivav.value"])
-      .orderBy("iva.sort_order", "asc")
-      .execute();
-
     const effectivePrice = await getVariantEffectivePrice(companyId, v.id);
+    const attributesJson = (v as { attributes: string | null }).attributes;
 
     responses.push({
       id: v.id,
@@ -768,9 +819,9 @@ export async function getItemVariants(
       stock_quantity: Number((v as { stock_quantity: number | string }).stock_quantity),
       barcode: (v as { barcode: string | null }).barcode,
       is_active: Boolean((v as { is_active: number }).is_active),
-      attributes: combos.map((c) => ({ attribute_name: (c as { attribute_name: string }).attribute_name, value: (c as { value: string }).value })),
-      created_at: ((v as { created_at: Date }).created_at).toISOString(),
-      updated_at: ((v as { updated_at: Date }).updated_at).toISOString()
+      attributes: parseJsonAttributes(attributesJson),
+      created_at: toIsoString((v as { created_at: Date | string }).created_at),
+      updated_at: toIsoString((v as { updated_at: Date | string }).updated_at)
     });
   }
 
@@ -779,30 +830,22 @@ export async function getItemVariants(
 
 export async function getVariantById(
   companyId: number,
-  variantId: number
+  variantId: number,
+  dbExecutor?: KyselySchema
 ): Promise<ItemVariantResponse | null> {
-  const db = getDb();
+  const db = dbExecutor ?? getDb();
   const variants = await db
     .selectFrom("item_variants")
     .where("id", "=", variantId)
     .where("company_id", "=", companyId)
-    .select(["id", "item_id", "sku", "variant_name", "price_override", "stock_quantity", "barcode", "is_active", "created_at", "updated_at"])
+    .select(["id", "item_id", "sku", "variant_name", "price_override", "stock_quantity", "barcode", "is_active", "attributes", "created_at", "updated_at"])
     .execute();
 
   if (variants.length === 0) return null;
 
   const v = variants[0];
-  const combos = await db
-    .selectFrom("item_variant_combinations as ivc")
-    .innerJoin("item_variant_attributes as iva", "iva.id", "ivc.attribute_id")
-    .innerJoin("item_variant_attribute_values as ivav", "ivav.id", "ivc.value_id")
-    .where("ivc.variant_id", "=", v.id)
-    .where("ivc.company_id", "=", companyId)
-    .select(["ivc.variant_id", "iva.attribute_name", "ivav.value"])
-    .orderBy("iva.sort_order", "asc")
-    .execute();
-
   const effectivePrice = await getVariantEffectivePrice(companyId, v.id);
+  const attributesJson = (v as { attributes: string | null }).attributes;
 
   return {
     id: v.id,
@@ -814,9 +857,9 @@ export async function getVariantById(
     stock_quantity: Number((v as { stock_quantity: number | string }).stock_quantity),
     barcode: (v as { barcode: string | null }).barcode,
     is_active: Boolean((v as { is_active: number }).is_active),
-    attributes: combos.map((c) => ({ attribute_name: (c as { attribute_name: string }).attribute_name, value: (c as { value: string }).value })),
-    created_at: ((v as { created_at: Date }).created_at).toISOString(),
-    updated_at: ((v as { updated_at: Date }).updated_at).toISOString()
+    attributes: parseJsonAttributes(attributesJson),
+    created_at: toIsoString((v as { created_at: Date | string }).created_at),
+    updated_at: toIsoString((v as { updated_at: Date | string }).updated_at)
   };
 }
 
@@ -882,7 +925,7 @@ export async function updateVariant(
         .execute();
     }
 
-    const result = await getVariantById(companyId, variantId);
+    const result = await getVariantById(companyId, variantId, trx);
     return result!;
   });
 }
@@ -896,17 +939,19 @@ export async function adjustVariantStock(
   const db = getDb();
   return withTransaction(db, async (trx) => {
     // Get current stock
-    const variantRows = await sql<{ stock_quantity: number }>`
-      SELECT stock_quantity FROM item_variants
-      WHERE id = ${variantId} AND company_id = ${companyId}
-      FOR UPDATE
-    `.execute(trx);
+    const variantRows = await trx
+      .selectFrom("item_variants")
+      .where("id", "=", variantId)
+      .where("company_id", "=", companyId)
+      .select(["stock_quantity"])
+      .forUpdate()
+      .execute();
     
-    if (variantRows.rows.length === 0) {
+    if (variantRows.length === 0) {
       throw new VariantNotFoundError(variantId);
     }
 
-    const currentStock = Number(variantRows.rows[0].stock_quantity);
+    const currentStock = Number((variantRows[0] as { stock_quantity: number | string }).stock_quantity);
     const newStock = Math.max(0, currentStock + adjustment);
 
     await trx
@@ -952,65 +997,52 @@ export async function getVariantsForSync(
   outletId?: number
 ): Promise<SyncPullVariant[]> {
   const db = getDb();
-  // Fetch all variants in one query
+  // Fetch all variants in one query - now includes attributes JSON column
   const variants = await db
     .selectFrom("item_variants as v")
     .innerJoin("items as i", "i.id", "v.item_id")
     .where("v.company_id", "=", companyId)
     .where("v.is_active", "=", 1)
     .where("i.is_active", "=", 1)
-    .select(["v.id", "v.item_id", "v.sku", "v.variant_name", "v.price_override", "v.stock_quantity", "v.barcode", "v.is_active"])
+    .select(["v.id", "v.item_id", "v.sku", "v.variant_name", "v.price_override", "v.stock_quantity", "v.barcode", "v.is_active", "v.attributes"])
     .execute();
 
   if (variants.length === 0) {
     return [];
   }
 
-  // Collect all variant IDs for batch combination fetch
+  // Collect all variant IDs for batch price fetch
   const variantIds = variants.map((v) => (v as { id: number }).id);
-
-  // Single query to fetch all combinations for all variants (avoids N+1)
-  const allCombos = await sql<{ variant_id: number; attribute_name: string; value: string }>`
-    SELECT 
-      ivc.variant_id,
-      iva.attribute_name, 
-      ivav.value
-     FROM item_variant_combinations ivc
-     JOIN item_variant_attributes iva ON iva.id = ivc.attribute_id
-     JOIN item_variant_attribute_values ivav ON ivav.id = ivc.value_id
-     WHERE ivc.variant_id IN (${sql.join(variantIds.map(id => sql`${id}`))}) AND ivc.company_id = ${companyId}
-     ORDER BY iva.sort_order, ivav.sort_order
-  `.execute(db);
-
-  // Group combinations by variant_id in memory
-  const combosByVariant = new Map<number, Array<{ attribute_name: string; value: string }>>();
-  for (const combo of allCombos.rows) {
-    const existing = combosByVariant.get(combo.variant_id) ?? [];
-    existing.push({
-      attribute_name: combo.attribute_name,
-      value: combo.value
-    });
-    combosByVariant.set(combo.variant_id, existing);
-  }
 
   // Batch fetch all effective prices in a single query to eliminate N+1
   const priceMap = await getVariantEffectivePricesBatch(companyId, variantIds, outletId);
 
-  // Build results with pre-grouped combinations
+  // Build results - attributes now come from JSON column directly
   const results: SyncPullVariant[] = [];
   for (const v of variants) {
-    const attributes: Record<string, string> = {};
-    const variantCombos = combosByVariant.get((v as { id: number }).id) ?? [];
-    for (const c of variantCombos) {
-      attributes[c.attribute_name] = c.value;
+    const variantId = (v as { id: number }).id;
+    const attributesJson = (v as { attributes: string | null }).attributes;
+    
+    // Parse JSON attributes to Record<string, string> format
+    let attributes: Record<string, string> = {};
+    if (attributesJson) {
+      try {
+        const parsed = JSON.parse(attributesJson);
+        if (typeof parsed === 'object' && parsed !== null) {
+          attributes = parsed as Record<string, string>;
+        }
+      } catch {
+        // If JSON parsing fails, keep empty object
+        attributes = {};
+      }
     }
 
     results.push({
-      id: (v as { id: number }).id,
+      id: variantId,
       item_id: (v as { item_id: number }).item_id,
       sku: (v as { sku: string }).sku,
       variant_name: (v as { variant_name: string }).variant_name,
-      price: priceMap.get((v as { id: number }).id) ?? 0,
+      price: priceMap.get(variantId) ?? 0,
       stock_quantity: Number((v as { stock_quantity: number | string }).stock_quantity),
       barcode: (v as { barcode: string | null }).barcode,
       is_active: Boolean((v as { is_active: number }).is_active),

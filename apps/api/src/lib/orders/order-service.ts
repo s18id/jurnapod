@@ -366,7 +366,9 @@ export async function createOrder(
     );
 
     const lineRows = buildOrderLines(input.lines, itemLookups);
-    const subtotal = lineRows.reduce((acc, line) => acc + line.line_total, 0);
+    const subtotal = sumMoney(lineRows.map((line) => line.line_total));
+    const taxAmount = normalizeMoney(0);
+    const grandTotal = normalizeMoney(subtotal + taxAmount);
 
     const insertResult = await sql`
       INSERT INTO sales_orders (
@@ -393,8 +395,8 @@ export async function createOrder(
         'DRAFT',
         ${input.notes ?? null},
         ${subtotal},
-        ${subtotal},
-        0,
+        ${taxAmount},
+        ${grandTotal},
         ${actor?.userId ?? null},
         ${actor?.userId ?? null}
       )
@@ -618,21 +620,11 @@ export async function listOrders(
   filters: OrderListFilters
 ): Promise<{ total: number; orders: SalesOrderDetail[] }> {
   const db = getDb();
-  const conditions: string[] = ["company_id = ?"];
-  const values: Array<number | string> = [companyId];
 
   if (filters.outletIds) {
     if (filters.outletIds.length === 0) {
       return { total: 0, orders: [] };
     }
-    const placeholders = filters.outletIds.map(() => "?").join(", ");
-    conditions.push(`outlet_id IN (${placeholders})`);
-    values.push(...filters.outletIds);
-  }
-
-  if (filters.status) {
-    conditions.push("status = ?");
-    values.push(filters.status);
   }
 
   // Handle timezone conversion for date range
@@ -646,28 +638,56 @@ export async function listOrders(
     dateTo = range.toEndUTC.slice(0, 10);
   }
 
+  // Build parameterized query using Kysely query builder for safe binding
+  let countQuery = db
+    .selectFrom("sales_orders")
+    .where("company_id", "=", companyId);
+
+  let baseQuery = db
+    .selectFrom("sales_orders")
+    .where("company_id", "=", companyId);
+
+  if (filters.outletIds && filters.outletIds.length > 0) {
+    countQuery = countQuery.where("outlet_id", "in", filters.outletIds);
+    baseQuery = baseQuery.where("outlet_id", "in", filters.outletIds);
+  }
+
+  if (filters.status) {
+    countQuery = countQuery.where("status", "=", filters.status);
+    baseQuery = baseQuery.where("status", "=", filters.status);
+  }
+
   if (dateFrom) {
-    conditions.push("order_date >= ?");
-    values.push(dateFrom);
+    const fromDate = new Date(`${dateFrom}T00:00:00.000Z`);
+    countQuery = countQuery.where("order_date", ">=", fromDate);
+    baseQuery = baseQuery.where("order_date", ">=", fromDate);
   }
 
   if (dateTo) {
-    conditions.push("order_date <= ?");
-    values.push(dateTo);
+    const toDate = new Date(`${dateTo}T00:00:00.000Z`);
+    countQuery = countQuery.where("order_date", "<=", toDate);
+    baseQuery = baseQuery.where("order_date", "<=", toDate);
   }
 
-  const whereClause = conditions.join(" AND ");
-
-  const countResult = await sql`SELECT COUNT(*) as total FROM sales_orders WHERE ${sql.raw(whereClause)}`.execute(db);
-  const total = Number((countResult.rows[0] as { total?: number }).total ?? 0);
+  // Use a simple count query with Kysely
+  const countResult = await countQuery
+    .select((eb) => eb.fn.countAll().as("total"))
+    .executeTakeFirst();
+  
+  const total = countResult ? Number((countResult as { total?: number | string }).total ?? 0) : 0;
 
   const limit = filters.limit ?? 50;
   const offset = filters.offset ?? 0;
 
-  const orderResult = await sql`SELECT * FROM sales_orders WHERE ${sql.raw(whereClause)} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`.execute(db);
+  const orderResult = await baseQuery
+    .orderBy("created_at", "desc")
+    .limit(limit)
+    .offset(offset)
+    .selectAll()
+    .execute();
 
   const orders: SalesOrderDetail[] = [];
-  for (const row of orderResult.rows as SalesOrderRow[]) {
+  for (const row of orderResult as unknown as SalesOrderRow[]) {
     const lines = await findOrderLinesByOrderId(db, row.id);
     orders.push({
       ...normalizeSalesOrderRow(row),

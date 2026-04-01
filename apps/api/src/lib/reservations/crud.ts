@@ -82,32 +82,82 @@ function legacyCanTransition(fromStatus: string, toStatus: string): boolean {
   return transitions[fromStatus]?.includes(toStatus) ?? false;
 }
 
-async function readReservationForUpdate(
-  db: KyselySchema,
-  companyId: number,
-  reservationId: number
-): Promise<ReservationDbRow> {
-  const result = await sql<ReservationDbRow>`
-    SELECT id, company_id, outlet_id, table_id, customer_name, customer_phone, guest_count,
-            reservation_at, reservation_start_ts, reservation_end_ts,
-            duration_minutes, status, notes, linked_order_id,
-            created_at, updated_at, arrived_at, seated_at, cancelled_at, status_id
-     FROM reservations
-     WHERE company_id = ${companyId} AND id = ${reservationId}
-     LIMIT 1
-     FOR UPDATE
-  `.execute(db);
+// ============================================================================
+// SCHEMA CAPABILITIES CACHE
+// ============================================================================
 
-  if (result.rows.length === 0) {
-    throw new ReservationNotFoundError(reservationId);
+interface ReservationSchemaCaps {
+  hasReservationCode: boolean;
+  hasCustomerEmail: boolean;
+  hasCreatedBy: boolean;
+  hasStatusId: boolean;
+  hasReservationStartTs: boolean;
+  hasReservationEndTs: boolean;
+  hasCanonicalTs: boolean;
+}
+
+// Cache using WeakMap per db instance - schema doesn't change at runtime
+const schemaCapsCache = new WeakMap<KyselySchema, ReservationSchemaCaps>();
+
+async function getReservationSchemaCaps(db: KyselySchema): Promise<ReservationSchemaCaps> {
+  if (schemaCapsCache.has(db)) {
+    return schemaCapsCache.get(db)!;
   }
+  
+  const [
+    hasReservationCode, hasCustomerEmail, hasCreatedBy, hasStatusId,
+    hasReservationStartTs, hasReservationEndTs
+  ] = await Promise.all([
+    columnExists(db, 'reservations', 'reservation_code'),
+    columnExists(db, 'reservations', 'customer_email'),
+    columnExists(db, 'reservations', 'created_by'),
+    columnExists(db, 'reservations', 'status_id'),
+    columnExists(db, 'reservations', 'reservation_start_ts'),
+    columnExists(db, 'reservations', 'reservation_end_ts'),
+  ]);
 
-  return result.rows[0]!;
+  const caps: ReservationSchemaCaps = {
+    hasReservationCode,
+    hasCustomerEmail,
+    hasCreatedBy,
+    hasStatusId,
+    hasReservationStartTs,
+    hasReservationEndTs,
+    hasCanonicalTs: hasReservationStartTs && hasReservationEndTs,
+  };
+  
+  schemaCapsCache.set(db, caps);
+  return caps;
 }
 
 // ============================================================================
 // READ OPERATIONS
 // ============================================================================
+
+async function readReservationForUpdate(
+  db: KyselySchema,
+  companyId: number,
+  reservationId: number
+): Promise<ReservationDbRow> {
+  const row = await db
+    .selectFrom("reservations")
+    .where("company_id", "=", companyId)
+    .where("id", "=", reservationId)
+    .select([
+      "id", "company_id", "outlet_id", "table_id", "customer_name", "customer_phone",
+      "guest_count", "reservation_at", "reservation_start_ts", "reservation_end_ts",
+      "duration_minutes", "status", "notes", "linked_order_id",
+      "created_at", "updated_at", "arrived_at", "seated_at", "cancelled_at", "status_id"
+    ])
+    .forUpdate()
+    .executeTakeFirst();
+
+  if (!row) {
+    throw new ReservationNotFoundError(reservationId);
+  }
+
+  return row as unknown as ReservationDbRow;
+}
 
 /**
  * List reservations with filtering and pagination (legacy interface)
@@ -117,68 +167,114 @@ export async function listReservations(
   query: ReservationListQuery
 ): Promise<ReservationRow[]> {
   const db = getDb();
-  const conditions: ReturnType<typeof sql>[] = [
-    sql`company_id = ${companyId}`,
-    sql`outlet_id = ${query.outlet_id}`
-  ];
+  
+  let q = db
+    .selectFrom("reservations")
+    .where("company_id", "=", companyId)
+    .where("outlet_id", "=", query.outlet_id);
 
   if (query.status) {
-    conditions.push(sql`status = ${query.status}`);
+    q = q.where("status", "=", query.status);
   }
 
-  if (query.from && query.to) {
+  // Store date values to avoid TypeScript narrowing issues inside expression builder
+  const queryFrom = query.from;
+  const queryTo = query.to;
+  const fromDateObj = queryFrom ? new Date(queryFrom) : undefined;
+  const toDateObj = queryTo ? new Date(queryTo) : undefined;
+  const fromMs = queryFrom ? toUnixMs(queryFrom) : undefined;
+  const toMs = queryTo ? toUnixMs(queryTo) : undefined;
+
+  if (fromMs !== undefined && toMs !== undefined) {
     if (query.overlap_filter) {
-      conditions.push(sql`
-        ((reservation_start_ts IS NOT NULL AND reservation_end_ts IS NOT NULL 
-          AND reservation_start_ts < ${toUnixMs(query.to) + 1} AND reservation_end_ts > ${toUnixMs(query.from)}) 
-        OR (reservation_start_ts IS NULL AND reservation_at >= ${toDbDateTime(query.from)} AND reservation_at <= ${toDbDateTime(query.to)}))
-      `);
+      q = q.where((eb) => eb.or([
+        eb.and([
+          eb("reservation_start_ts", "is not", null),
+          eb("reservation_end_ts", "is not", null),
+          eb("reservation_start_ts", "<", toMs + 1),
+          eb("reservation_end_ts", ">", fromMs)
+        ]),
+        eb.and([
+          eb("reservation_start_ts", "is", null),
+          eb("reservation_at", ">=", fromDateObj!),
+          eb("reservation_at", "<=", toDateObj!)
+        ])
+      ]));
     } else {
-      conditions.push(sql`
-        ((reservation_start_ts IS NOT NULL AND reservation_start_ts >= ${toUnixMs(query.from)} AND reservation_start_ts <= ${toUnixMs(query.to)}) 
-        OR (reservation_start_ts IS NULL AND reservation_at >= ${toDbDateTime(query.from)} AND reservation_at <= ${toDbDateTime(query.to)}))
-      `);
+      q = q.where((eb) => eb.or([
+        eb.and([
+          eb("reservation_start_ts", "is not", null),
+          eb("reservation_start_ts", ">=", fromMs),
+          eb("reservation_start_ts", "<=", toMs)
+        ]),
+        eb.and([
+          eb("reservation_start_ts", "is", null),
+          eb("reservation_at", ">=", fromDateObj!),
+          eb("reservation_at", "<=", toDateObj!)
+        ])
+      ]));
     }
-  } else if (query.from) {
+  } else if (fromMs !== undefined) {
     if (query.overlap_filter) {
-      conditions.push(sql`
-        ((reservation_start_ts IS NOT NULL AND reservation_end_ts IS NOT NULL AND reservation_end_ts > ${toUnixMs(query.from)}) 
-        OR (reservation_start_ts IS NULL AND reservation_at >= ${toDbDateTime(query.from)}))
-      `);
+      q = q.where((eb) => eb.or([
+        eb.and([
+          eb("reservation_start_ts", "is not", null),
+          eb("reservation_end_ts", "is not", null),
+          eb("reservation_end_ts", ">", fromMs)
+        ]),
+        eb.and([
+          eb("reservation_start_ts", "is", null),
+          eb("reservation_at", ">=", fromDateObj!)
+        ])
+      ]));
     } else {
-      conditions.push(sql`
-        ((reservation_start_ts IS NOT NULL AND reservation_start_ts >= ${toUnixMs(query.from)}) 
-        OR (reservation_start_ts IS NULL AND reservation_at >= ${toDbDateTime(query.from)}))
-      `);
+      q = q.where((eb) => eb.or([
+        eb.and([
+          eb("reservation_start_ts", "is not", null),
+          eb("reservation_start_ts", ">=", fromMs)
+        ]),
+        eb.and([
+          eb("reservation_start_ts", "is", null),
+          eb("reservation_at", ">=", fromDateObj!)
+        ])
+      ]));
     }
-  } else if (query.to) {
+  } else if (toMs !== undefined) {
     if (query.overlap_filter) {
-      conditions.push(sql`
-        ((reservation_start_ts IS NOT NULL AND reservation_start_ts < ${toUnixMs(query.to) + 1}) 
-        OR (reservation_start_ts IS NULL AND reservation_at <= ${toDbDateTime(query.to)}))
-      `);
+      q = q.where((eb) => eb.or([
+        eb.and([
+          eb("reservation_start_ts", "is not", null),
+          eb("reservation_start_ts", "<", toMs + 1)
+        ]),
+        eb.and([
+          eb("reservation_start_ts", "is", null),
+          eb("reservation_at", "<=", toDateObj!)
+        ])
+      ]));
     } else {
-      conditions.push(sql`
-        ((reservation_start_ts IS NOT NULL AND reservation_start_ts <= ${toUnixMs(query.to)}) 
-        OR (reservation_start_ts IS NULL AND reservation_at <= ${toDbDateTime(query.to)}))
-      `);
+      q = q.where((eb) => eb.or([
+        eb.and([
+          eb("reservation_start_ts", "is not", null),
+          eb("reservation_start_ts", "<=", toMs)
+        ]),
+        eb.and([
+          eb("reservation_start_ts", "is", null),
+          eb("reservation_at", "<=", toDateObj!)
+        ])
+      ]));
     }
   }
 
-  const whereClause = sql.join(conditions, sql` AND `);
+  const result = await q
+    .orderBy(sql`CASE WHEN reservation_start_ts IS NULL THEN 0 ELSE 1 END`, "asc")
+    .orderBy("reservation_start_ts", "asc")
+    .orderBy("reservation_at", "asc")
+    .orderBy("id", "asc")
+    .limit(query.limit)
+    .offset(query.offset)
+    .execute();
 
-  const result = await sql<ReservationDbRow>`
-    SELECT id, company_id, outlet_id, table_id, customer_name, customer_phone, guest_count,
-            reservation_at, reservation_start_ts, reservation_end_ts,
-            duration_minutes, status, notes, linked_order_id,
-            created_at, updated_at, arrived_at, seated_at, cancelled_at, status_id
-     FROM reservations
-     WHERE ${whereClause}
-     ORDER BY reservation_start_ts IS NULL ASC, reservation_start_ts ASC, reservation_at ASC, id ASC
-     LIMIT ${query.limit} OFFSET ${query.offset}
-  `.execute(db);
-
-  return result.rows.map(mapRow);
+  return result.map((row) => mapRow(row as ReservationDbRow));
 }
 
 /**
@@ -189,13 +285,14 @@ export async function readReservationOutletId(
   reservationId: number
 ): Promise<number | null> {
   const db = getDb();
-  const result = await sql<{ outlet_id: number }>`
-    SELECT outlet_id FROM reservations WHERE id = ${reservationId} AND company_id = ${companyId} LIMIT 1
-  `.execute(db);
-  if (result.rows.length === 0) {
-    return null;
-  }
-  return Number(result.rows[0]!.outlet_id);
+  const row = await db
+    .selectFrom("reservations")
+    .where("company_id", "=", companyId)
+    .where("id", "=", reservationId)
+    .select(["outlet_id"])
+    .executeTakeFirst();
+  
+  return row ? Number(row.outlet_id) : null;
 }
 
 /**
@@ -219,25 +316,33 @@ async function getReservationV2WithConnection(
   companyId: bigint,
   outletId: bigint
 ): Promise<Reservation | null> {
-  const result = await sql<ReservationDbRow>`
-    SELECT
-      id, company_id, outlet_id, table_id,
-      status_id, status,
-      guest_count,
-      customer_name, customer_phone,
-      reservation_at, reservation_start_ts, reservation_end_ts,
-      duration_minutes, notes,
-      created_at, updated_at
-    FROM reservations
-    WHERE id = ${id} AND company_id = ${companyId} AND outlet_id = ${outletId}
-    LIMIT 1
-  `.execute(db);
+  const row = await db
+    .selectFrom("reservations")
+    .where("id", "=", Number(id))
+    .where("company_id", "=", Number(companyId))
+    .where("outlet_id", "=", Number(outletId))
+    .select([
+      "id", "company_id", "outlet_id", "table_id",
+      "status_id", "status",
+      "guest_count",
+      "customer_name", "customer_phone",
+      "reservation_at", "reservation_start_ts", "reservation_end_ts",
+      "duration_minutes", "notes",
+      "created_at", "updated_at"
+    ])
+    .executeTakeFirst();
 
-  if (result.rows.length === 0) {
+  if (!row) {
     return null;
   }
 
-  return mapDbRowToReservation(result.rows[0]!);
+  return mapDbRowToReservation(row as unknown as ReservationDbRow);
+}
+
+// Extended type for listReservationsV2 result including joined columns
+interface ListReservationsV2Row extends ReservationDbRow {
+  table_code: string | null;
+  table_name: string | null;
 }
 
 /**
@@ -251,10 +356,12 @@ export async function listReservationsV2(
   params: ListReservationsParams
 ): Promise<{ reservations: Reservation[]; total: number }> {
   const db = getDb();
-  const conditions: ReturnType<typeof sql>[] = [
-    sql`r.company_id = ${params.companyId}`,
-    sql`r.outlet_id = ${params.outletId}`
-  ];
+  
+  // Build base query with company and outlet filters
+  let baseQuery = db
+    .selectFrom("reservations as r")
+    .where("r.company_id", "=", Number(params.companyId))
+    .where("r.outlet_id", "=", Number(params.outletId));
 
   // Add optional filters with fallback to legacy columns
   if (params.statusId !== undefined) {
@@ -266,91 +373,149 @@ export async function listReservationsV2(
       [ReservationStatusV2.CANCELLED]: 'CANCELLED',
       [ReservationStatusV2.COMPLETED]: 'COMPLETED'
     };
-    const legacyStatus = legacyStatusMap[params.statusId];
+    const statusId = params.statusId;
+    const legacyStatus = legacyStatusMap[statusId];
     if (legacyStatus) {
-      conditions.push(sql`(r.status_id = ${params.statusId} OR r.status = ${legacyStatus})`);
+      baseQuery = baseQuery.where((eb) => 
+        eb.or([
+          eb("r.status_id", "=", statusId),
+          eb("r.status", "=", legacyStatus)
+        ])
+      );
     } else {
-      conditions.push(sql`r.status_id = ${params.statusId}`);
+      baseQuery = baseQuery.where("r.status_id", "=", statusId);
     }
   }
 
   if (params.tableId !== undefined) {
-    conditions.push(sql`r.table_id = ${params.tableId}`);
+    baseQuery = baseQuery.where("r.table_id", "=", Number(params.tableId));
   }
 
   if (params.customerName) {
-    conditions.push(sql`r.customer_name LIKE ${`%${params.customerName}%`}`);
+    baseQuery = baseQuery.where("r.customer_name", "like", `%${params.customerName}%`);
   }
+
+  // Store date values to avoid TypeScript narrowing issues inside expression builder
+  const fromDate = params.fromDate;
+  const toDate = params.toDate;
+  const fromDateDb = fromDate ? toDbDateTime(fromDate) : undefined;
+  const toDateDb = toDate ? toDbDateTime(toDate) : undefined;
+  const fromDateMs = fromDate ? toUnixMs(fromDate) : undefined;
+  const toDateMs = toDate ? toUnixMs(toDate) : undefined;
 
   // Date filtering: calendar mode uses interval overlap, report mode uses point-in-time
-  if (params.fromDate && params.toDate) {
+  if (fromDateMs !== undefined && toDateMs !== undefined) {
     if (params.useOverlapFilter) {
-      conditions.push(sql`
-        ((r.reservation_start_ts IS NOT NULL AND r.reservation_end_ts IS NOT NULL 
-          AND r.reservation_start_ts < ${toUnixMs(params.toDate) + 1} AND r.reservation_end_ts > ${toUnixMs(params.fromDate)}) 
-        OR (r.reservation_start_ts IS NULL AND r.reservation_at >= ${toDbDateTime(params.fromDate)} AND r.reservation_at <= ${toDbDateTime(params.toDate)}))
-      `);
+      baseQuery = baseQuery.where((eb) => eb.or([
+        eb.and([
+          eb("r.reservation_start_ts", "is not", null),
+          eb("r.reservation_end_ts", "is not", null),
+          eb("r.reservation_start_ts", "<", toDateMs + 1),
+          eb("r.reservation_end_ts", ">", fromDateMs)
+        ]),
+        eb.and([
+          eb("r.reservation_start_ts", "is", null),
+          eb("r.reservation_at", ">=", fromDate!),
+          eb("r.reservation_at", "<=", toDate!)
+        ])
+      ]));
     } else {
-      conditions.push(sql`
-        ((r.reservation_start_ts IS NOT NULL AND r.reservation_start_ts >= ${toUnixMs(params.fromDate)} AND r.reservation_start_ts <= ${toUnixMs(params.toDate)}) 
-        OR (r.reservation_start_ts IS NULL AND r.reservation_at >= ${toDbDateTime(params.fromDate)} AND r.reservation_at <= ${toDbDateTime(params.toDate)}))
-      `);
+      baseQuery = baseQuery.where((eb) => eb.or([
+        eb.and([
+          eb("r.reservation_start_ts", "is not", null),
+          eb("r.reservation_start_ts", ">=", fromDateMs),
+          eb("r.reservation_start_ts", "<=", toDateMs)
+        ]),
+        eb.and([
+          eb("r.reservation_start_ts", "is", null),
+          eb("r.reservation_at", ">=", fromDate!),
+          eb("r.reservation_at", "<=", toDate!)
+        ])
+      ]));
     }
-  } else if (params.fromDate) {
+  } else if (fromDateMs !== undefined) {
     if (params.useOverlapFilter) {
-      conditions.push(sql`
-        ((r.reservation_start_ts IS NOT NULL AND r.reservation_end_ts IS NOT NULL AND r.reservation_end_ts > ${toUnixMs(params.fromDate)}) 
-        OR (r.reservation_start_ts IS NULL AND r.reservation_at >= ${toDbDateTime(params.fromDate)}))
-      `);
+      baseQuery = baseQuery.where((eb) => eb.or([
+        eb.and([
+          eb("r.reservation_start_ts", "is not", null),
+          eb("r.reservation_end_ts", "is not", null),
+          eb("r.reservation_end_ts", ">", fromDateMs)
+        ]),
+        eb.and([
+          eb("r.reservation_start_ts", "is", null),
+          eb("r.reservation_at", ">=", fromDate!)
+        ])
+      ]));
     } else {
-      conditions.push(sql`
-        ((r.reservation_start_ts IS NOT NULL AND r.reservation_start_ts >= ${toUnixMs(params.fromDate)}) 
-        OR (r.reservation_start_ts IS NULL AND r.reservation_at >= ${toDbDateTime(params.fromDate)}))
-      `);
+      baseQuery = baseQuery.where((eb) => eb.or([
+        eb.and([
+          eb("r.reservation_start_ts", "is not", null),
+          eb("r.reservation_start_ts", ">=", fromDateMs)
+        ]),
+        eb.and([
+          eb("r.reservation_start_ts", "is", null),
+          eb("r.reservation_at", ">=", fromDate!)
+        ])
+      ]));
     }
-  } else if (params.toDate) {
+  } else if (toDateMs !== undefined) {
     if (params.useOverlapFilter) {
-      conditions.push(sql`
-        ((r.reservation_start_ts IS NOT NULL AND r.reservation_start_ts < ${toUnixMs(params.toDate) + 1}) 
-        OR (r.reservation_start_ts IS NULL AND r.reservation_at <= ${toDbDateTime(params.toDate)}))
-      `);
+      baseQuery = baseQuery.where((eb) => eb.or([
+        eb.and([
+          eb("r.reservation_start_ts", "is not", null),
+          eb("r.reservation_start_ts", "<", toDateMs + 1)
+        ]),
+        eb.and([
+          eb("r.reservation_start_ts", "is", null),
+          eb("r.reservation_at", "<=", toDate!)
+        ])
+      ]));
     } else {
-      conditions.push(sql`
-        ((r.reservation_start_ts IS NOT NULL AND r.reservation_start_ts <= ${toUnixMs(params.toDate)}) 
-        OR (r.reservation_start_ts IS NULL AND r.reservation_at <= ${toDbDateTime(params.toDate)}))
-      `);
+      baseQuery = baseQuery.where((eb) => eb.or([
+        eb.and([
+          eb("r.reservation_start_ts", "is not", null),
+          eb("r.reservation_start_ts", "<=", toDateMs)
+        ]),
+        eb.and([
+          eb("r.reservation_start_ts", "is", null),
+          eb("r.reservation_at", "<=", toDate!)
+        ])
+      ]));
     }
   }
 
-  const whereClause = sql.join(conditions, sql` AND `);
-
   // Get total count
-  const countResult = await sql<{ total: number }>`
-    SELECT COUNT(*) as total FROM reservations r WHERE ${whereClause}
-  `.execute(db);
-  const total = Number(countResult.rows[0]?.total ?? 0);
+  const countResult = await baseQuery
+    .select((eb) => eb.fn.count("r.id").as("total"))
+    .executeTakeFirst();
+  const total = Number(countResult?.total ?? 0);
 
   // Get reservations with pagination
-  const result = await sql<ReservationDbRow>`
-    SELECT
-      r.id, r.company_id, r.outlet_id, r.table_id,
-      r.status_id, r.status,
-      r.guest_count,
-      r.customer_name, r.customer_phone,
-      r.reservation_at, r.reservation_start_ts, r.reservation_end_ts,
-      r.duration_minutes, r.notes,
-      r.created_at, r.updated_at,
-      ot.code as table_code, ot.name as table_name
-    FROM reservations r
-    LEFT JOIN outlet_tables ot ON r.table_id = ot.id
-      AND r.company_id = ot.company_id
-      AND r.outlet_id = ot.outlet_id
-    WHERE ${whereClause}
-    ORDER BY r.reservation_start_ts IS NULL ASC, r.reservation_start_ts ASC, r.reservation_at ASC, r.id ASC
-    LIMIT ${params.limit} OFFSET ${params.offset}
-  `.execute(db);
+  const result = await baseQuery
+    .leftJoin("outlet_tables as ot", (join) => join
+      .onRef("r.table_id", "=", "ot.id")
+      .onRef("r.company_id", "=", "ot.company_id")
+      .onRef("r.outlet_id", "=", "ot.outlet_id")
+    )
+    .select([
+      "r.id", "r.company_id", "r.outlet_id", "r.table_id",
+      "r.status_id", "r.status",
+      "r.guest_count",
+      "r.customer_name", "r.customer_phone",
+      "r.reservation_at", "r.reservation_start_ts", "r.reservation_end_ts",
+      "r.duration_minutes", "r.notes",
+      "r.created_at", "r.updated_at",
+      "ot.code as table_code", "ot.name as table_name"
+    ])
+    .orderBy(sql`CASE WHEN r.reservation_start_ts IS NULL THEN 0 ELSE 1 END`, "asc")
+    .orderBy("r.reservation_start_ts", "asc")
+    .orderBy("r.reservation_at", "asc")
+    .orderBy("r.id", "asc")
+    .limit(params.limit)
+    .offset(params.offset)
+    .execute();
 
-  const reservations = result.rows.map(mapDbRowToReservation);
+  const reservations = result.map((row) => mapDbRowToReservation(row as unknown as ListReservationsV2Row));
 
   return { reservations, total };
 }
@@ -387,79 +552,43 @@ export async function createReservation(
     const reservationStartTs = toUnixMs(input.reservation_at);
     const effectiveDurationMinutes = await resolveEffectiveDurationMinutes(companyId, input.duration_minutes);
     const reservationEndTs = reservationStartTs + effectiveDurationMinutes * 60000;
+    const reservationCode = await generateReservationCodeWithConnection(trx, BigInt(input.outlet_id));
+    const caps = await getReservationSchemaCaps(trx);
 
-    // Generate a reservation code for the new reservation
-    const reservationCode = await generateReservationCodeWithConnection(
-      trx,
-      BigInt(input.outlet_id)
-    );
+    // Build INSERT values dynamically based on schema capabilities
+    const insertData: Record<string, unknown> = {
+      company_id: companyId,
+      outlet_id: input.outlet_id,
+      table_id: input.table_id ?? null,
+      customer_name: input.customer_name,
+      customer_phone: input.customer_phone ?? null,
+      guest_count: input.guest_count,
+      reservation_at: reservationAtDb,
+      duration_minutes: input.duration_minutes ?? null,
+      status: "BOOKED",
+      notes: input.notes ?? null,
+    };
 
-    // Check which columns exist to build the appropriate INSERT
-    const hasReservationCodeCol = await columnExists(trx, 'reservations', 'reservation_code');
-    const hasStatusIdCol = await columnExists(trx, 'reservations', 'status_id');
-    const hasCreatedByCol = await columnExists(trx, 'reservations', 'created_by');
-    const hasReservationStartTsCol = await columnExists(trx, 'reservations', 'reservation_start_ts');
-    const hasReservationEndTsCol = await columnExists(trx, 'reservations', 'reservation_end_ts');
-    const hasCanonicalTsCols = hasReservationStartTsCol && hasReservationEndTsCol;
-
-    let insertResult;
-    if (hasReservationCodeCol && hasStatusIdCol && hasCreatedByCol && hasCanonicalTsCols) {
-      // All new columns exist
-      insertResult = await sql`
-        INSERT INTO reservations (
-          company_id, outlet_id, table_id, customer_name, customer_phone,
-          guest_count, reservation_at, reservation_start_ts, reservation_end_ts,
-          duration_minutes, status, notes,
-          reservation_code, status_id, created_by
-        ) VALUES (
-          ${companyId}, ${input.outlet_id}, ${input.table_id ?? null}, ${input.customer_name},
-          ${input.customer_phone ?? null}, ${input.guest_count}, ${reservationAtDb},
-          ${reservationStartTs}, ${reservationEndTs}, ${input.duration_minutes ?? null},
-          'BOOKED', ${input.notes ?? null}, ${reservationCode}, ${ReservationStatusV2.PENDING}, 'system'
-        )
-      `.execute(trx);
-    } else if (hasReservationCodeCol && hasStatusIdCol && hasCreatedByCol) {
-      insertResult = await sql`
-        INSERT INTO reservations (
-          company_id, outlet_id, table_id, customer_name, customer_phone,
-          guest_count, reservation_at, duration_minutes, status, notes,
-          reservation_code, status_id, created_by
-        ) VALUES (
-          ${companyId}, ${input.outlet_id}, ${input.table_id ?? null}, ${input.customer_name},
-          ${input.customer_phone ?? null}, ${input.guest_count}, ${reservationAtDb},
-          ${input.duration_minutes ?? null}, 'BOOKED', ${input.notes ?? null},
-          ${reservationCode}, ${ReservationStatusV2.PENDING}, 'system'
-        )
-      `.execute(trx);
-    } else if (hasCanonicalTsCols) {
-      insertResult = await sql`
-        INSERT INTO reservations (
-          company_id, outlet_id, table_id, customer_name, customer_phone,
-          guest_count, reservation_at, reservation_start_ts, reservation_end_ts,
-          duration_minutes, status, status_id, notes
-        ) VALUES (
-          ${companyId}, ${input.outlet_id}, ${input.table_id ?? null}, ${input.customer_name},
-          ${input.customer_phone ?? null}, ${input.guest_count}, ${reservationAtDb},
-          ${reservationStartTs}, ${reservationEndTs}, ${input.duration_minutes ?? null},
-          'BOOKED', 1, ${input.notes ?? null}
-        )
-      `.execute(trx);
-    } else {
-      // Use legacy columns only
-      insertResult = await sql`
-        INSERT INTO reservations (
-          company_id, outlet_id, table_id, customer_name, customer_phone,
-          guest_count, reservation_at, duration_minutes, status, status_id, notes
-        ) VALUES (
-          ${companyId}, ${input.outlet_id}, ${input.table_id ?? null}, ${input.customer_name},
-          ${input.customer_phone ?? null}, ${input.guest_count}, ${reservationAtDb},
-          ${input.duration_minutes ?? null}, 'BOOKED', 1, ${input.notes ?? null}
-        )
-      `.execute(trx);
+    if (caps.hasReservationCode) {
+      insertData.reservation_code = reservationCode;
+    }
+    if (caps.hasStatusId) {
+      insertData.status_id = ReservationStatusV2.PENDING;
+    }
+    if (caps.hasCreatedBy) {
+      insertData.created_by = "system";
+    }
+    if (caps.hasCanonicalTs) {
+      insertData.reservation_start_ts = reservationStartTs;
+      insertData.reservation_end_ts = reservationEndTs;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const reservationId = Number((insertResult as any).insertId ?? 0);
+    const insertResult = await trx
+      .insertInto("reservations")
+      .values(insertData as any)
+      .executeTakeFirst();
+
+    const reservationId = Number(insertResult!.insertId);
     const row = await readReservationForUpdate(trx, companyId, reservationId);
     return mapRow(row);
   });
@@ -526,14 +655,40 @@ export async function updateReservation(
       }
     }
 
-    const hasReservationStartTsCol = await columnExists(trx, 'reservations', 'reservation_start_ts');
-    const hasReservationEndTsCol = await columnExists(trx, 'reservations', 'reservation_end_ts');
+    const caps = await getReservationSchemaCaps(trx);
 
-    if (hasReservationStartTsCol && hasReservationEndTsCol) {
-      await sql`UPDATE reservations SET table_id = ${nextTableId}, customer_name = ${patch.customer_name ?? current.customer_name}, customer_phone = ${patch.customer_phone === undefined ? current.customer_phone : patch.customer_phone}, guest_count = ${patch.guest_count ?? current.guest_count}, reservation_at = ${nextReservationAtDb}, reservation_start_ts = ${reservationStartTs}, reservation_end_ts = ${reservationEndTs}, duration_minutes = ${nextDurationMinutes}, status = ${nextStatus}, notes = ${patch.notes === undefined ? current.notes : patch.notes}, arrived_at = CASE WHEN ${nextStatus} = 'ARRIVED' THEN CURRENT_TIMESTAMP ELSE arrived_at END, seated_at = CASE WHEN ${nextStatus} = 'SEATED' THEN CURRENT_TIMESTAMP ELSE seated_at END, cancelled_at = CASE WHEN ${nextStatus} IN ('CANCELLED', 'NO_SHOW') THEN CURRENT_TIMESTAMP ELSE cancelled_at END, updated_at = CURRENT_TIMESTAMP WHERE company_id = ${companyId} AND id = ${reservationId}`.execute(trx);
-    } else {
-      await sql`UPDATE reservations SET table_id = ${nextTableId}, customer_name = ${patch.customer_name ?? current.customer_name}, customer_phone = ${patch.customer_phone === undefined ? current.customer_phone : patch.customer_phone}, guest_count = ${patch.guest_count ?? current.guest_count}, reservation_at = ${nextReservationAtDb}, duration_minutes = ${nextDurationMinutes}, status = ${nextStatus}, notes = ${patch.notes === undefined ? current.notes : patch.notes}, arrived_at = CASE WHEN ${nextStatus} = 'ARRIVED' THEN CURRENT_TIMESTAMP ELSE arrived_at END, seated_at = CASE WHEN ${nextStatus} = 'SEATED' THEN CURRENT_TIMESTAMP ELSE seated_at END, cancelled_at = CASE WHEN ${nextStatus} IN ('CANCELLED', 'NO_SHOW') THEN CURRENT_TIMESTAMP ELSE cancelled_at END, updated_at = CURRENT_TIMESTAMP WHERE company_id = ${companyId} AND id = ${reservationId}`.execute(trx);
+    // Build update data with conditional timestamp handling
+    const updateData: Record<string, unknown> = {
+      table_id: nextTableId,
+      customer_name: patch.customer_name ?? current.customer_name,
+      customer_phone: patch.customer_phone === undefined ? current.customer_phone : patch.customer_phone,
+      guest_count: patch.guest_count ?? current.guest_count,
+      reservation_at: nextReservationAtDb,
+      duration_minutes: nextDurationMinutes,
+      status: nextStatus,
+      notes: patch.notes === undefined ? current.notes : patch.notes,
+      updated_at: new Date(),
+    };
+
+    // Conditional timestamp updates based on new status
+    if (caps.hasCanonicalTs) {
+      updateData.reservation_start_ts = reservationStartTs;
+      updateData.reservation_end_ts = reservationEndTs;
     }
+
+    // Handle arrived_at, seated_at, cancelled_at - preserve old value unless status changed to trigger
+    updateData.arrived_at = nextStatus === "ARRIVED" ? new Date() : current.arrived_at;
+    updateData.seated_at = nextStatus === "SEATED" ? new Date() : current.seated_at;
+    updateData.cancelled_at = nextStatus != null && ["CANCELLED", "NO_SHOW"].includes(nextStatus) ? new Date() : current.cancelled_at;
+
+    // Build update query
+    const updateQuery = trx
+      .updateTable("reservations")
+      .set(updateData)
+      .where("company_id", "=", companyId)
+      .where("id", "=", reservationId);
+
+    await updateQuery.execute();
 
     const impactedTableIds = new Set<number>();
     if (current.table_id != null) {
@@ -596,84 +751,45 @@ export async function createReservationV2(
     );
     const reservationEndTs = reservationStartTs + effectiveDurationMinutes * 60000;
 
-    // Insert reservation — check which columns exist to build the appropriate INSERT
-    const hasReservationCode = await columnExists(trx, 'reservations', 'reservation_code');
-    const hasCustomerEmail = await columnExists(trx, 'reservations', 'customer_email');
-    const hasCreatedBy = await columnExists(trx, 'reservations', 'created_by');
-    const hasStatusId = await columnExists(trx, 'reservations', 'status_id');
-    const hasReservationStartTs = await columnExists(trx, 'reservations', 'reservation_start_ts');
-    const hasReservationEndTs = await columnExists(trx, 'reservations', 'reservation_end_ts');
-    const hasCanonicalTsCols = hasReservationStartTs && hasReservationEndTs;
+    const caps = await getReservationSchemaCaps(trx);
 
-    let insertResult;
-    if (hasReservationCode && hasCustomerEmail && hasCreatedBy && hasStatusId && hasCanonicalTsCols) {
-      // All new columns exist
-      insertResult = await sql`
-        INSERT INTO reservations (
-          company_id, outlet_id, table_id,
-          customer_name, customer_phone,
-          guest_count, reservation_at, reservation_start_ts, reservation_end_ts,
-          duration_minutes,
-          status, notes, reservation_code, customer_email,
-          created_by, status_id
-        ) VALUES (
-          ${input.companyId}, ${input.outletId}, ${tableId},
-          ${input.customerName}, ${input.customerPhone ?? null},
-          ${input.partySize}, ${reservationAt}, ${reservationStartTs}, ${reservationEndTs},
-          ${durationMinutes},
-          'BOOKED', ${input.notes ?? null}, ${reservationCode}, ${input.customerEmail ?? null},
-          ${input.createdBy}, ${ReservationStatusV2.PENDING}
-        )
-      `.execute(trx);
-    } else if (hasReservationCode && hasCustomerEmail && hasCreatedBy && hasStatusId) {
-      insertResult = await sql`
-        INSERT INTO reservations (
-          company_id, outlet_id, table_id,
-          customer_name, customer_phone,
-          guest_count, reservation_at, duration_minutes,
-          status, notes, reservation_code, customer_email,
-          created_by, status_id
-        ) VALUES (
-          ${input.companyId}, ${input.outletId}, ${tableId},
-          ${input.customerName}, ${input.customerPhone ?? null},
-          ${input.partySize}, ${reservationAt}, ${durationMinutes},
-          'BOOKED', ${input.notes ?? null}, ${reservationCode}, ${input.customerEmail ?? null},
-          ${input.createdBy}, ${ReservationStatusV2.PENDING}
-        )
-      `.execute(trx);
-    } else if (hasCanonicalTsCols) {
-      insertResult = await sql`
-        INSERT INTO reservations (
-          company_id, outlet_id, table_id,
-          customer_name, customer_phone,
-          guest_count, reservation_at, reservation_start_ts, reservation_end_ts,
-          duration_minutes, status, status_id, notes
-        ) VALUES (
-          ${input.companyId}, ${input.outletId}, ${tableId},
-          ${input.customerName}, ${input.customerPhone ?? null},
-          ${input.partySize}, ${reservationAt}, ${reservationStartTs}, ${reservationEndTs},
-          ${durationMinutes}, 'BOOKED', 1, ${input.notes ?? null}
-        )
-      `.execute(trx);
-    } else {
-      // Use legacy columns only
-      insertResult = await sql`
-        INSERT INTO reservations (
-          company_id, outlet_id, table_id,
-          customer_name, customer_phone,
-          guest_count, reservation_at, duration_minutes,
-          status, status_id, notes
-        ) VALUES (
-          ${input.companyId}, ${input.outletId}, ${tableId},
-          ${input.customerName}, ${input.customerPhone ?? null},
-          ${input.partySize}, ${reservationAt}, ${durationMinutes},
-          'BOOKED', 1, ${input.notes ?? null}
-        )
-      `.execute(trx);
+    // Build INSERT values dynamically based on schema capabilities
+    const insertData: Record<string, unknown> = {
+      company_id: input.companyId,
+      outlet_id: input.outletId,
+      table_id: tableId,
+      customer_name: input.customerName,
+      customer_phone: input.customerPhone ?? null,
+      guest_count: input.partySize,
+      reservation_at: reservationAt,
+      duration_minutes: durationMinutes,
+      status: "BOOKED",
+      notes: input.notes ?? null,
+    };
+
+    if (caps.hasReservationCode) {
+      insertData.reservation_code = reservationCode;
+    }
+    if (caps.hasCustomerEmail) {
+      insertData.customer_email = input.customerEmail ?? null;
+    }
+    if (caps.hasCreatedBy) {
+      insertData.created_by = input.createdBy;
+    }
+    if (caps.hasStatusId) {
+      insertData.status_id = ReservationStatusV2.PENDING;
+    }
+    if (caps.hasCanonicalTs) {
+      insertData.reservation_start_ts = reservationStartTs;
+      insertData.reservation_end_ts = reservationEndTs;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const reservationId = BigInt((insertResult as any).insertId ?? 0);
+    const insertResult = await trx
+      .insertInto("reservations")
+      .values(insertData as any)
+      .executeTakeFirst();
+
+    const reservationId = BigInt(Number(insertResult?.insertId ?? 0));
 
     // Fetch within the transaction so a failed fetch causes rollback (no orphan)
     const reservation = await getReservationV2WithConnection(

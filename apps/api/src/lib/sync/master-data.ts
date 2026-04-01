@@ -328,14 +328,15 @@ export async function listActiveReservations(companyId: number, outletId: number
 
 /**
  * Get current sync data version for a company.
- * Uses Kysely for type-safe queries.
+ * Uses the unified sync_versions table with tier = NULL for data sync.
  */
 export async function getCompanyDataVersion(companyId: number): Promise<number> {
   const db = getDb();
 
   const row = await db
-    .selectFrom("sync_data_versions")
+    .selectFrom("sync_versions")
     .where("company_id", "=", companyId)
+    .where("tier", "is", null)
     .select(["current_version"])
     .executeTakeFirst();
 

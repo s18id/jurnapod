@@ -249,48 +249,45 @@ async function readOutletAccountMappingByKey(
   const requiredKeys = ["SALES_REVENUE", "AR"] as const;
   const requiredTypeIds = requiredKeys.map((key) => ACCOUNT_MAPPING_TYPE_ID_BY_CODE[key]);
 
-  const outletResult = await sql<{ mapping_type_id: number | null; mapping_key: string | null; account_id: number | null }>`
-    SELECT mapping_type_id, mapping_key, account_id
-    FROM outlet_account_mappings
-    WHERE company_id = ${context.companyId}
-      AND outlet_id = ${context.outletId}
-      AND (mapping_type_id IN (${sql.join(requiredTypeIds.map(id => sql`${id}`), sql`, `)}) OR mapping_key IN (${sql.join(requiredKeys.map(k => sql`${k}`), sql`, `)}))
-  `.execute(db);
+  // Query outlet-specific account_mappings first (prioritized)
+  const outletRows = await db
+    .selectFrom("account_mappings")
+    .select(["mapping_type_id", "mapping_key", "account_id", "outlet_id"])
+    .where("company_id", "=", context.companyId)
+    .where("outlet_id", "=", context.outletId)
+    .where((eb) => eb.or([
+      eb("mapping_type_id", "in", requiredTypeIds),
+      eb("mapping_key", "in", requiredKeys)
+    ]))
+    .execute();
+
+  // Query company-wide account_mappings as fallback
+  const companyRows = await db
+    .selectFrom("account_mappings")
+    .select(["mapping_type_id", "mapping_key", "account_id", "outlet_id"])
+    .where("company_id", "=", context.companyId)
+    .where("outlet_id", "is", null)
+    .where((eb) => eb.or([
+      eb("mapping_type_id", "in", requiredTypeIds),
+      eb("mapping_key", "in", requiredKeys)
+    ]))
+    .execute();
 
   const accountByKey = new Map<string, number>();
-  for (const row of outletResult.rows) {
+
+  // Process company-wide first, then outlet-specific (outlet overrides company)
+  for (const row of companyRows) {
     const mappingCode = resolveMappingCode(row);
-    if (!mappingCode || !Number.isFinite(row.account_id)) {
-      continue;
-    }
-
-    if (!requiredKeys.includes(mappingCode as typeof requiredKeys[number])) {
-      continue;
-    }
-
+    if (!mappingCode || !Number.isFinite(row.account_id)) continue;
+    if (!requiredKeys.includes(mappingCode as typeof requiredKeys[number])) continue;
     accountByKey.set(mappingCode, Number(row.account_id));
   }
 
-  const companyResult = await sql<{ mapping_type_id: number | null; mapping_key: string | null; account_id: number | null }>`
-    SELECT mapping_type_id, mapping_key, account_id
-    FROM company_account_mappings
-    WHERE company_id = ${context.companyId}
-      AND (mapping_type_id IN (${sql.join(requiredTypeIds.map(id => sql`${id}`), sql`, `)}) OR mapping_key IN (${sql.join(requiredKeys.map(k => sql`${k}`), sql`, `)}))
-  `.execute(db);
-
-  for (const row of companyResult.rows) {
+  for (const row of outletRows) {
     const mappingCode = resolveMappingCode(row);
-    if (!mappingCode || !Number.isFinite(row.account_id)) {
-      continue;
-    }
-
-    if (!requiredKeys.includes(mappingCode as typeof requiredKeys[number])) {
-      continue;
-    }
-
-    if (!accountByKey.has(mappingCode)) {
-      accountByKey.set(mappingCode, Number(row.account_id));
-    }
+    if (!mappingCode || !Number.isFinite(row.account_id)) continue;
+    if (!requiredKeys.includes(mappingCode as typeof requiredKeys[number])) continue;
+    accountByKey.set(mappingCode, Number(row.account_id));
   }
 
   const missingKeys = requiredKeys.filter((key) => !accountByKey.has(key));
@@ -313,66 +310,79 @@ async function readOutletPaymentMethodMappings(
   db: KyselySchema,
   context: SyncPushPostingContext
 ): Promise<Map<string, number>> {
-  let rows: Array<{ method_code?: string; account_id?: number }> = [];
-  try {
-    const paymentResult = await sql<{ method_code: string | null; account_id: number | null }>`
-      SELECT method_code, account_id
-      FROM outlet_payment_method_mappings
-      WHERE company_id = ${context.companyId}
-        AND outlet_id = ${context.outletId}
-    `.execute(db);
-    rows = paymentResult.rows.map(row => ({
-      method_code: row.method_code ?? undefined,
-      account_id: row.account_id ?? undefined
-    }));
-  } catch (error) {
-    if (!isNoSuchTableError(error)) {
-      throw error;
-    }
-  }
-
   const accountByMethod = new Map<string, number>();
-  for (const row of rows) {
-    if (!row.method_code || !Number.isFinite(row.account_id)) {
-      continue;
-    }
+
+  // Query payment_method_mappings: outlet-specific first
+  const outletPaymentRows = await db
+    .selectFrom("payment_method_mappings")
+    .select(["method_code", "account_id", "outlet_id"])
+    .where("company_id", "=", context.companyId)
+    .where("outlet_id", "=", context.outletId)
+    .execute();
+
+  for (const row of outletPaymentRows) {
+    if (!row.method_code || !Number.isFinite(row.account_id)) continue;
     const methodCode = normalizePaymentMethodCode(String(row.method_code));
     accountByMethod.set(methodCode, Number(row.account_id));
   }
 
-  const fallbackKeys = ["CASH", "QRIS", "CARD"];
-  const fallbackTypeIds = fallbackKeys.map((key) => ACCOUNT_MAPPING_TYPE_ID_BY_CODE[key as keyof typeof ACCOUNT_MAPPING_TYPE_ID_BY_CODE]);
+  // Query payment_method_mappings: company-wide fallback
+  const companyPaymentRows = await db
+    .selectFrom("payment_method_mappings")
+    .select(["method_code", "account_id", "outlet_id"])
+    .where("company_id", "=", context.companyId)
+    .where("outlet_id", "is", null)
+    .execute();
 
-  const fallbackResult = await sql<{ mapping_type_id: number | null; mapping_key: string | null; account_id: number | null }>`
-    SELECT mapping_type_id, mapping_key, account_id
-    FROM outlet_account_mappings
-    WHERE company_id = ${context.companyId}
-      AND outlet_id = ${context.outletId}
-      AND (mapping_type_id IN (${sql.join(fallbackTypeIds.map(id => sql`${id}`), sql`, `)}) OR mapping_key IN (${sql.join(fallbackKeys.map(k => sql`${k}`), sql`, `)}))
-  `.execute(db);
-
-  for (const row of fallbackResult.rows) {
-    const mappingCode = resolveMappingCode(row);
-    if (!mappingCode || !Number.isFinite(row.account_id)) {
-      continue;
+  for (const row of companyPaymentRows) {
+    if (!row.method_code || !Number.isFinite(row.account_id)) continue;
+    const methodCode = normalizePaymentMethodCode(String(row.method_code));
+    if (!accountByMethod.has(methodCode)) {
+      accountByMethod.set(methodCode, Number(row.account_id));
     }
+  }
+
+  // Fallback to account_mappings for standard payment methods
+  const fallbackKeys = ["CASH", "QRIS", "CARD"] as const;
+  const fallbackTypeIds = fallbackKeys.map((key) => ACCOUNT_MAPPING_TYPE_ID_BY_CODE[key]);
+
+  // Query account_mappings: outlet-specific first
+  const outletMappingRows = await db
+    .selectFrom("account_mappings")
+    .select(["mapping_type_id", "mapping_key", "account_id"])
+    .where("company_id", "=", context.companyId)
+    .where("outlet_id", "=", context.outletId)
+    .where((eb) => eb.or([
+      eb("mapping_type_id", "in", fallbackTypeIds),
+      eb("mapping_key", "in", fallbackKeys)
+    ]))
+    .execute();
+
+  for (const row of outletMappingRows) {
+    const mappingCode = resolveMappingCode(row);
+    if (!mappingCode || !Number.isFinite(row.account_id)) continue;
     const methodCode = normalizePaymentMethodCode(mappingCode);
     if (!accountByMethod.has(methodCode)) {
       accountByMethod.set(methodCode, Number(row.account_id));
     }
   }
 
-  const companyResult = await sql<{ method_code: string | null; account_id: number | null }>`
-    SELECT method_code, account_id
-    FROM company_payment_method_mappings
-    WHERE company_id = ${context.companyId}
-  `.execute(db);
+  // Query account_mappings: company-wide fallback
+  const companyMappingRows = await db
+    .selectFrom("account_mappings")
+    .select(["mapping_type_id", "mapping_key", "account_id"])
+    .where("company_id", "=", context.companyId)
+    .where("outlet_id", "is", null)
+    .where((eb) => eb.or([
+      eb("mapping_type_id", "in", fallbackTypeIds),
+      eb("mapping_key", "in", fallbackKeys)
+    ]))
+    .execute();
 
-  for (const row of companyResult.rows) {
-    if (!row.method_code || !Number.isFinite(row.account_id)) {
-      continue;
-    }
-    const methodCode = normalizePaymentMethodCode(String(row.method_code));
+  for (const row of companyMappingRows) {
+    const mappingCode = resolveMappingCode(row);
+    if (!mappingCode || !Number.isFinite(row.account_id)) continue;
+    const methodCode = normalizePaymentMethodCode(mappingCode);
     if (!accountByMethod.has(methodCode)) {
       accountByMethod.set(methodCode, Number(row.account_id));
     }

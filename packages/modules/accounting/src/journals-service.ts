@@ -347,6 +347,7 @@ export class JournalsService {
     
     const linesResult = await this.db
       .selectFrom('journal_lines')
+      .selectAll()
       .where('journal_batch_id', 'in', batchIds)
       .orderBy('id', 'asc')
       .execute();

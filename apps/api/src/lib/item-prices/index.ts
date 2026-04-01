@@ -205,40 +205,6 @@ export async function listEffectiveItemPricesForOutlet(
   filters?: { isActive?: boolean }
 ) {
   const db = getDb();
-  const values: Array<number> = [outletId, outletId, companyId];
-
-  let sqlQuery = `
-    SELECT 
-      COALESCE(override.id, def.id) AS id,
-      COALESCE(override.company_id, def.company_id) AS company_id,
-      COALESCE(override.outlet_id, ?) AS outlet_id,
-      COALESCE(override.item_id, def.item_id) AS item_id,
-      COALESCE(override.price, def.price) AS price,
-      COALESCE(override.is_active, def.is_active) AS is_active,
-      COALESCE(override.updated_at, def.updated_at) AS updated_at,
-      i.item_group_id,
-      ig.name AS item_group_name,
-      CASE WHEN override.id IS NOT NULL THEN 1 ELSE 0 END AS is_override
-    FROM items i
-    LEFT JOIN item_prices override ON override.item_id = i.id 
-      AND override.company_id = i.company_id 
-      AND override.outlet_id = ?
-    LEFT JOIN item_prices def ON def.item_id = i.id 
-      AND def.company_id = i.company_id 
-      AND def.outlet_id IS NULL
-    LEFT JOIN item_groups ig ON ig.id = i.item_group_id AND ig.company_id = i.company_id
-    WHERE i.company_id = ?
-      AND (override.id IS NOT NULL OR def.id IS NOT NULL)
-  `;
-
-  if (typeof filters?.isActive === "boolean") {
-    sqlQuery += " AND COALESCE(override.is_active, def.is_active) = ?";
-    values.push(filters.isActive ? 1 : 0);
-    sqlQuery += " AND i.is_active = ?";
-    values.push(filters.isActive ? 1 : 0);
-  }
-
-  sqlQuery += " ORDER BY i.id ASC";
 
   type ItemPriceRow = {
     id: number;
@@ -254,9 +220,56 @@ export async function listEffectiveItemPricesForOutlet(
     is_override: number;
   };
 
-  const rows = await sql<ItemPriceRow>`${sqlQuery}`.execute(db);
+  let query = db
+    .selectFrom("items as i")
+    .leftJoin("item_prices as override", (join) =>
+      join
+        .onRef("override.item_id", "=", "i.id")
+        .onRef("override.company_id", "=", "i.company_id")
+        .on("override.outlet_id", "=", outletId)
+    )
+    .leftJoin("item_prices as def", (join) =>
+      join
+        .onRef("def.item_id", "=", "i.id")
+        .onRef("def.company_id", "=", "i.company_id")
+        .on("def.outlet_id", "is", null)
+    )
+    .leftJoin("item_groups as ig", (join) =>
+      join
+        .onRef("ig.id", "=", "i.item_group_id")
+        .onRef("ig.company_id", "=", "i.company_id")
+    )
+    .where("i.company_id", "=", companyId)
+    .where((eb) =>
+      eb.or([
+        eb("override.id", "is not", null),
+        eb("def.id", "is not", null)
+      ])
+    )
+    .select([
+      sql<number>`COALESCE(override.id, def.id)`.as("id"),
+      sql<number>`COALESCE(override.company_id, def.company_id)`.as("company_id"),
+      sql<number>`COALESCE(override.outlet_id, ${outletId})`.as("outlet_id"),
+      sql<number>`COALESCE(override.item_id, def.item_id)`.as("item_id"),
+      sql<number | null>`COALESCE(override.variant_id, def.variant_id)`.as("variant_id"),
+      sql<string | number>`COALESCE(override.price, def.price)`.as("price"),
+      sql<number>`COALESCE(override.is_active, def.is_active)`.as("is_active"),
+      sql<Date | string>`COALESCE(override.updated_at, def.updated_at)`.as("updated_at"),
+      "i.item_group_id",
+      sql<string | null>`ig.name`.as("item_group_name"),
+      sql<number>`CASE WHEN override.id IS NOT NULL THEN 1 ELSE 0 END`.as("is_override")
+    ]);
 
-  return rows.rows.map((row) => {
+  if (typeof filters?.isActive === "boolean") {
+    const activeValue = filters.isActive ? 1 : 0;
+    query = query
+      .where(sql`COALESCE(override.is_active, def.is_active)`, "=", activeValue)
+      .where("i.is_active", "=", activeValue);
+  }
+
+  const rows = await query.orderBy("i.id", "asc").execute();
+
+  return (rows as ItemPriceRow[]).map((row) => {
     const normalized = normalizeItemPrice(row);
     return {
       ...normalized,
@@ -309,7 +322,8 @@ export async function createItemPrice(
     }
 
     try {
-      const result = await trx
+      // Use native Kysely insert to get insertId via executeTakeFirst
+      const insertResult = await trx
         .insertInto("item_prices")
         .values({
           company_id: companyId,
@@ -319,14 +333,17 @@ export async function createItemPrice(
           price: input.price,
           is_active: input.is_active === false ? 0 : 1
         })
-        .returningAll()
         .executeTakeFirst();
 
-      if (!result) {
-        throw new Error("Created item price not found");
+      const rawInsertId = insertResult.insertId;
+      if (rawInsertId === undefined || rawInsertId === null) {
+        throw new Error("Created item price did not return an ID");
       }
-
-      const itemPrice = await findItemPriceByIdWithExecutor(trx, companyId, Number(result.id));
+      const numericId = typeof rawInsertId === 'bigint' ? Number(rawInsertId) : Number(rawInsertId);
+      if (Number.isNaN(numericId)) {
+        throw new Error("Created item price returned an invalid ID");
+      }
+      const itemPrice = await findItemPriceByIdWithExecutor(trx, companyId, numericId);
       if (!itemPrice) {
         throw new Error("Created item price not found");
       }
