@@ -4,7 +4,17 @@
 
 import { getDb, type KyselySchema } from "@/lib/db";
 import { sql } from "kysely";
-import { withTransaction, type Transaction } from "@jurnapod/db";
+
+async function withExecutorTransaction<T>(
+  db: KyselySchema,
+  callback: (executor: KyselySchema) => Promise<T>
+): Promise<T> {
+  if (db.isTransaction) {
+    return callback(db);
+  }
+
+  return db.transaction().execute(async (trx) => callback(trx as unknown as KyselySchema));
+}
 
 // ============================================================================
 // Types
@@ -163,58 +173,57 @@ class AVGCostingStrategy implements CostingStrategy {
     input: CostCalculationInput,
     db: KyselySchema
   ): Promise<CostCalculationResult> {
-    return withTransaction(db, async (trx) => {
-      // Lock summary row to prevent concurrent updates
-      const summaryRows = await sql<CostSummaryRow>`
-        SELECT costing_method, current_avg_cost, total_layers_qty, total_layers_cost
-        FROM inventory_item_costs
-        WHERE company_id = ${input.companyId} AND item_id = ${input.itemId}
-        FOR UPDATE
-      `.execute(trx);
+    // Note: Caller manages transaction (stock.ts functions use top-level transactions)
+    // Lock summary row to prevent concurrent updates
+    const summaryRows = await sql<CostSummaryRow>`
+      SELECT costing_method, current_avg_cost, total_layers_qty, total_layers_cost
+      FROM inventory_item_costs
+      WHERE company_id = ${input.companyId} AND item_id = ${input.itemId}
+      FOR UPDATE
+    `.execute(db);
 
-      const summary = summaryRows.rows[0];
-      const avgCost = Number(summary?.current_avg_cost ?? 0);
-      const availableQty = Number(summary?.total_layers_qty ?? 0);
-      const totalLayersCost = Number(summary?.total_layers_cost ?? 0);
+    const summary = summaryRows.rows[0];
+    const avgCost = Number(summary?.current_avg_cost ?? 0);
+    const availableQty = Number(summary?.total_layers_qty ?? 0);
+    const totalLayersCost = Number(summary?.total_layers_cost ?? 0);
 
-      // Validate sufficient inventory
-      if (availableQty < input.quantity) {
-        throw new InsufficientInventoryError(input.quantity, availableQty);
-      }
+    // Validate sufficient inventory
+    if (availableQty < input.quantity) {
+      throw new InsufficientInventoryError(input.quantity, availableQty);
+    }
 
-      // Calculate total cost using minor-unit math
-      const totalCostMinor = toMinorUnits(avgCost) * input.quantity;
-      const totalCost = fromMinorUnits(totalCostMinor);
+    // Calculate total cost using minor-unit math
+    const totalCostMinor = toMinorUnits(avgCost) * input.quantity;
+    const totalCost = fromMinorUnits(totalCostMinor);
 
-      // Update summary state: reduce available quantity and total cost
-      const newQty = availableQty - input.quantity;
-      const newTotalCost = totalLayersCost - totalCost;
-      const newAvg = newQty > 0 ? newTotalCost / newQty : 0;
+    // Update summary state: reduce available quantity and total cost
+    const newQty = availableQty - input.quantity;
+    const newTotalCost = totalLayersCost - totalCost;
+    const newAvg = newQty > 0 ? newTotalCost / newQty : 0;
 
-      // Preserve existing costing_method or default to AVG
-      const summaryMethod = summary?.costing_method ? String(summary.costing_method) : null;
-      const currentMethod: CostingMethod =
-        summaryMethod === "AVG" || summaryMethod === "FIFO" || summaryMethod === "LIFO"
-          ? summaryMethod
-          : "AVG";
+    // Preserve existing costing_method or default to AVG
+    const summaryMethod = summary?.costing_method ? String(summary.costing_method) : null;
+    const currentMethod: CostingMethod =
+      summaryMethod === "AVG" || summaryMethod === "FIFO" || summaryMethod === "LIFO"
+        ? summaryMethod
+        : "AVG";
 
-      await sql`
-        INSERT INTO inventory_item_costs
-        (company_id, item_id, costing_method, current_avg_cost, total_layers_qty, total_layers_cost)
-        VALUES (${input.companyId}, ${input.itemId}, ${currentMethod}, ${newAvg}, ${newQty}, ${newTotalCost})
-        ON DUPLICATE KEY UPDATE
-        costing_method = VALUES(costing_method),
-        current_avg_cost = VALUES(current_avg_cost),
-        total_layers_qty = VALUES(total_layers_qty),
-        total_layers_cost = VALUES(total_layers_cost)
-      `.execute(trx);
+    await sql`
+      INSERT INTO inventory_item_costs
+      (company_id, item_id, costing_method, current_avg_cost, total_layers_qty, total_layers_cost)
+      VALUES (${input.companyId}, ${input.itemId}, ${currentMethod}, ${newAvg}, ${newQty}, ${newTotalCost})
+      ON DUPLICATE KEY UPDATE
+      costing_method = VALUES(costing_method),
+      current_avg_cost = VALUES(current_avg_cost),
+      total_layers_qty = VALUES(total_layers_qty),
+      total_layers_cost = VALUES(total_layers_cost)
+    `.execute(db);
 
-      // AVG method doesn't track specific layers consumed
-      return {
-        totalCost,
-        consumedLayers: [],
-      };
-    });
+    // AVG method doesn't track specific layers consumed
+    return {
+      totalCost,
+      consumedLayers: [],
+    };
   }
 }
 
@@ -233,67 +242,66 @@ class FIFOCostingStrategy implements CostingStrategy {
       );
     }
 
-    return withTransaction(db, async (trx) => {
-      // Lock available layers in chronological order
-      const layerRows = await sql<InventoryLayerRow>`
-        SELECT id, remaining_qty, unit_cost
-        FROM inventory_cost_layers
-        WHERE company_id = ${input.companyId} AND item_id = ${input.itemId} AND remaining_qty > 0
-        ORDER BY acquired_at ASC, id ASC
-        FOR UPDATE
-      `.execute(trx);
+    // Note: Caller manages transaction (stock.ts functions use top-level transactions)
+    // Lock available layers in chronological order
+    const layerRows = await sql<InventoryLayerRow>`
+      SELECT id, remaining_qty, unit_cost
+      FROM inventory_cost_layers
+      WHERE company_id = ${input.companyId} AND item_id = ${input.itemId} AND remaining_qty > 0
+      ORDER BY acquired_at ASC, id ASC
+      FOR UPDATE
+    `.execute(db);
 
-      const layers = layerRows.rows;
+    const layers = layerRows.rows;
 
-      // PRE-CHECK: Calculate total available BEFORE any mutations
-      const totalAvailable = layers.reduce(
-        (sum: number, layer: InventoryLayerRow) => sum + Number(layer.remaining_qty),
-        0
-      );
+    // PRE-CHECK: Calculate total available BEFORE any mutations
+    const totalAvailable = layers.reduce(
+      (sum: number, layer: InventoryLayerRow) => sum + Number(layer.remaining_qty),
+      0
+    );
 
-      if (totalAvailable < input.quantity) {
-        throw new InsufficientInventoryError(input.quantity, totalAvailable);
-      }
+    if (totalAvailable < input.quantity) {
+      throw new InsufficientInventoryError(input.quantity, totalAvailable);
+    }
 
-      // Only proceed with mutations if sufficient inventory confirmed
-      let remainingToConsume = input.quantity;
-      const consumedLayers: ConsumedLayer[] = [];
-      let totalCost = 0;
+    // Only proceed with mutations if sufficient inventory confirmed
+    let remainingToConsume = input.quantity;
+    const consumedLayers: ConsumedLayer[] = [];
+    let totalCost = 0;
 
-      for (const layer of layers) {
-        if (remainingToConsume <= 0) break;
+    for (const layer of layers) {
+      if (remainingToConsume <= 0) break;
 
-        const layerRemainingQty = Number(layer.remaining_qty);
-        const layerUnitCost = Number(layer.unit_cost);
-        const consumeFromLayer = Math.min(remainingToConsume, layerRemainingQty);
+      const layerRemainingQty = Number(layer.remaining_qty);
+      const layerUnitCost = Number(layer.unit_cost);
+      const consumeFromLayer = Math.min(remainingToConsume, layerRemainingQty);
 
-        // Update layer remaining quantity
-        await sql`
-          UPDATE inventory_cost_layers 
-          SET remaining_qty = remaining_qty - ${consumeFromLayer}
-          WHERE id = ${layer.id}
-        `.execute(trx);
+      // Update layer remaining quantity
+      await sql`
+        UPDATE inventory_cost_layers 
+        SET remaining_qty = remaining_qty - ${consumeFromLayer}
+        WHERE id = ${layer.id}
+      `.execute(db);
 
-        // Record consumption trace
-        const layerTotalCost = consumeFromLayer * layerUnitCost;
-        await sql`
-          INSERT INTO cost_layer_consumption 
-          (company_id, layer_id, transaction_id, consumed_qty, unit_cost, total_cost)
-          VALUES (${input.companyId}, ${layer.id}, ${input.transactionId}, ${consumeFromLayer}, ${layerUnitCost}, ${layerTotalCost})
-        `.execute(trx);
+      // Record consumption trace
+      const layerTotalCost = consumeFromLayer * layerUnitCost;
+      await sql`
+        INSERT INTO cost_layer_consumption 
+        (company_id, layer_id, transaction_id, consumed_qty, unit_cost, total_cost)
+        VALUES (${input.companyId}, ${layer.id}, ${input.transactionId}, ${consumeFromLayer}, ${layerUnitCost}, ${layerTotalCost})
+      `.execute(db);
 
-        consumedLayers.push({
-          layerId: layer.id,
-          consumedQty: consumeFromLayer,
-          unitCost: layerUnitCost,
-        });
+      consumedLayers.push({
+        layerId: layer.id,
+        consumedQty: consumeFromLayer,
+        unitCost: layerUnitCost,
+      });
 
-        totalCost += layerTotalCost;
-        remainingToConsume -= consumeFromLayer;
-      }
+      totalCost += layerTotalCost;
+      remainingToConsume -= consumeFromLayer;
+    }
 
-      return { totalCost, consumedLayers };
-    });
+    return { totalCost, consumedLayers };
   }
 }
 
@@ -312,67 +320,66 @@ class LIFOCostingStrategy implements CostingStrategy {
       );
     }
 
-    return withTransaction(db, async (trx) => {
-      // Lock available layers in reverse chronological order (newest first)
-      const layerRows = await sql<InventoryLayerRow>`
-        SELECT id, remaining_qty, unit_cost
-        FROM inventory_cost_layers
-        WHERE company_id = ${input.companyId} AND item_id = ${input.itemId} AND remaining_qty > 0
-        ORDER BY acquired_at DESC, id DESC
-        FOR UPDATE
-      `.execute(trx);
+    // Note: Caller manages transaction (stock.ts functions use top-level transactions)
+    // Lock available layers in reverse chronological order (newest first)
+    const layerRows = await sql<InventoryLayerRow>`
+      SELECT id, remaining_qty, unit_cost
+      FROM inventory_cost_layers
+      WHERE company_id = ${input.companyId} AND item_id = ${input.itemId} AND remaining_qty > 0
+      ORDER BY acquired_at DESC, id DESC
+      FOR UPDATE
+    `.execute(db);
 
-      const layers = layerRows.rows;
+    const layers = layerRows.rows;
 
-      // PRE-CHECK: Calculate total available BEFORE any mutations
-      const totalAvailable = layers.reduce(
-        (sum: number, layer: InventoryLayerRow) => sum + Number(layer.remaining_qty),
-        0
-      );
+    // PRE-CHECK: Calculate total available BEFORE any mutations
+    const totalAvailable = layers.reduce(
+      (sum: number, layer: InventoryLayerRow) => sum + Number(layer.remaining_qty),
+      0
+    );
 
-      if (totalAvailable < input.quantity) {
-        throw new InsufficientInventoryError(input.quantity, totalAvailable);
-      }
+    if (totalAvailable < input.quantity) {
+      throw new InsufficientInventoryError(input.quantity, totalAvailable);
+    }
 
-      // Only proceed with mutations if sufficient inventory confirmed
-      let remainingToConsume = input.quantity;
-      const consumedLayers: ConsumedLayer[] = [];
-      let totalCost = 0;
+    // Only proceed with mutations if sufficient inventory confirmed
+    let remainingToConsume = input.quantity;
+    const consumedLayers: ConsumedLayer[] = [];
+    let totalCost = 0;
 
-      for (const layer of layers) {
-        if (remainingToConsume <= 0) break;
+    for (const layer of layers) {
+      if (remainingToConsume <= 0) break;
 
-        const layerRemainingQty = Number(layer.remaining_qty);
-        const layerUnitCost = Number(layer.unit_cost);
-        const consumeFromLayer = Math.min(remainingToConsume, layerRemainingQty);
+      const layerRemainingQty = Number(layer.remaining_qty);
+      const layerUnitCost = Number(layer.unit_cost);
+      const consumeFromLayer = Math.min(remainingToConsume, layerRemainingQty);
 
-        // Update layer remaining quantity
-        await sql`
-          UPDATE inventory_cost_layers 
-          SET remaining_qty = remaining_qty - ${consumeFromLayer}
-          WHERE id = ${layer.id}
-        `.execute(trx);
+      // Update layer remaining quantity
+      await sql`
+        UPDATE inventory_cost_layers 
+        SET remaining_qty = remaining_qty - ${consumeFromLayer}
+        WHERE id = ${layer.id}
+      `.execute(db);
 
-        // Record consumption trace
-        const layerTotalCost = consumeFromLayer * layerUnitCost;
-        await sql`
-          INSERT INTO cost_layer_consumption 
-          (company_id, layer_id, transaction_id, consumed_qty, unit_cost, total_cost)
-          VALUES (${input.companyId}, ${layer.id}, ${input.transactionId}, ${consumeFromLayer}, ${layerUnitCost}, ${layerTotalCost})
-        `.execute(trx);
+      // Record consumption trace
+      const layerTotalCost = consumeFromLayer * layerUnitCost;
+      await sql`
+        INSERT INTO cost_layer_consumption 
+        (company_id, layer_id, transaction_id, consumed_qty, unit_cost, total_cost)
+        VALUES (${input.companyId}, ${layer.id}, ${input.transactionId}, ${consumeFromLayer}, ${layerUnitCost}, ${layerTotalCost})
+      `.execute(db);
 
-        consumedLayers.push({
-          layerId: layer.id,
-          consumedQty: consumeFromLayer,
-          unitCost: layerUnitCost,
-        });
+      consumedLayers.push({
+        layerId: layer.id,
+        consumedQty: consumeFromLayer,
+        unitCost: layerUnitCost,
+      });
 
-        totalCost += layerTotalCost;
-        remainingToConsume -= consumeFromLayer;
-      }
+      totalCost += layerTotalCost;
+      remainingToConsume -= consumeFromLayer;
+    }
 
-      return { totalCost, consumedLayers };
-    });
+    return { totalCost, consumedLayers };
   }
 }
 
@@ -444,12 +451,14 @@ export async function calculateCost(
   input: CostCalculationInput,
   db: KyselySchema
 ): Promise<CostCalculationResult> {
-  // Validate input before any operations
-  validateInput(input);
+  return withExecutorTransaction(db, async (executor) => {
+    // Validate input before any operations
+    validateInput(input);
 
-  const method = await getCompanyCostingMethod(input.companyId, db);
-  const strategy = getCostingStrategy(method);
-  return strategy.calculateCost(input, db);
+    const method = await getCompanyCostingMethod(input.companyId, executor);
+    const strategy = getCostingStrategy(method);
+    return strategy.calculateCost(input, executor);
+  });
 }
 
 export async function createCostLayer(
@@ -462,13 +471,13 @@ export async function createCostLayer(
   },
   db: KyselySchema
 ): Promise<CostLayer> {
-  return withTransaction(db, async (trx) => {
+  return withExecutorTransaction(db, async (executor) => {
     // Insert cost layer
     const result = await sql`
       INSERT INTO inventory_cost_layers 
       (company_id, item_id, transaction_id, unit_cost, original_qty, remaining_qty, acquired_at)
       VALUES (${params.companyId}, ${params.itemId}, ${params.transactionId}, ${params.unitCost}, ${params.quantity}, ${params.quantity}, NOW())
-    `.execute(trx);
+    `.execute(executor);
 
     const insertId = result.insertId;
 
@@ -478,14 +487,14 @@ export async function createCostLayer(
       FROM inventory_item_costs 
       WHERE company_id = ${params.companyId} AND item_id = ${params.itemId}
       FOR UPDATE
-    `.execute(trx);
+    `.execute(executor);
 
     const summary = existingSummaryRows.rows[0];
     const summaryMethod = summary?.costing_method ? String(summary.costing_method) : null;
     const currentMethod: CostingMethod =
       summaryMethod === "AVG" || summaryMethod === "FIFO" || summaryMethod === "LIFO"
         ? summaryMethod
-        : await getCompanyCostingMethod(params.companyId, trx as unknown as KyselySchema);
+        : await getCompanyCostingMethod(params.companyId, executor);
 
     const existingQty = Number(summary?.total_layers_qty ?? 0);
     const existingCost = Number(summary?.total_layers_cost ?? 0);
@@ -501,12 +510,12 @@ export async function createCostLayer(
       current_avg_cost = VALUES(current_avg_cost),
       total_layers_qty = VALUES(total_layers_qty),
       total_layers_cost = VALUES(total_layers_cost)
-    `.execute(trx);
+    `.execute(executor);
 
     // Return created layer
     const layerRows = await sql<InventoryLayerRow>`
       SELECT * FROM inventory_cost_layers WHERE id = ${insertId}
-    `.execute(trx);
+    `.execute(executor);
 
     const layer = layerRows.rows[0];
     return {

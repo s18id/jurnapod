@@ -10,9 +10,19 @@
 
 import { getDb, type KyselySchema } from "@/lib/db";
 import { sql } from "kysely";
-import { withTransaction, type Transaction } from "@jurnapod/db";
 import { createCostLayer, calculateCost } from "@/lib/cost-tracking";
 import type { CostCalculationResult } from "@/lib/cost-tracking";
+
+async function withExecutorTransaction<T>(
+  db: KyselySchema,
+  callback: (executor: KyselySchema) => Promise<T>
+): Promise<T> {
+  if (db.isTransaction) {
+    return callback(db);
+  }
+
+  return db.transaction().execute(async (trx) => callback(trx as unknown as KyselySchema));
+}
 
 /**
  * Transaction Type Constants
@@ -255,7 +265,7 @@ export async function deductStock(
 ): Promise<boolean> {
   const database = db ?? getDb();
 
-  return withTransaction(database, async (trx) => {
+  return withExecutorTransaction(database, async (trx) => {
     for (const item of items) {
       // Verify stock exists and has sufficient quantity (with lock)
       const stockRows = await sql<StockRow>`
@@ -334,7 +344,7 @@ export async function deductStockWithCost(
   const database = db ?? getDb();
   const results: StockDeductResult[] = [];
 
-  return withTransaction(database, async (trx) => {
+  return withExecutorTransaction(database, async (trx) => {
     for (const item of items) {
       // Verify stock exists and has sufficient quantity (with lock)
       const stockRows = await sql<StockRow>`
@@ -459,7 +469,7 @@ export async function deductStockForSaleWithCogs(
   
   const database = db ?? getDb();
   
-  return withTransaction(database, async (trx) => {
+  return withExecutorTransaction(database, async (trx) => {
     // First, deduct stock with cost consumption (method-correct via deductStockWithCost)
     const stockResults = await deductStockWithCost(
       company_id,
@@ -543,7 +553,7 @@ export async function restoreStock(
 ): Promise<boolean> {
   const database = db ?? getDb();
 
-  return withTransaction(database, async (trx) => {
+  return withExecutorTransaction(database, async (trx) => {
     for (const item of items) {
       // Update stock - increase both quantity and available_quantity
       const updateResult = await sql`
@@ -615,7 +625,7 @@ export async function adjustStock(
   const { company_id, outlet_id, product_id, adjustment_quantity, reason, reference_id, user_id } = input;
   const database = db ?? getDb();
 
-  return withTransaction(database, async (trx) => {
+  return withExecutorTransaction(database, async (trx) => {
     // Get current stock
     const stockRows = await sql<StockRow>`
       SELECT quantity, reserved_quantity, available_quantity
@@ -738,7 +748,7 @@ export async function reserveStock(
     return { success: false, conflicts };
   }
 
-  return withTransaction(database, async (trx) => {
+  return withExecutorTransaction(database, async (trx) => {
     for (const item of items) {
       // Reserve stock atomically
       const updateResult = await sql`
@@ -791,7 +801,7 @@ export async function releaseStock(
 ): Promise<boolean> {
   const database = db ?? getDb();
 
-  return withTransaction(database, async (trx) => {
+  return withExecutorTransaction(database, async (trx) => {
     for (const item of items) {
       // Get current reserved quantity
       const stockRows = await sql<StockRow>`
@@ -880,7 +890,7 @@ export async function getStockLevels(
     quantity: Number(row.quantity),
     reserved_quantity: Number(row.reserved_quantity),
     available_quantity: Number(row.available_quantity),
-    updated_at: row.updated_at.toISOString()
+    updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at)
   }));
 }
 
@@ -966,7 +976,7 @@ export async function getStockTransactions(
     reference_id: row.reference_id,
     product_id: row.product_id ?? 0,
     quantity_delta: Number(row.quantity_delta),
-    created_at: row.created_at.toISOString()
+    created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at)
   }));
 
   return { transactions, total };
