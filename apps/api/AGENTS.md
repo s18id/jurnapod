@@ -42,6 +42,13 @@ API server rules for auth, validation, posting triggers, persistence safety, and
 ### Testing expectations
 - Expect tests when changing: auth/RBAC, `/sync/push`, `/sync/pull`, posting endpoints, settings/config endpoints, report query logic.
 
+### Database testing policy (MANDATORY)
+- **NEVER use mock DB for database-backed business logic tests.**
+- Any code path that reads/writes SQL tables (Kysely queries, transactions, posting logic, import validation, sync persistence, auth/role lookups, report queries) must be validated with a **real database**.
+- For these paths, prefer integration tests with real DB state over mocked query executors/stubbed SQL results.
+- Mocking is acceptable only for pure logic with no database interaction.
+- If an existing unit test relies on DB mocks for DB-backed code, migrate it to a real-DB integration test.
+
 ---
 
 ## Critical Rules
