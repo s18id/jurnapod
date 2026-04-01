@@ -219,3 +219,16 @@ development_status:
   19-11-migrate-api-lib-reports: done
   19-12-migrate-api-routes: done
   19-13-final-verification: done (0 type errors)
+
+  # Epic 20: Schema Consolidation & JSON Normalization
+  epic-20: backlog
+  20-1-settings-system-migration: backlog
+  20-2-module-config-normalization: backlog
+  20-3-feature-flags-normalization: backlog
+  20-4-mappings-consolidation: backlog
+  20-5-auth-throttle-merge: backlog
+  20-6-item-variant-eav-cleanup: backlog
+  20-7-sync-versions-merge: review
+  20-8-data-import-count-columns: backlog
+  20-9-legacy-table-drops: in-progress
+  20-10-final-verification: backlog
