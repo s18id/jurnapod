@@ -1083,13 +1083,23 @@ Notes:
 | created_at | datetime | NO | | current_timestamp() |
 | updated_at | datetime | NO | | current_timestamp() on update |
 
-### sync_data_versions
+### sync_versions
 
 | Column | Type | Nullable | Key | Default |
 |--------|------|----------|-----|---------|
-| company_id | bigint(20) unsigned | NO | PRI | |
+| id | bigint(20) unsigned | NO | PRI | |
+| company_id | bigint(20) unsigned | NO | MUL | |
+| tier | varchar(50) | YES | | NULL |
+| tier_key | varchar(32) | NO | UNI | GENERATED |
 | current_version | bigint(20) unsigned | NO | | 0 |
+| min_version | bigint(20) unsigned | NO | | 0 |
+| last_synced_at | datetime | YES | | NULL |
+| created_at | datetime | NO | | current_timestamp() |
 | updated_at | datetime | NO | | current_timestamp() on update |
+
+**Canonical semantics:**
+- `tier IS NULL` = data-sync cursor row
+- explicit `tier` = tier cursor row (`MASTER`, `OPERATIONAL`, `REALTIME`, `ADMIN`, `ANALYTICS`)
 
 ### tax_rates
 
@@ -1108,13 +1118,7 @@ Notes:
 | created_at | datetime | NO | | current_timestamp() |
 | updated_at | datetime | NO | | current_timestamp() on update |
 
-### user_outlets
-
-| Column | Type | Nullable | Key | Default |
-|--------|------|----------|-----|---------|
-| user_id | bigint(20) unsigned | NO | PRI | |
-| outlet_id | bigint(20) unsigned | NO | PRI | |
-| created_at | datetime | NO | | current_timestamp() |
+> `user_outlets` is retired. Outlet scoping uses `user_role_assignments`.
 
 ### user_role_assignments
 
@@ -1445,7 +1449,7 @@ Indexes:
 | Auth | audit_logs, auth_login_throttles, auth_oauth_accounts, auth_password_reset_throttles, auth_refresh_tokens, email_tokens, email_outbox |
 | Accounting | accounts, account_types, account_balances_current, journal_batches, journal_lines |
 | Modules | modules, company_modules, module_roles |
-| Settings | company_settings, platform_settings, feature_flags |
+| Settings | settings_strings, settings_numbers, settings_booleans, feature_flags |
 | POS | pos_transactions, pos_transaction_items, pos_transaction_payments, pos_transaction_taxes |
 | POS Order Management | pos_order_snapshots, pos_order_snapshot_lines, pos_order_updates, pos_item_cancellations |
 | Dine-in Operations | table_occupancy, table_service_sessions, table_service_session_lines, table_events, table_service_session_checkpoints |
@@ -1454,11 +1458,11 @@ Indexes:
 | Items | items, item_prices, item_groups, item_variants, item_images |
 | Tax | tax_rates, company_tax_defaults |
 | Tables & Reservations | outlet_tables, reservations, reservation_groups |
-| Mappings | outlet_account_mappings, outlet_payment_method_mappings, company_account_mappings, company_payment_method_mappings |
+| Mappings | account_mappings, payment_method_mappings |
 | Numbering | numbering_templates |
 | Fiscal | fiscal_years |
 | Data Import | data_imports |
-| Sync | sync_data_versions, sync_operations |
+| Sync | sync_versions, sync_audit_events, pos_sync_metadata |
 | Email | email_tokens, email_outbox |
 | Static Content | static_pages |
 | Supplies | supplies |
