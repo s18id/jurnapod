@@ -359,19 +359,18 @@ export class PosDataService {
       WHERE company_id = ${company_id}
     `.execute(this.db);
 
-    // Get payment methods
+    // Get payment methods - query unified payment_method_mappings table
+    // outlet-specific first, then company-wide fallback
     const paymentMethodsResult = await sql`
       SELECT 
-        pm.code,
-        COALESCE(opm.label, pm.code) AS label,
-        COALESCE(opm.is_active, 1) AS is_active,
-        pm.account_id
-      FROM outlet_payment_method_mappings opm
-      RIGHT JOIN company_payment_method_mappings pm ON pm.code = opm.payment_method_code
-      WHERE pm.company_id = ${company_id}
-        AND (opm.outlet_id = ${outlet_id} OR opm.outlet_id IS NULL)
-        AND pm.is_active = 1
-      ORDER BY pm.code
+        method_code AS code,
+        COALESCE(label, method_code) AS label,
+        1 AS is_active,
+        account_id
+      FROM payment_method_mappings
+      WHERE company_id = ${company_id}
+        AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+      ORDER BY (outlet_id IS NOT NULL) DESC, outlet_id DESC, method_code
     `.execute(this.db);
 
     return {

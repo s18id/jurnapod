@@ -8,7 +8,11 @@ export const FeatureFlagKeySchema = z.string().trim().min(1);
 export const FeatureFlagEntrySchema = z.object({
   key: FeatureFlagKeySchema,
   enabled: z.boolean(),
-  config_json: z.string()
+  config_json: z.string(),
+  rollout_percentage: z.number().int().min(0).max(100).default(100),
+  target_segments: z.array(z.string()).nullable().optional(),
+  start_at: z.string().datetime().nullable().optional(),
+  end_at: z.string().datetime().nullable().optional()
 });
 
 export const FeatureFlagsResponseSchema = z.object({

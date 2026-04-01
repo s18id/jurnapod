@@ -331,7 +331,7 @@ export class BackofficeDataService {
     const { company_id } = context;
 
     const versionFilter = sinceVersion 
-      ? sql`AND pt.updated_at >= (SELECT last_updated_at FROM sync_tier_versions WHERE company_id = ${company_id} AND tier = "OPERATIONAL")`
+      ? sql`AND pt.updated_at >= (SELECT last_synced_at FROM sync_versions WHERE company_id = ${company_id} AND tier = "OPERATIONAL")`
       : sql``;
 
     const versionParams = sinceVersion ? [company_id, company_id] : [company_id];
@@ -426,14 +426,14 @@ export class BackofficeDataService {
 
     // Get current data version
     const versionResult = await sql<VersionRow>`
-      SELECT current_version FROM sync_tier_versions 
+      SELECT current_version FROM sync_versions 
       WHERE company_id = ${company_id} AND tier = 'MASTER'
     `.execute(this.db);
     const dataVersion = versionResult.rows[0]?.current_version || 0;
 
     // Build WHERE clause for incremental sync
     const versionFilter = sinceVersion && sinceVersion < dataVersion
-      ? sql`AND updated_at >= (SELECT last_updated_at FROM sync_tier_versions WHERE company_id = ${company_id} AND tier = "MASTER")`
+      ? sql`AND updated_at >= (SELECT last_synced_at FROM sync_versions WHERE company_id = ${company_id} AND tier = "MASTER")`
       : sql``;
 
     // Get comprehensive item data

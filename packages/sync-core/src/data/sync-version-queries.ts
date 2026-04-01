@@ -1,16 +1,18 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
+import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 
 /**
  * Get current sync data version for a company.
- * This is the version tracking for sync_data_versions table.
+ * Uses the unified sync_versions table with tier = NULL for data sync.
  */
 export async function getSyncDataVersion(db: KyselySchema, companyId: number): Promise<number> {
   const result = await db
-    .selectFrom('sync_data_versions')
+    .selectFrom('sync_versions')
     .select(['current_version'])
     .where('company_id', '=', companyId)
+    .where('tier', 'is', null)
     .executeTakeFirst();
   
   return Number(result?.current_version ?? 0);
@@ -24,9 +26,10 @@ export async function incrementSyncDataVersion(db: KyselySchema, companyId: numb
   // Use raw SQL for INSERT ... ON DUPLICATE KEY UPDATE since Kysely's
   // query builder doesn't directly support this MySQL-specific syntax
   await db
-    .insertInto('sync_data_versions')
+    .insertInto('sync_versions')
     .values({
       company_id: companyId,
+      tier: null,
       current_version: 1
     })
     .onDuplicateKeyUpdate({
