@@ -1,6 +1,6 @@
 # Story 21.1: Centralize PosSyncModule Lifecycle
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 21  
 **Story Points:** 2  
 **Priority:** P1  
@@ -15,10 +15,10 @@ Remove duplicate `PosSyncModule` singleton/init/get logic from sync pull and syn
 
 ## Acceptance Criteria
 
-- [ ] Exactly one shared lifecycle owner exists for `PosSyncModule` initialization and retrieval.
-- [ ] `routes/sync/pull.ts` and `routes/sync/push.ts` no longer define duplicate singleton/init/get logic.
-- [ ] Initialization config and runtime behavior remain unchanged.
-- [ ] Route tests for pull/push remain passing.
+- [x] Exactly one shared lifecycle owner exists for `PosSyncModule` initialization and retrieval.
+- [x] `routes/sync/pull.ts` and `routes/sync/push.ts` no longer define duplicate singleton/init/get logic.
+- [x] Initialization config and runtime behavior remain unchanged.
+- [x] Route tests for pull/push remain passing.
 
 ## Files (Expected)
 

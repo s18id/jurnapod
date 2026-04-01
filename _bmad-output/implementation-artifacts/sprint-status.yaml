@@ -235,7 +235,7 @@ development_status:
 
   # Epic 21: API Sync Runtime Consolidation (Package-First)
   epic-21: in-progress
-  21-1-centralize-pos-sync-module-lifecycle: in-progress
-  21-2-extract-sync-push-adapters-from-route: backlog
+  21-1-centralize-pos-sync-module-lifecycle: done
+  21-2-extract-sync-push-adapters-from-route: done
   21-3-retire-legacy-api-pull-builder-runtime-path: backlog
-  21-4-keep-and-bound-sync-check-duplicate-semantics: backlog
+  21-4-keep-and-bound-sync-check-duplicate-semantics: in-progress

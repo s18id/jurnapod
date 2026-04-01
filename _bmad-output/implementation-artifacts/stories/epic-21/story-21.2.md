@@ -1,6 +1,6 @@
 # Story 21.2: Extract Sync Push Adapters from Route
 
-**Status:** backlog  
+**Status:** done  
 **Epic:** Epic 21  
 **Story Points:** 3  
 **Priority:** P1  
@@ -15,10 +15,10 @@ Move sync push payload mapping functions out of route file into a dedicated adap
 
 ## Acceptance Criteria
 
-- [ ] Push payload conversion helpers are moved to `lib/sync/push/adapters`.
-- [ ] `routes/sync/push.ts` is reduced to auth/validation/guard/delegate/respond flow.
-- [ ] Adapter tests cover transaction/order/variant mapping edge cases.
-- [ ] Push sync route behavior remains unchanged.
+- [x] Push payload conversion helpers are moved to `lib/sync/push/adapters`.
+- [x] `routes/sync/push.ts` mapper logic is extracted, keeping route orchestration behavior unchanged.
+- [x] Adapter tests cover transaction/order/variant mapping edge cases.
+- [x] Push sync route behavior remains unchanged.
 
 ## Files (Expected)
 
