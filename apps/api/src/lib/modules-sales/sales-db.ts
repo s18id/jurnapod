@@ -625,6 +625,953 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     return rows.rows as Array<{ tax_rate_id: number; rate: number }>;
   }
 
+  // Account operations for payment validation
+  async accountIsPayable(companyId: number, accountId: number): Promise<boolean> {
+    const rows = await sql`
+      SELECT id FROM accounts
+       WHERE company_id = ${companyId}
+         AND id = ${accountId}
+         AND is_payable = 1
+       LIMIT 1
+    `.execute(this._getDb());
+    return rows.rows.length > 0;
+  }
+
+  // Payment operations
+  async findPaymentById(companyId: number, paymentId: number, forUpdate?: boolean): Promise<{
+    id: number;
+    company_id: number;
+    outlet_id: number;
+    invoice_id: number;
+    payment_no: string;
+    client_ref?: string | null;
+    payment_at: string;
+    account_id: number;
+    account_name?: string | null;
+    method?: "CASH" | "QRIS" | "CARD" | null;
+    status: "DRAFT" | "POSTED" | "VOID";
+    amount: number;
+    actual_amount_idr?: number | null;
+    invoice_amount_idr?: number | null;
+    payment_amount_idr?: number | null;
+    payment_delta_idr?: number | null;
+    shortfall_settled_as_loss?: boolean | null;
+    shortfall_reason?: string | null;
+    shortfall_settled_by_user_id?: number | null;
+    shortfall_settled_at?: string | null;
+    created_by_user_id?: number | null;
+    updated_by_user_id?: number | null;
+    created_at: string;
+    updated_at: string;
+  } | null> {
+    const forUpdateClause = forUpdate ? sql` FOR UPDATE` : sql``;
+    const result = await sql`SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.client_ref, sp.payment_at,
+            sp.account_id, a.name as account_name, sp.method, sp.status,
+            sp.amount, sp.invoice_amount_idr, sp.payment_amount_idr, sp.payment_delta_idr,
+            sp.shortfall_settled_as_loss, sp.shortfall_reason, sp.shortfall_settled_by_user_id, sp.shortfall_settled_at,
+            sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
+     FROM sales_payments sp
+     LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
+     WHERE sp.company_id = ${companyId}
+       AND sp.id = ${paymentId}
+     LIMIT 1${forUpdateClause}`.execute(this._getDb());
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const row = result.rows[0] as {
+      id: number;
+      company_id: number;
+      outlet_id: number;
+      invoice_id: number;
+      payment_no: string;
+      client_ref?: string | null;
+      payment_at: string;
+      account_id: number;
+      account_name?: string | null;
+      method?: string | null;
+      status: string;
+      amount: string | number;
+      actual_amount_idr?: string | number | null;
+      invoice_amount_idr?: string | number | null;
+      payment_amount_idr?: string | number | null;
+      payment_delta_idr?: string | number | null;
+      shortfall_settled_as_loss?: number | null;
+      shortfall_reason?: string | null;
+      shortfall_settled_by_user_id?: number | null;
+      shortfall_settled_at?: string | null;
+      created_by_user_id?: number | null;
+      updated_by_user_id?: number | null;
+      created_at: string;
+      updated_at: string;
+    };
+
+    return {
+      id: Number(row.id),
+      company_id: Number(row.company_id),
+      outlet_id: Number(row.outlet_id),
+      invoice_id: Number(row.invoice_id),
+      payment_no: row.payment_no,
+      client_ref: row.client_ref ?? undefined,
+      payment_at: row.payment_at,
+      account_id: Number(row.account_id),
+      account_name: row.account_name ?? undefined,
+      method: (row.method ?? undefined) as "CASH" | "QRIS" | "CARD" | null ?? undefined,
+      status: row.status as "DRAFT" | "POSTED" | "VOID",
+      amount: Number(row.amount),
+      actual_amount_idr: row.actual_amount_idr !== undefined && row.actual_amount_idr !== null ? Number(row.actual_amount_idr) : undefined,
+      invoice_amount_idr: row.invoice_amount_idr !== undefined && row.invoice_amount_idr !== null ? Number(row.invoice_amount_idr) : undefined,
+      payment_amount_idr: row.payment_amount_idr !== undefined && row.payment_amount_idr !== null ? Number(row.payment_amount_idr) : undefined,
+      payment_delta_idr: row.payment_delta_idr !== undefined ? Number(row.payment_delta_idr) : undefined,
+      shortfall_settled_as_loss: row.shortfall_settled_as_loss === 1 ? true : row.shortfall_settled_as_loss === 0 ? false : undefined,
+      shortfall_reason: row.shortfall_reason ?? undefined,
+      shortfall_settled_by_user_id: row.shortfall_settled_by_user_id ? Number(row.shortfall_settled_by_user_id) : undefined,
+      shortfall_settled_at: row.shortfall_settled_at ?? undefined,
+      created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : undefined,
+      updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : undefined,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    };
+  }
+
+  async findPaymentByClientRef(companyId: number, clientRef: string) {
+    const result = await sql`SELECT id
+       FROM sales_payments
+       WHERE company_id = ${companyId}
+         AND client_ref = ${clientRef}
+       LIMIT 1`.execute(this._getDb());
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const row = result.rows[0] as { id: number };
+    return this.findPaymentById(companyId, Number(row.id));
+  }
+
+  async findPaymentSplits(companyId: number, paymentId: number): Promise<Array<{
+    id: number;
+    payment_id: number;
+    company_id: number;
+    outlet_id: number;
+    split_index: number;
+    account_id: number;
+    account_name?: string | null;
+    amount: number;
+  }>> {
+    const result = await sql`SELECT sps.id, sps.payment_id, sps.company_id, sps.outlet_id, sps.split_index,
+            sps.account_id, a.name as account_name, sps.amount
+     FROM sales_payment_splits sps
+     LEFT JOIN accounts a ON a.id = sps.account_id AND a.company_id = sps.company_id
+     WHERE sps.company_id = ${companyId}
+       AND sps.payment_id = ${paymentId}
+     ORDER BY sps.split_index`.execute(this._getDb());
+
+    return (result.rows as Array<{
+      id: number;
+      payment_id: number;
+      company_id: number;
+      outlet_id: number;
+      split_index: number;
+      account_id: number;
+      account_name?: string | null;
+      amount: string | number;
+    }>).map(row => ({
+      id: Number(row.id),
+      payment_id: Number(row.payment_id),
+      company_id: Number(row.company_id),
+      outlet_id: Number(row.outlet_id),
+      split_index: Number(row.split_index),
+      account_id: Number(row.account_id),
+      account_name: row.account_name ?? undefined,
+      amount: Number(row.amount)
+    }));
+  }
+
+  async findPaymentSplitsForMultiple(companyId: number, paymentIds: number[]): Promise<Map<number, Array<{
+    id: number;
+    payment_id: number;
+    company_id: number;
+    outlet_id: number;
+    split_index: number;
+    account_id: number;
+    account_name?: string | null;
+    amount: number;
+  }>>> {
+    if (paymentIds.length === 0) {
+      return new Map();
+    }
+
+    const result = await sql`SELECT sps.id, sps.payment_id, sps.company_id, sps.outlet_id, sps.split_index,
+            sps.account_id, a.name as account_name, sps.amount
+     FROM sales_payment_splits sps
+     LEFT JOIN accounts a ON a.id = sps.account_id AND a.company_id = sps.company_id
+     WHERE sps.company_id = ${companyId}
+       AND sps.payment_id IN (${sql.join(paymentIds.map(id => sql`${id}`), sql`, `)})
+     ORDER BY sps.payment_id, sps.split_index`.execute(this._getDb());
+
+    const splitsByPaymentId = new Map<number, Array<{
+      id: number;
+      payment_id: number;
+      company_id: number;
+      outlet_id: number;
+      split_index: number;
+      account_id: number;
+      account_name?: string | null;
+      amount: number;
+    }>>();
+
+    for (const row of result.rows as Array<{
+      id: number;
+      payment_id: number;
+      company_id: number;
+      outlet_id: number;
+      split_index: number;
+      account_id: number;
+      account_name?: string | null;
+      amount: string | number;
+    }>) {
+      const paymentId = Number(row.payment_id);
+      if (!splitsByPaymentId.has(paymentId)) {
+        splitsByPaymentId.set(paymentId, []);
+      }
+      splitsByPaymentId.get(paymentId)!.push({
+        id: Number(row.id),
+        payment_id: Number(row.payment_id),
+        company_id: Number(row.company_id),
+        outlet_id: Number(row.outlet_id),
+        split_index: Number(row.split_index),
+        account_id: Number(row.account_id),
+        account_name: row.account_name ?? undefined,
+        amount: Number(row.amount)
+      });
+    }
+
+    return splitsByPaymentId;
+  }
+
+  async insertPayment(input: {
+    companyId: number;
+    outletId: number;
+    invoiceId: number;
+    paymentNo: string;
+    clientRef?: string;
+    paymentAt: string;
+    accountId: number;
+    method?: string;
+    status: string;
+    amount: number;
+    paymentAmountIdr: number;
+    createdByUserId?: number;
+  }): Promise<number> {
+    const result = await sql`INSERT INTO sales_payments (
+         company_id,
+         outlet_id,
+         invoice_id,
+         payment_no,
+         client_ref,
+         payment_at,
+         account_id,
+         method,
+         status,
+         amount,
+         payment_amount_idr,
+         created_by_user_id,
+         updated_by_user_id
+       ) VALUES (${input.companyId}, ${input.outletId}, ${input.invoiceId}, ${input.paymentNo}, ${input.clientRef ?? null}, ${input.paymentAt}, ${input.accountId}, ${input.method ?? null}, ${input.status}, ${input.amount}, ${input.paymentAmountIdr}, ${input.createdByUserId ?? null}, ${input.createdByUserId ?? null})`.execute(this._getDb());
+
+    return Number(result.insertId);
+  }
+
+  async insertPaymentSplit(input: {
+    paymentId: number;
+    companyId: number;
+    outletId: number;
+    splitIndex: number;
+    accountId: number;
+    amount: number;
+  }): Promise<void> {
+    await sql`INSERT INTO sales_payment_splits (
+         payment_id, company_id, outlet_id, split_index, account_id, amount
+       ) VALUES (${input.paymentId}, ${input.companyId}, ${input.outletId}, ${input.splitIndex}, ${input.accountId}, ${input.amount})`.execute(this._getDb());
+  }
+
+  async updatePayment(input: {
+    companyId: number;
+    paymentId: number;
+    outletId: number;
+    invoiceId: number;
+    paymentNo: string;
+    paymentAt: string;
+    accountId: number;
+    method?: string | null;
+    amount: number;
+    paymentAmountIdr: number;
+    updatedByUserId?: number;
+  }): Promise<void> {
+    await sql`UPDATE sales_payments
+       SET outlet_id = ${input.outletId},
+           invoice_id = ${input.invoiceId},
+           payment_no = ${input.paymentNo},
+           payment_at = ${input.paymentAt},
+           account_id = ${input.accountId},
+           method = ${input.method ?? null},
+           amount = ${input.amount},
+           payment_amount_idr = ${input.paymentAmountIdr},
+           updated_by_user_id = ${input.updatedByUserId ?? null},
+           updated_at = CURRENT_TIMESTAMP
+       WHERE company_id = ${input.companyId}
+         AND id = ${input.paymentId}`.execute(this._getDb());
+  }
+
+  async deletePaymentSplits(companyId: number, paymentId: number): Promise<void> {
+    await sql`DELETE FROM sales_payment_splits
+       WHERE company_id = ${companyId} AND payment_id = ${paymentId}`.execute(this._getDb());
+  }
+
+  async updatePaymentStatus(input: {
+    companyId: number;
+    paymentId: number;
+    status: string;
+    invoiceAmountIdr?: number;
+    paymentDeltaIdr?: number;
+    shortfallSettledAsLoss?: boolean;
+    shortfallReason?: string;
+    shortfallSettledByUserId?: number;
+    shortfallSettledAt?: Date | null;
+    updatedByUserId?: number;
+  }): Promise<void> {
+    await sql`UPDATE sales_payments
+       SET status = ${input.status},
+           invoice_amount_idr = ${input.invoiceAmountIdr ?? null},
+           payment_delta_idr = ${input.paymentDeltaIdr ?? null},
+           shortfall_settled_as_loss = ${input.shortfallSettledAsLoss ? 1 : 0},
+           shortfall_reason = ${input.shortfallReason ?? null},
+           shortfall_settled_by_user_id = ${input.shortfallSettledByUserId ?? null},
+           shortfall_settled_at = ${input.shortfallSettledAt ?? null},
+           updated_by_user_id = ${input.updatedByUserId ?? null},
+           updated_at = CURRENT_TIMESTAMP
+       WHERE company_id = ${input.companyId}
+         AND id = ${input.paymentId}`.execute(this._getDb());
+  }
+
+  async updateInvoicePaidTotal(input: {
+    companyId: number;
+    invoiceId: number;
+    paidTotal: number;
+    paymentStatus: string;
+    updatedByUserId?: number;
+  }): Promise<void> {
+    await sql`UPDATE sales_invoices
+       SET paid_total = ${input.paidTotal},
+           payment_status = ${input.paymentStatus},
+           updated_by_user_id = ${input.updatedByUserId ?? null},
+           updated_at = CURRENT_TIMESTAMP
+       WHERE company_id = ${input.companyId}
+         AND id = ${input.invoiceId}`.execute(this._getDb());
+  }
+
+  async listPayments(companyId: number, filters: {
+    outletIds?: readonly number[];
+    status?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    limit?: number;
+    offset?: number;
+    timezone?: string;
+  }): Promise<{ total: number; payments: Array<{
+    id: number;
+    company_id: number;
+    outlet_id: number;
+    invoice_id: number;
+    payment_no: string;
+    client_ref?: string | null;
+    payment_at: string;
+    account_id: number;
+    account_name?: string | null;
+    method?: string | null;
+    status: string;
+    amount: number;
+    actual_amount_idr?: number | null;
+    invoice_amount_idr?: number | null;
+    payment_amount_idr?: number | null;
+    payment_delta_idr?: number | null;
+    shortfall_settled_as_loss?: boolean | null;
+    shortfall_reason?: string | null;
+    shortfall_settled_by_user_id?: number | null;
+    shortfall_settled_at?: string | null;
+    created_by_user_id?: number | null;
+    updated_by_user_id?: number | null;
+    created_at: string;
+    updated_at: string;
+  }> }> {
+    const db = this._getDb();
+    const limit = filters.limit ?? 50;
+    const offset = filters.offset ?? 0;
+
+    // Build WHERE conditions dynamically
+    const conditions: Array<ReturnType<typeof sql>> = [sql`sp.company_id = ${companyId}`];
+
+    if (filters.outletIds && filters.outletIds.length > 0) {
+      conditions.push(sql`sp.outlet_id IN (${sql.join(filters.outletIds.map(id => sql`${id}`), sql`, `)})`);
+    }
+
+    if (filters.status) {
+      conditions.push(sql`sp.status = ${filters.status}`);
+    }
+
+    if (filters.dateFrom) {
+      conditions.push(sql`sp.payment_at >= ${filters.dateFrom}`);
+    }
+
+    if (filters.dateTo) {
+      conditions.push(sql`sp.payment_at <= ${filters.dateTo}`);
+    }
+
+    const whereClause = sql.join(conditions, sql` AND `);
+
+    const countResult = await sql`SELECT COUNT(*) as total
+       FROM sales_payments sp
+       WHERE ${whereClause}`.execute(db);
+    const total = Number((countResult.rows[0] as { total?: number }).total ?? 0);
+
+    const rowsResult = await sql`SELECT sp.id, sp.company_id, sp.outlet_id, sp.invoice_id, sp.payment_no, sp.client_ref, sp.payment_at,
+            sp.account_id, a.name as account_name, sp.method, sp.status,
+            sp.amount, sp.invoice_amount_idr, sp.payment_amount_idr, sp.payment_delta_idr,
+            sp.shortfall_settled_as_loss, sp.shortfall_reason, sp.shortfall_settled_by_user_id, sp.shortfall_settled_at,
+            sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
+     FROM sales_payments sp
+     LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
+     WHERE ${whereClause}
+     ORDER BY sp.payment_at DESC, sp.id DESC
+     LIMIT ${limit} OFFSET ${offset}`.execute(db);
+
+    // Batch fetch splits for all payments
+    const paymentIds = (rowsResult.rows as Array<{ id: number }>).map(r => Number(r.id));
+    const splitsByPaymentId = await this.findPaymentSplitsForMultiple(companyId, paymentIds);
+
+    const payments = (rowsResult.rows as Array<{
+      id: number;
+      company_id: number;
+      outlet_id: number;
+      invoice_id: number;
+      payment_no: string;
+      client_ref?: string | null;
+      payment_at: string;
+      account_id: number;
+      account_name?: string | null;
+      method?: string | null;
+      status: string;
+      amount: string | number;
+      actual_amount_idr?: string | number | null;
+      invoice_amount_idr?: string | number | null;
+      payment_amount_idr?: string | number | null;
+      payment_delta_idr?: string | number | null;
+      shortfall_settled_as_loss?: number | null;
+      shortfall_reason?: string | null;
+      shortfall_settled_by_user_id?: number | null;
+      shortfall_settled_at?: string | null;
+      created_by_user_id?: number | null;
+      updated_by_user_id?: number | null;
+      created_at: string;
+      updated_at: string;
+    }>).map(row => {
+      const payment = {
+        id: Number(row.id),
+        company_id: Number(row.company_id),
+        outlet_id: Number(row.outlet_id),
+        invoice_id: Number(row.invoice_id),
+        payment_no: row.payment_no,
+        client_ref: row.client_ref ?? undefined,
+        payment_at: row.payment_at,
+        account_id: Number(row.account_id),
+        account_name: row.account_name ?? undefined,
+        method: (row.method ?? undefined) as "CASH" | "QRIS" | "CARD" | null,
+        status: row.status as "DRAFT" | "POSTED" | "VOID",
+        amount: Number(row.amount),
+        actual_amount_idr: row.actual_amount_idr !== undefined && row.actual_amount_idr !== null ? Number(row.actual_amount_idr) : undefined,
+        invoice_amount_idr: row.invoice_amount_idr !== undefined && row.invoice_amount_idr !== null ? Number(row.invoice_amount_idr) : undefined,
+        payment_amount_idr: row.payment_amount_idr !== undefined && row.payment_amount_idr !== null ? Number(row.payment_amount_idr) : undefined,
+        payment_delta_idr: row.payment_delta_idr !== undefined ? Number(row.payment_delta_idr) : undefined,
+        shortfall_settled_as_loss: row.shortfall_settled_as_loss === 1 ? true : row.shortfall_settled_as_loss === 0 ? false : undefined,
+        shortfall_reason: row.shortfall_reason ?? undefined,
+        shortfall_settled_by_user_id: row.shortfall_settled_by_user_id ? Number(row.shortfall_settled_by_user_id) : undefined,
+        shortfall_settled_at: row.shortfall_settled_at ?? undefined,
+        created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : undefined,
+        updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : undefined,
+        created_at: row.created_at,
+        updated_at: row.updated_at
+      };
+
+      const splits = splitsByPaymentId.get(payment.id);
+      if (splits && splits.length > 0) {
+        return { ...payment, splits };
+      }
+      return payment;
+    });
+
+    return { total, payments };
+  }
+
+  // Credit Note operations
+  async findCreditNoteById(companyId: number, creditNoteId: number, forUpdate?: boolean): Promise<{
+    id: number;
+    company_id: number;
+    outlet_id: number;
+    invoice_id: number;
+    credit_note_no: string;
+    credit_note_date: string;
+    client_ref: string | null;
+    status: string;
+    reason: string | null;
+    notes: string | null;
+    amount: number;
+    created_by_user_id: number | null;
+    updated_by_user_id: number | null;
+    created_at: string;
+    updated_at: string;
+    lines: Array<{
+      id: number;
+      credit_note_id: number;
+      line_no: number;
+      description: string;
+      qty: number;
+      unit_price: number;
+      line_total: number;
+    }>;
+  } | null> {
+    const forUpdateClause = forUpdate ? sql` FOR UPDATE` : sql``;
+    const rows = await sql`SELECT id, company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
+            client_ref, status, reason, notes, amount, created_by_user_id, updated_by_user_id,
+            created_at, updated_at
+     FROM sales_credit_notes
+     WHERE company_id = ${companyId} AND id = ${creditNoteId}
+     ${forUpdateClause}
+     LIMIT 1`.execute(this._getDb());
+
+    if (rows.rows.length === 0) {
+      return null;
+    }
+
+    const creditNote = rows.rows[0] as {
+      id: number;
+      company_id: number;
+      outlet_id: number;
+      invoice_id: number;
+      credit_note_no: string;
+      credit_note_date: string;
+      client_ref: string | null;
+      status: string;
+      reason: string | null;
+      notes: string | null;
+      amount: string | number;
+      created_by_user_id: number | null;
+      updated_by_user_id: number | null;
+      created_at: string;
+      updated_at: string;
+    };
+
+    const lineRows = await sql`SELECT id, credit_note_id, line_no, description, qty, unit_price, line_total
+     FROM sales_credit_note_lines
+     WHERE credit_note_id = ${creditNoteId}
+     ORDER BY line_no`.execute(this._getDb());
+
+    return {
+      id: creditNote.id,
+      company_id: creditNote.company_id,
+      outlet_id: creditNote.outlet_id,
+      invoice_id: creditNote.invoice_id,
+      credit_note_no: creditNote.credit_note_no,
+      credit_note_date: formatDateOnly(creditNote.credit_note_date),
+      client_ref: creditNote.client_ref ?? null,
+      status: creditNote.status,
+      reason: creditNote.reason ?? null,
+      notes: creditNote.notes ?? null,
+      amount: Number(creditNote.amount),
+      created_by_user_id: creditNote.created_by_user_id ?? null,
+      updated_by_user_id: creditNote.updated_by_user_id ?? null,
+      created_at: creditNote.created_at,
+      updated_at: creditNote.updated_at,
+      lines: (lineRows.rows as Array<{
+        id: number;
+        credit_note_id: number;
+        line_no: number;
+        description: string;
+        qty: string | number;
+        unit_price: string | number;
+        line_total: string | number;
+      }>).map(line => ({
+        id: line.id,
+        credit_note_id: line.credit_note_id,
+        line_no: line.line_no,
+        description: line.description,
+        qty: Number(line.qty),
+        unit_price: Number(line.unit_price),
+        line_total: Number(line.line_total)
+      }))
+    };
+  }
+
+  async findCreditNoteByClientRef(companyId: number, clientRef: string): Promise<{
+    id: number;
+    company_id: number;
+    outlet_id: number;
+    invoice_id: number;
+    credit_note_no: string;
+    credit_note_date: string;
+    client_ref: string | null;
+    status: string;
+    reason: string | null;
+    notes: string | null;
+    amount: number;
+    created_by_user_id: number | null;
+    updated_by_user_id: number | null;
+    created_at: string;
+    updated_at: string;
+  } | null> {
+    const rows = await sql`SELECT id, company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
+            client_ref, status, reason, notes, amount, created_by_user_id, updated_by_user_id,
+            created_at, updated_at
+     FROM sales_credit_notes
+     WHERE company_id = ${companyId} AND client_ref = ${clientRef}
+     LIMIT 1`.execute(this._getDb());
+
+    if (rows.rows.length === 0) {
+      return null;
+    }
+
+    const creditNote = rows.rows[0] as {
+      id: number;
+      company_id: number;
+      outlet_id: number;
+      invoice_id: number;
+      credit_note_no: string;
+      credit_note_date: string;
+      client_ref: string | null;
+      status: string;
+      reason: string | null;
+      notes: string | null;
+      amount: string | number;
+      created_by_user_id: number | null;
+      updated_by_user_id: number | null;
+      created_at: string;
+      updated_at: string;
+    };
+
+    return {
+      id: creditNote.id,
+      company_id: creditNote.company_id,
+      outlet_id: creditNote.outlet_id,
+      invoice_id: creditNote.invoice_id,
+      credit_note_no: creditNote.credit_note_no,
+      credit_note_date: formatDateOnly(creditNote.credit_note_date),
+      client_ref: creditNote.client_ref ?? null,
+      status: creditNote.status,
+      reason: creditNote.reason ?? null,
+      notes: creditNote.notes ?? null,
+      amount: Number(creditNote.amount),
+      created_by_user_id: creditNote.created_by_user_id ?? null,
+      updated_by_user_id: creditNote.updated_by_user_id ?? null,
+      created_at: creditNote.created_at,
+      updated_at: creditNote.updated_at
+    };
+  }
+
+  async findCreditNoteLines(creditNoteId: number): Promise<Array<{
+    id: number;
+    credit_note_id: number;
+    line_no: number;
+    description: string;
+    qty: number;
+    unit_price: number;
+    line_total: number;
+  }>> {
+    const rows = await sql`SELECT id, credit_note_id, line_no, description, qty, unit_price, line_total
+     FROM sales_credit_note_lines
+     WHERE credit_note_id = ${creditNoteId}
+     ORDER BY line_no`.execute(this._getDb());
+
+    return (rows.rows as Array<{
+      id: number;
+      credit_note_id: number;
+      line_no: number;
+      description: string;
+      qty: string | number;
+      unit_price: string | number;
+      line_total: string | number;
+    }>).map(line => ({
+      id: line.id,
+      credit_note_id: line.credit_note_id,
+      line_no: line.line_no,
+      description: line.description,
+      qty: Number(line.qty),
+      unit_price: Number(line.unit_price),
+      line_total: Number(line.line_total)
+    }));
+  }
+
+  async getCreditNoteCapacity(companyId: number, invoiceId: number, excludeCreditNoteId?: number): Promise<{
+    grand_total: number;
+    already_credited: number;
+    remaining: number;
+  }> {
+    // Lock the invoice row first
+    await sql`SELECT grand_total FROM sales_invoices
+     WHERE company_id = ${companyId} AND id = ${invoiceId} AND status = 'POSTED'
+     FOR UPDATE`.execute(this._getDb());
+
+    const invoiceRows = await sql`SELECT grand_total FROM sales_invoices
+     WHERE company_id = ${companyId} AND id = ${invoiceId} AND status = 'POSTED'
+     FOR UPDATE`.execute(this._getDb());
+
+    if (invoiceRows.rows.length === 0) {
+      throw new Error("Invoice not found or not posted");
+    }
+
+    const grandTotal = Number((invoiceRows.rows[0] as { grand_total: string | number }).grand_total);
+
+    // Lock individual credit note rows
+    const excludeClause = excludeCreditNoteId ? sql` AND id != ${excludeCreditNoteId}` : sql``;
+    await sql`SELECT id FROM sales_credit_notes
+     WHERE company_id = ${companyId} AND invoice_id = ${invoiceId} AND status = 'POSTED'
+     ${excludeClause}
+     FOR UPDATE`.execute(this._getDb());
+
+    // Calculate the sum
+    const creditRows = await sql`SELECT COALESCE(SUM(amount), 0) as total
+     FROM sales_credit_notes
+     WHERE company_id = ${companyId} AND invoice_id = ${invoiceId} AND status = 'POSTED'
+     ${excludeClause}`.execute(this._getDb());
+
+    const alreadyCredited = Number((creditRows.rows[0] as { total: string | number }).total ?? 0);
+    const remaining = Math.max(0, grandTotal - alreadyCredited);
+
+    return { grand_total: grandTotal, already_credited: alreadyCredited, remaining };
+  }
+
+  async insertCreditNote(input: {
+    companyId: number;
+    outletId: number;
+    invoiceId: number;
+    creditNoteNo: string;
+    creditNoteDate: string;
+    status: string;
+    clientRef?: string;
+    reason?: string;
+    notes?: string;
+    amount: number;
+    createdByUserId?: number;
+  }): Promise<number> {
+    const result = await sql`INSERT INTO sales_credit_notes (
+        company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
+        status, client_ref, reason, notes, amount, created_by_user_id, updated_by_user_id
+      ) VALUES (${input.companyId}, ${input.outletId}, ${input.invoiceId}, ${input.creditNoteNo}, ${input.creditNoteDate},
+        ${input.status}, ${input.clientRef ?? null}, ${input.reason ?? null}, ${input.notes ?? null},
+        ${input.amount}, ${input.createdByUserId ?? null}, ${input.createdByUserId ?? null})`.execute(this._getDb());
+
+    return Number(result.insertId);
+  }
+
+  async insertCreditNoteLine(input: {
+    creditNoteId: number;
+    companyId: number;
+    outletId: number;
+    lineNo: number;
+    description: string;
+    qty: number;
+    unitPrice: number;
+    lineTotal: number;
+  }): Promise<void> {
+    await sql`INSERT INTO sales_credit_note_lines (
+        credit_note_id, company_id, outlet_id, line_no, description, qty, unit_price, line_total
+      ) VALUES (${input.creditNoteId}, ${input.companyId}, ${input.outletId}, ${input.lineNo},
+        ${input.description}, ${input.qty}, ${input.unitPrice}, ${input.lineTotal})`.execute(this._getDb());
+  }
+
+  async updateCreditNote(input: {
+    companyId: number;
+    creditNoteId: number;
+    creditNoteDate?: string;
+    reason?: string;
+    notes?: string;
+    amount?: number;
+    updatedByUserId?: number;
+  }): Promise<void> {
+    const updates: Array<ReturnType<typeof sql>> = [sql`updated_by_user_id = ${input.updatedByUserId ?? null}`, sql`updated_at = CURRENT_TIMESTAMP`];
+
+    if (input.creditNoteDate) {
+      updates.push(sql`credit_note_date = ${input.creditNoteDate}`);
+    }
+
+    if (input.reason !== undefined) {
+      updates.push(sql`reason = ${input.reason ?? null}`);
+    }
+
+    if (input.notes !== undefined) {
+      updates.push(sql`notes = ${input.notes ?? null}`);
+    }
+
+    if (input.amount !== undefined) {
+      updates.push(sql`amount = ${input.amount}`);
+    }
+
+    await sql`UPDATE sales_credit_notes SET ${sql.join(updates, sql`, `)} WHERE company_id = ${input.companyId} AND id = ${input.creditNoteId}`.execute(this._getDb());
+  }
+
+  async updateCreditNoteStatus(companyId: number, creditNoteId: number, status: string, updatedByUserId?: number): Promise<void> {
+    await sql`UPDATE sales_credit_notes
+     SET status = ${status},
+         updated_by_user_id = ${updatedByUserId ?? null},
+         updated_at = CURRENT_TIMESTAMP
+     WHERE company_id = ${companyId} AND id = ${creditNoteId}`.execute(this._getDb());
+  }
+
+  async deleteCreditNoteLines(creditNoteId: number): Promise<void> {
+    await sql`DELETE FROM sales_credit_note_lines WHERE credit_note_id = ${creditNoteId}`.execute(this._getDb());
+  }
+
+  async listCreditNotes(companyId: number, filters: {
+    outletIds?: readonly number[];
+    invoiceId?: number;
+    status?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    limit?: number;
+    offset?: number;
+    timezone?: string;
+  }): Promise<{ total: number; creditNotes: Array<{
+    id: number;
+    company_id: number;
+    outlet_id: number;
+    invoice_id: number;
+    credit_note_no: string;
+    credit_note_date: string;
+    client_ref: string | null;
+    status: string;
+    reason: string | null;
+    notes: string | null;
+    amount: number;
+    created_by_user_id: number | null;
+    updated_by_user_id: number | null;
+    created_at: string;
+    updated_at: string;
+    lines: Array<{
+      id: number;
+      credit_note_id: number;
+      line_no: number;
+      description: string;
+      qty: number;
+      unit_price: number;
+      line_total: number;
+    }>;
+  }> }> {
+    const db = this._getDb();
+    const conditions: Array<ReturnType<typeof sql>> = [sql`company_id = ${companyId}`];
+
+    if (filters.outletIds && filters.outletIds.length > 0) {
+      conditions.push(sql`outlet_id IN (${sql.join(filters.outletIds.map(id => sql`${id}`), sql`, `)})`);
+    }
+
+    if (filters.invoiceId) {
+      conditions.push(sql`invoice_id = ${filters.invoiceId}`);
+    }
+
+    if (filters.status) {
+      conditions.push(sql`status = ${filters.status}`);
+    }
+
+    if (filters.dateFrom) {
+      conditions.push(sql`credit_note_date >= ${filters.dateFrom}`);
+    }
+
+    if (filters.dateTo) {
+      conditions.push(sql`credit_note_date <= ${filters.dateTo}`);
+    }
+
+    const whereClause = sql.join(conditions, sql` AND `);
+
+    const countResult = await sql`SELECT COUNT(*) as total FROM sales_credit_notes WHERE ${whereClause}`.execute(db);
+
+    const limit = filters.limit ?? 50;
+    const offset = filters.offset ?? 0;
+
+    const rows = await sql`SELECT id, company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
+            client_ref, status, reason, notes, amount, created_by_user_id, updated_by_user_id,
+            created_at, updated_at
+     FROM sales_credit_notes
+     WHERE ${whereClause}
+     ORDER BY id DESC
+     LIMIT ${limit} OFFSET ${offset}`.execute(db);
+
+    const creditNotes: Array<{
+      id: number;
+      company_id: number;
+      outlet_id: number;
+      invoice_id: number;
+      credit_note_no: string;
+      credit_note_date: string;
+      client_ref: string | null;
+      status: string;
+      reason: string | null;
+      notes: string | null;
+      amount: number;
+      created_by_user_id: number | null;
+      updated_by_user_id: number | null;
+      created_at: string;
+      updated_at: string;
+      lines: Array<{
+        id: number;
+        credit_note_id: number;
+        line_no: number;
+        description: string;
+        qty: number;
+        unit_price: number;
+        line_total: number;
+      }>;
+    }> = [];
+
+    for (const row of rows.rows as Array<{
+      id: number;
+      company_id: number;
+      outlet_id: number;
+      invoice_id: number;
+      credit_note_no: string;
+      credit_note_date: string;
+      client_ref: string | null;
+      status: string;
+      reason: string | null;
+      notes: string | null;
+      amount: string | number;
+      created_by_user_id: number | null;
+      updated_by_user_id: number | null;
+      created_at: string;
+      updated_at: string;
+    }>) {
+      const lines = await this.findCreditNoteLines(row.id);
+      creditNotes.push({
+        id: row.id,
+        company_id: row.company_id,
+        outlet_id: row.outlet_id,
+        invoice_id: row.invoice_id,
+        credit_note_no: row.credit_note_no,
+        credit_note_date: formatDateOnly(row.credit_note_date),
+        client_ref: row.client_ref ?? null,
+        status: row.status,
+        reason: row.reason ?? null,
+        notes: row.notes ?? null,
+        amount: Number(row.amount),
+        created_by_user_id: row.created_by_user_id ?? null,
+        updated_by_user_id: row.updated_by_user_id ?? null,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        lines
+      });
+    }
+
+    return { total: Number((countResult.rows[0] as { total: string | number }).total), creditNotes };
+  }
+
   // List operations
   async listOrders(companyId: number, filters: OrderListFilters): Promise<{ total: number; orders: SalesOrderDetail[] }> {
     const db = this._getDb();

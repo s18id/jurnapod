@@ -1,0 +1,785 @@
+// Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
+// Ownership: Ahmad Faruk (Signal18 ID)
+
+/**
+ * Recipe Service Implementation
+ * 
+ * Core recipe/kit operations with database transaction support.
+ * All methods enforce company_id scoping.
+ */
+
+import { sql } from "kysely";
+import { toRfc3339Required } from "@jurnapod/shared";
+import { withTransaction } from "@jurnapod/db";
+import type { KyselySchema } from "@jurnapod/db";
+import { getInventoryDb } from "../db.js";
+import type {
+  RecipeService,
+  RecipeIngredient,
+  RecipeIngredientWithDetails,
+  RecipeCostBreakdown,
+  CreateRecipeIngredientInput,
+  UpdateRecipeIngredientInput
+} from "../interfaces/recipe-service.js";
+import {
+  InventoryConflictError,
+  InventoryReferenceError,
+  InventoryForbiddenError
+} from "../errors.js";
+
+// Re-export error classes for API compatibility
+export { InventoryConflictError, InventoryReferenceError, InventoryForbiddenError };
+
+// Money scale for calculations
+const MONEY_SCALE = 100;
+
+// Row type definitions
+interface RecipeIngredientRow {
+  id: number;
+  company_id: number;
+  recipe_item_id: number;
+  ingredient_item_id: number;
+  quantity: string | number;
+  unit_of_measure: string;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ItemRow {
+  id: number;
+  company_id: number;
+  name: string;
+  sku: string | null;
+  item_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+  is_active: number;
+}
+
+interface IngredientInventoryCostRow {
+  product_id: number;
+  inbound_quantity: number | string;
+  inbound_total_cost: number | string;
+}
+
+interface IngredientPriceRow {
+  item_id: number;
+  unit_cost: number | string;
+}
+
+// Normalization functions
+function normalizeRecipeIngredient(row: RecipeIngredientRow): RecipeIngredient {
+  return {
+    id: Number(row.id),
+    company_id: Number(row.company_id),
+    recipe_item_id: Number(row.recipe_item_id),
+    ingredient_item_id: Number(row.ingredient_item_id),
+    quantity: Number(row.quantity),
+    unit_of_measure: row.unit_of_measure,
+    is_active: row.is_active === 1,
+    created_at: toRfc3339Required(row.created_at),
+    updated_at: toRfc3339Required(row.updated_at)
+  };
+}
+
+function normalizeMoney(value: number): number {
+  return Math.round(value * MONEY_SCALE) / MONEY_SCALE;
+}
+
+// Helper to build IN clause with sql template
+function buildInClause(values: readonly number[]) {
+  if (values.length === 0) return null;
+  return sql.join(values.map(v => sql`${v}`));
+}
+
+// Resolve ingredient unit cost from inventory transactions
+async function resolveIngredientUnitCost(
+  db: KyselySchema,
+  companyId: number,
+  itemId: number
+): Promise<number> {
+  const costs = await resolveIngredientUnitCosts(db, companyId, [itemId]);
+  return costs.get(itemId) ?? 0;
+}
+
+async function resolveIngredientUnitCosts(
+  db: KyselySchema,
+  companyId: number,
+  itemIds: readonly number[]
+): Promise<Map<number, number>> {
+  const uniqueItemIds = Array.from(new Set(itemIds.map(Number))).filter((id) => Number.isInteger(id) && id > 0);
+  if (uniqueItemIds.length === 0) {
+    return new Map();
+  }
+
+  const resolvedCosts = new Map<number, number>();
+
+  // Try inventory_transactions first for actual cost
+  const inClause = buildInClause(uniqueItemIds);
+  if (inClause) {
+    const inventoryRows = await sql<IngredientInventoryCostRow>`
+      SELECT
+        product_id,
+        COALESCE(SUM(quantity_delta), 0) AS inbound_quantity,
+        COALESCE(SUM(quantity_delta * unit_cost), 0) AS inbound_total_cost
+      FROM inventory_transactions
+      WHERE company_id = ${companyId}
+        AND product_id IN (${inClause})
+        AND quantity_delta > 0
+      GROUP BY product_id
+    `.execute(db);
+
+    for (const row of inventoryRows.rows) {
+      const productId = Number(row.product_id);
+      const inboundQuantity = Number(row.inbound_quantity ?? 0);
+      const inboundTotalCost = Number(row.inbound_total_cost ?? 0);
+      if (inboundQuantity > 0 && inboundTotalCost > 0) {
+        resolvedCosts.set(productId, normalizeMoney(inboundTotalCost / inboundQuantity));
+      }
+    }
+  }
+
+  // Fallback to item_prices if no inventory cost found
+  const fallbackIds = uniqueItemIds.filter((itemId) => !resolvedCosts.has(itemId));
+  if (fallbackIds.length === 0) {
+    return resolvedCosts;
+  }
+
+  const fallbackInClause = buildInClause(fallbackIds);
+  if (!fallbackInClause) {
+    return resolvedCosts;
+  }
+
+  const priceResult = await sql<IngredientPriceRow[]>`
+    SELECT COALESCE(price, 0) AS unit_cost, item_id
+    FROM item_prices
+    WHERE company_id = ${companyId}
+      AND item_id IN (${fallbackInClause})
+      AND is_active = 1
+    ORDER BY item_id ASC, created_at DESC, id DESC
+  `.execute(db);
+
+  for (const row of priceResult.rows as unknown as IngredientPriceRow[]) {
+    const itemId = Number(row.item_id);
+    if (resolvedCosts.has(itemId)) {
+      continue;
+    }
+    const price = Number(row.unit_cost ?? 0);
+    if (price > 0) {
+      resolvedCosts.set(itemId, normalizeMoney(price));
+    }
+  }
+
+  return resolvedCosts;
+}
+
+// Get item by ID helper
+async function getItemById(
+  db: KyselySchema,
+  companyId: number,
+  itemId: number
+): Promise<ItemRow | null> {
+  const rows = await sql<ItemRow>`
+    SELECT id, company_id, name, sku, item_type, is_active 
+    FROM items 
+    WHERE id = ${itemId} AND company_id = ${companyId}
+    LIMIT 1
+  `.execute(db);
+
+  if (rows.rows.length === 0) {
+    return null;
+  }
+
+  return rows.rows[0];
+}
+
+// Ensure company item exists helper
+async function ensureCompanyItemExists(
+  db: KyselySchema,
+  companyId: number,
+  itemId: number
+): Promise<ItemRow> {
+  const item = await getItemById(db, companyId, itemId);
+  if (!item) {
+    throw new InventoryReferenceError(`Item with ID ${itemId} not found`);
+  }
+  return item;
+}
+
+// Audit log helper
+async function recordAuditLog(
+  db: KyselySchema,
+  input: {
+    companyId: number;
+    outletId: number | null;
+    actor?: { userId: number };
+    action: string;
+    payload: Record<string, unknown>;
+  }
+): Promise<void> {
+  await sql`
+    INSERT INTO audit_logs (
+      company_id, outlet_id, user_id, action, result, success, ip_address, payload_json
+    ) VALUES (
+      ${input.companyId},
+      ${input.outletId},
+      ${input.actor?.userId ?? null},
+      ${input.action},
+      'SUCCESS',
+      1,
+      NULL,
+      ${JSON.stringify(input.payload)}
+    )
+  `.execute(db);
+}
+
+// Circular reference detection
+async function detectCircularReference(
+  db: KyselySchema,
+  companyId: number,
+  recipeId: number,
+  ingredientId: number,
+  visited: Set<number> = new Set()
+): Promise<boolean> {
+  if (visited.has(ingredientId)) return true;
+  if (ingredientId === recipeId) return true;
+
+  visited.add(ingredientId);
+
+  // Check if ingredient is itself a recipe
+  const item = await getItemById(db, companyId, ingredientId);
+  if (item && item.item_type === "RECIPE") {
+    const subIngredients = await sql<{ ingredient_item_id: number }>`
+      SELECT ingredient_item_id FROM recipe_ingredients 
+      WHERE company_id = ${companyId} AND recipe_item_id = ${ingredientId} AND is_active = 1
+    `.execute(db);
+
+    for (const sub of subIngredients.rows) {
+      if (
+        await detectCircularReference(
+          db,
+          companyId,
+          recipeId,
+          Number(sub.ingredient_item_id),
+          visited
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+// Find recipe ingredient by ID with details
+async function findRecipeIngredientById(
+  db: KyselySchema,
+  companyId: number,
+  ingredientId: number
+): Promise<RecipeIngredientWithDetails | null> {
+  const rows = await sql`
+    SELECT 
+      ri.*,
+      i.name as ingredient_name,
+      i.sku as ingredient_sku,
+      i.item_type as ingredient_type
+    FROM recipe_ingredients ri
+    JOIN items i ON ri.ingredient_item_id = i.id
+    WHERE ri.id = ${ingredientId} AND ri.company_id = ${companyId}
+    LIMIT 1
+  `.execute(db);
+
+  if (rows.rows.length === 0) {
+    return null;
+  }
+
+  const row = rows.rows[0];
+  const typedRow = row as RecipeIngredientRow & {
+    ingredient_name: string;
+    ingredient_sku: string | null;
+    ingredient_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+  };
+  const normalized = normalizeRecipeIngredient(typedRow);
+  const unitCost = await resolveIngredientUnitCost(
+    db,
+    companyId,
+    Number(normalized.ingredient_item_id)
+  );
+
+  return {
+    ...normalized,
+    ingredient_name: typedRow.ingredient_name,
+    ingredient_sku: typedRow.ingredient_sku ?? null,
+    ingredient_type: typedRow.ingredient_type,
+    unit_cost: unitCost,
+    total_cost: normalizeMoney(normalized.quantity * unitCost)
+  };
+}
+
+// Recipe Service Implementation
+export class RecipeServiceImpl implements RecipeService {
+  constructor(private readonly db: KyselySchema) {}
+
+  /**
+   * Add ingredient to recipe.
+   */
+  async addIngredientToRecipe(
+    companyId: number,
+    recipeItemId: number,
+    input: CreateRecipeIngredientInput,
+    actor?: { userId: number }
+  ): Promise<RecipeIngredientWithDetails> {
+    return withTransaction(this.db, async (trx) => {
+      // Validate recipe exists
+      const recipeItem = await ensureCompanyItemExists(
+        trx,
+        companyId,
+        recipeItemId
+      );
+      if (recipeItem.item_type !== "RECIPE") {
+        throw new InventoryForbiddenError(
+          `Item ${recipeItemId} is not a RECIPE type`
+        );
+      }
+
+      // Validate ingredient exists
+      const ingredientItem = await ensureCompanyItemExists(
+        trx,
+        companyId,
+        input.ingredient_item_id
+      );
+
+      if (input.ingredient_item_id === recipeItemId) {
+        throw new InventoryConflictError("Cannot add recipe as its own ingredient");
+      }
+
+      // Validate ingredient type (only INGREDIENT or PRODUCT can be recipe components)
+      if (
+        ingredientItem.item_type !== "INGREDIENT" &&
+        ingredientItem.item_type !== "PRODUCT"
+      ) {
+        throw new InventoryForbiddenError(
+          "Only ingredients and products can be recipe components"
+        );
+      }
+
+      // Check for circular reference
+      const hasCircularRef = await detectCircularReference(
+        trx,
+        companyId,
+        recipeItemId,
+        input.ingredient_item_id
+      );
+      if (hasCircularRef) {
+        throw new InventoryConflictError(
+          "Cannot add recipe as its own ingredient"
+        );
+      }
+
+      try {
+        const result = await sql`
+          INSERT INTO recipe_ingredients 
+          (company_id, recipe_item_id, ingredient_item_id, quantity, unit_of_measure)
+          VALUES (
+            ${companyId},
+            ${recipeItemId},
+            ${input.ingredient_item_id},
+            ${input.quantity},
+            ${input.unit_of_measure ?? "unit"}
+          )
+        `.execute(trx);
+
+        const insertId = Number((result.insertId ?? 0));
+
+        // Audit logging
+        await recordAuditLog(trx, {
+          companyId,
+          outletId: null,
+          actor,
+          action: "RECIPE_INGREDIENT_CREATE",
+          payload: {
+            recipe_item_id: recipeItemId,
+            ingredient_item_id: input.ingredient_item_id,
+            quantity: input.quantity,
+            unit_of_measure: input.unit_of_measure ?? "unit"
+          }
+        });
+
+        // Fetch the created ingredient with details
+        const ingredient = await findRecipeIngredientById(
+          trx,
+          companyId,
+          insertId
+        );
+        if (!ingredient) {
+          throw new Error("Failed to fetch created ingredient");
+        }
+
+        return ingredient;
+      } catch (error) {
+        if (isMysqlError(error) && error.errno === 1062) {
+          throw new InventoryConflictError(
+            "Ingredient already exists in this recipe"
+          );
+        }
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * Get all ingredients for a recipe.
+   */
+  async getRecipeIngredients(
+    companyId: number,
+    recipeItemId: number
+  ): Promise<RecipeIngredientWithDetails[]> {
+    const recipeRows = await sql`
+      SELECT id
+      FROM items
+      WHERE id = ${recipeItemId} AND company_id = ${companyId} AND item_type = 'RECIPE'
+      LIMIT 1
+    `.execute(this.db);
+
+    if (recipeRows.rows.length === 0) {
+      throw new InventoryReferenceError(
+        `Recipe item with ID ${recipeItemId} not found`
+      );
+    }
+
+    const rows = await sql`
+      SELECT 
+        ri.*,
+        i.name as ingredient_name,
+        i.sku as ingredient_sku,
+        i.item_type as ingredient_type
+      FROM recipe_ingredients ri
+      JOIN items i ON ri.ingredient_item_id = i.id
+      WHERE ri.company_id = ${companyId}
+        AND ri.recipe_item_id = ${recipeItemId}
+        AND ri.is_active = 1
+        AND i.is_active = 1
+      ORDER BY i.name ASC
+    `.execute(this.db);
+
+    const unitCosts = await resolveIngredientUnitCosts(
+      this.db,
+      companyId,
+      rows.rows.map((row) => Number((row as RecipeIngredientRow).ingredient_item_id))
+    );
+
+    return rows.rows.map((row) => {
+      const typedRow = row as RecipeIngredientRow & {
+        ingredient_name: string;
+        ingredient_sku: string | null;
+        ingredient_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+      };
+      const normalized = normalizeRecipeIngredient(typedRow);
+      const unitCost = unitCosts.get(Number(normalized.ingredient_item_id)) ?? 0;
+      return {
+        ...normalized,
+        ingredient_name: typedRow.ingredient_name,
+        ingredient_sku: typedRow.ingredient_sku ?? null,
+        ingredient_type: typedRow.ingredient_type,
+        unit_cost: unitCost,
+        total_cost: normalizeMoney(normalized.quantity * unitCost)
+      };
+    });
+  }
+
+  /**
+   * Update a recipe ingredient.
+   */
+  async updateRecipeIngredient(
+    companyId: number,
+    ingredientId: number,
+    updates: UpdateRecipeIngredientInput,
+    actor?: { userId: number }
+  ): Promise<RecipeIngredientWithDetails> {
+    return withTransaction(this.db, async (trx) => {
+      // Check ingredient exists
+      const existing = await findRecipeIngredientById(
+        trx,
+        companyId,
+        ingredientId
+      );
+      if (!existing) {
+        throw new InventoryReferenceError(
+          `Recipe ingredient with ID ${ingredientId} not found`
+        );
+      }
+
+      // Build update query
+      const updateFields: string[] = [];
+      const values: (string | number | null)[] = [];
+
+      if (updates.quantity !== undefined) {
+        if (updates.quantity <= 0) {
+          throw new InventoryForbiddenError("Quantity must be greater than 0");
+        }
+        updateFields.push("quantity");
+        values.push(updates.quantity);
+      }
+
+      if (updates.unit_of_measure !== undefined) {
+        updateFields.push("unit_of_measure");
+        values.push(updates.unit_of_measure);
+      }
+
+      if (updates.is_active !== undefined) {
+        updateFields.push("is_active");
+        values.push(updates.is_active ? 1 : 0);
+      }
+
+      if (updateFields.length === 0) {
+        return existing;
+      }
+
+      const setClauses = updateFields.map((f, i) => sql`${sql.raw(f)} = ${values[i]}`);
+      
+      await sql`
+        UPDATE recipe_ingredients 
+        SET ${sql.join(setClauses)}
+        WHERE id = ${ingredientId} AND company_id = ${companyId}
+      `.execute(trx);
+
+      // Audit logging
+      await recordAuditLog(trx, {
+        companyId,
+        outletId: null,
+        actor,
+        action: "RECIPE_INGREDIENT_UPDATE",
+        payload: {
+          ingredient_id: ingredientId,
+          recipe_item_id: existing.recipe_item_id,
+          updates
+        }
+      });
+
+      // Fetch updated ingredient
+      const updated = await findRecipeIngredientById(
+        trx,
+        companyId,
+        ingredientId
+      );
+      if (!updated) {
+        throw new Error("Failed to fetch updated ingredient");
+      }
+
+      return updated;
+    });
+  }
+
+  /**
+   * Remove ingredient from recipe.
+   */
+  async removeIngredientFromRecipe(
+    companyId: number,
+    ingredientId: number,
+    actor?: { userId: number }
+  ): Promise<void> {
+    return withTransaction(this.db, async (trx) => {
+      // Check ingredient exists
+      const existing = await findRecipeIngredientById(
+        trx,
+        companyId,
+        ingredientId
+      );
+      if (!existing) {
+        throw new InventoryReferenceError(
+          `Recipe ingredient with ID ${ingredientId} not found`
+        );
+      }
+
+      await sql`
+        DELETE FROM recipe_ingredients WHERE id = ${ingredientId} AND company_id = ${companyId}
+      `.execute(trx);
+
+      // Audit logging
+      await recordAuditLog(trx, {
+        companyId,
+        outletId: null,
+        actor,
+        action: "RECIPE_INGREDIENT_DELETE",
+        payload: {
+          ingredient_id: ingredientId,
+          recipe_item_id: existing.recipe_item_id,
+          ingredient_item_id: existing.ingredient_item_id
+        }
+      });
+    });
+  }
+
+  /**
+   * Calculate recipe cost breakdown.
+   */
+  async calculateRecipeCost(
+    companyId: number,
+    recipeItemId: number
+  ): Promise<RecipeCostBreakdown> {
+    // Verify recipe exists
+    const recipeRows = await sql`
+      SELECT id, name, sku FROM items 
+      WHERE id = ${recipeItemId} AND company_id = ${companyId} AND item_type = 'RECIPE'
+      LIMIT 1
+    `.execute(this.db);
+
+    if (recipeRows.rows.length === 0) {
+      throw new InventoryReferenceError(
+        `Recipe item with ID ${recipeItemId} not found`
+      );
+    }
+
+    const ingredientRows = await sql`
+      SELECT 
+        ri.ingredient_item_id,
+        ri.quantity,
+        ri.unit_of_measure,
+        i.name,
+        i.sku
+      FROM recipe_ingredients ri
+      JOIN items i ON ri.ingredient_item_id = i.id
+      WHERE ri.company_id = ${companyId}
+        AND ri.recipe_item_id = ${recipeItemId}
+        AND ri.is_active = 1
+        AND i.is_active = 1
+      ORDER BY i.name ASC
+    `.execute(this.db);
+
+    const unitCosts = await resolveIngredientUnitCosts(
+      this.db,
+      companyId,
+      ingredientRows.rows.map((row) => Number((row as { ingredient_item_id: number }).ingredient_item_id))
+    );
+
+    const ingredients = ingredientRows.rows.map((row) => {
+      const typedRow = row as { ingredient_item_id: number; quantity: string | number; unit_of_measure: string; name: string; sku: string | null };
+      const quantity = Number(typedRow.quantity);
+      const unitCost = unitCosts.get(typedRow.ingredient_item_id) ?? 0;
+      const lineCost = normalizeMoney(quantity * unitCost);
+
+      return {
+        ingredient_item_id: typedRow.ingredient_item_id,
+        name: typedRow.name,
+        sku: typedRow.sku ?? null,
+        quantity,
+        unit_of_measure: typedRow.unit_of_measure,
+        unit_cost: unitCost,
+        line_cost: lineCost
+      };
+    });
+
+    const totalCost = normalizeMoney(ingredients.reduce((sum, ing) => sum + ing.line_cost, 0));
+
+    return {
+      recipe_item_id: recipeItemId,
+      total_ingredient_cost: totalCost,
+      ingredient_count: ingredients.length,
+      ingredients
+    };
+  }
+
+  /**
+   * Validate recipe composition before adding ingredient.
+   */
+  async validateRecipeComposition(
+    companyId: number,
+    recipeItemId: number,
+    ingredientItemId: number
+  ): Promise<{ valid: boolean; error?: string }> {
+    try {
+      // Check if recipe exists and is RECIPE type
+      const recipeRows = await sql`
+        SELECT item_type FROM items 
+        WHERE id = ${recipeItemId} AND company_id = ${companyId}
+        LIMIT 1
+      `.execute(this.db);
+
+      if (recipeRows.rows.length === 0) {
+        return { valid: false, error: "Recipe item not found" };
+      }
+
+      const recipeRow = recipeRows.rows[0] as { item_type: string };
+      if (recipeRow.item_type !== "RECIPE") {
+        return { valid: false, error: "Item is not a RECIPE type" };
+      }
+
+      if (ingredientItemId === recipeItemId) {
+        return {
+          valid: false,
+          error: "Cannot add recipe as its own ingredient"
+        };
+      }
+
+      // Check if ingredient exists and is valid type
+      const ingredientRows = await sql`
+        SELECT item_type FROM items 
+        WHERE id = ${ingredientItemId} AND company_id = ${companyId}
+        LIMIT 1
+      `.execute(this.db);
+
+      if (ingredientRows.rows.length === 0) {
+        return { valid: false, error: "Ingredient item not found" };
+      }
+
+      const ingredientRow = ingredientRows.rows[0] as { item_type: string };
+      const ingredientType = ingredientRow.item_type;
+      if (ingredientType !== "INGREDIENT" && ingredientType !== "PRODUCT") {
+        return {
+          valid: false,
+          error: "Only ingredients and products can be recipe components"
+        };
+      }
+
+      // Check for circular reference
+      const hasCircularRef = await detectCircularReference(
+        this.db,
+        companyId,
+        recipeItemId,
+        ingredientItemId
+      );
+      if (hasCircularRef) {
+        return {
+          valid: false,
+          error: "Cannot add recipe as its own ingredient"
+        };
+      }
+
+      // Check for duplicate
+      const existingRows = await sql`
+        SELECT id FROM recipe_ingredients 
+        WHERE company_id = ${companyId} AND recipe_item_id = ${recipeItemId} AND ingredient_item_id = ${ingredientItemId}
+        LIMIT 1
+      `.execute(this.db);
+
+      if (existingRows.rows.length > 0) {
+        return {
+          valid: false,
+          error: "Ingredient already exists in this recipe"
+        };
+      }
+
+      return { valid: true };
+    } catch (error) {
+      console.error("validateRecipeComposition error:", error);
+      return { valid: false, error: "Validation failed" };
+    }
+  }
+}
+
+// Type guard for MySQL errors
+function isMysqlError(error: unknown): error is { errno?: number } {
+  return typeof error === "object" && error !== null && "errno" in error;
+}
+
+// Re-export types
+export type {
+  RecipeIngredient,
+  RecipeIngredientWithDetails,
+  RecipeCostBreakdown,
+  CreateRecipeIngredientInput,
+  UpdateRecipeIngredientInput
+} from "../interfaces/recipe-service.js";
+
+// Default singleton instance for convenience
+export const recipeService = new RecipeServiceImpl(getInventoryDb());

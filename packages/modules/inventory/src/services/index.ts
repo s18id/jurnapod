@@ -14,3 +14,6 @@ export type {
   VariantAttribute,
   SyncPullVariant
 } from "./item-variant-service.js";
+export { StockServiceImpl, getStockService, InventoryConflictError as StockConflictError, InventoryReferenceError as StockReferenceError, InventoryForbiddenError as StockForbiddenError } from "./stock-service.js";
+export { RecipeServiceImpl, recipeService, InventoryConflictError as RecipeConflictError, InventoryReferenceError as RecipeReferenceError, InventoryForbiddenError as RecipeForbiddenError } from "./recipe-service.js";
+export { SuppliesServiceImpl, suppliesService, InventoryConflictError as SuppliesConflictError } from "./supplies-service.js";

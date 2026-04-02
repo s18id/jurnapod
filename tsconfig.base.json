@@ -18,6 +18,7 @@
       "@jurnapod/modules-inventory": ["packages/modules/inventory/src/index.ts"],
       "@jurnapod/modules-sales": ["packages/modules/sales/src/index.ts"],
       "@jurnapod/modules-reporting": ["packages/modules/reporting/src/index.ts"],
+      "@jurnapod/modules-reservations": ["packages/modules/reservations/src/index.ts"],
       "@/lib/*": ["apps/api/src/lib/*"],
       "@/lib": ["apps/api/src/lib"],
       "@/services/*": ["apps/api/src/services/*"],

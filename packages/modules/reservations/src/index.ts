@@ -23,5 +23,11 @@ export * from "./table-occupancy/index.js";
 // Outlet tables module - re-export everything
 export * from "./outlet-tables/index.js";
 
+// Service sessions module - re-export everything
+export * from "./service-sessions/index.js";
+
+// Table sync module - re-export everything
+export * from "./table-sync/index.js";
+
 // Module type marker
 export type ReservationsModuleStub = "reservations";

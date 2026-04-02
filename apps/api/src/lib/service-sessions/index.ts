@@ -1,36 +1,24 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-// Re-export types from types module (canonical location)
-export * from './types';
+/**
+ * Service Sessions - Thin API Adapter
+ *
+ * Re-exports from sub-modules which delegate to @jurnapod/modules-reservations.
+ * This module provides backward compatibility for API routes.
+ */
 
-// Re-export shared utilities from session-utils (single source of truth)
-export {
-  mapDbRowToServiceSession,
-  mapDbRowToSessionLine,
-  checkClientTxIdExists,
-  getSessionWithConnection,
-  getSessionLineWithConnection,
-  logTableEventWithConnection,
-  logSessionEvent,
-  getSessionVersionWithConnection,
-  syncSnapshotLinesFromSession,
-  validateSessionModifiable,
-  isValidSessionStateTransition,
-} from './session-utils';
+// Re-export types and errors from types module
+export * from "./types";
 
-// Re-export lifecycle functions
-export * from './lifecycle';
+// Re-export session-utils (helpers, mappers, event logging)
+export * from "./session-utils";
 
-// Re-export line functions
-export {
-  addSessionLine,
-  updateSessionLine,
-  removeSessionLine,
-} from './lines';
+// Re-export lifecycle functions (getSession, listSessions, lockSessionForPayment, closeSession)
+export * from "./lifecycle";
 
-// Re-export checkpoint functions
-export {
-  finalizeSessionBatch,
-  adjustSessionLine,
-} from './checkpoint';
+// Re-export line functions (addSessionLine, updateSessionLine, removeSessionLine)
+export * from "./lines";
+
+// Re-export checkpoint functions (finalizeSessionBatch, adjustSessionLine)
+export * from "./checkpoint";

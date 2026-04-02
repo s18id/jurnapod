@@ -7,3 +7,6 @@ export * from "./item-service.js";
 export * from "./item-group-service.js";
 export * from "./item-price-service.js";
 export * from "./item-variant-service.js";
+export * from "./stock-service.js";
+export * from "./recipe-service.js";
+export * from "./supplies-service.js";

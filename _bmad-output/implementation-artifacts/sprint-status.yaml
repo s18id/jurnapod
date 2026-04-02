@@ -268,11 +268,11 @@ development_status:
   23-3-10-modules-reporting-bootstrap: done
   # Sprint 3: Domain Extraction + Sync + Cleanup
   23-3-2-extract-orders-invoices-to-modules-sales: done
-  23-3-3-extract-payments-credit-notes-to-modules-sales: backlog
+  23-3-3-extract-payments-credit-notes-to-modules-sales: REVIEW
   23-3-5-extract-item-catalog-services: done
-  23-3-6-extract-stock-recipe-supplies: backlog
+  23-3-6-extract-stock-recipe-supplies: REVIEW
   23-3-8-extract-reservations-table-services: done
-  23-3-9-extract-service-session-table-sync: backlog
+  23-3-9-extract-service-session-table-sync: review
   23-3-11-extract-report-query-services: done
   23-4-1-extract-sync-push-business-logic: backlog
   23-4-2-extract-sync-pull-business-logic: backlog

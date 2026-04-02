@@ -56,9 +56,14 @@ export const SalesPermissions = {
   UPDATE_INVOICE: "sales:update_invoice",
   READ_INVOICE: "sales:read_invoice",
   CREATE_PAYMENT: "payments:create",
+  UPDATE_PAYMENT: "payments:update",
   READ_PAYMENT: "payments:read",
+  POST_PAYMENT: "payments:post",
   CREATE_CREDIT_NOTE: "credit_notes:create",
+  UPDATE_CREDIT_NOTE: "credit_notes:update",
   READ_CREDIT_NOTE: "credit_notes:read",
+  POST_CREDIT_NOTE: "credit_notes:post",
+  VOID_CREDIT_NOTE: "credit_notes:void",
 } as const;
 
 export type SalesPermission = typeof SalesPermissions[keyof typeof SalesPermissions];
