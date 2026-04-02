@@ -124,7 +124,7 @@ if (Number(inUse?.count ?? 0) > 0) {
 
 | File | Action | Description |
 |------|--------|-------------|
-| `packages/modules-accounting/src/account-types-service.ts` | Modify | Add kysely to interface, migrate CRUD |
+| `packages/modules/accounting/src/account-types-service.ts` | Modify | Add kysely to interface, migrate CRUD |
 | `apps/api/src/lib/account-types.ts` | Modify | Ensure kysely integration |
 | `apps/api/src/routes/account-types.ts` | Create | Create route file if missing |
 

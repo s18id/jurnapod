@@ -17,7 +17,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "lint": "echo 'lint not configured yet for @jurnapod/db'",
+    "lint": "eslint src --config eslint.config.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --import tsx --test-force-exit 'src/**/*.test.ts'",
     "test:unit": "node --test --import tsx --test-force-exit 'src/**/*.test.ts'",

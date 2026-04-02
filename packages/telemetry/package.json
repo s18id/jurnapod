@@ -6,7 +6,8 @@
   "main": "./src/index.ts",
   "scripts": {
     "test": "node --test --import tsx src/__tests__/*.test.ts",
-    "test:verbose": "node --test --verbose --import tsx src/__tests__/*.test.ts"
+    "test:verbose": "node --test --verbose --import tsx src/__tests__/*.test.ts",
+    "lint": "eslint src --config eslint.config.mjs"
   },
   "exports": {
     ".": "./src/index.ts",

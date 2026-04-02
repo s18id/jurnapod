@@ -115,7 +115,7 @@ const glQuery = `
 
 | File | Action | Description |
 |------|--------|-------------|
-| `packages/modules-accounting/src/journals-service.ts` | Modify | Add kysely to interface, migrate CRUD |
+| `packages/modules/accounting/src/journals-service.ts` | Modify | Add kysely to interface, migrate CRUD |
 | `apps/api/src/lib/journals.ts` | Modify | Ensure kysely integration |
 | `apps/api/src/routes/journals.ts` | Modify | Migrate endpoints to Kysely |
 

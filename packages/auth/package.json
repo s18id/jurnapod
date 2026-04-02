@@ -39,7 +39,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "echo 'lint not configured yet for @jurnapod/auth'",
+    "lint": "eslint src --config eslint.config.mjs",
     "test": "node --test --import tsx 'src/**/*.test.ts' '!src/**/*.*.integration.test.ts'",
     "test:unit": "node --test --import tsx 'src/**/*.test.ts' '!src/**/*.*.integration.test.ts'",
     "test:db": "AUTH_TEST_USE_DB=1 node --test --import tsx 'integration/**/*.test.ts'",
