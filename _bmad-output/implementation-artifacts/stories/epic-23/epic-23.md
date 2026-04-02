@@ -1,9 +1,34 @@
 # Epic 23: API Detachment
 
-**Status:** 🟠 In Progress (Sprint 1)  
+**Status:** 🟠 In Progress (Sprint 4)  
 **Date:** 2026-04-02  
-**Stories:** 25 total, 0/25 complete (Sprint 1: 0/8 started)  
+**Stories:** 25 total, 19/25 complete  
 **Sprint Plan:** `_bmad-output/planning-artifacts/epic-23-sprint-plan.md`
+
+---
+
+## Sprint Completion Status
+
+| Sprint | Phase | Status | Notes |
+|--------|-------|--------|-------|
+| Sprint 1 | Phase 0-1 | ✅ Done | ADR, lint, foundation extractions |
+| Sprint 2 | Phase 2 | ✅ Done | Accounting package extractions |
+| Sprint 3 | Phase 3 | ✅ Done | Domain package extractions |
+| Sprint 4 | Phase 3-4 | 🔄 In Progress | Sync extraction, route thinning |
+| Sprint 5 | Phase 5 | ⏳ Pending | Cleanup, validation |
+
+---
+
+## Scope Note: Cost-Aware Stock Extraction
+
+**Cost-aware stock operations** (COGS-dependent stock deduction) were **not** extracted to `modules-inventory` because they depend on `@/lib/cost-tracking` (API-internal). This would create a cycle: inventory → costing → accounting.
+
+**Resolution:** Cost-aware stock extraction moved to **Epic 24: Inventory Costing Boundary**:
+- Story 24-2: Extract `cost-tracking.ts` to `@jurnapod/modules-inventory-costing`
+- Story 24-3: Update `lib/stock.ts` to use costing package
+- Story 24-4: Update COGS posting to use costing contract
+
+This separation maintains clean architecture: `modules-inventory → modules-inventory-costing → modules-accounting`
 
 ---
 
