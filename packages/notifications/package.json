@@ -2,8 +2,13 @@
   "name": "@jurnapod/notifications",
   "version": "1.0.0",
   "description": "Email notification service for Jurnapod",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./templates/email": "./dist/templates/email.js",
+    "./link-builder/email": "./dist/link-builder/email.js"
+  },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",

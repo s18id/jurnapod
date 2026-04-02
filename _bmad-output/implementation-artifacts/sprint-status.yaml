@@ -1,4 +1,4 @@
-last_updated: 2026-04-02T06:30:00Z
+last_updated: 2026-04-02T12:30:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -251,17 +251,17 @@ development_status:
   epic-23: in-progress
   # Sprint 1: Pre-flight + Foundation
   23-0-1-author-package-dependency-policy-adr: done
-  23-0-2-add-import-boundary-lint-constraints: REVIEW
-  23-0-3-scaffold-new-domain-package-workspaces: backlog
-  23-0-4-create-extraction-checklist-template: backlog
-  23-1-1-move-correlation-primitives-to-telemetry: backlog
-  23-1-2-extract-email-templates-to-notifications: backlog
-  23-1-3-move-feature-flags-settings-to-modules-platform: backlog
-  23-1-4-consolidate-audit-utilities-into-modules-platform: backlog
+  23-0-2-add-import-boundary-lint-constraints: done
+  23-0-3-scaffold-new-domain-package-workspaces: done
+  23-0-4-create-extraction-checklist-template: done
+  23-1-1-move-correlation-primitives-to-telemetry: done
+  23-1-2-extract-email-templates-to-notifications: done
+  23-1-3-move-feature-flags-settings-to-modules-platform: done
+  23-1-4-consolidate-audit-utilities-into-modules-platform: done
   # Sprint 2: Accounting + Domain Bootstraps
-  23-2-1-move-posting-engines-to-modules-accounting: backlog
-  23-2-2-move-reconciliation-service-to-accounting-package: backlog
-  23-2-3-thin-api-accounting-adapters-to-composition-only: backlog
+  23-2-1-move-posting-engines-to-modules-accounting: done
+  23-2-2-move-reconciliation-service-to-accounting-package: review
+  23-2-3-thin-api-accounting-adapters-to-composition-only: review
   23-3-1-modules-sales-bootstrap-acl-interface-seam: backlog
   23-3-4-modules-inventory-bootstrap-scoping-guards: backlog
   23-3-7-modules-reservations-bootstrap-with-time-model: backlog

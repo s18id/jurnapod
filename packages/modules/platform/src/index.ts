@@ -9,4 +9,7 @@ export type FeatureFlagKey =
   | "purchasing.enabled"
   | "recipes.enabled";
 
+export * from "./audit";
 export * from "./audit-service";
+export * from "./feature-flags";
+export * from "./settings";

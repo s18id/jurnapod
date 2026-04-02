@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import {
-  AccountsService,
-  type AccountsDbClient
-} from "@jurnapod/modules-accounting";
+/**
+ * Thin API adapter for accounts - composition/IO boundary only.
+ * All business logic delegates to accounting module services.
+ */
+
 import type {
   AccountResponse,
   AccountCreateRequest,
@@ -12,127 +13,23 @@ import type {
   AccountListQuery,
   AccountTreeNode
 } from "@jurnapod/shared";
-import { getDb } from "./db";
-import { getAuditService } from "./audit";
+import { getAccountsService } from "./accounting-services";
 
 /**
- * Audit service interface (matches AccountsService expectations)
- */
-interface AuditServiceInterface {
-  logCreate(
-    context: { company_id: number; user_id: number; outlet_id?: number | null; ip_address?: string | null },
-    entityType: string,
-    entityId: string | number,
-    payload: Record<string, any>
-  ): Promise<void>;
-  logUpdate(
-    context: { company_id: number; user_id: number; outlet_id?: number | null; ip_address?: string | null },
-    entityType: string,
-    entityId: string | number,
-    before: Record<string, any>,
-    after: Record<string, any>
-  ): Promise<void>;
-  logDeactivate(
-    context: { company_id: number; user_id: number; outlet_id?: number | null; ip_address?: string | null },
-    entityType: string,
-    entityId: string | number,
-    payload?: Record<string, any>
-  ): Promise<void>;
-  logReactivate(
-    context: { company_id: number; user_id: number; outlet_id?: number | null; ip_address?: string | null },
-    entityType: string,
-    entityId: string | number,
-    payload?: Record<string, any>
-  ): Promise<void>;
-}
-
-/**
- * Adapter to make AuditService compatible with AuditServiceInterface
- * The platform AuditService uses AuditEntityType enum, but the interface expects string
- */
-class AuditServiceAdapter implements AuditServiceInterface {
-  constructor(private readonly auditService: ReturnType<typeof getAuditService>) {}
-
-  async logCreate(
-    context: { company_id: number; user_id: number; outlet_id?: number | null; ip_address?: string | null },
-    entityType: string,
-    entityId: string | number,
-    payload: Record<string, any>
-  ): Promise<void> {
-    return this.auditService.logCreate(context, entityType as any, entityId, payload);
-  }
-
-  async logUpdate(
-    context: { company_id: number; user_id: number; outlet_id?: number | null; ip_address?: string | null },
-    entityType: string,
-    entityId: string | number,
-    before: Record<string, any>,
-    after: Record<string, any>
-  ): Promise<void> {
-    return this.auditService.logUpdate(context, entityType as any, entityId, before, after);
-  }
-
-  async logDeactivate(
-    context: { company_id: number; user_id: number; outlet_id?: number | null; ip_address?: string | null },
-    entityType: string,
-    entityId: string | number,
-    payload?: Record<string, any>
-  ): Promise<void> {
-    return this.auditService.logDeactivate(context, entityType as any, entityId, payload);
-  }
-
-  async logReactivate(
-    context: { company_id: number; user_id: number; outlet_id?: number | null; ip_address?: string | null },
-    entityType: string,
-    entityId: string | number,
-    payload?: Record<string, any>
-  ): Promise<void> {
-    return this.auditService.logReactivate(context, entityType as any, entityId, payload);
-  }
-}
-
-/**
- * Create AccountsService instance with DbConn and audit service.
- * Both services share the same db client to support transactions.
- */
-async function createAccountsService(): Promise<AccountsService> {
-  const dbClient = getDb();
-  
-  // Import AuditService class using dynamic import
-  const { AuditService } = await import("@jurnapod/modules-platform");
-  
-  // Create audit service with the SAME db client to share transactions
-  const auditService = new AuditService(dbClient);
-  const auditServiceAdapter = new AuditServiceAdapter(auditService);
-  
-  return new AccountsService(dbClient as AccountsDbClient, auditServiceAdapter);
-}
-
-// Singleton instance
-let accountsServiceInstance: AccountsService | null = null;
-
-async function getAccountsService(): Promise<AccountsService> {
-  if (!accountsServiceInstance) {
-    accountsServiceInstance = await createAccountsService();
-  }
-  return accountsServiceInstance;
-}
-
-/**
- * Export service methods
+ * Export service methods - thin wrappers around accounting module
  */
 export async function listAccounts(query: AccountListQuery): Promise<AccountResponse[]> {
-  const service = await getAccountsService();
+  const service = getAccountsService();
   return service.listAccounts(query);
 }
 
 export async function getAccountById(accountId: number, companyId: number): Promise<AccountResponse> {
-  const service = await getAccountsService();
+  const service = getAccountsService();
   return service.getAccountById(accountId, companyId);
 }
 
 export async function createAccount(data: AccountCreateRequest, userId?: number): Promise<AccountResponse> {
-  const service = await getAccountsService();
+  const service = getAccountsService();
   return service.createAccount(data, userId);
 }
 
@@ -142,32 +39,32 @@ export async function updateAccount(
   companyId: number,
   userId?: number
 ): Promise<AccountResponse> {
-  const service = await getAccountsService();
+  const service = getAccountsService();
   return service.updateAccount(accountId, data, companyId, userId);
 }
 
 export async function deactivateAccount(accountId: number, companyId: number, userId?: number): Promise<AccountResponse> {
-  const service = await getAccountsService();
+  const service = getAccountsService();
   return service.deactivateAccount(accountId, companyId, userId);
 }
 
 export async function reactivateAccount(accountId: number, companyId: number, userId?: number): Promise<AccountResponse> {
-  const service = await getAccountsService();
+  const service = getAccountsService();
   return service.reactivateAccount(accountId, companyId, userId);
 }
 
 export async function getAccountTree(companyId: number, includeInactive = false): Promise<AccountTreeNode[]> {
-  const service = await getAccountsService();
+  const service = getAccountsService();
   return service.getAccountTree(companyId, includeInactive);
 }
 
 export async function isAccountInUse(accountId: number, companyId: number): Promise<boolean> {
-  const service = await getAccountsService();
+  const service = getAccountsService();
   return service.isAccountInUse(accountId, companyId);
 }
 
 /**
- * Export error classes
+ * Export error classes from accounting module
  */
 export {
   AccountCodeExistsError,

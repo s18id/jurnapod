@@ -92,12 +92,23 @@ All packages pass lint with no boundary violations detected:
 - @jurnapod/pos-sync: PASS
 - @jurnapod/backoffice-sync: PASS
 
+### Negative Test Verification
+
+The boundary rules are correctly set to `"error"` severity. Any actual violation
+in the codebase will now fail CI, satisfying ADR-0014 §Enforcement Mechanism:
+*"Lint must fail on boundary violations"*.
+
+Initial test fixtures (`src/test-boundary-violation.ts`) were created during
+development to verify rules trigger correctly, then removed to avoid
+perpetual lint failures in the source tree.
+
 ## Change Log
 
 - Date: 2026-04-02
 - Implemented ESLint boundary rules for ADR-0014 package boundary policy
 - Added no-restricted-imports rules to all 11 packages
 - All existing code passes boundary checks (no violations found)
+- **Updated**: Changed rule severity from "warn" to "error" in all 11 configs (ADR-0014 requires lint to fail on violations)
 
 ## Status
 

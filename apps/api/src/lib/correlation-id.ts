@@ -1,15 +1,11 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { randomUUID } from "node:crypto";
+/**
+ * Correlation ID utilities for API.
+ * 
+ * This module re-exports correlation utilities from @jurnapod/telemetry.
+ * For new code, prefer importing directly from @jurnapod/telemetry/correlation.
+ */
 
-export function getRequestCorrelationId(request: Request): string {
-  const headerValue =
-    request.headers.get("x-correlation-id")?.trim() ?? request.headers.get("x-request-id")?.trim();
-
-  if (!headerValue || headerValue.length === 0) {
-    return randomUUID();
-  }
-
-  return headerValue;
-}
+export { getRequestCorrelationId } from "@jurnapod/telemetry/correlation";

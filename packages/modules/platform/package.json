@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./audit": {
+      "types": "./dist/audit/index.d.ts",
+      "default": "./dist/audit/index.js"
+    },
     "./sync": {
       "types": "./dist/sync/index.d.ts",
       "default": "./dist/sync/index.js"

@@ -12,7 +12,7 @@
  * - Provides structured logging with correlation context
  */
 
-import { randomUUID } from "node:crypto";
+import { generateRequestId } from "@jurnapod/telemetry/correlation";
 import type { Context, Next } from "hono";
 
 // OpenTelemetry imports - lazy loaded to allow optional dependency
@@ -78,13 +78,17 @@ const CORRELATION_HEADERS = {
 
 /**
  * Generate a new correlation ID
+ * 
+ * @deprecated Use generateRequestId from @jurnapod/telemetry/correlation directly
  */
 export function generateCorrelationId(): string {
-  return randomUUID();
+  return generateRequestId();
 }
 
 /**
  * Extract correlation ID from headers
+ * 
+ * @deprecated Use extractCorrelationId from @jurnapod/telemetry/correlation directly
  */
 export function extractCorrelationId(request: Request, headerName: string): string | undefined {
   const value = request.headers.get(headerName)?.trim();

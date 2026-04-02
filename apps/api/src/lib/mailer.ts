@@ -5,6 +5,14 @@ import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
 import type { MailerDriver } from "./env";
 import { ensurePlatformSettingsSeeded, getPlatformSetting } from "./platform-settings";
+import { getAppEnv } from "./env";
+import {
+  buildPasswordResetEmail,
+  buildUserInviteEmail,
+  buildVerifyEmail,
+  type EmailTemplateParams,
+} from "@jurnapod/notifications/templates/email";
+import { createEmailLinkBuilder } from "@jurnapod/notifications/link-builder/email";
 
 export class MailerError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
@@ -183,4 +191,119 @@ export async function getMailer(): Promise<Mailer> {
   }
 
   return mailerInstance;
+}
+
+// ============================================================================
+// Email Template Helper Functions
+// ============================================================================
+
+/**
+ * Build an email link using the configured public URL.
+ */
+function buildEmailLinkFromToken(path: string, token: string): string {
+  const env = getAppEnv();
+  const linkBuilder = createEmailLinkBuilder(env.app.publicUrl);
+  return linkBuilder.buildEmailLink(path, token);
+}
+
+export type SendPasswordResetEmailParams = {
+  toEmail: string;
+  userName: string;
+  companyName: string;
+  token: string;
+  expiryHours: number;
+};
+
+export type SendUserInviteEmailParams = {
+  toEmail: string;
+  userName: string;
+  companyName: string;
+  token: string;
+  expiryHours: number;
+};
+
+export type SendVerifyEmailParams = {
+  toEmail: string;
+  userName: string;
+  companyName: string;
+  token: string;
+  expiryHours: number;
+};
+
+/**
+ * Send a password reset email using the buildPasswordResetEmail template.
+ */
+export async function sendPasswordResetEmail(params: SendPasswordResetEmailParams): Promise<void> {
+  const { toEmail, userName, companyName, token, expiryHours } = params;
+
+  const actionUrl = buildEmailLinkFromToken("/password-reset", token);
+
+  const templateParams: EmailTemplateParams = {
+    userName,
+    companyName,
+    actionUrl,
+    expiryHours,
+  };
+
+  const email = buildPasswordResetEmail(templateParams);
+
+  const mailer = await getMailer();
+  await mailer.sendMail({
+    to: toEmail,
+    subject: email.subject,
+    html: email.html,
+    text: email.text,
+  });
+}
+
+/**
+ * Send a user invitation email using the buildUserInviteEmail template.
+ */
+export async function sendUserInviteEmail(params: SendUserInviteEmailParams): Promise<void> {
+  const { toEmail, userName, companyName, token, expiryHours } = params;
+
+  const actionUrl = buildEmailLinkFromToken("/invite", token);
+
+  const templateParams: EmailTemplateParams = {
+    userName,
+    companyName,
+    actionUrl,
+    expiryHours,
+  };
+
+  const email = buildUserInviteEmail(templateParams);
+
+  const mailer = await getMailer();
+  await mailer.sendMail({
+    to: toEmail,
+    subject: email.subject,
+    html: email.html,
+    text: email.text,
+  });
+}
+
+/**
+ * Send an email verification email using the buildVerifyEmail template.
+ */
+export async function sendVerifyEmail(params: SendVerifyEmailParams): Promise<void> {
+  const { toEmail, userName, companyName, token, expiryHours } = params;
+
+  const actionUrl = buildEmailLinkFromToken("/verify-email", token);
+
+  const templateParams: EmailTemplateParams = {
+    userName,
+    companyName,
+    actionUrl,
+    expiryHours,
+  };
+
+  const email = buildVerifyEmail(templateParams);
+
+  const mailer = await getMailer();
+  await mailer.sendMail({
+    to: toEmail,
+    subject: email.subject,
+    html: email.html,
+    text: email.text,
+  });
 }

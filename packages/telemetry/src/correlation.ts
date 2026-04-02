@@ -118,3 +118,28 @@ export function generateClientTxId(): string {
 export function generateJournalBatchId(): string {
   return crypto.randomUUID();
 }
+
+/**
+ * Extract correlation ID from a request header
+ */
+export function extractCorrelationId(request: Request, headerName: string): string | undefined {
+  const value = request.headers.get(headerName)?.trim();
+  return value && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Get request correlation ID from request.
+ * 
+ * Checks `x-correlation-id` header first, then `x-request-id`.
+ * Falls back to generating a new UUID if neither header is present.
+ */
+export function getRequestCorrelationId(request: Request): string {
+  const headerValue =
+    request.headers.get("x-correlation-id")?.trim() ?? request.headers.get("x-request-id")?.trim();
+
+  if (!headerValue || headerValue.length === 0) {
+    return generateRequestId();
+  }
+
+  return headerValue;
+}
