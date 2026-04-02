@@ -35,7 +35,7 @@ const config = {
   },
   rules: {
     "no-restricted-imports": [
-      "warn",
+      "error",
       {
         patterns: [
           {

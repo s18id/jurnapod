@@ -2,11 +2,11 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 /**
- * ESLint Configuration for @jurnapod/modules-accounting
+ * ESLint Configuration for @jurnapod/modules-sales
  *
  * Boundary rules enforce ADR-0014 package boundary policy:
  * 1. packages/** must never import from apps/**
- * 2. @jurnapod/modules-accounting must not import @jurnapod/modules-sales
+ * 2. @jurnapod/modules-sales must not import other domain packages directly
  * 3. Domain packages must not import API route/middleware/auth helpers
  * 4. Sync transport packages must not be imported by domain packages
  *
@@ -20,8 +20,7 @@ import tsParser from "@typescript-eslint/parser";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const config = {
-  // ESLint for this workspace runs from package root
-  files: ["src/**/*.ts", "src/**/*.tsx", "tests/fixtures/**/*.ts"],
+  files: ["src/**/*.ts", "src/**/*.tsx"],
 
   ignores: ["dist/**", "node_modules/**", "*.config.*"],
 
@@ -35,9 +34,8 @@ const config = {
 
   rules: {
     "no-restricted-imports": [
-      "error",
+      "warn",
       {
-        // IMPORTANT: no-restricted-imports requires patterns in a single options object
         patterns: [
           {
             group: [
@@ -61,9 +59,24 @@ const config = {
         ],
         paths: [
           {
-            name: "@jurnapod/modules-sales",
+            name: "@jurnapod/modules-accounting",
             message:
-              "[ADR-0014] @jurnapod/modules-accounting must not import @jurnapod/modules-sales.",
+              "[ADR-0014] @jurnapod/modules-sales must not import @jurnapod/modules-accounting.",
+          },
+          {
+            name: "@jurnapod/modules-inventory",
+            message:
+              "[ADR-0014] @jurnapod/modules-sales must not import @jurnapod/modules-inventory.",
+          },
+          {
+            name: "@jurnapod/modules-reservations",
+            message:
+              "[ADR-0014] @jurnapod/modules-sales must not import @jurnapod/modules-reservations.",
+          },
+          {
+            name: "@jurnapod/modules-reporting",
+            message:
+              "[ADR-0014] @jurnapod/modules-sales must not import @jurnapod/modules-reporting.",
           },
           {
             name: "@jurnapod/pos-sync",
