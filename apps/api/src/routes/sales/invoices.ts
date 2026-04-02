@@ -7,6 +7,8 @@
  * Routes for sales invoice operations.
  * GET /sales/invoices - List invoices with filtering
  * POST /sales/invoices - Create new invoice
+ * 
+ * Uses modules-sales package via adapter layer.
  */
 
 import { Hono } from "hono";
@@ -18,23 +20,30 @@ import {
   NumericIdSchema
 } from "@jurnapod/shared";
 import {
-  createInvoice,
+  createInvoiceService,
+  type InvoiceService,
   DatabaseConflictError,
   DatabaseForbiddenError,
   DatabaseReferenceError,
-  InvoiceStatusError,
-  listInvoices,
-  postInvoice,
-  getInvoice,
-  updateInvoice
-} from "@/lib/sales";
+  InvoiceStatusError
+} from "@jurnapod/modules-sales";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { requireAccess } from "@/lib/auth-guard";
 import { getCompany } from "@/lib/companies";
 import { errorResponse, successResponse } from "@/lib/response";
 import type { AuthContext } from "@/lib/auth-guard";
+import { createApiSalesDb } from "@/lib/modules-sales/sales-db";
+import { getAccessScopeChecker } from "@/lib/modules-sales/access-scope-checker";
 
 const invoiceRoutes = new Hono();
+
+// Create invoice service instance using the adapter layer
+const db = createApiSalesDb();
+const accessScopeChecker = getAccessScopeChecker();
+const invoiceService: InvoiceService = createInvoiceService({
+  db,
+  accessScopeChecker
+});
 
 const numberingTemplateConflictMessage =
   "No numbering template configured. Please configure document numbering in settings.";
@@ -96,7 +105,7 @@ invoiceRoutes.get("/", async (c) => {
     const company = await getCompany(auth.companyId);
     const timezone = company.timezone ?? 'UTC';
 
-    const report = await listInvoices(auth.companyId, {
+    const report = await invoiceService.listInvoices(auth.companyId, {
       outletIds,
       status: parsed.status,
       paymentStatus: parsed.payment_status,
@@ -163,7 +172,7 @@ invoiceRoutes.post("/", async (c) => {
     }
 
     // Create invoice in DRAFT status
-    const invoice = await createInvoice(auth.companyId, input, {
+    const invoice = await invoiceService.createInvoice(auth.companyId, input, {
       userId: auth.userId
     });
 
@@ -176,7 +185,7 @@ invoiceRoutes.post("/", async (c) => {
     // If posting fails for any reason (GL or COGS), return 409 - the invoice remains
     // in DRAFT status and user must fix the issue and retry
     try {
-      const postedInvoice = await postInvoice(auth.companyId, invoice.id, {
+      const postedInvoice = await invoiceService.postInvoice(auth.companyId, invoice.id, {
         userId: auth.userId
       });
 
@@ -242,7 +251,9 @@ invoiceRoutes.get("/:id", async (c) => {
   try {
     const invoiceId = NumericIdSchema.parse(c.req.param("id"));
 
-    const invoice = await getInvoice(auth.companyId, invoiceId);
+    const invoice = await invoiceService.getInvoice(auth.companyId, invoiceId, {
+      userId: auth.userId
+    });
     if (!invoice) {
       return errorResponse("NOT_FOUND", "Invoice not found", 404);
     }
@@ -293,7 +304,7 @@ invoiceRoutes.patch("/:id", async (c) => {
       }
     }
 
-    const updatedInvoice = await updateInvoice(auth.companyId, invoiceId, input, {
+    const updatedInvoice = await invoiceService.updateInvoice(auth.companyId, invoiceId, input, {
       userId: auth.userId
     });
 
@@ -331,7 +342,9 @@ invoiceRoutes.post("/:id/post", async (c) => {
     const invoiceId = NumericIdSchema.parse(c.req.param("id"));
 
     // Check if invoice exists and user has access
-    const invoice = await getInvoice(auth.companyId, invoiceId);
+    const invoice = await invoiceService.getInvoice(auth.companyId, invoiceId, {
+      userId: auth.userId
+    });
     if (!invoice) {
       return errorResponse("NOT_FOUND", "Invoice not found", 404);
     }
@@ -341,7 +354,7 @@ invoiceRoutes.post("/:id/post", async (c) => {
       return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
 
-    const postedInvoice = await postInvoice(auth.companyId, invoiceId, {
+    const postedInvoice = await invoiceService.postInvoice(auth.companyId, invoiceId, {
       userId: auth.userId
     });
 

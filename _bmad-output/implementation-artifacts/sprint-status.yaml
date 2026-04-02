@@ -262,18 +262,18 @@ development_status:
   23-2-1-move-posting-engines-to-modules-accounting: done
   23-2-2-move-reconciliation-service-to-accounting-package: review
   23-2-3-thin-api-accounting-adapters-to-composition-only: review
-  23-3-1-modules-sales-bootstrap-acl-interface-seam: backlog
-  23-3-4-modules-inventory-bootstrap-scoping-guards: backlog
-  23-3-7-modules-reservations-bootstrap-with-time-model: backlog
-  23-3-10-modules-reporting-bootstrap: backlog
+  23-3-1-modules-sales-bootstrap-acl-interface-seam: done
+  23-3-4-modules-inventory-bootstrap-scoping-guards: done
+  23-3-7-modules-reservations-bootstrap-with-time-model: done
+  23-3-10-modules-reporting-bootstrap: done
   # Sprint 3: Domain Extraction + Sync + Cleanup
-  23-3-2-extract-orders-invoices-to-modules-sales: backlog
+  23-3-2-extract-orders-invoices-to-modules-sales: done
   23-3-3-extract-payments-credit-notes-to-modules-sales: backlog
-  23-3-5-extract-item-catalog-services: backlog
+  23-3-5-extract-item-catalog-services: done
   23-3-6-extract-stock-recipe-supplies: backlog
-  23-3-8-extract-reservations-table-services: backlog
+  23-3-8-extract-reservations-table-services: done
   23-3-9-extract-service-session-table-sync: backlog
-  23-3-11-extract-report-query-services: backlog
+  23-3-11-extract-report-query-services: done
   23-4-1-extract-sync-push-business-logic: backlog
   23-4-2-extract-sync-pull-business-logic: backlog
   23-4-3-add-route-thinness-enforcement: backlog

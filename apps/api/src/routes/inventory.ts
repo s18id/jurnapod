@@ -25,34 +25,15 @@ import {
 } from "../lib/auth-guard.js";
 import { userHasOutletAccess } from "../lib/auth.js";
 import { errorResponse, successResponse } from "../lib/response.js";
-import {
-  createItem,
-  updateItem,
-  deleteItem,
-  listItems,
-  getItemVariantStats,
-  findItemById,
-} from "../lib/items/index.js";
-import {
-  createItemPrice,
-  updateItemPrice,
-  deleteItemPrice,
-  findItemPriceById,
-  listItemPrices,
-  listEffectiveItemPricesForOutlet,
-} from "../lib/item-prices/index.js";
+import { itemsAdapter } from "../lib/items/adapter.js";
+import { itemPricesAdapter } from "../lib/item-prices/adapter.js";
 import {
   DatabaseConflictError,
   DatabaseReferenceError,
   DatabaseForbiddenError
 } from "../lib/master-data-errors.js";
-import {
-  createItemGroup,
-  createItemGroupsBulk,
-  updateItemGroup,
-  deleteItemGroup,
-  ItemGroupBulkConflictError
-} from "../lib/item-groups/index.js";
+import { itemGroupsAdapter } from "../lib/item-groups/adapter.js";
+import { ItemGroupBulkConflictError } from "../lib/item-groups/index.js";
 import { checkUserAccess } from "../lib/auth.js";
 import { canManageCompanyDefaults } from "../lib/auth/permissions.js";
 
@@ -141,7 +122,7 @@ inventoryRoutes.get("/items", async (c) => {
     }
 
     const isActive = parseOptionalIsActive(url.searchParams.get("is_active"));
-    const items = await listItems(auth.companyId, { isActive });
+    const items = await itemsAdapter.listItems(auth.companyId, { isActive });
 
     return successResponse(items);
   } catch (error) {
@@ -194,7 +175,7 @@ inventoryRoutes.get("/variant-stats", async (c) => {
       return errorResponse("INVALID_REQUEST", "Too many item IDs (max 100)", 400);
     }
 
-    const stats = await getItemVariantStats(auth.companyId, itemIds);
+    const stats = await itemsAdapter.getItemVariantStats(auth.companyId, itemIds);
     return successResponse(stats);
   } catch (error) {
     console.error("GET /inventory/variant-stats failed", error);
@@ -256,7 +237,7 @@ inventoryRoutes.post("/items", async (c) => {
     const payload = await c.req.json();
     const input = ItemCreateRequestSchema.parse(payload);
 
-    const item = await createItem(auth.companyId, {
+    const item = await itemsAdapter.createItem(auth.companyId, {
       sku: input.sku,
       name: input.name,
       type: input.type,
@@ -306,12 +287,12 @@ inventoryRoutes.patch("/items/:id", async (c) => {
     const payload = await c.req.json();
 
     // Check if item exists
-    const existingItem = await findItemById(auth.companyId, itemId);
+    const existingItem = await itemsAdapter.findItemById(auth.companyId, itemId);
     if (!existingItem) {
       return errorResponse("NOT_FOUND", "Item not found", 404);
     }
 
-    const updatedItem = await updateItem(auth.companyId, itemId, payload, {
+    const updatedItem = await itemsAdapter.updateItem(auth.companyId, itemId, payload, {
       userId: auth.userId
     });
 
@@ -356,12 +337,12 @@ inventoryRoutes.delete("/items/:id", async (c) => {
     const itemId = NumericIdSchema.parse(c.req.param("id"));
 
     // Check if item exists
-    const existingItem = await findItemById(auth.companyId, itemId);
+    const existingItem = await itemsAdapter.findItemById(auth.companyId, itemId);
     if (!existingItem) {
       return errorResponse("NOT_FOUND", "Item not found", 404);
     }
 
-    await deleteItem(auth.companyId, itemId, {
+    await itemsAdapter.deleteItem(auth.companyId, itemId, {
       userId: auth.userId
     });
 
@@ -464,7 +445,7 @@ inventoryRoutes.post("/item-groups", async (c) => {
       is_active: z.boolean().optional().default(true)
     }).parse(payload);
 
-    const group = await createItemGroup(auth.companyId, {
+    const group = await itemGroupsAdapter.createItemGroup(auth.companyId, {
       code: input.code,
       name: input.name,
       parent_id: input.parent_id,
@@ -524,7 +505,7 @@ inventoryRoutes.post("/item-groups/bulk", async (c) => {
       is_active: r.is_active
     }));
 
-    const result = await createItemGroupsBulk(auth.companyId, rows, {
+    const result = await itemGroupsAdapter.createItemGroupsBulk(auth.companyId, rows, {
       userId: auth.userId
     });
 
@@ -571,7 +552,7 @@ inventoryRoutes.patch("/item-groups/:id", async (c) => {
       is_active: z.boolean().optional()
     }).parse(payload);
 
-    const group = await updateItemGroup(auth.companyId, groupId, {
+    const group = await itemGroupsAdapter.updateItemGroup(auth.companyId, groupId, {
       code: input.code,
       name: input.name,
       parent_id: input.parent_id,
@@ -618,7 +599,7 @@ inventoryRoutes.delete("/item-groups/:id", async (c) => {
   try {
     const groupId = NumericIdSchema.parse(c.req.param("id"));
 
-    const deleted = await deleteItemGroup(auth.companyId, groupId);
+    const deleted = await itemGroupsAdapter.deleteItemGroup(auth.companyId, groupId);
 
     if (!deleted) {
       return errorResponse("NOT_FOUND", "Item group not found", 404);
@@ -676,7 +657,7 @@ inventoryRoutes.get("/item-prices/active", async (c) => {
     );
 
     // List effective prices
-    const prices = await listEffectiveItemPricesForOutlet(auth.companyId, outletIdNum, { isActive: true });
+    const prices = await itemPricesAdapter.listEffectiveItemPricesForOutlet(auth.companyId, outletIdNum, { isActive: true });
 
     // Filter out company defaults if user doesn't have access to them
     // Company defaults have is_override = false
@@ -726,7 +707,7 @@ inventoryRoutes.post("/item-prices", async (c) => {
       return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
 
-    const price = await createItemPrice(auth.companyId, {
+    const price = await itemPricesAdapter.createItemPrice(auth.companyId, {
       item_id: input.item_id,
       outlet_id: input.outlet_id,
       variant_id: input.variant_id ?? null,
@@ -789,12 +770,12 @@ inventoryRoutes.get("/item-prices", async (c) => {
     if (outletIdParam) {
       const outletId = NumericIdSchema.parse(outletIdParam);
       // When filtering by outlet, only include company defaults if user has access
-      itemPrices = await listItemPrices(auth.companyId, {
+      itemPrices = await itemPricesAdapter.listItemPrices(auth.companyId, {
         outletId,
         includeDefaults: canAccessCompanyDefaults
       });
     } else {
-      itemPrices = await listItemPrices(auth.companyId);
+      itemPrices = await itemPricesAdapter.listItemPrices(auth.companyId);
     }
 
     return successResponse(itemPrices);
@@ -825,7 +806,7 @@ inventoryRoutes.get("/item-prices/:id", async (c) => {
 
     const priceId = NumericIdSchema.parse(c.req.param("id"));
 
-    const itemPrice = await findItemPriceById(auth.companyId, priceId);
+    const itemPrice = await itemPricesAdapter.findItemPriceById(auth.companyId, priceId);
     if (!itemPrice) {
       return errorResponse("NOT_FOUND", "Item price not found", 404);
     }
@@ -884,7 +865,7 @@ inventoryRoutes.patch("/item-prices/:id", async (c) => {
     const input = ItemPriceUpdateSchema.parse(payload);
 
     // Check if item price exists and validate outlet access
-    const existingPrice = await findItemPriceById(auth.companyId, priceId);
+    const existingPrice = await itemPricesAdapter.findItemPriceById(auth.companyId, priceId);
     if (!existingPrice) {
       return errorResponse("NOT_FOUND", "Item price not found", 404);
     }
@@ -907,7 +888,7 @@ inventoryRoutes.patch("/item-prices/:id", async (c) => {
       return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
 
-    const updatedItemPrice = await updateItemPrice(auth.companyId, priceId, {
+    const updatedItemPrice = await itemPricesAdapter.updateItemPrice(auth.companyId, priceId, {
       variant_id: input.variant_id,
       price: input.price,
       is_active: input.is_active
@@ -962,7 +943,7 @@ inventoryRoutes.delete("/item-prices/:id", async (c) => {
       companyId: auth.companyId
     });
 
-    await deleteItemPrice(auth.companyId, priceId, {
+    await itemPricesAdapter.deleteItemPrice(auth.companyId, priceId, {
       userId: auth.userId,
       canManageCompanyDefaults: access?.hasGlobalRole || access?.isSuperAdmin || false
     });
@@ -1020,13 +1001,13 @@ inventoryRoutes.get("/items/:id/variants/:variantId/prices", async (c) => {
     let variantPrices;
     if (outletIdParam) {
       const outletId = NumericIdSchema.parse(outletIdParam);
-      variantPrices = await listItemPrices(auth.companyId, {
+      variantPrices = await itemPricesAdapter.listItemPrices(auth.companyId, {
         outletId,
         variantId,
         includeDefaults: canAccessCompanyDefaults
       });
     } else {
-      variantPrices = await listItemPrices(auth.companyId, {
+      variantPrices = await itemPricesAdapter.listItemPrices(auth.companyId, {
         variantId
       });
     }
@@ -1072,14 +1053,14 @@ inventoryRoutes.get("/items/:id/prices", async (c) => {
     let itemPrices;
     if (outletIdParam) {
       const outletId = NumericIdSchema.parse(outletIdParam);
-      itemPrices = await listItemPrices(auth.companyId, {
+      itemPrices = await itemPricesAdapter.listItemPrices(auth.companyId, {
         outletId,
         includeDefaults: canAccessCompanyDefaults
       });
       // Filter for this item only
       itemPrices = itemPrices.filter(p => p.item_id === itemId);
     } else {
-      itemPrices = await listItemPrices(auth.companyId);
+      itemPrices = await itemPricesAdapter.listItemPrices(auth.companyId);
       // Filter for this item only
       itemPrices = itemPrices.filter(p => p.item_id === itemId);
     }

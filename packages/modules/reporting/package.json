@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./reports": {
+      "types": "./dist/reports/index.d.ts",
+      "default": "./dist/reports/index.js"
     }
   },
   "files": ["dist", "README.md"],

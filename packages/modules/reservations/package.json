@@ -19,7 +19,8 @@
   },
   "dependencies": {
     "@jurnapod/db": "0.1.0",
-    "@jurnapod/shared": "0.1.0"
+    "@jurnapod/shared": "0.1.0",
+    "@js-temporal/polyfill": "^0.5.1"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

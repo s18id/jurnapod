@@ -9,131 +9,41 @@
  * - Error classification and counting
  * - Dataset size bucketing
  * - Structured logging for report operations
+ * 
+ * NOTE: Core type definitions and helpers have been moved to @jurnapod/modules-reporting.
+ * This module provides Hono-specific middleware and context bindings.
  */
 
 import type { Context } from "hono";
 import { logWithTelemetry } from "../middleware/telemetry";
 
-/**
- * Report types that have SLO targets
- */
-export type ReportType = 
-  | "trial_balance" 
-  | "general_ledger" 
-  | "profit_loss" 
-  | "worksheet" 
-  | "pos_transactions"
-  | "journals"
-  | "daily_sales"
-  | "pos_payments"
-  | "receivables_ageing"
-  | "other";
+// Re-export from modules-reporting for convenience
+export type {
+  ReportType,
+  ReportErrorClass,
+  DatasetSizeBucket,
+  ReportTelemetryData,
+} from "@jurnapod/modules-reporting";
 
-/**
- * Error classification for report failures
- */
-export type ReportErrorClass = "timeout" | "validation" | "system" | "auth";
+export {
+  DATASET_SIZE_THRESHOLDS,
+  REPORT_SLO_LATENCY_MS,
+  QUERY_TIMEOUT_MS,
+  getDatasetSizeBucket,
+  classifyReportError,
+  QueryTimeoutError,
+  ValidationError,
+  AuthError,
+  withQueryTimeout,
+} from "@jurnapod/modules-reporting";
 
-/**
- * Dataset size buckets based on row count
- */
-export type DatasetSizeBucket = "small" | "medium" | "large" | "xlarge";
-
-/**
- * Report telemetry data
- */
-export interface ReportTelemetryData {
-  reportType: ReportType;
-  companyId: number;
-  datasetSizeBucket: DatasetSizeBucket;
-  errorClass?: ReportErrorClass;
-  latencyMs: number;
-  rowCount?: number;
-  retryCount?: number;
-}
-
-/**
- * Dataset size thresholds (row count)
- */
-export const DATASET_SIZE_THRESHOLDS = {
-  small: 100,      // <= 100 rows
-  medium: 500,     // 101-500 rows
-  large: 2000,     // 501-2000 rows
-  xlarge: Infinity // > 2000 rows
-} as const;
-
-/**
- * Report SLO latency target (5 seconds in ms)
- */
-export const REPORT_SLO_LATENCY_MS = 5000;
-
-/**
- * Query timeout default (30 seconds in ms)
- */
-export const QUERY_TIMEOUT_MS = 30000;
-
-/**
- * Determine dataset size bucket based on row count
- */
-export function getDatasetSizeBucket(rowCount: number): DatasetSizeBucket {
-  if (rowCount <= DATASET_SIZE_THRESHOLDS.small) return "small";
-  if (rowCount <= DATASET_SIZE_THRESHOLDS.medium) return "medium";
-  if (rowCount <= DATASET_SIZE_THRESHOLDS.large) return "large";
-  return "xlarge";
-}
-
-/**
- * Classify error for report failure
- */
-export function classifyReportError(error: unknown): ReportErrorClass {
-  if (error instanceof QueryTimeoutError) return "timeout";
-  if (error instanceof ValidationError) return "validation";
-  if (error instanceof AuthError) return "auth";
-  return "system";
-}
-
-/**
- * Custom error for query timeout
- */
-export class QueryTimeoutError extends Error {
-  readonly name = "QueryTimeoutError";
-  constructor(message = "Query execution exceeded timeout threshold") {
-    super(message);
-  }
-}
-
-/**
- * Custom error for validation failures
- */
-export class ValidationError extends Error {
-  readonly name = "ValidationError";
-  constructor(message: string) {
-    super(message);
-  }
-}
-
-/**
- * Custom error for auth failures
- */
-export class AuthError extends Error {
-  readonly name = "AuthError";
-  constructor(message = "Authentication required") {
-    super(message);
-  }
-}
-
-/**
- * Execute a promise with a timeout
- */
-export async function withQueryTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number = QUERY_TIMEOUT_MS
-): Promise<T> {
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new QueryTimeoutError()), timeoutMs);
-  });
-  return Promise.race([promise, timeoutPromise]);
-}
+import { 
+  getDatasetSizeBucket, 
+  REPORT_SLO_LATENCY_MS,
+  type ReportType,
+  type DatasetSizeBucket,
+  type ReportTelemetryData,
+} from "@jurnapod/modules-reporting";
 
 /**
  * Emit report telemetry metrics (structured log based)

@@ -7,6 +7,8 @@
  * Routes for sales order operations.
  * GET /sales/orders - List orders with filtering
  * POST /sales/orders - Create new order
+ * 
+ * Uses modules-sales package via adapter layer.
  */
 
 import { Hono } from "hono";
@@ -16,18 +18,28 @@ import {
   SalesOrderListQuerySchema
 } from "@jurnapod/shared";
 import {
-  createOrder,
+  createOrderService,
+  type OrderService,
   DatabaseConflictError,
   DatabaseForbiddenError,
-  DatabaseReferenceError,
-  listOrders
-} from "@/lib/orders";
+  DatabaseReferenceError
+} from "@jurnapod/modules-sales";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { getCompany } from "@/lib/companies";
 import { errorResponse, successResponse } from "@/lib/response";
 import type { AuthContext } from "@/lib/auth-guard";
+import { createApiSalesDb } from "@/lib/modules-sales/sales-db";
+import { getAccessScopeChecker } from "@/lib/modules-sales/access-scope-checker";
 
 const orderRoutes = new Hono();
+
+// Create order service instance using the adapter layer
+const db = createApiSalesDb();
+const accessScopeChecker = getAccessScopeChecker();
+const orderService: OrderService = createOrderService({
+  db,
+  accessScopeChecker
+});
 
 const numberingTemplateConflictMessage =
   "No numbering template configured. Please configure document numbering in settings.";
@@ -65,7 +77,7 @@ orderRoutes.get("/", async (c) => {
     const company = await getCompany(auth.companyId);
     const timezone = company.timezone ?? 'UTC';
 
-    const result = await listOrders(auth.companyId, {
+    const result = await orderService.listOrders(auth.companyId, {
       outletIds,
       status: parsed.status,
       dateFrom: parsed.date_from,
@@ -120,7 +132,7 @@ orderRoutes.post("/", async (c) => {
       return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
 
-    const order = await createOrder(auth.companyId, input, {
+    const order = await orderService.createOrder(auth.companyId, input, {
       userId: auth.userId
     });
 
