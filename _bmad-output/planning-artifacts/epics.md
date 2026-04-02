@@ -29,13 +29,15 @@
 
 ## Active Epics
 
-None
+| Epic | Title | Status | Sprint Plan |
+|------|-------|--------|-------------|
+| Epic 23 | API Detachment | in-progress | epic-23-sprint-plan |
 
 ## Backlog
 
 | Epic | Title | Status | Sprint Plan |
 |------|-------|--------|-------------|
-| Epic 23 | API Detachment | backlog | epic-23-sprint-plan |
+| Epic 24 | Inventory Costing Boundary | backlog | epic-24-sprint-plan |
 
 ## Future Epics
 

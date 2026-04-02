@@ -28,3 +28,9 @@ export {
   DatabaseReferenceError,
   DatabaseForbiddenError
 } from "./order-service.js";
+
+export {
+  createCreditNoteService,
+  type CreditNoteService,
+  type CreditNoteServiceDeps
+} from "./credit-note-service.js";

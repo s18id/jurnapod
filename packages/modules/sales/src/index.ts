@@ -104,6 +104,18 @@ export {
   SalesReferenceError
 } from "./types/sales.js";
 
+// Credit Note types
+export type {
+  SalesCreditNoteDetail,
+  SalesCreditNoteLine,
+  SalesCreditNoteStatus,
+  CreditNoteLineInput,
+  CreateCreditNoteInput,
+  UpdateCreditNoteInput,
+  CreditNoteListFilters,
+  CreditCapacity
+} from "./types/credit-notes.js";
+
 // =============================================================================
 // Services
 // =============================================================================
@@ -126,6 +138,12 @@ export {
   type InvoiceService,
   type InvoiceServiceDeps
 } from "./services/invoice-service.js";
+
+export {
+  createCreditNoteService,
+  type CreditNoteService,
+  type CreditNoteServiceDeps
+} from "./services/index.js";
 
 // Module stub for type-level marker
 export type SalesModuleStub = "sales";

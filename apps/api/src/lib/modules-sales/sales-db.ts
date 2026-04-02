@@ -24,7 +24,8 @@ import type {
   OrderListFilters,
   ItemLookup,
   InvoiceListFilters,
-  SalesInvoice
+  SalesInvoice,
+  SalesCreditNoteStatus
 } from "@jurnapod/modules-sales";
 
 // Row types
@@ -1123,7 +1124,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     credit_note_no: string;
     credit_note_date: string;
     client_ref: string | null;
-    status: string;
+    status: SalesCreditNoteStatus;
     reason: string | null;
     notes: string | null;
     amount: number;
@@ -1185,7 +1186,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
       credit_note_no: creditNote.credit_note_no,
       credit_note_date: formatDateOnly(creditNote.credit_note_date),
       client_ref: creditNote.client_ref ?? null,
-      status: creditNote.status,
+      status: creditNote.status as SalesCreditNoteStatus,
       reason: creditNote.reason ?? null,
       notes: creditNote.notes ?? null,
       amount: Number(creditNote.amount),
@@ -1448,7 +1449,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     credit_note_no: string;
     credit_note_date: string;
     client_ref: string | null;
-    status: string;
+    status: SalesCreditNoteStatus;
     reason: string | null;
     notes: string | null;
     amount: number;
@@ -1512,7 +1513,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
       credit_note_no: string;
       credit_note_date: string;
       client_ref: string | null;
-      status: string;
+      status: SalesCreditNoteStatus;
       reason: string | null;
       notes: string | null;
       amount: number;
@@ -1557,7 +1558,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
         credit_note_no: row.credit_note_no,
         credit_note_date: formatDateOnly(row.credit_note_date),
         client_ref: row.client_ref ?? null,
-        status: row.status,
+        status: row.status as SalesCreditNoteStatus,
         reason: row.reason ?? null,
         notes: row.notes ?? null,
         amount: Number(row.amount),
