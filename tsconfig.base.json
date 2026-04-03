@@ -20,6 +20,7 @@
       "@jurnapod/modules-reporting": ["packages/modules/reporting/src/index.ts"],
       "@jurnapod/modules-reservations": ["packages/modules/reservations/src/index.ts"],
       "@jurnapod/modules-inventory-costing": ["packages/modules/inventory-costing/src/index.ts"],
+      "@jurnapod/modules-treasury": ["packages/modules/treasury/src/index.ts"],
       "@/lib/*": ["apps/api/src/lib/*"],
       "@/lib": ["apps/api/src/lib"],
       "@/services/*": ["apps/api/src/services/*"],
