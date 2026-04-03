@@ -61,35 +61,11 @@ import {
   FiscalYearNotOpenError
 } from "../lib/fiscal-years.js";
 import {
-  listFixedAssetCategories,
-  createFixedAssetCategory,
-  updateFixedAssetCategory,
-  deleteFixedAssetCategory,
-  findFixedAssetCategoryById,
-  listFixedAssets,
-  createFixedAsset,
-  updateFixedAsset,
-  deleteFixedAsset,
-  findFixedAssetById
-} from "../lib/fixed-assets/index.js";
-import {
-  createDepreciationPlan,
-  updateDepreciationPlan,
-  runDepreciationPlan,
-  getLatestDepreciationPlan,
-  DepreciationPlanValidationError,
-  DepreciationPlanStatusError,
-  DatabaseReferenceError
-} from "../lib/depreciation.js";
-import {
-  recordAcquisition,
-  recordTransfer,
-  recordImpairment,
-  recordDisposal,
-  voidEvent,
-  getAssetLedger,
-  getAssetBook
-} from "../lib/fixed-assets-lifecycle.js";
+  getComposedCategoryService,
+  getComposedAssetService,
+  getComposedDepreciationService,
+  getComposedLifecycleService,
+} from "../lib/modules-accounting/index.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -235,8 +211,9 @@ accountRoutes.get("/fixed-asset-categories", async (c) => {
     const url = new URL(c.req.raw.url);
     const isActiveParam = url.searchParams.get("is_active");
 
-    const categories = await listFixedAssetCategories(auth.companyId, {
-      isActive: isActiveParam === "true" ? true : isActiveParam === "false" ? false : undefined
+    const categoryService = getComposedCategoryService();
+    const categories = await categoryService.list(auth.companyId, {
+      is_active: isActiveParam === "true" ? true : isActiveParam === "false" ? false : undefined
     });
 
     return successResponse(categories);
@@ -263,7 +240,8 @@ accountRoutes.post("/fixed-asset-categories", async (c) => {
     const payload = await c.req.json();
     const input = FixedAssetCategoryCreateRequestSchema.parse(payload);
 
-    const category = await createFixedAssetCategory(auth.companyId, input, {
+    const categoryService = getComposedCategoryService();
+    const category = await categoryService.create(auth.companyId, input, {
       userId: auth.userId
     });
 
@@ -271,6 +249,11 @@ accountRoutes.post("/fixed-asset-categories", async (c) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "FIXED_ASSET_CATEGORY_CODE_EXISTS") {
+      return errorResponse("CONFLICT", err.message || "Category code already exists", 409);
     }
 
     console.error("POST /accounts/fixed-asset-categories failed", error);
@@ -293,7 +276,8 @@ accountRoutes.get("/fixed-asset-categories/:id", async (c) => {
 
   try {
     const categoryId = NumericIdSchema.parse(c.req.param("id"));
-    const category = await findFixedAssetCategoryById(auth.companyId, categoryId);
+    const categoryService = getComposedCategoryService();
+    const category = await categoryService.getById(auth.companyId, categoryId);
 
     if (!category) {
       return errorResponse("NOT_FOUND", "Fixed asset category not found", 404);
@@ -328,18 +312,23 @@ accountRoutes.patch("/fixed-asset-categories/:id", async (c) => {
     const payload = await c.req.json();
     const input = FixedAssetCategoryUpdateRequestSchema.parse(payload);
 
-    const category = await updateFixedAssetCategory(auth.companyId, categoryId, input, {
+    const categoryService = getComposedCategoryService();
+    const category = await categoryService.update(auth.companyId, categoryId, input, {
       userId: auth.userId
     });
-
-    if (!category) {
-      return errorResponse("NOT_FOUND", "Fixed asset category not found", 404);
-    }
 
     return successResponse(category);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "FIXED_ASSET_CATEGORY_NOT_FOUND") {
+      return errorResponse("NOT_FOUND", "Fixed asset category not found", 404);
+    }
+    if (err.code === "FIXED_ASSET_CATEGORY_CODE_EXISTS") {
+      return errorResponse("CONFLICT", err.message || "Category code already exists", 409);
     }
 
     console.error("PATCH /accounts/fixed-asset-categories/:id failed", error);
@@ -362,18 +351,23 @@ accountRoutes.delete("/fixed-asset-categories/:id", async (c) => {
 
   try {
     const categoryId = NumericIdSchema.parse(c.req.param("id"));
-    const deleted = await deleteFixedAssetCategory(auth.companyId, categoryId, {
+    const categoryService = getComposedCategoryService();
+    await categoryService.delete(auth.companyId, categoryId, {
       userId: auth.userId
     });
-
-    if (!deleted) {
-      return errorResponse("NOT_FOUND", "Fixed asset category not found", 404);
-    }
 
     return successResponse({ deleted: true });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid category ID", 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "FIXED_ASSET_CATEGORY_NOT_FOUND") {
+      return errorResponse("NOT_FOUND", "Fixed asset category not found", 404);
+    }
+    if (err.code === "FIXED_ASSET_CATEGORY_NOT_EMPTY") {
+      return errorResponse("CONFLICT", "Cannot delete category that has associated assets", 409);
     }
 
     console.error("DELETE /accounts/fixed-asset-categories/:id failed", error);
@@ -406,9 +400,10 @@ accountRoutes.get("/fixed-assets", async (c) => {
     // Get allowed outlet IDs from user's role assignments for outlet scoping
     const allowedOutletIds = await listUserOutletIds(auth.userId, auth.companyId);
 
-    const assets = await listFixedAssets(auth.companyId, {
-      outletId: outletIdParam ? NumericIdSchema.parse(outletIdParam) : undefined,
-      isActive: isActiveParam === "true" ? true : isActiveParam === "false" ? false : undefined,
+    const assetService = getComposedAssetService();
+    const assets = await assetService.list(auth.companyId, {
+      outlet_id: outletIdParam ? NumericIdSchema.parse(outletIdParam) : undefined,
+      is_active: isActiveParam === "true" ? true : isActiveParam === "false" ? false : undefined,
       allowedOutletIds
     });
 
@@ -440,7 +435,8 @@ accountRoutes.post("/fixed-assets", async (c) => {
     const payload = await c.req.json();
     const input = FixedAssetCreateRequestSchema.parse(payload);
 
-    const asset = await createFixedAsset(auth.companyId, input, {
+    const assetService = getComposedAssetService();
+    const asset = await assetService.create(auth.companyId, input, {
       userId: auth.userId
     });
 
@@ -448,6 +444,11 @@ accountRoutes.post("/fixed-assets", async (c) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "FIXED_ASSET_ACCESS_DENIED") {
+      return errorResponse("FORBIDDEN", "Access denied to outlet", 403);
     }
 
     console.error("POST /accounts/fixed-assets failed", error);
@@ -470,7 +471,8 @@ accountRoutes.get("/fixed-assets/:id", async (c) => {
 
   try {
     const assetId = NumericIdSchema.parse(c.req.param("id"));
-    const asset = await findFixedAssetById(auth.companyId, assetId);
+    const assetService = getComposedAssetService();
+    const asset = await assetService.getById(auth.companyId, assetId);
 
     if (!asset) {
       return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
@@ -489,6 +491,11 @@ accountRoutes.get("/fixed-assets/:id", async (c) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid asset ID", 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "FIXED_ASSET_ACCESS_DENIED") {
+      return errorResponse("FORBIDDEN", "Access denied to asset", 403);
     }
 
     console.error("GET /accounts/fixed-assets/:id failed", error);
@@ -514,18 +521,23 @@ accountRoutes.patch("/fixed-assets/:id", async (c) => {
     const payload = await c.req.json();
     const input = FixedAssetUpdateRequestSchema.parse(payload);
 
-    const asset = await updateFixedAsset(auth.companyId, assetId, input, {
+    const assetService = getComposedAssetService();
+    const asset = await assetService.update(auth.companyId, assetId, input, {
       userId: auth.userId
     });
-
-    if (!asset) {
-      return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
-    }
 
     return successResponse(asset);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "FIXED_ASSET_NOT_FOUND") {
+      return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
+    }
+    if (err.code === "FIXED_ASSET_ACCESS_DENIED") {
+      return errorResponse("FORBIDDEN", "Access denied to asset", 403);
     }
 
     console.error("PATCH /accounts/fixed-assets/:id failed", error);
@@ -548,18 +560,26 @@ accountRoutes.delete("/fixed-assets/:id", async (c) => {
 
   try {
     const assetId = NumericIdSchema.parse(c.req.param("id"));
-    const deleted = await deleteFixedAsset(auth.companyId, assetId, {
+    const assetService = getComposedAssetService();
+    await assetService.delete(auth.companyId, assetId, {
       userId: auth.userId
     });
-
-    if (!deleted) {
-      return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
-    }
 
     return successResponse({ deleted: true });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid asset ID", 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "FIXED_ASSET_NOT_FOUND") {
+      return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
+    }
+    if (err.code === "FIXED_ASSET_ACCESS_DENIED") {
+      return errorResponse("FORBIDDEN", "Access denied to asset", 403);
+    }
+    if (err.code === "FIXED_ASSET_HAS_EVENTS") {
+      return errorResponse("CONFLICT", "Cannot delete asset that has lifecycle events", 409);
     }
 
     console.error("DELETE /accounts/fixed-assets/:id failed", error);
@@ -585,10 +605,11 @@ accountRoutes.post("/fixed-assets/:id/depreciation-plan", async (c) => {
     const payload = await c.req.json();
     const input = DepreciationPlanCreateRequestSchema.parse(payload);
 
-    const plan = await createDepreciationPlan(
+    const depreciationService = getComposedDepreciationService();
+    const plan = await depreciationService.createDepreciationPlan(
       auth.companyId,
+      assetId,
       {
-        asset_id: assetId,
         outlet_id: input.outlet_id,
         method: input.method,
         start_date: input.start_date,
@@ -608,12 +629,9 @@ accountRoutes.post("/fixed-assets/:id/depreciation-plan", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
-    if (error instanceof DatabaseReferenceError) {
-      return errorResponse("INVALID_REFERENCE", error.message, 400);
-    }
-
-    if (error instanceof DepreciationPlanValidationError) {
-      return errorResponse("VALIDATION_ERROR", error.message, 400);
+    const err = error as { code?: string; message?: string };
+    if (err.code === "DEPRECIATION_PLAN_VALIDATION_ERROR") {
+      return errorResponse("VALIDATION_ERROR", err.message || "Invalid depreciation plan", 400);
     }
 
     console.error("POST /accounts/fixed-assets/:id/depreciation-plan failed", error);
@@ -639,16 +657,32 @@ accountRoutes.patch("/fixed-assets/:id/depreciation-plan", async (c) => {
     const payload = await c.req.json();
     const input = DepreciationPlanUpdateRequestSchema.parse(payload);
 
+    const depreciationService = getComposedDepreciationService();
+
     // First, find the depreciation plan for this asset
-    const existingPlan = await getLatestDepreciationPlan(auth.companyId, assetId);
+    const existingPlan = await depreciationService.getPlanByAssetId(assetId, auth.companyId);
     if (!existingPlan) {
       return errorResponse("NOT_FOUND", "Depreciation plan not found for this asset", 404);
     }
 
-    // Update the plan
-    const updatedPlan = await updateDepreciationPlan(auth.companyId, existingPlan.id, input, {
-      userId: auth.userId
-    });
+    // Update the plan - convert start_date string to Date if provided
+    const updateInput = {
+      outlet_id: input.outlet_id,
+      method: input.method,
+      start_date: input.start_date ? new Date(input.start_date) : undefined,
+      useful_life_months: input.useful_life_months,
+      salvage_value: input.salvage_value,
+      expense_account_id: input.expense_account_id,
+      accum_depr_account_id: input.accum_depr_account_id,
+      status: input.status,
+    };
+
+    const updatedPlan = await depreciationService.updateDepreciationPlan(
+      auth.companyId,
+      existingPlan.id,
+      updateInput,
+      { userId: auth.userId }
+    );
 
     if (!updatedPlan) {
       return errorResponse("NOT_FOUND", "Depreciation plan not found", 404);
@@ -660,16 +694,12 @@ accountRoutes.patch("/fixed-assets/:id/depreciation-plan", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
-    if (error instanceof DatabaseReferenceError) {
-      return errorResponse("INVALID_REFERENCE", error.message, 400);
+    const err = error as { code?: string; message?: string };
+    if (err.code === "DEPRECIATION_PLAN_STATUS_ERROR") {
+      return errorResponse("CONFLICT", err.message || "Depreciation plan has posted runs", 409);
     }
-
-    if (error instanceof DepreciationPlanStatusError) {
-      return errorResponse("CONFLICT", error.message, 409);
-    }
-
-    if (error instanceof DepreciationPlanValidationError) {
-      return errorResponse("VALIDATION_ERROR", error.message, 400);
+    if (err.code === "DEPRECIATION_PLAN_VALIDATION_ERROR") {
+      return errorResponse("VALIDATION_ERROR", err.message || "Invalid depreciation plan", 400);
     }
 
     console.error("PATCH /accounts/fixed-assets/:id/depreciation-plan failed", error);
@@ -694,37 +724,33 @@ accountRoutes.post("/depreciation/run", async (c) => {
     const payload = await c.req.json();
     const input = DepreciationRunCreateRequestSchema.parse(payload);
 
-    const result = await runDepreciationPlan(auth.companyId, input, {
-      userId: auth.userId
-    });
+    // Construct periodKey in YYYY-MM format from period_year and period_month
+    const periodKey = `${String(input.period_year).padStart(4, '0')}-${String(input.period_month).padStart(2, '0')}`;
 
+    const depreciationService = getComposedDepreciationService();
+    const result = await depreciationService.executeDepreciationRun(
+      auth.companyId,
+      periodKey,
+      { userId: auth.userId }
+    );
+
+    // Return the batch result - the module processes all active plans
     return successResponse({
-      duplicate: result.duplicate,
-      run: result.run
+      processedCount: result.processedCount,
+      skippedCount: result.skippedCount,
+      runs: result.runs
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid request", 400);
     }
 
-    if (error instanceof DepreciationPlanValidationError) {
-      return errorResponse("VALIDATION_ERROR", error.message, 400);
+    const err = error as { code?: string; message?: string };
+    if (err.code === "DEPRECIATION_PLAN_VALIDATION_ERROR") {
+      return errorResponse("VALIDATION_ERROR", err.message || "Invalid depreciation plan", 400);
     }
-
-    if (error instanceof DepreciationPlanStatusError) {
+    if (err.code === "DEPRECIATION_PLAN_STATUS_ERROR") {
       return errorResponse("CONFLICT", "Depreciation run conflict", 409);
-    }
-
-    if (error instanceof DatabaseReferenceError) {
-      return errorResponse("INVALID_REFERENCE", "Invalid depreciation reference", 400);
-    }
-
-    if (error instanceof FiscalYearNotOpenError) {
-      return errorResponse(
-        "FISCAL_YEAR_CLOSED",
-        "Depreciation run date is outside any open fiscal year",
-        400
-      );
     }
 
     console.error("POST /accounts/depreciation/run failed", error);
@@ -1020,13 +1046,8 @@ accountRoutes.post("/fixed-assets/:id/acquisition", async (c) => {
     const payload = await c.req.json();
     const input = AcquisitionRequestSchema.parse(payload);
 
-    // Verify asset exists
-    const asset = await findFixedAssetById(auth.companyId, assetId);
-    if (!asset) {
-      return errorResponse("NOT_FOUND", "Fixed asset not found", 404);
-    }
-
-    const result = await recordAcquisition(auth.companyId, assetId, input, {
+    const lifecycleService = getComposedLifecycleService();
+    const result = await lifecycleService.recordAcquisition(auth.companyId, assetId, input, {
       userId: auth.userId
     });
 
@@ -1042,20 +1063,17 @@ accountRoutes.post("/fixed-assets/:id/acquisition", async (c) => {
     }
 
     const err = error as { code?: string; message?: string };
-    if (err.code === "NOT_FOUND") {
+    if (err.code === "FIXED_ASSET_NOT_FOUND") {
       return errorResponse("NOT_FOUND", err.message || "Fixed asset not found", 404);
     }
-    if (err.code === "ASSET_ALREADY_DISPOSED") {
+    if (err.code === "LIFECYCLE_ASSET_DISPOSED") {
       return errorResponse("CONFLICT", err.message || "Asset already disposed", 409);
     }
-    if (err.code === "DUPLICATE_EVENT") {
+    if (err.code === "LIFECYCLE_DUPLICATE_EVENT") {
       return errorResponse("CONFLICT", "Duplicate event", 409);
     }
-    if (err.code === "INVALID_REFERENCE") {
+    if (err.code === "LIFECYCLE_INVALID_REFERENCE") {
       return errorResponse("INVALID_REFERENCE", err.message || "Invalid reference", 400);
-    }
-    if (err.code === "FORBIDDEN") {
-      return errorResponse("FORBIDDEN", err.message || "Forbidden", 403);
     }
 
     console.error("POST /accounts/fixed-assets/:id/acquisition failed", error);
@@ -1081,7 +1099,8 @@ accountRoutes.post("/fixed-assets/:id/transfer", async (c) => {
     const payload = await c.req.json();
     const input = TransferRequestSchema.parse(payload);
 
-    const result = await recordTransfer(auth.companyId, assetId, input, {
+    const lifecycleService = getComposedLifecycleService();
+    const result = await lifecycleService.recordTransfer(auth.companyId, assetId, input, {
       userId: auth.userId
     });
 
@@ -1097,13 +1116,13 @@ accountRoutes.post("/fixed-assets/:id/transfer", async (c) => {
     }
 
     const err = error as { code?: string; message?: string };
-    if (err.code === "NOT_FOUND") {
+    if (err.code === "FIXED_ASSET_NOT_FOUND") {
       return errorResponse("NOT_FOUND", err.message || "Asset not found", 404);
     }
-    if (err.code === "ASSET_NOT_ACTIVE" || err.code === "ASSET_ALREADY_DISPOSED") {
+    if (err.code === "LIFECYCLE_ASSET_DISPOSED") {
       return errorResponse("CONFLICT", err.message || "Asset is not active", 409);
     }
-    if (err.code === "DUPLICATE_EVENT") {
+    if (err.code === "LIFECYCLE_DUPLICATE_EVENT") {
       return errorResponse("CONFLICT", "Duplicate event", 409);
     }
 
@@ -1130,7 +1149,8 @@ accountRoutes.post("/fixed-assets/:id/impairment", async (c) => {
     const payload = await c.req.json();
     const input = ImpairmentRequestSchema.parse(payload);
 
-    const result = await recordImpairment(auth.companyId, assetId, input, {
+    const lifecycleService = getComposedLifecycleService();
+    const result = await lifecycleService.recordImpairment(auth.companyId, assetId, input, {
       userId: auth.userId
     });
 
@@ -1146,16 +1166,16 @@ accountRoutes.post("/fixed-assets/:id/impairment", async (c) => {
     }
 
     const err = error as { code?: string; message?: string };
-    if (err.code === "NOT_FOUND") {
+    if (err.code === "FIXED_ASSET_NOT_FOUND") {
       return errorResponse("NOT_FOUND", err.message || "Asset not found", 404);
     }
-    if (err.code === "ASSET_NOT_ACTIVE" || err.code === "ASSET_ALREADY_DISPOSED") {
+    if (err.code === "LIFECYCLE_ASSET_DISPOSED") {
       return errorResponse("CONFLICT", err.message || "Asset is not active", 409);
     }
-    if (err.code === "DUPLICATE_EVENT") {
+    if (err.code === "LIFECYCLE_DUPLICATE_EVENT") {
       return errorResponse("CONFLICT", "Duplicate event", 409);
     }
-    if (err.code === "INVALID_STATE") {
+    if (err.code === "LIFECYCLE_INVALID_STATE") {
       return errorResponse("CONFLICT", err.message || "Invalid asset state", 409);
     }
 
@@ -1182,7 +1202,8 @@ accountRoutes.post("/fixed-assets/:id/disposal", async (c) => {
     const payload = await c.req.json();
     const input = DisposalRequestSchema.parse(payload);
 
-    const result = await recordDisposal(auth.companyId, assetId, input, {
+    const lifecycleService = getComposedLifecycleService();
+    const result = await lifecycleService.recordDisposal(auth.companyId, assetId, input, {
       userId: auth.userId
     });
 
@@ -1199,19 +1220,19 @@ accountRoutes.post("/fixed-assets/:id/disposal", async (c) => {
     }
 
     const err = error as { code?: string; message?: string };
-    if (err.code === "NOT_FOUND") {
+    if (err.code === "FIXED_ASSET_NOT_FOUND") {
       return errorResponse("NOT_FOUND", err.message || "Asset not found", 404);
     }
-    if (err.code === "ASSET_ALREADY_DISPOSED" || err.code === "ASSET_NOT_ACTIVE") {
+    if (err.code === "LIFECYCLE_ASSET_DISPOSED") {
       return errorResponse("CONFLICT", err.message || "Asset already disposed", 409);
     }
-    if (err.code === "DUPLICATE_EVENT") {
+    if (err.code === "LIFECYCLE_DUPLICATE_EVENT") {
       return errorResponse("CONFLICT", "Duplicate event", 409);
     }
-    if (err.code === "INVALID_STATE") {
+    if (err.code === "LIFECYCLE_INVALID_STATE") {
       return errorResponse("CONFLICT", err.message || "Invalid asset state", 409);
     }
-    if (err.code === "INVALID_REFERENCE") {
+    if (err.code === "LIFECYCLE_INVALID_REFERENCE") {
       return errorResponse("CONFLICT", err.message || "Invalid reference", 409);
     }
 
@@ -1236,7 +1257,8 @@ accountRoutes.get("/fixed-assets/:id/ledger", async (c) => {
   try {
     const assetId = NumericIdSchema.parse(c.req.param("id"));
 
-    const ledger = await getAssetLedger(auth.companyId, assetId, { userId: auth.userId });
+    const lifecycleService = getComposedLifecycleService();
+    const ledger = await lifecycleService.getLedger(auth.companyId, assetId, { userId: auth.userId });
 
     return successResponse(ledger);
   } catch (error) {
@@ -1245,7 +1267,7 @@ accountRoutes.get("/fixed-assets/:id/ledger", async (c) => {
     }
 
     const err = error as { code?: string; message?: string };
-    if (err.code === "NOT_FOUND") {
+    if (err.code === "FIXED_ASSET_NOT_FOUND") {
       return errorResponse("NOT_FOUND", "Asset not found", 404);
     }
 
@@ -1270,7 +1292,8 @@ accountRoutes.get("/fixed-assets/:id/book", async (c) => {
   try {
     const assetId = NumericIdSchema.parse(c.req.param("id"));
 
-    const book = await getAssetBook(auth.companyId, assetId, { userId: auth.userId });
+    const lifecycleService = getComposedLifecycleService();
+    const book = await lifecycleService.getBook(auth.companyId, assetId, { userId: auth.userId });
 
     return successResponse(book);
   } catch (error) {
@@ -1279,7 +1302,7 @@ accountRoutes.get("/fixed-assets/:id/book", async (c) => {
     }
 
     const err = error as { code?: string; message?: string };
-    if (err.code === "NOT_FOUND") {
+    if (err.code === "FIXED_ASSET_NOT_FOUND") {
       return errorResponse("NOT_FOUND", "Asset not found", 404);
     }
 
@@ -1306,7 +1329,8 @@ accountRoutes.post("/fixed-assets/events/:id/void", async (c) => {
     const payload = await c.req.json().catch(() => ({}));
     const input = VoidEventRequestSchema.parse(payload);
 
-    const result = await voidEvent(auth.companyId, eventId, {
+    const lifecycleService = getComposedLifecycleService();
+    const result = await lifecycleService.voidEvent(auth.companyId, eventId, {
       void_reason: input.void_reason,
       idempotency_key: input.idempotency_key
     }, { userId: auth.userId });
@@ -1323,10 +1347,10 @@ accountRoutes.post("/fixed-assets/events/:id/void", async (c) => {
     }
 
     const err = error as { code?: string; message?: string };
-    if (err.code === "NOT_FOUND" || err.code === "EVENT_NOT_FOUND") {
+    if (err.code === "LIFECYCLE_EVENT_NOT_FOUND") {
       return errorResponse("NOT_FOUND", err.message || "Event not found", 404);
     }
-    if (err.code === "EVENT_ALREADY_VOIDED" || err.code === "EVENT_NOT_VOIDABLE") {
+    if (err.code === "LIFECYCLE_EVENT_VOIDED" || err.code === "LIFECYCLE_EVENT_NOT_VOIDABLE") {
       return errorResponse("CONFLICT", err.message || "Cannot void this event", 409);
     }
 

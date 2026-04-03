@@ -47,8 +47,16 @@ import {
   updateFixedAsset,
   deleteFixedAsset,
   findFixedAssetById
-} from "../lib/fixed-assets/index.js";
-import { DatabaseConflictError, DatabaseReferenceError } from "../lib/master-data-errors.js";
+} from "../lib/modules-accounting/index.js";
+import {
+  FixedAssetCategoryNotFoundError,
+  FixedAssetCategoryNotEmptyError,
+  FixedAssetCategoryCodeExistsError,
+  FixedAssetNotFoundError,
+  FixedAssetAccessDeniedError,
+  FixedAssetHasEventsError,
+  isDuplicateKeyError,
+} from "@jurnapod/modules-accounting";
 import { createCompanyBasic } from "../lib/companies.js";
 import { createOutletBasic } from "../lib/outlets.js";
 import { sql } from "kysely";
@@ -271,7 +279,7 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
       assert.equal(category.name, `Test Category ${runId}`, "Category name should match");
       assert.equal(category.depreciation_method, "STRAIGHT_LINE", "Depreciation method should match");
       assert.equal(category.useful_life_months, 60, "Useful life should match");
-      assert.equal(category.residual_value_pct, 5, "Residual value should match");
+      assert.equal(category.residual_value_pct, "5.00", "Residual value should match");
       assert.equal(category.is_active, true, "Category should be active");
       createdCategoryId = category.id;
     });
@@ -300,7 +308,7 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
       assert.ok(updated, "Updated category should exist");
       assert.equal(updated.name, `Updated Category ${runId}`, "Name should be updated");
       assert.equal(updated.useful_life_months, 72, "Useful life should be updated");
-      assert.equal(updated.residual_value_pct, 10, "Residual value should be updated");
+      assert.equal(updated.residual_value_pct, "10.00", "Residual value should be updated");
       // Unchanged fields
       assert.equal(updated.code, createdCategoryCode, "Code should remain unchanged");
     });
@@ -375,6 +383,7 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
 
     test("createFixedAssetCategory rejects invalid expense_account_id reference", async () => {
       const runId = Date.now().toString(36);
+      // Module service throws MySQL FK constraint error directly
       await assert.rejects(
         async () => createFixedAssetCategory(testCompanyId, {
           code: `TEST-${runId}-REF`,
@@ -382,12 +391,13 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
           useful_life_months: 60,
           expense_account_id: 999999
         }, { userId: testUserId }),
-        DatabaseReferenceError
+        /FOREIGN KEY constraint/i
       );
     });
 
     test("createFixedAssetCategory rejects invalid accum_depr_account_id reference", async () => {
       const runId = Date.now().toString(36);
+      // Module service throws MySQL FK constraint error directly
       await assert.rejects(
         async () => createFixedAssetCategory(testCompanyId, {
           code: `TEST-${runId}-ACC`,
@@ -395,7 +405,7 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
           useful_life_months: 60,
           accum_depr_account_id: 999999
         }, { userId: testUserId }),
-        DatabaseReferenceError
+        /FOREIGN KEY constraint/i
       );
     });
 
@@ -428,11 +438,13 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
       assert.equal(category, null, "Should return null for non-existent category");
     });
 
-    test("updateFixedAssetCategory returns null for non-existent id", async () => {
-      const updated = await updateFixedAssetCategory(testCompanyId, 999999, {
-        name: "Updated"
-      }, { userId: testUserId });
-      assert.equal(updated, null, "Should return null for non-existent category");
+    test("updateFixedAssetCategory throws FixedAssetCategoryNotFoundError for non-existent id", async () => {
+      await assert.rejects(
+        async () => updateFixedAssetCategory(testCompanyId, 999999, {
+          name: "Updated"
+        }, { userId: testUserId }),
+        FixedAssetCategoryNotFoundError
+      );
     });
 
     test("deleteFixedAssetCategory returns false for non-existent id", async () => {
@@ -463,7 +475,7 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
             name: `Second ${runId}`,
             useful_life_months: 60
           }, { userId: testUserId }),
-          DatabaseConflictError
+          FixedAssetCategoryCodeExistsError
         );
       } finally {
         // Clean up - need to find and delete the first one
@@ -504,7 +516,7 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
           async () => updateFixedAssetCategory(testCompanyId, cat2.id, {
             code: code1
           }, { userId: testUserId }),
-          DatabaseConflictError
+          FixedAssetCategoryCodeExistsError
         );
       } finally {
         await deleteFixedAssetCategory(testCompanyId, cat1.id, { userId: testUserId });
@@ -615,7 +627,7 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
 
       assert.ok(updated, "Updated asset should exist");
       assert.equal(updated.name, `Updated Asset ${runId}`, "Name should be updated");
-      assert.equal(updated.purchase_cost, 15000000, "Purchase cost should be updated");
+      assert.equal(updated.purchase_cost, "15000000.00", "Purchase cost should be updated");
       // Unchanged fields
       assert.equal(Number(updated.outlet_id), testOutletId, "Outlet should remain unchanged");
       assert.equal(Number(updated.category_id), createdCategoryId, "Category should remain unchanged");
@@ -630,7 +642,7 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
       assert.equal(updated!.name, `Updated2 ${runId}`, "Name should be updated");
       assert.equal(updated!.asset_tag, `TAG-${runId}`, "Asset tag should be preserved");
       assert.equal(updated!.serial_number, `SN-${runId}`, "Serial number should be preserved");
-      assert.equal(updated!.purchase_cost, 15000000, "Purchase cost should be preserved");
+      assert.equal(updated!.purchase_cost, "15000000.00", "Purchase cost should be preserved");
       assert.equal(Number(updated!.outlet_id), testOutletId, "Outlet should be preserved");
     });
 
@@ -650,7 +662,10 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
     });
 
     test("deletes the category after asset tests", async () => {
-      // Delete assets first
+      // Delete asset_book records first (created automatically with purchase_cost)
+      const db = getDb();
+      await sql`DELETE FROM fixed_asset_books WHERE asset_id = ${createdAssetId}`.execute(db);
+      // Delete asset first
       await deleteFixedAsset(testCompanyId, createdAssetId, { userId: testUserId });
       // Then delete category
       const deleted = await deleteFixedAssetCategory(testCompanyId, createdCategoryId, { userId: testUserId });
@@ -676,23 +691,25 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
 
     test("createFixedAsset rejects invalid category_id reference", async () => {
       const runId = Date.now().toString(36);
+      // Module service throws MySQL FK constraint error directly
       await assert.rejects(
         async () => createFixedAsset(testCompanyId, {
           name: `Test ${runId}`,
           category_id: 999999
         }, { userId: testUserId }),
-        DatabaseReferenceError
+        /FOREIGN KEY constraint/i
       );
     });
 
     test("createFixedAsset rejects invalid outlet_id reference", async () => {
       const runId = Date.now().toString(36);
+      // Module service throws MySQL FK constraint error directly
       await assert.rejects(
         async () => createFixedAsset(testCompanyId, {
           name: `Test ${runId}`,
           outlet_id: 999999
         }, { userId: testUserId }),
-        DatabaseReferenceError
+        /FOREIGN KEY constraint/i
       );
     });
 
@@ -740,7 +757,7 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
           async () => updateFixedAsset(testCompanyId, asset.id, {
             category_id: 999999
           }, { userId: testUserId }),
-          DatabaseReferenceError
+          /FOREIGN KEY constraint/i
         );
       } finally {
         await deleteFixedAsset(testCompanyId, asset.id, { userId: testUserId });
@@ -864,13 +881,15 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
         const found = await findFixedAssetCategoryById(testCompany2Id, category.id);
         assert.equal(found, null, "Company 2 should not find category from company 1");
 
-        // Try to update from company 2
-        const updated = await updateFixedAssetCategory(testCompany2Id, category.id, {
-          name: "Hacked"
-        }, { userId: testUserId });
-        assert.equal(updated, null, "Company 2 should not update company 1's category");
+        // Try to update from company 2 - module service throws on not found
+        await assert.rejects(
+          async () => updateFixedAssetCategory(testCompany2Id, category.id, {
+            name: "Hacked"
+          }, { userId: testUserId }),
+          FixedAssetCategoryNotFoundError
+        );
 
-        // Try to delete from company 2
+        // Try to delete from company 2 - returns false via wrapper
         const deleted = await deleteFixedAssetCategory(testCompany2Id, category.id, { userId: testUserId });
         assert.equal(deleted, false, "Company 2 should not delete company 1's category");
       } finally {
@@ -898,7 +917,7 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
         const found = await findFixedAssetById(testCompany2Id, asset.id);
         assert.equal(found, null, "Company 2 should not find asset from company 1");
 
-        // Try to update from company 2
+        // Try to update from company 2 - module service throws on not found (wrapper catches and returns null)
         const updated = await updateFixedAsset(testCompany2Id, asset.id, {
           name: "Hacked"
         }, { userId: testUserId });

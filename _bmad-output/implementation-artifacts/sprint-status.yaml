@@ -323,3 +323,13 @@ development_status:
   28-3-payment-posting-hook-transaction-safe: done
   28-4-api-route-flip-library-cleanup: done
   28-5-full-validation-gate: done
+
+  # Epic 29: Fixed Assets / Depreciation Extraction
+  epic-29: done
+  29-1-scope-decisions-parity-matrix: done
+  29-2-scaffold-fixed-assets-subdomain: done
+  29-3-extract-category-asset-crud: done
+  29-4-extract-depreciation-plan-run: done
+  29-5-extract-lifecycle-service: done
+  29-6-flip-routes-delete-libs: done
+  29-7-integration-tests-gate: done
