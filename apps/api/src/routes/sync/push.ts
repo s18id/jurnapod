@@ -5,21 +5,21 @@
  * Sync Push Route
  *
  * Thin HTTP layer for POST /sync/push.
- * Uses PosSyncModule for Phase 1 (persistence) and iterates Phase 1 results
- * for Phase 2 (COGS posting, stock deduction, table release, reservation update).
+ * Phase 1 (persistence): delegated to PosSyncModule.handlePushSync()
+ * Phase 2 (COGS posting, stock deduction, table release, reservation update):
+ *   delegated to orchestrateSyncPushPhase2() in lib/sync/push/transactions.ts
  */
 
 import { Hono } from "hono";
 import { SyncPushRequestSchema } from "@jurnapod/shared";
 import { authenticateRequest, requireAccess, type AuthContext } from "../../lib/auth-guard.js";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
-import { getDbPool } from "../../lib/db.js";
 import { errorResponse, successResponse } from "../../lib/response.js";
 import { SyncIdempotencyMetricsCollector } from "@jurnapod/sync-core";
-import type { KyselySchema } from "@jurnapod/db";
-import { sql } from "kysely";
-import { processSyncPushTransactionPhase2 } from "../../lib/sync/push/transactions.js";
-import type { SyncPushTaxContext, SyncPushTransactionPayload } from "../../lib/sync/push/types.js";
+import { orchestrateSyncPushPhase2 } from "../../lib/sync/push/transactions.js";
+import { buildSyncPushTaxContext } from "../../lib/sync/push/tax-context.js";
+import { getSyncPushDbPool } from "../../lib/sync/push/db.js";
+import type { SyncPushTransactionPayload } from "../../lib/sync/push/types.js";
 import { shouldUseNewPushSync, getPushSyncModeDescription } from "../../lib/feature-flags.js";
 import { getPosSyncModule } from "../../lib/sync-modules.js";
 import { toTransactionPush, toActiveOrderPush, buildTxByClientTxIdMap } from "../../lib/sync/push/adapters.js";
@@ -34,59 +34,6 @@ declare module "hono" {
   interface ContextVariableMap {
     auth: AuthContext;
   }
-}
-
-const TEST_FAIL_AFTER_HEADER_INSERT_HEADER = "x-jp-sync-push-fail-after-header";
-const TEST_FORCE_DB_ERRNO_HEADER = "x-jp-sync-push-force-db-errno";
-const SYNC_PUSH_TEST_HOOKS_ENV = "JP_SYNC_PUSH_TEST_HOOKS";
-const SYNC_PUSH_CONCURRENCY_ENV = "JP_SYNC_PUSH_CONCURRENCY";
-const DEFAULT_SYNC_PUSH_CONCURRENCY = 3;
-const MAX_SYNC_PUSH_CONCURRENCY = 5;
-const MYSQL_LOCK_WAIT_TIMEOUT_ERROR_CODE = 1205;
-const MYSQL_DEADLOCK_ERROR_CODE = 1213;
-
-function isSyncPushTestHookEnabled(): boolean {
-  return process.env.NODE_ENV !== "production" && process.env[SYNC_PUSH_TEST_HOOKS_ENV] === "1";
-}
-
-function shouldInjectFailureAfterHeaderInsert(request: Request): boolean {
-  return isSyncPushTestHookEnabled() && request.headers.get(TEST_FAIL_AFTER_HEADER_INSERT_HEADER) === "1";
-}
-
-function readForcedRetryableErrno(request: Request): number | null {
-  if (!isSyncPushTestHookEnabled()) {
-    return null;
-  }
-
-  const headerValue = request.headers.get(TEST_FORCE_DB_ERRNO_HEADER)?.trim();
-  if (!headerValue) {
-    return null;
-  }
-
-  const parsed = Number(headerValue);
-  if (!Number.isInteger(parsed)) {
-    return null;
-  }
-
-  if (parsed !== MYSQL_LOCK_WAIT_TIMEOUT_ERROR_CODE && parsed !== MYSQL_DEADLOCK_ERROR_CODE) {
-    return null;
-  }
-
-  return parsed;
-}
-
-function readSyncPushConcurrency(): number {
-  const raw = process.env[SYNC_PUSH_CONCURRENCY_ENV];
-  if (!raw || raw.trim().length === 0) {
-    return DEFAULT_SYNC_PUSH_CONCURRENCY;
-  }
-
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    return DEFAULT_SYNC_PUSH_CONCURRENCY;
-  }
-
-  return Math.min(MAX_SYNC_PUSH_CONCURRENCY, Math.max(1, parsed));
 }
 
 const syncPushRoutes = new Hono();
@@ -105,7 +52,7 @@ syncPushRoutes.use("/*", async (c, next) => {
 syncPushRoutes.post("/", async (c) => {
   const auth = c.get("auth");
   const correlationId = getRequestCorrelationId(c.req.raw);
-  const dbPool = getDbPool();
+  const dbPool = getSyncPushDbPool();
   const metricsCollector = new SyncIdempotencyMetricsCollector();
 
   console.info("POST /sync/push started", {
@@ -151,79 +98,9 @@ syncPushRoutes.post("/", async (c) => {
       return successResponse({ results: [] });
     }
 
-    // Build tax context using Kysely
+    // Build tax context using library function
     const db = dbPool;
-    
-    // Get default tax rates for the company
-    const defaultTaxRatesResult = await sql`
-      SELECT tr.id, tr.company_id, tr.code, tr.name, tr.rate_percent, tr.account_id, 
-             tr.is_inclusive, tr.is_active, tr.created_by_user_id, tr.updated_by_user_id,
-             tr.created_at, tr.updated_at
-      FROM tax_rates tr
-      INNER JOIN company_tax_defaults ctd ON ctd.tax_rate_id = tr.id
-      WHERE ctd.company_id = ${auth.companyId}
-        AND tr.is_active = 1
-    `.execute(db);
-
-    // Get all tax rates for the company
-    const allTaxRatesResult = await sql`
-      SELECT id, company_id, code, name, rate_percent, account_id, 
-             is_inclusive, is_active, created_by_user_id, updated_by_user_id,
-             created_at, updated_at
-      FROM tax_rates
-      WHERE company_id = ${auth.companyId}
-        AND is_active = 1
-    `.execute(db);
-
-    interface TaxRateRow {
-      id: number;
-      company_id: number;
-      code: string;
-      name: string;
-      rate_percent: number;
-      account_id: number | null;
-      is_inclusive: number;
-      is_active: number;
-      created_by_user_id: number | null;
-      updated_by_user_id: number | null;
-      created_at: string;
-      updated_at: string;
-    }
-
-    const defaultTaxRates = (defaultTaxRatesResult.rows as TaxRateRow[]).map(row => ({
-      id: row.id,
-      company_id: row.company_id,
-      code: row.code,
-      name: row.name,
-      rate_percent: Number(row.rate_percent),
-      account_id: row.account_id,
-      is_inclusive: row.is_inclusive === 1,
-      is_active: row.is_active === 1,
-      created_by_user_id: row.created_by_user_id,
-      updated_by_user_id: row.updated_by_user_id,
-      created_at: row.created_at,
-      updated_at: row.updated_at
-    }));
-
-    const allTaxRates = (allTaxRatesResult.rows as TaxRateRow[]).map(row => ({
-      id: row.id,
-      company_id: row.company_id,
-      code: row.code,
-      name: row.name,
-      rate_percent: Number(row.rate_percent),
-      account_id: row.account_id,
-      is_inclusive: row.is_inclusive === 1,
-      is_active: row.is_active === 1,
-      created_by_user_id: row.created_by_user_id,
-      updated_by_user_id: row.updated_by_user_id,
-      created_at: row.created_at,
-      updated_at: row.updated_at
-    }));
-
-    const taxContext: SyncPushTaxContext = {
-      defaultTaxRates,
-      taxRateById: new Map(allTaxRates.map(rate => [rate.id, rate]))
-    };
+    const taxContext = await buildSyncPushTaxContext(db, auth.companyId);
 
     // Check feature flag to determine which path to use
     const useNewPath = shouldUseNewPushSync(auth.companyId);
@@ -256,41 +133,15 @@ syncPushRoutes.post("/", async (c) => {
       metricsCollector
     });
 
-    // Phase 2: Iterate Phase 1 results and process COGS, stock, etc.
-    // Process OK results from Phase 1
-    const okResults = phase1Results.results.filter((r) => r.result === "OK" && r.posTransactionId !== undefined);
-    
-    for (const result of okResults) {
-      const originalTx = txByClientTxId.get(result.client_tx_id);
-      if (!originalTx) {
-        console.warn("Phase 2: Original transaction not found", {
-          correlation_id: correlationId,
-          client_tx_id: result.client_tx_id
-        });
-        continue;
-      }
-
-      try {
-        // Phase 2 uses Kysely for database operations
-        await processSyncPushTransactionPhase2({
-          db: db,
-          tx: originalTx,
-          posTransactionId: result.posTransactionId!,
-          authUserId: auth.userId,
-          correlationId,
-          taxContext
-        });
-      } catch (phase2Error) {
-        // Phase 2 failed but Phase 1 data is already committed
-        // Log the error but don't fail the entire request
-        console.error("Phase 2 processing failed for transaction", {
-          correlation_id: correlationId,
-          client_tx_id: result.client_tx_id,
-          pos_transaction_id: result.posTransactionId,
-          error: phase2Error instanceof Error ? phase2Error.message : String(phase2Error)
-        });
-      }
-    }
+    // Phase 2: Delegate to library function for orchestration
+    await orchestrateSyncPushPhase2({
+      db,
+      phase1Results: phase1Results.results,
+      txByClientTxId,
+      authUserId: auth.userId,
+      correlationId,
+      taxContext
+    });
 
     const responsePayload = {
       results: phase1Results.results,

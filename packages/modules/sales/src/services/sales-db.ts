@@ -250,7 +250,7 @@ export interface SalesDbExecutor {
   // Validation
   outletExists(companyId: number, outletId: number): Promise<boolean>;
   validateTaxRates(companyId: number, taxRateIds: number[]): Promise<boolean>;
-  getDefaultTaxRates(companyId: number): Promise<Array<{ tax_rate_id: number; rate: number }>>;
+  getDefaultTaxRates(companyId: number): Promise<Array<{ tax_rate_id: number; rate_percent: number }>>;
 
   // List operations
   listOrders(companyId: number, filters: OrderListFilters): Promise<{ total: number; orders: SalesOrderDetail[] }>;

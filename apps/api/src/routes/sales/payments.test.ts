@@ -17,7 +17,8 @@ import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
 import { closeDbPool, getDb } from "../../lib/db";
-import { listPayments, type SalesPayment } from "../../lib/sales";
+import { listPayments } from "../../lib/payments/payment-service";
+import type { SalesPayment } from "@jurnapod/modules-sales";
 import { sql } from "kysely";
 
 loadEnvIfPresent();

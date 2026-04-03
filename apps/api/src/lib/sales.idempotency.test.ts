@@ -8,7 +8,9 @@ import {
   readEnv
 } from "../../tests/integration/integration-harness.mjs";
 import { getDb, closeDbPool } from "./db";
-import { createPayment, DatabaseConflictError, PaymentAllocationError } from "./sales";
+import { createPayment } from "./payments/payment-service";
+import { PaymentAllocationError } from "@jurnapod/modules-sales";
+import { DatabaseConflictError } from "@/lib/shared/common-utils";
 import { createAccount } from "./accounts.js";
 import { sql } from "kysely";
 import { randomUUID } from "node:crypto";

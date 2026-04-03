@@ -116,6 +116,25 @@ export type {
   CreditCapacity
 } from "./types/credit-notes.js";
 
+// Payment types
+export type {
+  SalesPayment,
+  SalesPaymentSplit,
+  SalesPaymentStatus,
+  SalesPaymentMethod,
+  PaymentSplitInput,
+  CreatePaymentInput,
+  UpdatePaymentInput,
+  PostPaymentInput,
+  PaymentListFilters,
+  CanonicalPaymentInput
+} from "./types/payments.js";
+
+export {
+  PaymentStatusError,
+  PaymentAllocationError
+} from "./types/payments.js";
+
 // =============================================================================
 // Services
 // =============================================================================

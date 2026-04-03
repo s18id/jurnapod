@@ -18,13 +18,6 @@ export interface AccountBalancesCurrent {
   updated_at: Generated<Date>;
 }
 
-export interface AccountMappingTypes {
-  code: string;
-  created_at: Generated<Date>;
-  id: number;
-  updated_at: Generated<Date>;
-}
-
 export interface AccountMappings {
   account_id: number;
   company_id: number;
@@ -33,6 +26,13 @@ export interface AccountMappings {
   mapping_key: string;
   mapping_type_id: number;
   outlet_id: Generated<number | null>;
+  updated_at: Generated<Date>;
+}
+
+export interface AccountMappingTypes {
+  code: string;
+  created_at: Generated<Date>;
+  id: number;
   updated_at: Generated<Date>;
 }
 
@@ -63,6 +63,36 @@ export interface AccountTypes {
   normal_balance: Generated<string | null>;
   report_group: Generated<string | null>;
   updated_at: Generated<Date>;
+}
+
+export interface AnalyticsInsights {
+  calculated_at: Generated<Date>;
+  company_id: number;
+  description: string;
+  expires_at: Date;
+  id: Generated<number>;
+  insight_type: "ANOMALY" | "PEAK_HOURS" | "SEASONALITY" | "TOP_PRODUCTS" | "TREND" | "UNDERPERFORMING";
+  metric_name: string;
+  metric_value: Decimal;
+  outlet_id: Generated<number | null>;
+  recommendation: Generated<string | null>;
+  reference_period: string;
+  severity: Generated<"CRITICAL" | "INFO" | "WARNING">;
+}
+
+export interface ArchiveSyncDataVersions {
+  archived_at: Generated<Date | null>;
+  company_id: number;
+  current_version: Generated<number | null>;
+  updated_at: Generated<Date | null>;
+}
+
+export interface ArchiveSyncTierVersions {
+  archived_at: Generated<Date | null>;
+  company_id: number;
+  current_version: Generated<number | null>;
+  last_updated_at: Generated<Date | null>;
+  tier: "ADMIN" | "ANALYTICS" | "MASTER" | "OPERATIONAL" | "REALTIME";
 }
 
 export interface AssetDepreciationPlans {
@@ -125,21 +155,6 @@ export interface AuthLoginThrottles {
   updated_at: Generated<Date>;
 }
 
-export interface AuthThrottles {
-  created_at: Generated<Date>;
-  failure_count: Generated<number>;
-  id: Generated<number>;
-  key_hash: string;
-  last_failed_at: Generated<Date | null>;
-  last_ip: Generated<string | null>;
-  last_succeeded_at: Generated<Date | null>;
-  last_user_agent: Generated<string | null>;
-  locked_until: Generated<Date | null>;
-  request_count: Generated<number>;
-  throttle_type: "login" | "password_reset";
-  updated_at: Generated<Date>;
-}
-
 export interface AuthOauthAccounts {
   company_id: number;
   created_at: Generated<Date>;
@@ -172,6 +187,21 @@ export interface AuthRefreshTokens {
   token_hash: string;
   user_agent: Generated<string | null>;
   user_id: number;
+}
+
+export interface AuthThrottles {
+  created_at: Generated<Date | null>;
+  failure_count: Generated<number | null>;
+  id: Generated<number>;
+  key_hash: string;
+  last_failed_at: Generated<Date | null>;
+  last_ip: Generated<string | null>;
+  last_succeeded_at: Generated<Date | null>;
+  last_user_agent: Generated<string | null>;
+  locked_until: Generated<Date | null>;
+  request_count: Generated<number | null>;
+  throttle_type: "login" | "password_reset";
+  updated_at: Generated<Date | null>;
 }
 
 export interface BackofficeSyncQueue {
@@ -244,6 +274,17 @@ export interface CompanyAccountMappings {
   updated_at: Generated<Date>;
 }
 
+export interface CompanyAccountMappingsView {
+  account_id: number;
+  company_id: number;
+  created_at: Generated<Date>;
+  id: Generated<number>;
+  mapping_key: string;
+  mapping_type_id: number;
+  outlet_id: Generated<number | null>;
+  updated_at: Generated<Date>;
+}
+
 export interface CompanyModules {
   company_id: number;
   config_json: string;
@@ -251,41 +292,37 @@ export interface CompanyModules {
   created_by_user_id: Generated<number | null>;
   enabled: Generated<number>;
   id: Generated<number>;
+  inventory_auto_reorder: Generated<number>;
+  inventory_default_asset_account_id: Generated<number | null>;
+  inventory_default_cogs_account_id: Generated<number | null>;
+  inventory_enabled: Generated<number>;
+  inventory_low_stock_threshold: Generated<number>;
+  inventory_multi_warehouse: Generated<number>;
+  inventory_warehouses: Generated<string | null>;
   module_id: number;
-  updated_at: Generated<Date>;
-  updated_by_user_id: Generated<number | null>;
-  // POS module columns
+  pos_allow_discount_after_tax: Generated<number>;
+  pos_auto_sync: Generated<number>;
+  pos_default_payment_method_id: Generated<number | null>;
   pos_enabled: Generated<number>;
   pos_offline_mode: Generated<number>;
   pos_receipt_template: Generated<string>;
-  pos_auto_sync: Generated<number>;
-  pos_sync_interval_seconds: Generated<number>;
   pos_require_auth: Generated<number>;
-  pos_allow_discount_after_tax: Generated<number>;
-  pos_default_payment_method_id: Generated<number | null>;
+  pos_sync_interval_seconds: Generated<number>;
   pos_tip_adjustment_enabled: Generated<number>;
-  // Inventory module columns
-  inventory_enabled: Generated<number>;
-  inventory_multi_warehouse: Generated<number>;
-  inventory_warehouses: Generated<string | null>;
-  inventory_auto_reorder: Generated<number>;
-  inventory_low_stock_threshold: Generated<number>;
-  inventory_default_asset_account_id: Generated<number | null>;
-  inventory_default_cogs_account_id: Generated<number | null>;
-  // Sales module columns
-  sales_enabled: Generated<number>;
-  sales_tax_mode: Generated<string>;
-  sales_default_tax_rate_id: Generated<number | null>;
+  purchasing_approval_workflow: Generated<number>;
+  purchasing_credit_limit_enabled: Generated<number>;
+  purchasing_default_expense_account_id: Generated<number | null>;
+  purchasing_default_tax_rate_id: Generated<number | null>;
+  purchasing_enabled: Generated<number>;
   sales_allow_partial_pay: Generated<number>;
   sales_credit_limit_enabled: Generated<number>;
-  sales_default_price_list_id: Generated<number | null>;
   sales_default_income_account_id: Generated<number | null>;
-  // Purchasing module columns
-  purchasing_enabled: Generated<number>;
-  purchasing_approval_workflow: Generated<number>;
-  purchasing_default_tax_rate_id: Generated<number | null>;
-  purchasing_default_expense_account_id: Generated<number | null>;
-  purchasing_credit_limit_enabled: Generated<number>;
+  sales_default_price_list_id: Generated<number | null>;
+  sales_default_tax_rate_id: Generated<number | null>;
+  sales_enabled: Generated<number>;
+  sales_tax_mode: Generated<"exclusive" | "inclusive" | "mixed">;
+  updated_at: Generated<Date>;
+  updated_by_user_id: Generated<number | null>;
 }
 
 export interface CompanyPaymentMethodMappings {
@@ -296,6 +333,18 @@ export interface CompanyPaymentMethodMappings {
   is_invoice_default: Generated<number>;
   label: Generated<string | null>;
   method_code: string;
+  updated_at: Generated<Date>;
+}
+
+export interface CompanyPaymentMethodMappingsView {
+  account_id: number;
+  company_id: number;
+  created_at: Generated<Date>;
+  id: Generated<number>;
+  is_invoice_default: Generated<number>;
+  label: Generated<string | null>;
+  method_code: string;
+  outlet_id: Generated<number | null>;
   updated_at: Generated<Date>;
 }
 
@@ -310,36 +359,6 @@ export interface CompanySettings {
   updated_by_user_id: Generated<number | null>;
   value_json: string;
   value_type: string;
-}
-
-export interface SettingsBooleans {
-  company_id: number;
-  created_at: Generated<Date>;
-  id: Generated<number>;
-  outlet_id: Generated<number | null>;
-  setting_key: string;
-  setting_value: Generated<number>;
-  updated_at: Generated<Date>;
-}
-
-export interface SettingsNumbers {
-  company_id: number;
-  created_at: Generated<Date>;
-  id: Generated<number>;
-  outlet_id: Generated<number | null>;
-  setting_key: string;
-  setting_value: Generated<Decimal | null>;
-  updated_at: Generated<Date>;
-}
-
-export interface SettingsStrings {
-  company_id: number;
-  created_at: Generated<Date>;
-  id: Generated<number>;
-  outlet_id: Generated<number | null>;
-  setting_key: string;
-  setting_value: string | null;
-  updated_at: Generated<Date>;
 }
 
 export interface CompanyTaxDefaults {
@@ -366,7 +385,7 @@ export interface DataImports {
   accounts_file_name: string;
   allocations_file_name: string;
   company_id: number;
-  completion_percentage: Generated<Decimal>;
+  completion_percentage: Generated<Decimal | null>;
   counts_json: Generated<string | null>;
   created_at: Generated<Date>;
   created_by: Generated<number | null>;
@@ -374,7 +393,7 @@ export interface DataImports {
   error_json: Generated<string | null>;
   file_hash: string;
   id: Generated<number>;
-  processed_rows: Generated<number>;
+  processed_rows: Generated<number | null>;
   status: string;
   success_count: Generated<number>;
   total_rows: Generated<number>;
@@ -438,7 +457,7 @@ export interface FeatureFlags {
   key: string;
   rollout_percentage: Generated<number>;
   start_at: Generated<Date | null>;
-  target_segments: string | null;
+  target_segments: Generated<string | null>;
   updated_at: Generated<Date>;
 }
 
@@ -691,8 +710,8 @@ export interface ItemVariantCombinations {
 export interface ItemVariants {
   archived_at: Generated<Date | null>;
   attributes: Generated<string | null>;
-  combination_hash: Generated<string | null>;
   barcode: Generated<string | null>;
+  combination_hash: Generated<string | null>;
   company_id: number;
   created_at: Generated<Date | null>;
   id: Generated<number>;
@@ -790,6 +809,17 @@ export interface OutletAccountMappings {
   updated_at: Generated<Date>;
 }
 
+export interface OutletAccountMappingsView {
+  account_id: number;
+  company_id: number;
+  created_at: Generated<Date>;
+  id: Generated<number>;
+  mapping_key: string;
+  mapping_type_id: number;
+  outlet_id: Generated<number | null>;
+  updated_at: Generated<Date>;
+}
+
 export interface OutletPaymentMethodMappings {
   account_id: number;
   company_id: number;
@@ -802,7 +832,7 @@ export interface OutletPaymentMethodMappings {
   updated_at: Generated<Date>;
 }
 
-export interface PaymentMethodMappings {
+export interface OutletPaymentMethodMappingsView {
   account_id: number;
   company_id: number;
   created_at: Generated<Date>;
@@ -844,6 +874,18 @@ export interface OutletTables {
   status_id: number;
   updated_at: Generated<Date>;
   zone: Generated<string | null>;
+}
+
+export interface PaymentMethodMappings {
+  account_id: number;
+  company_id: number;
+  created_at: Generated<Date>;
+  id: Generated<number>;
+  is_invoice_default: Generated<number>;
+  label: Generated<string | null>;
+  method_code: string;
+  outlet_id: Generated<number | null>;
+  updated_at: Generated<Date>;
 }
 
 export interface PlatformSettings {
@@ -1254,6 +1296,36 @@ export interface ScheduledExports {
   webhook_url: Generated<string | null>;
 }
 
+export interface SettingsBooleans {
+  company_id: number;
+  created_at: Generated<Date | null>;
+  id: Generated<number>;
+  outlet_id: Generated<number | null>;
+  setting_key: string;
+  setting_value: Generated<number | null>;
+  updated_at: Generated<Date | null>;
+}
+
+export interface SettingsNumbers {
+  company_id: number;
+  created_at: Generated<Date | null>;
+  id: Generated<number>;
+  outlet_id: Generated<number | null>;
+  setting_key: string;
+  setting_value: Generated<Decimal | null>;
+  updated_at: Generated<Date | null>;
+}
+
+export interface SettingsStrings {
+  company_id: number;
+  created_at: Generated<Date | null>;
+  id: Generated<number>;
+  outlet_id: Generated<number | null>;
+  setting_key: string;
+  setting_value: Generated<string | null>;
+  updated_at: Generated<Date | null>;
+}
+
 export interface StaticPages {
   content_md: string;
   created_at: Generated<Date>;
@@ -1303,14 +1375,14 @@ export interface SyncAuditEvents {
 
 export interface SyncVersions {
   company_id: number;
-  created_at: Generated<Date>;
-  current_version: Generated<number>;
+  created_at: Generated<Date | null>;
+  current_version: Generated<number | null>;
   id: Generated<number>;
   last_synced_at: Generated<Date | null>;
-  min_version: Generated<number>;
+  min_version: Generated<number | null>;
   tier: Generated<string | null>;
-  tier_key: Generated<string>;
-  updated_at: Generated<Date>;
+  tier_key: Generated<string | null>;
+  updated_at: Generated<Date | null>;
 }
 
 export interface TableEvents {
@@ -1501,6 +1573,9 @@ export interface DB {
   account_mappings: AccountMappings;
   account_types: AccountTypes;
   accounts: Accounts;
+  analytics_insights: AnalyticsInsights;
+  archive_sync_data_versions: ArchiveSyncDataVersions;
+  archive_sync_tier_versions: ArchiveSyncTierVersions;
   asset_depreciation_plans: AssetDepreciationPlans;
   asset_depreciation_runs: AssetDepreciationRuns;
   audit_logs: AuditLogs;
@@ -1513,13 +1588,12 @@ export interface DB {
   cash_bank_transactions: CashBankTransactions;
   companies: Companies;
   company_account_mappings: CompanyAccountMappings;
+  company_account_mappings_view: CompanyAccountMappingsView;
   company_modules: CompanyModules;
   company_payment_method_mappings: CompanyPaymentMethodMappings;
+  company_payment_method_mappings_view: CompanyPaymentMethodMappingsView;
   company_settings: CompanySettings;
   company_tax_defaults: CompanyTaxDefaults;
-  settings_booleans: SettingsBooleans;
-  settings_numbers: SettingsNumbers;
-  settings_strings: SettingsStrings;
   cost_layer_consumption: CostLayerConsumption;
   data_imports: DataImports;
   email_outbox: EmailOutbox;
@@ -1552,10 +1626,12 @@ export interface DB {
   numbering_templates: NumberingTemplates;
   operation_progress: OperationProgress;
   outlet_account_mappings: OutletAccountMappings;
+  outlet_account_mappings_view: OutletAccountMappingsView;
   outlet_payment_method_mappings: OutletPaymentMethodMappings;
-  payment_method_mappings: PaymentMethodMappings;
+  outlet_payment_method_mappings_view: OutletPaymentMethodMappingsView;
   outlet_tables: OutletTables;
   outlets: Outlets;
+  payment_method_mappings: PaymentMethodMappings;
   platform_settings: PlatformSettings;
   pos_item_cancellations: PosItemCancellations;
   pos_order_snapshot_lines: PosOrderSnapshotLines;
@@ -1581,6 +1657,9 @@ export interface DB {
   sales_payment_splits: SalesPaymentSplits;
   sales_payments: SalesPayments;
   scheduled_exports: ScheduledExports;
+  settings_booleans: SettingsBooleans;
+  settings_numbers: SettingsNumbers;
+  settings_strings: SettingsStrings;
   static_pages: StaticPages;
   supplies: Supplies;
   sync_audit_events: SyncAuditEvents;

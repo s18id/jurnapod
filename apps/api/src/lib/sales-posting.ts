@@ -7,7 +7,8 @@
 import { sql } from "kysely";
 import { type KyselySchema } from "./db";
 import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years";
-import type { SalesInvoiceDetail, SalesPayment } from "./sales";
+import type { SalesInvoiceDetail } from "@jurnapod/modules-sales";
+import type { SalesPayment } from "@jurnapod/modules-sales";
 import type { QueryExecutor } from "@/lib/shared/common-utils";
 import {
   ACCOUNT_MAPPING_TYPE_ID_BY_CODE,

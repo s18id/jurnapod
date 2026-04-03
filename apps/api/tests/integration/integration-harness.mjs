@@ -236,6 +236,65 @@ export async function stopApiServer(childProcess) {
   });
 }
 
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Defensive API server teardown helper for integration tests.
+ * Handles stubborn child processes and stdio/socket handles.
+ */
+export async function stopApiServerSafely(childProcess, options = {}) {
+  if (!childProcess || childProcess.exitCode != null) {
+    return;
+  }
+
+  const stopTimeoutMs = options.stopTimeoutMs ?? 10000;
+  const forceKillPolls = options.forceKillPolls ?? 20;
+
+  await Promise.race([
+    stopApiServer(childProcess),
+    new Promise((resolve) => setTimeout(resolve, stopTimeoutMs))
+  ]);
+
+  if (childProcess.exitCode == null) {
+    const pid = childProcess.pid;
+    if (typeof pid === "number" && pid > 0 && isProcessAlive(pid)) {
+      try {
+        childProcess.kill("SIGKILL");
+      } catch {
+        // ignore
+      }
+
+      for (let i = 0; i < forceKillPolls && isProcessAlive(pid); i++) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // ignore
+        }
+        await delay(100);
+      }
+    }
+  }
+
+  try {
+    childProcess.stdout?.destroy();
+  } catch {
+    // ignore
+  }
+
+  try {
+    childProcess.stderr?.destroy();
+  } catch {
+    // ignore
+  }
+}
+
 export async function ensureDailySalesView(db) {
   await db.execute(DAILY_SALES_VIEW_SQL);
 }

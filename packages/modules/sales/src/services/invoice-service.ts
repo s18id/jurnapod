@@ -395,7 +395,7 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
   async function getDefaultTaxRates(
     executor: SalesDbExecutor,
     companyId: number
-  ): Promise<Array<{ tax_rate_id: number; rate: number }>> {
+  ): Promise<Array<{ tax_rate_id: number; rate_percent: number }>> {
     return executor.getDefaultTaxRates(companyId);
   }
 
@@ -533,7 +533,7 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
             taxLines = defaultTaxRates
               .map((rate) => ({
                 tax_rate_id: rate.tax_rate_id,
-                amount: normalizeMoney((subtotal * rate.rate) / 100)
+                amount: normalizeMoney((subtotal * rate.rate_percent) / 100)
               }))
               .filter((tax) => tax.amount > 0);
             taxAmount = normalizeMoney(taxLines.reduce((acc, tax) => acc + tax.amount, 0));

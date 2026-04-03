@@ -9,8 +9,8 @@
 
 import type { RowDataPacket, PoolConnection } from "mysql2/promise";
 
-// Re-export payment types from sales.ts for backward compatibility
-export type { SalesPayment, SalesPaymentSplit } from "@/lib/sales";
+// Re-export payment types from modules-sales for backward compatibility
+export type { SalesPayment, SalesPaymentSplit } from "@jurnapod/modules-sales";
 
 // Row types for database queries
 export type SalesPaymentSplitRow = RowDataPacket & {
@@ -80,8 +80,8 @@ export type CanonicalPaymentInput = {
   splits: Array<{ account_id: number; amount_minor: number }>;
 };
 
-// Re-export error classes from sales.ts for backward compatibility
+// Re-export error classes from modules-sales for backward compatibility
 export {
   PaymentStatusError,
   PaymentAllocationError
-} from "@/lib/sales";
+} from "@jurnapod/modules-sales";

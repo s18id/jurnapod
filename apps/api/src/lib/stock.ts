@@ -13,8 +13,8 @@
 
 import { getDb, type KyselySchema } from "@/lib/db";
 import { sql } from "kysely";
-import { createCostLayer, calculateCost } from "@/lib/cost-tracking";
-import type { CostCalculationResult } from "@/lib/cost-tracking";
+import { createCostLayer, deductWithCost } from "@/lib/cost-tracking";
+import type { DeductionResult, ItemCostResult } from "@/lib/cost-tracking";
 
 // Transaction type constants
 export const TransactionType = {
@@ -39,7 +39,7 @@ export interface StockDeductResult {
   transactionId: number;
   unitCost: number;
   totalCost: number;
-  costResult: CostCalculationResult;
+  costResult: ItemCostResult;
 }
 
 export interface StockAdjustmentInput {
@@ -313,6 +313,9 @@ export async function deductStock(
 /**
  * Deduct stock permanently with cost consumption (after transaction completion)
  * Reduces quantity and available_quantity, consumes cost layers, and returns cost details.
+ * 
+ * Delegates cost calculation to @jurnapod/modules-inventory-costing package using the
+ * deductWithCost contract (stockTxId pattern from 24-2).
  */
 export async function deductStockWithCost(
   company_id: number,
@@ -323,9 +326,11 @@ export async function deductStockWithCost(
   db?: KyselySchema
 ): Promise<StockDeductResult[]> {
   const database = db ?? getDb();
-  const results: StockDeductResult[] = [];
 
   return withExecutorTransaction(database, async (trx) => {
+    // Phase 1: Validate stock and create inventory transactions (pre-created stockTxIds)
+    const stockTxItems: Array<{ itemId: number; qty: number; stockTxId: number; quantity: number }> = [];
+    
     for (const item of items) {
       const stockRows = await sql<StockRow>`
         SELECT quantity, available_quantity
@@ -364,16 +369,16 @@ export async function deductStockWithCost(
       `.execute(trx);
       const transactionId = Number(txResult.insertId);
 
-      const costResult = await calculateCost(
-        {
-          companyId: company_id,
-          itemId: item.product_id,
-          quantity: item.quantity,
-          transactionId: transactionId,
-        },
-        trx as unknown as KyselySchema
-      );
+      stockTxItems.push({
+        itemId: item.product_id,
+        qty: item.quantity,
+        stockTxId: transactionId,
+        quantity: item.quantity
+      });
+    }
 
+    // Phase 2: Update stock quantities
+    for (const item of items) {
       const updateResult = await sql`
         UPDATE inventory_stock
         SET quantity = quantity - ${item.quantity},
@@ -388,16 +393,39 @@ export async function deductStockWithCost(
       if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
         throw new Error(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
       }
+    }
 
-      const unitCost = costResult.totalCost / item.quantity;
+    // Phase 3: Delegate cost calculation to costing package using stockTxId pattern
+    const deductionInput = stockTxItems.map(i => ({
+      itemId: i.itemId,
+      qty: i.qty,
+      stockTxId: i.stockTxId
+    }));
+
+    const deductionResult: DeductionResult = await deductWithCost(
+      company_id,
+      deductionInput,
+      trx as unknown as KyselySchema
+    );
+
+    // Phase 4: Build results matching existing StockDeductResult interface
+    // Map stockTxIds back to their corresponding items using the order
+    const results: StockDeductResult[] = [];
+    for (let i = 0; i < stockTxItems.length; i++) {
+      const stockTxItem = stockTxItems[i];
+      const costItem = deductionResult.itemCosts.find(c => c.stockTxId === stockTxItem.stockTxId);
+      
+      if (!costItem) {
+        throw new Error(`Cost calculation missing for item ${stockTxItem.itemId}`);
+      }
 
       results.push({
-        itemId: item.product_id,
-        quantity: item.quantity,
-        transactionId: transactionId,
-        unitCost: unitCost,
-        totalCost: costResult.totalCost,
-        costResult: costResult,
+        itemId: stockTxItem.itemId,
+        quantity: stockTxItem.quantity,
+        transactionId: stockTxItem.stockTxId,
+        unitCost: costItem.unitCost,
+        totalCost: costItem.totalCost,
+        costResult: costItem,
       });
     }
 
@@ -557,7 +585,7 @@ export async function adjustStock(
   input: StockAdjustmentInput,
   db?: KyselySchema
 ): Promise<boolean> {
-  const { company_id, outlet_id, product_id, adjustment_quantity, reason, reference_id, user_id } = input;
+  const { company_id, outlet_id, product_id, adjustment_quantity, reference_id } = input;
   const database = db ?? getDb();
 
   return withExecutorTransaction(database, async (trx) => {

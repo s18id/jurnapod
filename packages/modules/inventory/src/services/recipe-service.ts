@@ -55,10 +55,9 @@ interface ItemRow {
   is_active: number;
 }
 
-interface IngredientInventoryCostRow {
-  product_id: number;
-  inbound_quantity: number | string;
-  inbound_total_cost: number | string;
+interface InventoryItemCostRow {
+  item_id: number;
+  current_avg_cost: number | string | null;
 }
 
 interface IngredientPriceRow {
@@ -113,27 +112,23 @@ async function resolveIngredientUnitCosts(
 
   const resolvedCosts = new Map<number, number>();
 
-  // Try inventory_transactions first for actual cost
+  // Try inventory_item_costs first for actual average cost
   const inClause = buildInClause(uniqueItemIds);
   if (inClause) {
-    const inventoryRows = await sql<IngredientInventoryCostRow>`
+    const inventoryRows = await sql<InventoryItemCostRow>`
       SELECT
-        product_id,
-        COALESCE(SUM(quantity_delta), 0) AS inbound_quantity,
-        COALESCE(SUM(quantity_delta * unit_cost), 0) AS inbound_total_cost
-      FROM inventory_transactions
+        item_id,
+        current_avg_cost
+      FROM inventory_item_costs
       WHERE company_id = ${companyId}
-        AND product_id IN (${inClause})
-        AND quantity_delta > 0
-      GROUP BY product_id
+        AND item_id IN (${inClause})
     `.execute(db);
 
     for (const row of inventoryRows.rows) {
-      const productId = Number(row.product_id);
-      const inboundQuantity = Number(row.inbound_quantity ?? 0);
-      const inboundTotalCost = Number(row.inbound_total_cost ?? 0);
-      if (inboundQuantity > 0 && inboundTotalCost > 0) {
-        resolvedCosts.set(productId, normalizeMoney(inboundTotalCost / inboundQuantity));
+      const itemId = Number(row.item_id);
+      const currentAvgCost = Number(row.current_avg_cost ?? 0);
+      if (currentAvgCost > 0) {
+        resolvedCosts.set(itemId, normalizeMoney(currentAvgCost));
       }
     }
   }

@@ -88,7 +88,7 @@ export async function checkPasswordResetAllowed(
     }
 
     const limit = limits[key.scope];
-    if (row.request_count >= limit) {
+    if ((row.request_count ?? 0) >= limit) {
       const retryAfterMs = windowStart.getTime() + 60 * 60 * 1000 - Date.now();
       const retryAfterSeconds = Math.ceil(retryAfterMs / 1000);
       

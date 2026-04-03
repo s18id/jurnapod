@@ -9,7 +9,7 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@/lib/db";
-import type { SalesPayment, SalesPaymentSplit } from "@/lib/sales";
+import type { SalesPayment, SalesPaymentSplit } from "@jurnapod/modules-sales";
 import type { QueryExecutor, CanonicalPaymentInput } from "./types";
 import { toMysqlDateTime, toMysqlDateTimeFromDateLike } from "@/lib/date-helpers";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";

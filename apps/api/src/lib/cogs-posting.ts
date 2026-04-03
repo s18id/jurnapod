@@ -10,8 +10,7 @@ import {
   accountMappingIdToCode,
   type AccountMappingCode,
   type JournalLine,
-  type PostingRequest,
-  type PostingResult
+  type PostingRequest
 } from "@jurnapod/shared";
 
 // Constants
@@ -41,18 +40,39 @@ export class CogsPostingError extends Error {
 }
 
 // Interfaces
+export interface CogsPostingItemInput {
+  itemId: number;
+  quantity: number;
+  unitCost?: number;
+  totalCost?: number;
+}
+
+/**
+ * Pre-calculated item cost keyed by stockTxId.
+ * Produced by deductWithCost from the costing package.
+ * When present, postCogsForSale uses these instead of re-querying inventory.
+ */
+export interface StockCostEntry {
+  stockTxId: number;
+  itemId: number;
+  quantity: number;
+  unitCost: number;
+  totalCost: number;
+}
+
 export interface CogsPostingInput {
   saleId: string;
   companyId: number;
   outletId: number;
-  items: Array<{
-    itemId: number;
-    quantity: number;
-    unitCost?: number;
-    totalCost?: number;
-  }>;
+  items: CogsPostingItemInput[];
   saleDate: Date;
   postedBy: number;
+  /**
+   * Optional pre-calculated costs from deductWithCost.
+   * When provided, postCogsForSale uses these instead of re-querying inventory by itemId.
+   * Keys journal entries to the specific stockTxId for deterministic linkage.
+   */
+  deductionCosts?: StockCostEntry[];
 }
 
 export interface CogsPostingResult {
@@ -67,6 +87,11 @@ export interface CogsItemDetail {
   quantity: number;
   unitCost: number;
   totalCost: number;
+  /**
+   * stockTxId from the inventory transaction that was deducted.
+   * Present when postCogsForSale was called with pre-calculated deductionCosts.
+   */
+  stockTxId?: number;
 }
 
 interface ItemAccountMapping {
@@ -347,7 +372,7 @@ export async function getItemAccountsBatch(
 
     const accountTypeById = new Map(accountTypeRowsResult.rows.map((row: { account_id: number | undefined; account_type: string | null }) => [Number(row.account_id), row.account_type?.toUpperCase() ?? null]));
 
-    for (const [itemId, mapping] of result.entries()) {
+    for (const [, mapping] of result.entries()) {
       const cogsType = accountTypeById.get(mapping.cogsAccountId);
       if (!cogsType) {
         throw new CogsAccountConfigError(`COGS account ${mapping.cogsAccountId} not found`);
@@ -456,6 +481,11 @@ interface CogsSaleDetail {
   outletId: number;
   items: CogsItemDetail[];
   inventoryTransactionIds?: number[];
+  /**
+   * When true, items array contains stockTxId-linked costs from deductWithCost.
+   * Journal entries will be keyed by stockTxId instead of itemId-only matching.
+   */
+  useDeductionCosts?: boolean;
 }
 
 class CogsPostingMapper implements PostingMapper {
@@ -516,16 +546,50 @@ export async function postCogsForSale(
   const errors: string[] = [];
 
   try {
-    // Calculate COGS for all items if not provided.
-    // IMPORTANT: do NOT pass the outer transaction (db) to calculateSaleCogs.
-    // calculateSaleCogs manages its own transaction for atomic inventory/price reads.
-    // Passing the outer transaction would cause a nesting error and is unnecessary
-    // since calculateSaleCogs returns data (cogsItems) rather than requiring
-    // the same transaction for subsequent journal writes.
+    // Determine cogsItems source with stockTxId-aware linkage
     let cogsItems: CogsItemDetail[];
-    if (input.items.every(item => item.totalCost !== undefined && item.unitCost !== undefined)) {
+
+    if (input.deductionCosts && input.deductionCosts.length > 0) {
+      // Use pre-calculated costs from deductWithCost (stockTxId-aware contract)
+      // Build COGS rows directly from deduction costs to avoid itemId ambiguity.
+      cogsItems = input.deductionCosts.map((cost) => ({
+        itemId: cost.itemId,
+        quantity: cost.quantity,
+        unitCost: cost.unitCost,
+        totalCost: cost.totalCost,
+        stockTxId: cost.stockTxId
+      }));
+
+      // Validate aggregate quantities by item to catch contract mismatch.
+      const expectedQtyByItem = new Map<number, number>();
+      for (const item of input.items) {
+        expectedQtyByItem.set(item.itemId, (expectedQtyByItem.get(item.itemId) ?? 0) + item.quantity);
+      }
+
+      const deductedQtyByItem = new Map<number, number>();
+      for (const cost of input.deductionCosts) {
+        deductedQtyByItem.set(cost.itemId, (deductedQtyByItem.get(cost.itemId) ?? 0) + cost.quantity);
+      }
+
+      const mismatches: number[] = [];
+      for (const [itemId, expectedQty] of expectedQtyByItem.entries()) {
+        const deductedQty = deductedQtyByItem.get(itemId) ?? 0;
+        if (Math.abs(deductedQty - expectedQty) > 0.000001) {
+          mismatches.push(itemId);
+        }
+      }
+
+      if (mismatches.length > 0) {
+        throw new CogsCalculationError(
+          `Deduction cost quantity mismatch for items: ${mismatches.join(", ")}. ` +
+          `COGS requires deductionCosts to align with deducted stock quantities.`
+        );
+      }
+    } else if (input.items.every(item => item.totalCost !== undefined && item.unitCost !== undefined)) {
+      // All items have pre-calculated costs passed in directly
       cogsItems = input.items as CogsItemDetail[];
     } else {
+      // Fall back to calculating COGS from inventory
       cogsItems = await calculateSaleCogs(
         input.companyId,
         input.items.map(item => ({ itemId: item.itemId, quantity: item.quantity }))
@@ -543,11 +607,18 @@ export async function postCogsForSale(
     const lineDate = toBusinessDate(input.saleDate);
 
     // Build sale detail for mapper
+    // Extract inventory transaction IDs from stockTxId-aware costs for journal linking
+    const inventoryTransactionIds = cogsItems
+      .map(item => item.stockTxId)
+      .filter((id): id is number => id !== undefined);
+
     const saleDetail: CogsSaleDetail = {
       saleId: input.saleId,
       companyId: input.companyId,
       outletId: input.outletId,
-      items: cogsItems
+      items: cogsItems,
+      inventoryTransactionIds: inventoryTransactionIds.length > 0 ? inventoryTransactionIds : undefined,
+      useDeductionCosts: (input.deductionCosts?.length ?? 0) > 0
     };
 
     // Execute posting within a transaction

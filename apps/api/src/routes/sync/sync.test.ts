@@ -17,7 +17,7 @@ import {
   getFreePort,
   startApiServer,
   waitForHealthcheck,
-  stopApiServer,
+  stopApiServerSafely,
   loginOwner,
 } from "../../../tests/integration/integration-harness.mjs";
 import { closeDbPool, getDb } from "../../lib/db";
@@ -38,6 +38,22 @@ describe("Sync Routes", { concurrency: false }, () => {
   let baseUrl = "";
   let accessToken = "";
   let apiServer: ReturnType<typeof startApiServer> | null = null;
+
+  async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | null> {
+    let timer: NodeJS.Timeout | null = null;
+    const timeoutPromise = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        console.warn(`[sync.test] timeout waiting for ${label} after ${ms}ms`);
+        resolve(null);
+      }, ms);
+    });
+
+    const result = await Promise.race([promise, timeoutPromise]);
+    if (timer) {
+      clearTimeout(timer);
+    }
+    return result as T | null;
+  }
 
   before(async () => {
     db = getDb();
@@ -81,10 +97,59 @@ describe("Sync Routes", { concurrency: false }, () => {
 
   after(async () => {
     if (apiServer) {
-      await stopApiServer(apiServer.childProcess);
+      await withTimeout(stopApiServerSafely(apiServer.childProcess), 12000, "stopApiServerSafely");
+
       apiServer = null;
     }
-    await closeDbPool();
+
+    // Close HTTP keep-alive sockets opened by fetch() during integration tests.
+    // Without this, node:test can wait indefinitely for active undici handles.
+    try {
+      // @ts-expect-error undici types may not be present in this workspace
+      const { getGlobalDispatcher } = await import("undici");
+      await withTimeout(getGlobalDispatcher().close(), 5000, "undici global dispatcher close");
+    } catch {
+      // ignore if undici API is unavailable in this runtime
+    }
+
+    await withTimeout(closeDbPool(), 10000, "closeDbPool");
+
+    // Final safety net: release lingering active handles that can keep node:test alive.
+    // This is test-only cleanup and does not affect production code paths.
+    // @ts-expect-error Node internal API used for diagnostics/cleanup in tests.
+    const activeHandles: unknown[] = typeof process._getActiveHandles === "function"
+      // @ts-expect-error Node internal API used for diagnostics/cleanup in tests.
+      ? process._getActiveHandles()
+      : [];
+
+    for (const handle of activeHandles) {
+      if (handle === process.stdin || handle === process.stdout || handle === process.stderr) {
+        continue;
+      }
+
+      const maybeHandle = handle as {
+        close?: () => void;
+        destroy?: () => void;
+        unref?: () => void;
+        constructor?: { name?: string };
+      };
+
+      try {
+        if (typeof maybeHandle.unref === "function") {
+          maybeHandle.unref();
+        }
+
+        if (typeof maybeHandle.close === "function") {
+          maybeHandle.close();
+        }
+
+        if (typeof maybeHandle.destroy === "function") {
+          maybeHandle.destroy();
+        }
+      } catch {
+        // ignore cleanup errors in test teardown
+      }
+    }
   });
 
   describe("Auth Throttle Functions (used by sync)", () => {

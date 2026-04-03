@@ -147,6 +147,157 @@ const noRawSqlInsertItemsRule = {
   },
 };
 
+/**
+ * ESLint Rule: no-route-business-logic
+ * 
+ * Enforces that API routes remain thin (adapter-only, no business logic).
+ * Routes should only:
+ * - Handle HTTP concerns (request parsing, response formatting)
+ * - Delegate to library/adapter functions for business logic
+ * - Perform auth checks, validation, and error translation
+ * 
+ * Flagged patterns in routes:
+ * - Direct getDb() / getDbPool() calls (DB access should be in lib/)
+ * - Service instantiation (createXxxService) - should use adapter factories
+ * - Raw SQL strings - should be in library modules
+ */
+const noRouteBusinessLogicRule = {
+  meta: {
+    type: "problem",
+    docs: {
+      description: "Disallow business logic in API routes - routes should be thin adapters only",
+      category: "Route Quality",
+      recommended: true,
+    },
+    fixable: null,
+    schema: [],
+    messages: {
+      noDirectDbAccess: "Direct database access detected in route. Delegate to library functions instead.",
+      noServiceInstantiation: "Service instantiation detected in route ('{{ serviceName }}'). Routes should use adapter factories or delegate to library functions.",
+      noRawSql: "Raw SQL detected in route. SQL queries should be in library modules.",
+    },
+  },
+  create(context) {
+    const filename = context.getFilename();
+    
+    // Only apply to route files
+    const isRouteFile = filename.includes('/routes/') && filename.endsWith('.ts');
+    if (!isRouteFile) {
+      return {};
+    }
+
+    // Allowed imports for thin routes
+    const allowedImportPatterns = [
+      // Auth helpers
+      /^@\/lib\/auth$/,
+      /^@\/lib\/auth-guard$/,
+      /^@\/lib\/auth-adapter$/,
+      // Response helpers
+      /^@\/lib\/response$/,
+      /^@\/lib\/shared\/common-errors$/,
+      /^@\/lib\/shared\/common-utils$/,
+      // Company lookup
+      /^@\/lib\/companies$/,
+      // Adapter factories (createXxxDb patterns)
+      /^@\/lib\/modules-/,
+      // External packages
+      /^@jurnapod\/shared$/,
+      /^zod$/,
+      /^hono$/,
+    ];
+
+    const isAllowedImport = (importPath) => {
+      return allowedImportPatterns.some(pattern => pattern.test(importPath));
+    };
+
+    // Check if an identifier name looks like a service factory (creates business logic)
+    const isServiceFactoryCall = (calleeName) => {
+      return /^create[A-Z]\w+Service$/.test(calleeName);
+    };
+
+    return {
+      // Flag direct getDb() or getDbPool() calls
+      CallExpression(node) {
+        const callee = node.callee;
+        
+        // Check for getDb() or getDbPool() calls
+        if (callee.type === 'Identifier') {
+          if (callee.name === 'getDb' || callee.name === 'getDbPool') {
+            context.report({
+              node,
+              messageId: "noDirectDbAccess",
+            });
+          }
+        }
+
+        // Check for service instantiation like createInvoiceService({...})
+        if (callee.type === 'Identifier' && isServiceFactoryCall(callee.name)) {
+          context.report({
+            node,
+            messageId: "noServiceInstantiation",
+            data: { serviceName: callee.name },
+          });
+        }
+      },
+
+      // Flag direct SQL strings
+      TemplateLiteral(node) {
+        const sourceCode = context.getSourceCode();
+        const text = sourceCode.getText(node).toLowerCase();
+        
+        // Check for SQL keywords (rough heuristic)
+        if ((text.includes('select ') || text.includes('insert ') || 
+             text.includes('update ') || text.includes('delete ') ||
+             text.includes(' from ') || text.includes(' where ')) &&
+            text.includes('`')) {
+          context.report({
+            node,
+            messageId: "noRawSql",
+          });
+        }
+      },
+
+      // Flag raw SQL in string literals
+      Literal(node) {
+        if (typeof node.value === 'string') {
+          const text = node.value.toLowerCase();
+          // Check for SQL patterns
+          if ((text.includes('select ') || text.includes('insert ') || 
+               text.includes('update ') || text.includes('delete ') ||
+               text.includes(' from ') || text.includes(' where '))) {
+            context.report({
+              node,
+              messageId: "noRawSql",
+            });
+          }
+        }
+      },
+
+      // Flag restricted imports
+      ImportDeclaration(node) {
+        const importPath = node.source.value;
+        
+        if (typeof importPath !== 'string') return;
+        
+        // Allow test files to have their own patterns
+        if (filename.includes('.test.') || filename.includes('.spec.')) {
+          return;
+        }
+
+        // Flag direct db imports in routes (but allow adapter factories)
+        if (importPath === '@/lib/db' || importPath === '@/lib/kysely') {
+          // Check if it's used for adapter creation only
+          // If imported directly in a route, flag it
+          context.report({
+            node,
+            messageId: "noDirectDbAccess",
+          });
+        }
+      },
+    };
+  },
+};
+
 /** @type {import('eslint').Linter.Plugin} */
 const plugin = {
   meta: {
@@ -156,6 +307,7 @@ const plugin = {
   rules: {
     "no-hardcoded-ids": noHardcodedIdsRule,
     "no-raw-sql-insert-items": noRawSqlInsertItemsRule,
+    "no-route-business-logic": noRouteBusinessLogicRule,
   },
   configs: {
     recommended: {
@@ -163,10 +315,11 @@ const plugin = {
       rules: {
         "jurnapod-test-rules/no-hardcoded-ids": "error",
         "jurnapod-test-rules/no-raw-sql-insert-items": "error",
+        "jurnapod-test-rules/no-route-business-logic": "error",
       },
     },
   },
 };
 
 export default plugin;
-export { noHardcodedIdsRule, noRawSqlInsertItemsRule };
+export { noHardcodedIdsRule, noRawSqlInsertItemsRule, noRouteBusinessLogicRule };

@@ -17,7 +17,9 @@ import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
 import { closeDbPool, getDb } from "../../lib/db";
-import { createOrder, listOrders, type SalesOrderDetail } from "../../lib/sales";
+import { createApiSalesDb } from "@/lib/modules-sales/sales-db";
+import { getAccessScopeChecker } from "@/lib/modules-sales/access-scope-checker";
+import { createOrderService, type OrderService, type SalesOrderDetail } from "@jurnapod/modules-sales";
 import { sql } from "kysely";
 
 loadEnvIfPresent();
@@ -31,6 +33,7 @@ describe("Sales Order Routes", { concurrency: false }, () => {
   let testCompanyId = 0;
   let testOutletId = 0;
   let testOrderId = 0;
+  let orderService: OrderService;
 
   before(async () => {
     const db = getDb();
@@ -61,6 +64,11 @@ describe("Sales Order Routes", { concurrency: false }, () => {
     `.execute(db);
     assert.ok(outletRows.rows.length > 0, `Outlet ${TEST_OUTLET_CODE} not found`);
     testOutletId = Number(outletRows.rows[0].id);
+
+    // Initialize the order service using modules-sales package
+    const salesDb = createApiSalesDb();
+    const accessScopeChecker = getAccessScopeChecker();
+    orderService = createOrderService({ db: salesDb, accessScopeChecker });
   });
 
   after(async () => {
@@ -117,7 +125,7 @@ describe("Sales Order Routes", { concurrency: false }, () => {
 
   describe("List Orders", () => {
     test("returns orders for company", async () => {
-      const result = await listOrders(testCompanyId, {
+      const result = await orderService.listOrders(testCompanyId, {
         outletIds: [testOutletId],
         limit: 10
       });
@@ -127,7 +135,7 @@ describe("Sales Order Routes", { concurrency: false }, () => {
     });
 
     test("filters by status", async () => {
-      const result = await listOrders(testCompanyId, {
+      const result = await orderService.listOrders(testCompanyId, {
         outletIds: [testOutletId],
         status: "DRAFT",
         limit: 10
@@ -141,7 +149,7 @@ describe("Sales Order Routes", { concurrency: false }, () => {
 
     test("enforces company scoping - cannot see other company orders", async () => {
       // Query with a different company ID should return empty
-      const result = await listOrders(999999, {
+      const result = await orderService.listOrders(999999, {
         outletIds: [],
         limit: 10
       });
@@ -157,7 +165,7 @@ describe("Sales Order Routes", { concurrency: false }, () => {
 
   describe("Create Order", () => {
     test("creates order with minimal data", async () => {
-      const order = await createOrder(testCompanyId, {
+      const order = await orderService.createOrder(testCompanyId, {
         outlet_id: testOutletId,
         order_date: new Date().toISOString().slice(0, 10),
         lines: [
@@ -183,7 +191,7 @@ describe("Sales Order Routes", { concurrency: false }, () => {
     test("creates order with client_ref for idempotency", async () => {
       const clientRef = crypto.randomUUID();
       
-      const order1 = await createOrder(testCompanyId, {
+      const order1 = await orderService.createOrder(testCompanyId, {
         outlet_id: testOutletId,
         order_date: new Date().toISOString().slice(0, 10),
         client_ref: clientRef,
@@ -197,7 +205,7 @@ describe("Sales Order Routes", { concurrency: false }, () => {
       }, { userId: testUserId });
 
       // Creating again with same client_ref should return the same order
-      const order2 = await createOrder(testCompanyId, {
+      const order2 = await orderService.createOrder(testCompanyId, {
         outlet_id: testOutletId,
         order_date: new Date().toISOString().slice(0, 10),
         client_ref: clientRef,
@@ -214,7 +222,7 @@ describe("Sales Order Routes", { concurrency: false }, () => {
     });
 
     test("calculates subtotal correctly", async () => {
-      const order = await createOrder(testCompanyId, {
+      const order = await orderService.createOrder(testCompanyId, {
         outlet_id: testOutletId,
         order_date: new Date().toISOString().slice(0, 10),
         lines: [
@@ -240,7 +248,7 @@ describe("Sales Order Routes", { concurrency: false }, () => {
     });
 
     test("respects line_type for SERVICE items", async () => {
-      const order = await createOrder(testCompanyId, {
+      const order = await orderService.createOrder(testCompanyId, {
         outlet_id: testOutletId,
         order_date: new Date().toISOString().slice(0, 10),
         lines: [
@@ -261,7 +269,7 @@ describe("Sales Order Routes", { concurrency: false }, () => {
     });
 
     test("tax_amount is zero and grand_total equals subtotal plus tax_amount", async () => {
-      const order = await createOrder(testCompanyId, {
+      const order = await orderService.createOrder(testCompanyId, {
         outlet_id: testOutletId,
         order_date: new Date().toISOString().slice(0, 10),
         lines: [
@@ -296,7 +304,7 @@ describe("Sales Order Routes", { concurrency: false }, () => {
     });
 
     test("maintains subtotal/tax/grand total invariant for fractional prices", async () => {
-      const order = await createOrder(testCompanyId, {
+      const order = await orderService.createOrder(testCompanyId, {
         outlet_id: testOutletId,
         order_date: new Date().toISOString().slice(0, 10),
         lines: [
@@ -342,7 +350,7 @@ describe("Sales Order Routes", { concurrency: false }, () => {
 
   describe("Company Scoping Enforcement", () => {
     test("order is scoped to company", async () => {
-      const order = await createOrder(testCompanyId, {
+      const order = await orderService.createOrder(testCompanyId, {
         outlet_id: testOutletId,
         order_date: new Date().toISOString().slice(0, 10),
         lines: [
@@ -362,7 +370,7 @@ describe("Sales Order Routes", { concurrency: false }, () => {
 
     test("cannot create order for non-existent outlet", async () => {
       try {
-        await createOrder(testCompanyId, {
+        await orderService.createOrder(testCompanyId, {
           outlet_id: 999999,
           order_date: new Date().toISOString().slice(0, 10),
           lines: [

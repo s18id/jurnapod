@@ -17,7 +17,9 @@ import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
 import { closeDbPool, getDb } from "../../lib/db";
-import { createInvoice, listInvoices, postInvoice, type SalesInvoiceDetail } from "../../lib/sales";
+import { createApiSalesDb } from "@/lib/modules-sales/sales-db";
+import { getAccessScopeChecker } from "@/lib/modules-sales/access-scope-checker";
+import { createInvoiceService, type InvoiceService, type SalesInvoiceDetail } from "@jurnapod/modules-sales";
 import { sql } from "kysely";
 
 loadEnvIfPresent();
@@ -31,6 +33,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
   let testCompanyId = 0;
   let testOutletId = 0;
   let testInvoiceId = 0;
+  let invoiceService: InvoiceService;
 
   before(async () => {
     const db = getDb();
@@ -61,6 +64,11 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
     `.execute(db);
     assert.ok(outletRows.rows.length > 0, `Outlet ${TEST_OUTLET_CODE} not found`);
     testOutletId = Number(outletRows.rows[0].id);
+
+    // Initialize the invoice service using modules-sales package
+    const salesDb = createApiSalesDb();
+    const accessScopeChecker = getAccessScopeChecker();
+    invoiceService = createInvoiceService({ db: salesDb, accessScopeChecker });
   });
 
   after(async () => {
@@ -136,7 +144,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
 
   describe("List Invoices", () => {
     test("returns invoices for company", async () => {
-      const result = await listInvoices(testCompanyId, {
+      const result = await invoiceService.listInvoices(testCompanyId, {
         outletIds: [testOutletId],
         limit: 10
       });
@@ -146,7 +154,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
     });
 
     test("returns invoices list (may have existing data)", async () => {
-      const result = await listInvoices(testCompanyId, {
+      const result = await invoiceService.listInvoices(testCompanyId, {
         outletIds: [testOutletId],
         limit: 10
       });
@@ -157,7 +165,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
     });
 
     test("filters by status", async () => {
-      const result = await listInvoices(testCompanyId, {
+      const result = await invoiceService.listInvoices(testCompanyId, {
         outletIds: [testOutletId],
         status: "DRAFT",
         limit: 10
@@ -170,7 +178,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
     });
 
     test("filters by payment_status", async () => {
-      const result = await listInvoices(testCompanyId, {
+      const result = await invoiceService.listInvoices(testCompanyId, {
         outletIds: [testOutletId],
         paymentStatus: "UNPAID",
         limit: 10
@@ -184,7 +192,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
 
     test("enforces company scoping - cannot see other company invoices", async () => {
       // Query with a different company ID should return empty
-      const result = await listInvoices(999999, {
+      const result = await invoiceService.listInvoices(999999, {
         outletIds: [],
         limit: 10
       });
@@ -200,7 +208,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
 
   describe("Create Invoice", () => {
     test("creates invoice with minimal data", async () => {
-      const invoice = await createInvoice(testCompanyId, {
+      const invoice = await invoiceService.createInvoice(testCompanyId, {
         outlet_id: testOutletId,
         invoice_date: new Date().toISOString().slice(0, 10),
         tax_amount: 0,
@@ -228,7 +236,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
     test("creates invoice with client_ref for idempotency", async () => {
       const clientRef = crypto.randomUUID();
       
-      const invoice1 = await createInvoice(testCompanyId, {
+      const invoice1 = await invoiceService.createInvoice(testCompanyId, {
         outlet_id: testOutletId,
         invoice_date: new Date().toISOString().slice(0, 10),
         client_ref: clientRef,
@@ -243,7 +251,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
       }, { userId: testUserId });
 
       // Creating again with same client_ref should return the same invoice
-      const invoice2 = await createInvoice(testCompanyId, {
+      const invoice2 = await invoiceService.createInvoice(testCompanyId, {
         outlet_id: testOutletId,
         invoice_date: new Date().toISOString().slice(0, 10),
         client_ref: clientRef,
@@ -261,7 +269,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
     });
 
     test("calculates subtotal correctly", async () => {
-      const invoice = await createInvoice(testCompanyId, {
+      const invoice = await invoiceService.createInvoice(testCompanyId, {
         outlet_id: testOutletId,
         invoice_date: new Date().toISOString().slice(0, 10),
         tax_amount: 0,
@@ -288,7 +296,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
     });
 
     test("respects line_type for SERVICE items", async () => {
-      const invoice = await createInvoice(testCompanyId, {
+      const invoice = await invoiceService.createInvoice(testCompanyId, {
         outlet_id: testOutletId,
         invoice_date: new Date().toISOString().slice(0, 10),
         tax_amount: 0,
@@ -316,7 +324,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
 
   describe("GL Balance Validation", () => {
     test("invoice totals satisfy grand_total = subtotal + tax_amount", async () => {
-      const invoice = await createInvoice(testCompanyId, {
+      const invoice = await invoiceService.createInvoice(testCompanyId, {
         outlet_id: testOutletId,
         invoice_date: new Date().toISOString().slice(0, 10),
         tax_amount: 11000,
@@ -340,7 +348,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
 
     test("posting invoice changes status to POSTED", async () => {
       // Create invoice first
-      const invoice = await createInvoice(testCompanyId, {
+      const invoice = await invoiceService.createInvoice(testCompanyId, {
         outlet_id: testOutletId,
         invoice_date: new Date().toISOString().slice(0, 10),
         tax_amount: 10000,
@@ -357,7 +365,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
 
       try {
         // Post to GL
-        const postedInvoice = await postInvoice(testCompanyId, invoice.id, {
+        const postedInvoice = await invoiceService.postInvoice(testCompanyId, invoice.id, {
           userId: testUserId
         });
 
@@ -366,8 +374,8 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
 
         // Verify journal batch was created (if GL accounts are configured)
         const db = getDb();
-        const batchRows = await sql<{ id: number; doc_type: string; doc_id: number; total_debit: string; total_credit: string }>`
-          SELECT id, doc_type, doc_id, total_debit, total_credit
+        const batchRows = await sql<{ id: number; doc_type: string; doc_id: number }>`
+          SELECT id, doc_type, doc_id
            FROM journal_batches 
            WHERE company_id = ${testCompanyId} AND doc_type = 'SALES_INVOICE' AND doc_id = ${invoice.id}
         `.execute(db);
@@ -377,9 +385,23 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
           assert.equal(batch.doc_type, "SALES_INVOICE", "Should have correct doc_type");
           assert.equal(Number(batch.doc_id), invoice.id, "Should reference invoice ID");
 
+          // Aggregate debit/credit from journal_lines
+          const lineRows = await sql<{ total_debit: string | null; total_credit: string | null }>`
+            SELECT SUM(debit) AS total_debit, SUM(credit) AS total_credit
+             FROM journal_lines 
+             WHERE journal_batch_id = ${batch.id}
+          `.execute(db);
+
+          // Assert that aggregate row exists AND contains non-null values before checking amounts
+          assert.ok(lineRows.rows.length > 0, "Aggregate query should return a row");
+          const totals = lineRows.rows[0];
+          assert.ok(totals.total_debit !== null, "total_debit should not be NULL (batch should have lines)");
+          assert.ok(totals.total_credit !== null, "total_credit should not be NULL (batch should have lines)");
+
+          const totalDebit = Number(totals.total_debit);
+          const totalCredit = Number(totals.total_credit);
+
           // Verify debits equal credits (balanced journal)
-          const totalDebit = Number(batch.total_debit);
-          const totalCredit = Number(batch.total_credit);
           assert.equal(totalDebit, totalCredit, "Debits should equal credits");
           assert.ok(totalDebit > 0, "Should have positive amounts");
         }
@@ -400,7 +422,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
 
     test("invoice posting handles missing GL configuration gracefully", async () => {
       // Create invoice
-      const invoice = await createInvoice(testCompanyId, {
+      const invoice = await invoiceService.createInvoice(testCompanyId, {
         outlet_id: testOutletId,
         invoice_date: new Date().toISOString().slice(0, 10),
         tax_amount: 15000,
@@ -415,7 +437,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
 
       // Attempt to post - should either succeed or fail gracefully
       try {
-        const postedInvoice = await postInvoice(testCompanyId, invoice.id, {
+        const postedInvoice = await invoiceService.postInvoice(testCompanyId, invoice.id, {
           userId: testUserId
         });
         
@@ -451,7 +473,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
 
   describe("Company Scoping Enforcement", () => {
     test("invoice is scoped to company", async () => {
-      const invoice = await createInvoice(testCompanyId, {
+      const invoice = await invoiceService.createInvoice(testCompanyId, {
         outlet_id: testOutletId,
         invoice_date: new Date().toISOString().slice(0, 10),
         tax_amount: 0,
@@ -472,7 +494,7 @@ describe("Sales Invoice Routes", { concurrency: false }, () => {
 
     test("cannot create invoice for non-existent outlet", async () => {
       try {
-        await createInvoice(testCompanyId, {
+        await invoiceService.createInvoice(testCompanyId, {
           outlet_id: 999999,
           invoice_date: new Date().toISOString().slice(0, 10),
           tax_amount: 0,

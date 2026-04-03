@@ -112,7 +112,7 @@ export async function deductVariantStock(
 export async function resolveAndDeductStockForTransaction(
   db: KyselySchema,
   tx: SyncPushTransactionPayload,
-  posTransactionId: number
+  _posTransactionId: number
 ): Promise<StockDeductResult[] | null> {
   if (tx.status !== "COMPLETED") {
     return null;

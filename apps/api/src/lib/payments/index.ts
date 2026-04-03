@@ -8,10 +8,10 @@
  * Extracted from sales.ts as part of Story 6.1b.
  */
 
-// Types - re-export from sales.ts for backward compatibility
-export type { SalesPayment, SalesPaymentSplit } from "@/lib/sales";
+// Types - re-export from modules-sales for backward compatibility
+export type { SalesPayment, SalesPaymentSplit } from "@jurnapod/modules-sales";
 export type { PaymentListFilters, SalesPaymentSplitRow, SalesPaymentRow, QueryExecutor, MutationActor, CanonicalPaymentInput } from "./types";
-export { PaymentStatusError, PaymentAllocationError } from "@/lib/sales";
+export { PaymentStatusError, PaymentAllocationError } from "@jurnapod/modules-sales";
 
 // Functions - export from extracted payment-service
 export {

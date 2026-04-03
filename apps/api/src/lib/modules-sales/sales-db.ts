@@ -615,15 +615,18 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     return matched.size === taxRateIds.length;
   }
 
-  async getDefaultTaxRates(companyId: number): Promise<Array<{ tax_rate_id: number; rate: number }>> {
+  async getDefaultTaxRates(companyId: number): Promise<Array<{ tax_rate_id: number; rate_percent: number }>> {
     const rows = await sql`
-      SELECT id as tax_rate_id, rate
-       FROM tax_rates
-       WHERE company_id = ${companyId}
-         AND is_active = 1
-         AND is_default = 1
+      SELECT tr.id as tax_rate_id, tr.rate_percent
+       FROM tax_rates tr
+       INNER JOIN company_tax_defaults ctd ON ctd.tax_rate_id = tr.id
+       WHERE ctd.company_id = ${companyId}
+         AND tr.is_active = 1
     `.execute(this._getDb());
-    return rows.rows as Array<{ tax_rate_id: number; rate: number }>;
+    return (rows.rows as Array<{ tax_rate_id: number; rate_percent: string | number }>).map(row => ({
+      tax_rate_id: Number(row.tax_rate_id),
+      rate_percent: Number(row.rate_percent)
+    }));
   }
 
   // Account operations for payment validation
@@ -975,7 +978,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
 
   async listPayments(companyId: number, filters: {
     outletIds?: readonly number[];
-    status?: string;
+    status?: "DRAFT" | "POSTED" | "VOID";
     dateFrom?: string;
     dateTo?: string;
     limit?: number;
@@ -991,8 +994,8 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     payment_at: string;
     account_id: number;
     account_name?: string | null;
-    method?: string | null;
-    status: string;
+    method?: "CASH" | "QRIS" | "CARD" | null;
+    status: "DRAFT" | "POSTED" | "VOID";
     amount: number;
     actual_amount_idr?: number | null;
     invoice_amount_idr?: number | null;

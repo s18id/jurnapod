@@ -4,11 +4,32 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadEnvIfPresent } from "../../tests/integration/integration-harness.mjs";
-import { createSupply, deleteSupply, findSupplyById, listSupplies, updateSupply } from "./supplies/index.js";
-import { DatabaseConflictError } from "./master-data-errors.js";
 import { closeDbPool, getDb } from "./db";
 
 loadEnvIfPresent();
+
+const {
+  createSupply,
+  deleteSupply,
+  findSupplyById,
+  listSupplies,
+  updateSupply,
+  DatabaseConflictError,
+} = await import("./supplies/index.js");
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 async function getCompanyIdByCode(companyCode: string): Promise<number> {
   const db = getDb();
@@ -268,5 +289,34 @@ test(
 );
 
 test.after(async () => {
-  await closeDbPool();
+  await withTimeout(closeDbPool(), 10000, "closeDbPool");
+
+  // Final safety net: release lingering active handles that can keep node:test alive.
+  // @ts-expect-error Node internal API used for diagnostics/cleanup in tests.
+  const activeHandles: unknown[] = typeof process._getActiveHandles === "function"
+    // @ts-expect-error Node internal API used for diagnostics/cleanup in tests.
+    ? process._getActiveHandles()
+    : [];
+
+  for (const handle of activeHandles) {
+    if (handle === process.stdin || handle === process.stdout || handle === process.stderr) {
+      continue;
+    }
+
+    const maybeHandle = handle as {
+      destroy?: () => void;
+      close?: () => void;
+      unref?: () => void;
+      end?: () => void;
+    };
+
+    try {
+      maybeHandle.unref?.();
+      maybeHandle.end?.();
+      maybeHandle.destroy?.();
+      maybeHandle.close?.();
+    } catch {
+      // ignore cleanup best-effort errors
+    }
+  }
 });

@@ -28,7 +28,7 @@ import {
   DatabaseConflictError,
   DatabaseForbiddenError,
   DatabaseReferenceError
-} from "@/lib/sales";
+} from "@jurnapod/modules-sales";
 import { PaymentVarianceConfigError } from "@/lib/sales-posting";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { requireAccess } from "@/lib/auth-guard";

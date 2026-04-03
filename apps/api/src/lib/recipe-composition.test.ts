@@ -5,7 +5,26 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { sql } from "kysely";
 import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import {
+import { createItem } from "./items/index.js";
+import { closeDbPool, getDb } from "./db";
+
+loadEnvIfPresent();
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+const {
   addIngredientToRecipe,
   getRecipeIngredients,
   updateRecipeIngredient,
@@ -14,12 +33,8 @@ import {
   validateRecipeComposition,
   DatabaseConflictError,
   DatabaseReferenceError,
-  DatabaseForbiddenError
-} from "./recipe-composition";
-import { createItem } from "./items/index.js";
-import { closeDbPool, getDb } from "./db";
-
-loadEnvIfPresent();
+  DatabaseForbiddenError,
+} = await import("./recipe-composition");
 
 test(
   "addIngredientToRecipe - successfully adds ingredient to recipe",
@@ -829,5 +844,34 @@ test(
 
 // CRITICAL: Database pool cleanup hook
 test.after(async () => {
-  await closeDbPool();
+  await withTimeout(closeDbPool(), 10000, "closeDbPool");
+
+  // Final safety net: release lingering active handles that can keep node:test alive.
+  // @ts-expect-error Node internal API used for diagnostics/cleanup in tests.
+  const activeHandles: unknown[] = typeof process._getActiveHandles === "function"
+    // @ts-expect-error Node internal API used for diagnostics/cleanup in tests.
+    ? process._getActiveHandles()
+    : [];
+
+  for (const handle of activeHandles) {
+    if (handle === process.stdin || handle === process.stdout || handle === process.stderr) {
+      continue;
+    }
+
+    const maybeHandle = handle as {
+      destroy?: () => void;
+      close?: () => void;
+      unref?: () => void;
+      end?: () => void;
+    };
+
+    try {
+      maybeHandle.unref?.();
+      maybeHandle.end?.();
+      maybeHandle.destroy?.();
+      maybeHandle.close?.();
+    } catch {
+      // ignore cleanup best-effort errors
+    }
+  }
 });

@@ -1,4 +1,4 @@
-last_updated: 2026-04-02T12:30:00Z
+last_updated: 2026-04-03T22:55:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -248,7 +248,7 @@ development_status:
   22-4-run-exit-gates-and-closeout: done
 
   # Epic 23: API Detachment
-  epic-23: in-progress
+  epic-23: done
   # Sprint 1: Pre-flight + Foundation
   23-0-1-author-package-dependency-policy-adr: done
   23-0-2-add-import-boundary-lint-constraints: done
@@ -276,16 +276,18 @@ development_status:
   23-3-8-extract-reservations-table-services: done
   23-3-9-extract-service-session-table-sync: done
   23-3-11-extract-report-query-services: done
-  23-4-1-extract-sync-push-business-logic: backlog
-  23-4-2-extract-sync-pull-business-logic: backlog
-  23-4-3-add-route-thinness-enforcement: backlog
-  23-5-1-remove-deprecated-api-lib-implementations: backlog
-  23-5-2-freeze-package-public-apis: backlog
-  23-5-3-run-full-workspace-validation-gate: backlog
-  # Epic 24: Inventory Costing Boundary
-  24-1-create-inventory-costing-package-scaffold: backlog
-  24-2-extract-cost-tracking-to-costing-package: backlog
-  24-3-update-lib-stock-to-use-costing-package: backlog
-  24-4-update-cogs-posting-to-use-costing-contract: backlog
-  24-5-update-sync-push-stock-handlers: backlog
-  24-6-full-validation-gate: backlog
+  23-4-1-extract-sync-push-business-logic: done
+  23-4-2-extract-sync-pull-business-logic: done
+  23-4-3-add-route-thinness-enforcement: done
+  23-5-1-remove-deprecated-api-lib-implementations: done
+  23-5-2-freeze-package-public-apis: done
+  23-5-3-run-full-workspace-validation-gate: done
+  # Epic 24: Inventory Costing Boundary (COGS-aware stock extraction)
+  epic-24: done
+  # See epic-24-sprint-plan.md - NOT part of Epic 23 Sprint 4
+  24-1-create-inventory-costing-package-scaffold: done
+  24-2-extract-cost-tracking-to-costing-package: done
+  24-3-update-lib-stock-to-use-costing-package: done
+  24-4-update-cogs-posting-to-use-costing-contract: done
+  24-5-update-sync-push-stock-handlers: done  # COGS-aware sync handlers
+  24-6-full-validation-gate: done

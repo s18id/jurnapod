@@ -13,14 +13,14 @@ import { toMysqlDateTime, toMysqlDateTimeFromDateLike } from "@/lib/date-helpers
 import { toRfc3339Required } from "@jurnapod/shared";
 import {
   DOCUMENT_TYPES,
-  type DocumentType
 } from "@/lib/numbering";
 import { postSalesPaymentToJournal } from "@/lib/sales-posting";
-import type { SalesPayment, SalesInvoice } from "@/lib/sales";
+import type { SalesInvoice } from "@jurnapod/modules-sales";
+import type { SalesPayment } from "@jurnapod/modules-sales";
 import {
   PaymentStatusError,
   PaymentAllocationError
-} from "@/lib/sales";
+} from "@jurnapod/modules-sales";
 import type { PaymentListFilters, MutationActor } from "./types";
 import type { SalesPaymentRow } from "./types";
 import {
@@ -178,63 +178,13 @@ export async function findPaymentByClientRefWithExecutor(
   return findPaymentByIdWithExecutor(executor, companyId, Number(rows[0].id));
 }
 
-function buildPaymentWhereClause(companyId: number, filters: PaymentListFilters) {
-  const conditions: string[] = ["sp.company_id = ?"];
-  const values: Array<string | number> = [companyId];
-
-  if (filters.outletIds) {
-    if (filters.outletIds.length === 0) {
-      return { clause: "", values: [], isEmpty: true };
-    }
-    const placeholders = filters.outletIds.map(() => "?").join(", ");
-    conditions.push(`sp.outlet_id IN (${placeholders})`);
-    values.push(...filters.outletIds);
-  }
-
-  if (filters.status) {
-    conditions.push("sp.status = ?");
-    values.push(filters.status);
-  }
-
-  // Handle timezone conversion for date range
-  let dateFrom = filters.dateFrom;
-  let dateTo = filters.dateTo;
-
-  if (dateFrom && dateTo && filters.timezone && filters.timezone !== 'UTC') {
-    const range = toDateTimeRangeWithTimezone(dateFrom, dateTo, filters.timezone);
-    // Convert to date-only format for comparison
-    dateFrom = range.fromStartUTC.slice(0, 10);
-    dateTo = range.toEndUTC.slice(0, 10);
-  }
-
-  if (dateFrom) {
-    conditions.push("sp.payment_at >= ?");
-    values.push(dateFrom);
-  }
-
-  if (dateTo) {
-    conditions.push("sp.payment_at <= ?");
-    values.push(dateTo);
-  }
-
-  return { clause: conditions.join(" AND "), values, isEmpty: false };
-}
-
-function toDateTimeRangeWithTimezone(dateFrom: string, dateTo: string, timezone: string) {
-  // Simple implementation - in production this would use a proper timezone library
-  return {
-    fromStartUTC: dateFrom,
-    toEndUTC: dateTo
-  };
-}
-
 export async function listPayments(companyId: number, filters: PaymentListFilters) {
   const db = getDb();
   const limit = filters.limit ?? 50;
   const offset = filters.offset ?? 0;
 
   // Build WHERE conditions dynamically
-  const conditions: Expression<any>[] = [sql`sp.company_id = ${companyId}`];
+  const conditions: Expression<unknown>[] = [sql`sp.company_id = ${companyId}`];
 
   if (filters.outletIds && filters.outletIds.length > 0) {
     conditions.push(sql`sp.outlet_id IN (${sql.join(filters.outletIds.map(id => sql`${id}`), sql`, `)})`);

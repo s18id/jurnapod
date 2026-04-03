@@ -722,8 +722,55 @@ export class ItemVariantServiceImpl implements ItemVariantService {
           .execute();
       }
 
-      const result = await this.getVariantById(companyId, variantId);
-      return result!;
+      // Read back the updated variant using the transaction connection (trx)
+      // to ensure we see uncommitted changes before the transaction commits.
+      // Do NOT call this.getVariantById() here — it uses getInventoryDb()
+      // which is a separate connection and would return stale pre-commit data.
+      const updatedRows = await trx
+        .selectFrom("item_variants")
+        .where("id", "=", variantId)
+        .where("company_id", "=", companyId)
+        .select(["id", "item_id", "sku", "variant_name", "price_override", "stock_quantity", "barcode", "is_active", "attributes", "created_at", "updated_at"])
+        .execute();
+
+      const v = updatedRows[0];
+      const attributesJson = (v as { attributes: string | null }).attributes;
+
+      // Inline effective price calculation within the transaction to stay consistent
+      const priceOverride = (v as { price_override: string | null }).price_override;
+      let effectivePrice = 0;
+      if (priceOverride !== null) {
+        effectivePrice = Number(priceOverride);
+      } else {
+        const itemId = (v as { item_id: number }).item_id;
+        // Try outlet-specific price (outletId not available here, skip to default)
+        const defaultPriceRow = await trx
+          .selectFrom("item_prices")
+          .where("item_id", "=", itemId)
+          .where("outlet_id", "is", null)
+          .where("is_active", "=", 1)
+          .where("company_id", "=", companyId)
+          .select(["price"])
+          .executeTakeFirst();
+        if (defaultPriceRow) {
+          effectivePrice = Number((defaultPriceRow as { price: number | string }).price);
+        }
+      }
+
+      return {
+        id: v.id,
+        item_id: (v as { item_id: number }).item_id,
+        sku: (v as { sku: string }).sku,
+        variant_name: (v as { variant_name: string }).variant_name,
+        price_override: priceOverride !== null ? Number(priceOverride) : null,
+        effective_price: effectivePrice,
+        stock_quantity: Number((v as { stock_quantity: number | string }).stock_quantity),
+        barcode: (v as { barcode: string | null }).barcode,
+        is_active: Boolean((v as { is_active: number }).is_active),
+        attributes: parseJsonAttributes(attributesJson),
+        created_at: toIsoString((v as { created_at: Date | string }).created_at),
+        updated_at: toIsoString((v as { updated_at: Date | string }).updated_at)
+      };
     });
   }
 

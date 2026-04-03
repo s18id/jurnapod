@@ -3,11 +3,10 @@
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { __salesTestables } from "./sales";
+import { parseFeatureGateValue } from "./shared/common-utils";
 
 describe("sales COGS feature gate", () => {
   test("parseFeatureGateValue handles int and boolean variants", () => {
-    const { parseFeatureGateValue } = __salesTestables;
 
     assert.equal(parseFeatureGateValue(1), true);
     assert.equal(parseFeatureGateValue(true), true);
@@ -21,8 +20,6 @@ describe("sales COGS feature gate", () => {
   });
 
   test("parseFeatureGateValue treats invalid values as disabled", () => {
-    const { parseFeatureGateValue } = __salesTestables;
-
     assert.equal(parseFeatureGateValue("yes"), false);
     assert.equal(parseFeatureGateValue(2), false);
     assert.equal(parseFeatureGateValue(null), false);

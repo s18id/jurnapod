@@ -52,6 +52,18 @@ const config = [
       "jurnapod-test-rules/no-raw-sql-insert-items": "error",
     },
   },
+  // Route file specific rules - enforce thin routes
+  {
+    files: ["src/routes/**/*.ts"],
+    ignores: ["src/routes/**/*.test.ts"],
+    plugins: {
+      "jurnapod-test-rules": jurnapodTestRules,
+    },
+    rules: {
+      // Enforce route thinness: no business logic in routes
+      "jurnapod-test-rules/no-route-business-logic": "error",
+    },
+  },
 ];
 
 export default config;
