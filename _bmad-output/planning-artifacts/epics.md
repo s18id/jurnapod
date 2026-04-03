@@ -38,6 +38,7 @@
 | Epic | Title | Status | Sprint Plan |
 |------|-------|--------|-------------|
 | Epic 24 | Inventory Costing Boundary | backlog | epic-24-sprint-plan |
+| Epic 25 | Cash-Bank Domain Extraction | backlog | epic-25-sprint-plan |
 
 ## Future Epics
 
@@ -45,4 +46,4 @@
 
 ---
 
-_Last Updated: 2026-04-02_
+_Last Updated: 2026-04-03_

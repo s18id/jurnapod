@@ -1,4 +1,4 @@
-last_updated: 2026-04-03T22:55:00Z
+last_updated: 2026-04-03T23:55:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -291,3 +291,10 @@ development_status:
   24-4-update-cogs-posting-to-use-costing-contract: done
   24-5-update-sync-push-stock-handlers: done  # COGS-aware sync handlers
   24-6-full-validation-gate: done
+
+  # Epic 25: Cash-Bank Domain Extraction to modules-treasury
+  epic-25: done
+  25-1-scaffold-modules-treasury-package: done
+  25-2-extract-domain-types-errors-helpers: done
+  25-3-cashbank-service-ports-adapters: done
+  25-4-add-tests-update-adapter-validate-gate: done

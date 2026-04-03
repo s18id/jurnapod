@@ -24,15 +24,12 @@ import {
 import { userHasOutletAccess } from "../lib/auth.js";
 import { errorResponse, successResponse } from "../lib/response.js";
 import {
-  listCashBankTransactions,
-  createCashBankTransaction,
-  postCashBankTransaction,
-  voidCashBankTransaction,
   CashBankValidationError,
   CashBankNotFoundError,
   CashBankForbiddenError,
   CashBankStatusError
-} from "../lib/cash-bank.js";
+} from "@jurnapod/modules-treasury";
+import { createCashBankService } from "../lib/treasury-adapter.js";
 import { FiscalYearNotOpenError } from "../lib/fiscal-years.js";
 
 declare module "hono" {
@@ -81,6 +78,7 @@ cashBankTransactionsRoutes.use("/*", async (c, next) => {
 cashBankTransactionsRoutes.get("/", async (c) => {
   try {
     const auth = c.get("auth");
+    const service = createCashBankService();
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
@@ -106,9 +104,7 @@ cashBankTransactionsRoutes.get("/", async (c) => {
       }
     }
 
-    const transactions = await listCashBankTransactions(auth.companyId, {
-      outletId
-    });
+    const transactions = await service.list(auth.companyId, { outletId });
     
     return successResponse(transactions);
   } catch (error) {
@@ -121,6 +117,7 @@ cashBankTransactionsRoutes.get("/", async (c) => {
 cashBankTransactionsRoutes.post("/", async (c) => {
   try {
     const auth = c.get("auth");
+    const service = createCashBankService();
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
@@ -143,7 +140,7 @@ cashBankTransactionsRoutes.post("/", async (c) => {
       }
     }
 
-    const transaction = await createCashBankTransaction(auth.companyId, {
+    const transaction = await service.create({
       outlet_id: input.outlet_id,
       transaction_type: input.transaction_type,
       transaction_date: input.transaction_date || new Date().toISOString().slice(0, 10),
@@ -156,9 +153,7 @@ cashBankTransactionsRoutes.post("/", async (c) => {
       exchange_rate: input.exchange_rate,
       base_amount: input.base_amount,
       fx_account_id: input.fx_account_id
-    }, {
-      userId: auth.userId
-    });
+    }, auth.companyId, { userId: auth.userId });
 
     return successResponse(transaction, 201);
   } catch (error) {
@@ -183,6 +178,7 @@ cashBankTransactionsRoutes.post("/", async (c) => {
 cashBankTransactionsRoutes.post("/:id/post", async (c) => {
   try {
     const auth = c.get("auth");
+    const service = createCashBankService();
     
     // Check access permission - posting requires create permission (not update)
     const accessResult = await requireAccess({
@@ -196,9 +192,7 @@ cashBankTransactionsRoutes.post("/:id/post", async (c) => {
 
     const transactionId = NumericIdSchema.parse(c.req.param("id"));
 
-    const postedTransaction = await postCashBankTransaction(auth.companyId, transactionId, {
-      userId: auth.userId
-    });
+    const postedTransaction = await service.post(transactionId, auth.companyId, { userId: auth.userId });
 
     return successResponse(postedTransaction);
   } catch (error) {
@@ -231,6 +225,7 @@ cashBankTransactionsRoutes.post("/:id/post", async (c) => {
 cashBankTransactionsRoutes.post("/:id/void", async (c) => {
   try {
     const auth = c.get("auth");
+    const service = createCashBankService();
     
     // Check access permission - voiding requires create permission (not delete)
     const accessResult = await requireAccess({
@@ -244,9 +239,7 @@ cashBankTransactionsRoutes.post("/:id/void", async (c) => {
 
     const transactionId = NumericIdSchema.parse(c.req.param("id"));
 
-    const voidedTransaction = await voidCashBankTransaction(auth.companyId, transactionId, {
-      userId: auth.userId
-    });
+    const voidedTransaction = await service.void(transactionId, auth.companyId, { userId: auth.userId });
 
     return successResponse(voidedTransaction);
   } catch (error) {
@@ -264,6 +257,10 @@ cashBankTransactionsRoutes.post("/:id/void", async (c) => {
 
     if (error instanceof CashBankStatusError) {
       return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof FiscalYearNotOpenError) {
+      return errorResponse("FISCAL_YEAR_CLOSED", error.message, 400);
     }
 
     console.error("POST /cash-bank-transactions/:id/void failed", error);
