@@ -321,7 +321,7 @@ export class FixedAssetRepository {
         serial_number: input.serial_number ?? null,
         purchase_cost: input.purchase_cost ?? null,
         purchase_date: input.purchase_date ?? null,
-        is_active: 1,
+        is_active: input.is_active !== undefined ? (input.is_active ? 1 : 0) : 1,
       })
       .executeTakeFirst();
 

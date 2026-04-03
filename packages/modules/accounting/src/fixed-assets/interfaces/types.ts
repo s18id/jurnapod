@@ -134,6 +134,7 @@ export interface FixedAssetCreateInput {
   serial_number?: string | null;
   purchase_cost?: string | null;
   purchase_date?: Date | null;
+  is_active?: boolean;
 }
 
 export interface FixedAssetUpdateInput {

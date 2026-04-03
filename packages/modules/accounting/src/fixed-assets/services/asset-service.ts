@@ -110,6 +110,7 @@ export class AssetService {
       serial_number: input.serial_number,
       purchase_cost: input.purchase_cost !== undefined ? String(input.purchase_cost) : null,
       purchase_date: input.purchase_date ? new Date(input.purchase_date) : null,
+      is_active: input.is_active ?? true,
     };
 
     const asset = await this.repo.createAsset(createInput);
