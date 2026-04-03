@@ -28,7 +28,9 @@ import type {
   StockDeductResult,
   DeductStockInput,
   RestoreStockInput,
-  StockAdjustmentInput
+  StockAdjustmentInput,
+  PosStockDeductResult,
+  ResolveAndDeductInput
 } from "../interfaces/stock-service.js";
 import {
   InventoryConflictError,
@@ -835,6 +837,254 @@ export class StockServiceImpl implements StockService {
       }
 
       return true;
+    });
+  }
+
+  /**
+   * Resolve and deduct stock for a POS transaction.
+   * Handles both variant-based and regular item stock deduction.
+   */
+  async resolveAndDeductForPosTransaction(
+    input: ResolveAndDeductInput,
+    db: KyselySchema
+  ): Promise<PosStockDeductResult[]> {
+    const { companyId, outletId, items, referenceId, userId } = input;
+
+    // Separate variant items from regular items
+    const variantItems = items.filter(item => item.variantId !== undefined);
+    const regularItems = items.filter(item => item.variantId === undefined);
+
+    const results: PosStockDeductResult[] = [];
+
+    return withExecutorTransaction(db, async (trx) => {
+      // Process variant items
+      for (const item of variantItems) {
+        const variantId = item.variantId!;
+
+        // Resolve item_id from variant
+        const variantRows = await sql<{ item_id: number }>`
+          SELECT item_id FROM item_variants 
+          WHERE id = ${variantId} AND company_id = ${companyId} AND is_active = TRUE
+          LIMIT 1
+        `.execute(trx);
+
+        if (variantRows.rows.length === 0) {
+          throw new Error(`Variant ${variantId} not found or inactive`);
+        }
+
+        const resolvedItemId = variantRows.rows[0].item_id;
+
+        // Check variant stock via inventory_stock first
+        const stockRows = await sql<StockRow>`
+          SELECT quantity, available_quantity 
+          FROM inventory_stock 
+          WHERE company_id = ${companyId} AND variant_id = ${variantId} AND outlet_id IS NOT NULL
+          LIMIT 1
+          FOR UPDATE
+        `.execute(trx);
+
+        if (stockRows.rows.length > 0) {
+          // Use inventory_stock variant tracking
+          const currentQty = Number(stockRows.rows[0].quantity);
+          if (currentQty < item.quantity) {
+            throw new Error(`Insufficient stock for variant ${variantId}: ${currentQty} < ${item.quantity}`);
+          }
+
+          // Update inventory_stock for variant
+          await sql`
+            UPDATE inventory_stock 
+            SET quantity = quantity - ${item.quantity}, 
+                available_quantity = available_quantity - ${item.quantity}, 
+                updated_at = CURRENT_TIMESTAMP
+            WHERE company_id = ${companyId} AND variant_id = ${variantId}
+          `.execute(trx);
+
+          // Also update item_variants.stock_quantity as source of truth
+          await sql`
+            UPDATE item_variants SET stock_quantity = stock_quantity - ${item.quantity} 
+            WHERE id = ${variantId} AND company_id = ${companyId}
+          `.execute(trx);
+
+          // Insert inventory_transactions for variant
+          const txResult = await sql`
+            INSERT INTO inventory_transactions (
+              company_id, outlet_id, transaction_type, reference_type, reference_id,
+              product_id, variant_id, quantity_delta, created_at
+            ) VALUES (${companyId}, ${outletId}, ${TRANSACTION_TYPE.SALE}, 'SALE', ${referenceId}, ${resolvedItemId}, ${variantId}, ${-item.quantity}, CURRENT_TIMESTAMP)
+          `.execute(trx);
+
+          // For variant items, use zero cost since they don't go through cost layers
+          results.push({
+            variantId,
+            itemId: resolvedItemId,
+            quantity: item.quantity,
+            stockTxId: Number(txResult.insertId),
+            unitCost: 0,
+            totalCost: 0
+          });
+        } else {
+          // Fallback: use item_variants.stock_quantity directly
+          const variantStockRows = await sql<{ stock_quantity: string }>`
+            SELECT stock_quantity FROM item_variants
+            WHERE id = ${variantId} AND company_id = ${companyId} AND is_active = TRUE
+            FOR UPDATE
+          `.execute(trx);
+
+          if (variantStockRows.rows.length === 0) {
+            throw new Error(`Variant ${variantId} not found or inactive`);
+          }
+
+          const currentStock = Number(variantStockRows.rows[0].stock_quantity);
+          if (currentStock < item.quantity) {
+            throw new Error(`Insufficient stock for variant ${variantId}: ${currentStock} < ${item.quantity}`);
+          }
+
+          await sql`
+            UPDATE item_variants
+            SET stock_quantity = stock_quantity - ${item.quantity}
+            WHERE id = ${variantId} AND company_id = ${companyId}
+          `.execute(trx);
+
+          // Insert inventory_transactions
+          const txResult = await sql`
+            INSERT INTO inventory_transactions (
+              company_id, outlet_id, transaction_type, reference_type, reference_id,
+              product_id, variant_id, quantity_delta, created_at
+            ) VALUES (${companyId}, ${outletId}, ${TRANSACTION_TYPE.SALE}, 'SALE', ${referenceId}, ${resolvedItemId}, ${variantId}, ${-item.quantity}, CURRENT_TIMESTAMP)
+          `.execute(trx);
+
+          results.push({
+            variantId,
+            itemId: resolvedItemId,
+            quantity: item.quantity,
+            stockTxId: Number(txResult.insertId),
+            unitCost: 0,
+            totalCost: 0
+          });
+        }
+      }
+
+      // Process regular items - filter for track_stock items only
+      if (regularItems.length > 0) {
+        const trackStockItemIds = regularItems.filter(item => item.trackStock).map(item => item.itemId);
+
+        if (trackStockItemIds.length > 0) {
+          // Get items that have track_stock = 1
+          const trackedRows = await sql<{ id: number }>`
+            SELECT id FROM items
+            WHERE company_id = ${companyId}
+              AND id IN (${sql.join(trackStockItemIds.map(id => sql`${id}`), sql`, `)})
+              AND track_stock = 1
+          `.execute(trx);
+
+          const trackedItemIds = new Set(trackedRows.rows.map(row => row.id));
+
+          // Build stock items for tracked items only
+          const stockItems: StockItem[] = regularItems
+            .filter(item => item.trackStock && trackedItemIds.has(item.itemId))
+            .map(item => ({
+              product_id: item.itemId,
+              quantity: item.quantity
+            }));
+
+          if (stockItems.length > 0) {
+            // Lock and validate stock rows
+            const stockTxItems: Array<{ itemId: number; qty: number; stockTxId: number; quantity: number }> = [];
+
+            for (const item of stockItems) {
+              const stockRows = await sql<StockRow>`
+                SELECT quantity, available_quantity
+                FROM inventory_stock
+                WHERE company_id = ${companyId}
+                  AND product_id = ${item.product_id}
+                  AND (outlet_id = ${outletId} OR outlet_id IS NULL)
+                ORDER BY outlet_id IS NULL ASC
+                LIMIT 1
+                FOR UPDATE
+              `.execute(trx);
+
+              if (stockRows.rows.length === 0) {
+                throw new Error(`Stock not found for product ${item.product_id} in company ${companyId}`);
+              }
+
+              const stock = stockRows.rows[0];
+              if (Number(stock.quantity) < item.quantity) {
+                throw new Error(
+                  `Insufficient stock for product ${item.product_id}: ` +
+                  `requested ${item.quantity}, available ${stock.quantity}`
+                );
+              }
+
+              // Insert inventory_transactions
+              const txResult = await sql`
+                INSERT INTO inventory_transactions (
+                  company_id, outlet_id, transaction_type, reference_type, reference_id,
+                  product_id, quantity_delta, created_at
+                ) VALUES (${companyId}, ${outletId}, ${TRANSACTION_TYPE.SALE}, 'SALE', ${referenceId}, ${item.product_id}, ${-item.quantity}, CURRENT_TIMESTAMP)
+              `.execute(trx);
+
+              stockTxItems.push({
+                itemId: item.product_id,
+                qty: item.quantity,
+                stockTxId: Number(txResult.insertId),
+                quantity: item.quantity
+              });
+            }
+
+            // Update stock quantities
+            for (const item of stockItems) {
+              const updateResult = await sql`
+                UPDATE inventory_stock
+                SET quantity = quantity - ${item.quantity},
+                    available_quantity = available_quantity - ${item.quantity},
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE company_id = ${companyId}
+                  AND product_id = ${item.product_id}
+                  AND (outlet_id = ${outletId} OR outlet_id IS NULL)
+                  AND quantity >= ${item.quantity}
+              `.execute(trx);
+
+              if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
+                throw new Error(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
+              }
+            }
+
+            // Delegate cost calculation to costing package
+            const deductionInput = stockTxItems.map(i => ({
+              itemId: i.itemId,
+              qty: i.qty,
+              stockTxId: i.stockTxId
+            }));
+
+            const deductionResult: DeductionResult = await deductWithCost(
+              companyId,
+              deductionInput,
+              trx
+            );
+
+            // Build results
+            for (let i = 0; i < stockTxItems.length; i++) {
+              const stockTxItem = stockTxItems[i];
+              const costItem = deductionResult.itemCosts.find(c => c.stockTxId === stockTxItem.stockTxId);
+
+              if (!costItem) {
+                throw new Error(`Cost calculation missing for item ${stockTxItem.itemId}`);
+              }
+
+              results.push({
+                variantId: 0, // 0 indicates no variant
+                itemId: stockTxItem.itemId,
+                quantity: stockTxItem.quantity,
+                stockTxId: stockTxItem.stockTxId,
+                unitCost: costItem.unitCost,
+                totalCost: costItem.totalCost
+              });
+            }
+          }
+        }
+      }
+
+      return results;
     });
   }
 }

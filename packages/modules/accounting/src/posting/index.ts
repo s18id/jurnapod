@@ -1,7 +1,16 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-export * from "../posting.js";
+export type {
+  PostingMapper,
+  PostingRepository,
+  PostingTransactionOwner,
+  PostingOptions
+} from "../posting.js";
+export {
+  UnbalancedJournalError,
+  PostingService
+} from "../posting.js";
 export * from "./common.js";
 export {
   // Sales posting
@@ -28,44 +37,57 @@ export {
   PAYMENT_VARIANCE_GAIN_MISSING_MESSAGE,
   PAYMENT_VARIANCE_LOSS_MISSING_MESSAGE,
 } from "./sales.js";
-export {
-  // COGS posting
+export type {
+  // COGS posting types
   CogsPostingInput,
   CogsPostingResult,
   CogsItemDetail,
   ItemAccountMapping,
   CogsSaleDetail,
   CogsPostingExecutor,
-  CogsRepository,
-  CogsPostingMapper,
+  StockCostEntry,
   CogsCalculationError,
   CogsAccountConfigError,
   CogsPostingError,
-  postCogsForSale,
 } from "./cogs.js";
 export {
-  // Depreciation posting
+  // COGS posting values
+  CogsRepository,
+  CogsPostingMapper,
+  postCogsForSale,
+  calculateSaleCogs,
+  getItemAccounts,
+  getItemAccountsBatch,
+} from "./cogs.js";
+export type {
+  // Depreciation posting types
   DepreciationPlan,
   DepreciationRun,
   DepreciationPostingExecutor,
   DepreciationPostingRepository,
   DepreciationPostingMapper,
-  postDepreciationRun,
 } from "./depreciation.js";
 export {
-  // Sync push posting
+  // Depreciation posting values
+  postDepreciationRun,
+} from "./depreciation.js";
+export type {
+  // Sync push posting types
+  SyncPushPostingMode,
+  SyncPushPostingHookResult,
+  SyncPushPostingContext,
+  SyncPushPostingExecutor,
+  PosSyncPushPostingRepository,
+  PosSyncPushPostingMapper,
+} from "./sync-push.js";
+export {
+  // Sync push posting values
+  SyncPushPostingHookError,
   OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE,
   OUTLET_PAYMENT_MAPPING_MISSING_MESSAGE,
   TAX_ACCOUNT_MISSING_MESSAGE,
   UNSUPPORTED_PAYMENT_METHOD_MESSAGE,
   POS_EMPTY_PAYMENT_SET_MESSAGE,
   POS_OVERPAYMENT_NOT_SUPPORTED_MESSAGE,
-  SyncPushPostingMode,
-  SyncPushPostingHookResult,
-  SyncPushPostingContext,
-  SyncPushPostingHookError,
-  SyncPushPostingExecutor,
-  PosSyncPushPostingRepository,
-  PosSyncPushPostingMapper,
   runSyncPushPostingHook,
 } from "./sync-push.js";

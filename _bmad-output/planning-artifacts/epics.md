@@ -34,12 +34,14 @@
 
 | Epic | Title | Status | Sprint Plan |
 |------|-------|--------|-------------|
-| Epic 26 | Extend modules-inventory with Cost-Dependent Stock Ops | in-progress | epic-26-sprint-plan |
+| Epic 27 | POS Sync Push Boundary Completion | done | epic-27-sprint-plan |
 
 ## Backlog
 
 | Epic | Title | Status | Sprint Plan |
 |------|-------|--------|-------------|
+| Epic 28 | Sales Payments Extraction | backlog | TBD |
+| Epic 29 | Fixed Assets / Depreciation | backlog | TBD |
 
 
 ## Future Epics

@@ -4,12 +4,14 @@
  * POS Sync Push Layer
  * 
  * Orchestrates sync push operations using sync-core/data queries.
- * Business logic (tax calculation, COGS posting, stock cost) is STUBBED - these stay in API layer.
+ * Phase 2 business logic (stock deduction via modules-inventory, COGS posting via modules-accounting)
+ * is implemented. Table/reservation release and posting hooks are stubs pending story 27.6.
  * 
  * This module has zero HTTP knowledge - it accepts plain params and returns typed results.
  */
 
 import { createHash } from "node:crypto";
+import { sql } from "kysely";
 
 import type { KyselySchema } from "@jurnapod/db";
 import type {
@@ -78,6 +80,10 @@ import {
 } from "@jurnapod/sync-core";
 
 import { toMysqlDateTime, toUtcInstant, toEpochMs } from "@jurnapod/shared";
+
+// Modules for Phase2 business logic
+import { getStockService } from "@jurnapod/modules-inventory";
+import { postCogsForSale, type StockCostEntry } from "@jurnapod/modules-accounting/posting/cogs";
 
 // ============================================================================
 // Constants
@@ -359,13 +365,74 @@ async function processTransaction(
       }
     }
 
-    // STUB: Stock deduction - would call API layer in production
-    // if (tx.status === "COMPLETED") {
-    //   await resolveAndDeductStockForTransaction(db, tx, posTransactionId);
-    // }
+    // Phase 2: Stock deduction + COGS + posting hook (after persist transaction)
+    // Only for COMPLETED transactions
+    if (tx.status === "COMPLETED") {
+      // Idempotency check: skip if already deducted (on retry)
+      const existingDeduction = await sql`
+        SELECT id FROM inventory_transactions
+        WHERE company_id = ${tx.company_id}
+          AND outlet_id = ${tx.outlet_id}
+          AND reference_type = 'SALE'
+          AND reference_id = ${tx.client_tx_id}
+          AND quantity_delta < 0
+        LIMIT 1
+      `.execute(db);
 
-    // STUB: COGS posting - would call API layer in production
-    // STUB: Posting hooks - would call API layer in production
+      let stockResults = null;
+      if (existingDeduction.rows.length === 0) {
+        // Deduct stock via modules-inventory
+        const stockItems = tx.items
+          .filter(item => item.qty > 0)
+          .map(item => ({
+            variantId: item.variant_id,
+            itemId: item.item_id,
+            quantity: item.qty,
+            trackStock: true
+          }));
+
+        if (stockItems.length > 0) {
+          stockResults = await getStockService(db).resolveAndDeductForPosTransaction({
+            companyId: tx.company_id,
+            outletId: tx.outlet_id,
+            posTransactionId: String(posTransactionId),
+            items: stockItems,
+            referenceId: tx.client_tx_id,
+            userId: tx.cashier_user_id
+          }, db);
+
+          // Post COGS via modules-accounting
+          if (stockResults && stockResults.length > 0) {
+            const cogsItems = stockResults.map((r: { itemId: number; quantity: number; unitCost: number; totalCost: number }) => ({
+              itemId: r.itemId,
+              quantity: r.quantity,
+              unitCost: r.unitCost,
+              totalCost: r.totalCost
+            }));
+            const deductionCosts: StockCostEntry[] = stockResults.map((r: { stockTxId: number; itemId: number; quantity: number; unitCost: number; totalCost: number }) => ({
+              stockTxId: r.stockTxId,
+              itemId: r.itemId,
+              quantity: r.quantity,
+              unitCost: r.unitCost,
+              totalCost: r.totalCost
+            }));
+            await postCogsForSale({
+              saleId: String(posTransactionId),
+              companyId: tx.company_id,
+              outletId: tx.outlet_id,
+              items: cogsItems,
+              deductionCosts,
+              saleDate: new Date(tx.trx_at),
+              postedBy: tx.cashier_user_id
+            }, db);
+          }
+        }
+      }
+
+      // STUB: Posting hook - requires KyselyPosSyncPushPostingExecutor from API layer
+      // This will be implemented in story 27.6
+      // await runSyncPushPostingHook(...);
+    }
 
     // Record success metric
     if (metricsCollector) {

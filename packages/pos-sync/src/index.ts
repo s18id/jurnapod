@@ -21,7 +21,21 @@ export type {
   VariantSaleResult,
   VariantStockAdjustmentResult,
   PushSyncParams,
-  PushSyncResult
+  PushSyncResult,
+  // Domain result types (Story 27.1)
+  StockDeductResult,
+  SyncPushVariantSaleResult,
+  SyncVariantStockAdjustResult,
+  PostPushResult,
+  StockConflict,
+} from "./push/types.js";
+
+// Export domain errors (Story 27.1)
+export {
+  SyncStockConflictError,
+  SyncStockOverflowError,
+  SyncStockNotFoundError,
+  SyncValidationError,
 } from "./push/types.js";
 
 // Export pull types

@@ -23,6 +23,8 @@
     "@jurnapod/db": "0.1.0",
     "@jurnapod/shared": "0.1.0",
     "@jurnapod/sync-core": "0.1.0",
+    "@jurnapod/modules-inventory": "0.1.0",
+    "@jurnapod/modules-accounting": "0.1.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

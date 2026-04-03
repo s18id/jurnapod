@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./posting/cogs": {
+      "types": "./dist/posting/cogs.d.ts",
+      "default": "./dist/posting/cogs.js"
     }
   },
   "files": ["dist", "README.md"],

@@ -13,8 +13,8 @@ import {
   postCogsForSale,
   CogsCalculationError,
   CogsAccountConfigError,
-  __cogsPostingTestables
-} from "./cogs-posting";
+} from "@jurnapod/modules-accounting/posting/cogs";
+import { normalizeMoney } from "@jurnapod/modules-accounting";
 import { createItem } from "./items/index.js";
 import { createItemPrice } from "./item-prices/index.js";
 import { createCompanyBasic } from "./companies.js";
@@ -667,7 +667,7 @@ test("postCogsForSale - should post COGS for multiple items", async () => {
 });
 
 test("Helper functions - normalizeMoney should handle precision correctly", () => {
-  const { normalizeMoney } = __cogsPostingTestables;
+  // normalizeMoney imported at top of file
   
   assert.strictEqual(normalizeMoney(10.555), 10.56);
   assert.strictEqual(normalizeMoney(10.554), 10.55);

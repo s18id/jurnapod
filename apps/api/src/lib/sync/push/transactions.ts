@@ -26,8 +26,9 @@ import {
   SyncPushPostingHookError,
   type SyncPushPostingHookResult,
   runSyncPushPostingHook
-} from "../../sync-push-posting.js";
-import { postCogsForSale } from "../../cogs-posting.js";
+} from "@jurnapod/modules-accounting";
+import { KyselyPosSyncPushPostingExecutor } from "./posting-executor.js";
+import { postCogsForSale } from "@jurnapod/modules-accounting/posting/cogs";
 import {
   CogsPostingResult
 } from "@jurnapod/sync-core";
@@ -410,7 +411,8 @@ export async function processSyncPushTransactionPhase2(
     // Run posting hook
     let postingResult: SyncPushPostingHookResult;
     try {
-      postingResult = await runSyncPushPostingHook(db, acceptedContext);
+      const executor = new KyselyPosSyncPushPostingExecutor(db, acceptedContext);
+      postingResult = await runSyncPushPostingHook(db, executor, acceptedContext);
     } catch (postingHookError) {
       if (
         postingHookError instanceof SyncPushPostingHookError

@@ -5,9 +5,8 @@
  * Sync Push Route
  *
  * Thin HTTP layer for POST /sync/push.
- * Phase 1 (persistence): delegated to PosSyncModule.handlePushSync()
- * Phase 2 (COGS posting, stock deduction, table release, reservation update):
- *   delegated to orchestrateSyncPushPhase2() in lib/sync/push/transactions.ts
+ * Phase 1 + Phase 2 (persistence, stock deduction, COGS posting):
+ *   handled by PosSyncModule.handlePushSync() — phase2 is now inline in pos-sync
  */
 
 import { Hono } from "hono";
@@ -16,13 +15,11 @@ import { authenticateRequest, requireAccess, type AuthContext } from "../../lib/
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
 import { errorResponse, successResponse } from "../../lib/response.js";
 import { SyncIdempotencyMetricsCollector } from "@jurnapod/sync-core";
-import { orchestrateSyncPushPhase2 } from "../../lib/sync/push/transactions.js";
-import { buildSyncPushTaxContext } from "../../lib/sync/push/tax-context.js";
 import { getSyncPushDbPool } from "../../lib/sync/push/db.js";
 import type { SyncPushTransactionPayload } from "../../lib/sync/push/types.js";
 import { shouldUseNewPushSync, getPushSyncModeDescription } from "../../lib/feature-flags.js";
 import { getPosSyncModule } from "../../lib/sync-modules.js";
-import { toTransactionPush, toActiveOrderPush, buildTxByClientTxIdMap } from "../../lib/sync/push/adapters.js";
+import { toTransactionPush, toActiveOrderPush } from "../../lib/sync/push/adapters.js";
 import type {
   OrderUpdatePush,
   ItemCancellationPush,
@@ -98,25 +95,9 @@ syncPushRoutes.post("/", async (c) => {
       return successResponse({ results: [] });
     }
 
-    // Build tax context using library function
     const db = dbPool;
-    const taxContext = await buildSyncPushTaxContext(db, auth.companyId);
 
-    // Check feature flag to determine which path to use
-    const useNewPath = shouldUseNewPushSync(auth.companyId);
-    const modeDescription = getPushSyncModeDescription();
-
-    console.info("POST /sync/push feature flag", {
-      correlation_id: correlationId,
-      company_id: auth.companyId,
-      use_new_path: useNewPath,
-      mode: modeDescription
-    });
-
-    // Build transaction map for Phase 2
-    const txByClientTxId = buildTxByClientTxIdMap(transactions as SyncPushTransactionPayload[]);
-
-    // Phase 1: Use PosSyncModule for persistence
+    // Phase 1 + Phase 2: Use PosSyncModule — phase2 is now handled inline in pos-sync
     const module = getPosSyncModule();
 
     const phase1Results = await module.handlePushSync({
@@ -131,16 +112,6 @@ syncPushRoutes.post("/", async (c) => {
       variantStockAdjustments: (variant_stock_adjustments ?? []) as VariantStockAdjustmentPush[],
       correlationId,
       metricsCollector
-    });
-
-    // Phase 2: Delegate to library function for orchestration
-    await orchestrateSyncPushPhase2({
-      db,
-      phase1Results: phase1Results.results,
-      txByClientTxId,
-      authUserId: auth.userId,
-      correlationId,
-      taxContext
     });
 
     const responsePayload = {

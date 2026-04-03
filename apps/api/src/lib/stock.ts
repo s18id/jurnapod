@@ -293,7 +293,7 @@ export async function deductStockForSaleWithCogs(
       totalCost: result.totalCost
     }));
     
-    const { postCogsForSale } = await import("@/lib/cogs-posting.js");
+    const { postCogsForSale } = await import("@jurnapod/modules-accounting/posting/cogs");
     
     const cogsResult = await postCogsForSale(
       {

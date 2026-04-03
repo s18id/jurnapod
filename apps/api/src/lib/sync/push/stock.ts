@@ -6,6 +6,11 @@
  * 
  * Stock deduction functions for sync push.
  * These functions have zero HTTP knowledge.
+ * 
+ * DELEGATION NOTICE:
+ * resolveAndDeductStockForTransaction now delegates to @jurnapod/modules-inventory
+ * for the core stock resolution logic. This file is kept as a thin adapter to
+ * preserve the existing API contract (StockDeductResult[]) used by transactions.ts.
  */
 
 import { sql } from "kysely";
@@ -13,6 +18,7 @@ import type { KyselySchema } from "@/lib/db";
 import type { SyncPushTransactionPayload } from "./types.js";
 import { deductStockWithCost } from "../../stock.js";
 import type { StockDeductResult, StockItem } from "../../stock.js";
+import { getStockService } from "@jurnapod/modules-inventory";
 
 interface StockRow {
   quantity: string;
@@ -107,7 +113,9 @@ export async function deductVariantStock(
 }
 
 /**
- * Resolve and deduct stock for a transaction
+ * Resolve and deduct stock for a transaction.
+ * Delegates to modules-inventory's resolveAndDeductForPosTransaction.
+ * Returns StockDeductResult[] to preserve API contract with transactions.ts.
  */
 export async function resolveAndDeductStockForTransaction(
   db: KyselySchema,
@@ -122,59 +130,42 @@ export async function resolveAndDeductStockForTransaction(
     return null;
   }
 
-  const variantItems = tx.items.filter((item) => item.variant_id);
-  const regularItems = tx.items.filter((item) => !item.variant_id);
+  // Build input for modules-inventory
+  const resolveInput = {
+    companyId: tx.company_id,
+    outletId: tx.outlet_id,
+    posTransactionId: String(_posTransactionId),
+    items: tx.items.map(item => ({
+      variantId: item.variant_id,
+      itemId: item.item_id,
+      quantity: item.qty,
+      trackStock: true // The track_stock filtering happens inside resolveAndDeductForPosTransaction
+    })),
+    referenceId: tx.client_tx_id,
+    userId: tx.cashier_user_id
+  };
 
-  for (const item of variantItems) {
-    if (item.variant_id) {
-      await deductVariantStock(db, tx.company_id, item.variant_id, item.qty);
+  // Delegate to modules-inventory
+  const posResults = await getStockService(db).resolveAndDeductForPosTransaction(resolveInput, db);
+
+  // Transform PosStockDeductResult[] to StockDeductResult[] for API contract
+  // Note: variant items return unitCost=0, totalCost=0 since they don't go through cost layers
+  const stockResults: StockDeductResult[] = posResults.map(result => ({
+    itemId: result.itemId,
+    quantity: result.quantity,
+    transactionId: result.stockTxId,
+    unitCost: result.unitCost,
+    totalCost: result.totalCost,
+    costResult: {
+      stockTxId: result.stockTxId,
+      itemId: result.itemId,
+      qty: result.quantity,
+      unitCost: result.unitCost,
+      totalCost: result.totalCost,
+      layersConsumed: 0,
+      layersCreated: 0
     }
-  }
-
-  if (regularItems.length === 0) {
-    return null;
-  }
-
-  const itemIds = regularItems.map((item) => item.item_id);
-  if (itemIds.length === 0) {
-    return null;
-  }
-
-  // Build dynamic IN clause using sql.join
-  const inClause = sql.join(itemIds.map(id => sql`${id}`), sql`, `);
-  
-  const trackedRows = await sql<ItemRow>`
-    SELECT id FROM items
-    WHERE company_id = ${tx.company_id}
-      AND id IN (${inClause})
-      AND track_stock = 1
-  `.execute(db);
-
-  const trackedItemIds = new Set(trackedRows.rows.map((row) => row.id));
-
-  if (trackedItemIds.size === 0) {
-    return null;
-  }
-
-  const stockItems: StockItem[] = regularItems
-    .filter((item) => trackedItemIds.has(item.item_id))
-    .map((item) => ({
-      product_id: item.item_id,
-      quantity: item.qty
-    }));
-
-  if (stockItems.length === 0) {
-    return null;
-  }
-
-  const stockResults = await deductStockWithCost(
-    tx.company_id,
-    tx.outlet_id,
-    stockItems,
-    tx.client_tx_id,
-    tx.cashier_user_id,
-    db
-  );
+  }));
 
   return stockResults;
 }

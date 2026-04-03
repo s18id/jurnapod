@@ -76,6 +76,33 @@ export interface LowStockAlert {
 }
 
 // -----------------------------------------------------------------------------
+// POS-specific types
+// -----------------------------------------------------------------------------
+
+export interface PosStockDeductResult {
+  variantId: number;
+  itemId: number;
+  quantity: number;
+  stockTxId: number;
+  unitCost: number;
+  totalCost: number;
+}
+
+export interface ResolveAndDeductInput {
+  companyId: number;
+  outletId: number;
+  posTransactionId: string;
+  items: Array<{
+    variantId?: number;
+    itemId: number;
+    quantity: number;
+    trackStock: boolean;
+  }>;
+  referenceId: string;
+  userId: number;
+}
+
+// -----------------------------------------------------------------------------
 // Cost-dependent types
 // -----------------------------------------------------------------------------
 
@@ -243,4 +270,17 @@ export interface StockService {
     input: StockAdjustmentInput,
     db: KyselySchema
   ): Promise<boolean>;
+
+  /**
+   * Resolve and deduct stock for a POS transaction.
+   * Handles both variant-based and regular item stock deduction.
+   * 
+   * - If variantId present: resolve itemId from variant first, then deduct
+   * - If trackStock=false: skip stock deduction
+   * - If regular item: deduct by itemId directly
+   */
+  resolveAndDeductForPosTransaction(
+    input: ResolveAndDeductInput,
+    db: KyselySchema
+  ): Promise<PosStockDeductResult[]>;
 }

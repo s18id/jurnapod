@@ -6,18 +6,35 @@
  * 
  * Shared types for sync push business logic.
  * These types have zero HTTP knowledge - they are plain data structures.
+ * 
+ * Domain types are owned by @jurnapod/pos-sync.
+ * This file re-exports them for backward compatibility.
  */
 
 import type { TaxRateRecord } from "../../../lib/taxes.js";
 import type { StockDeductResult } from "../../stock.js";
-import type { CogsPostingResult } from "../../../lib/cogs-posting.js";
-import type { RowDataPacket, ResultSetHeader } from "mysql2";
-import type { PoolConnection, Pool } from "mysql2/promise";
+import type { CogsPostingResult } from "@jurnapod/modules-accounting/posting/cogs";
 import type { Kysely } from "kysely";
 import type { SyncIdempotencyMetricsCollector } from "@jurnapod/sync-core";
 
+// Re-export domain result types from pos-sync
+export type {
+  StockDeductResult,
+  SyncPushVariantSaleResult,
+  SyncVariantStockAdjustResult,
+  PostPushResult,
+} from "@jurnapod/pos-sync";
+
+// Re-export errors from pos-sync
+export {
+  SyncStockConflictError,
+  SyncStockOverflowError,
+  SyncStockNotFoundError,
+  SyncValidationError,
+} from "@jurnapod/pos-sync";
+
 // ============================================================================
-// Constants
+// Constants (API-specific - not moved)
 // ============================================================================
 
 export const MYSQL_DUPLICATE_ERROR_CODE = 1062;
@@ -37,7 +54,7 @@ export const MAX_SYNC_PUSH_CONCURRENCY = 5;
 export const PAYLOAD_HASH_VERSION_CANONICAL_TRX_AT = 2;
 
 // ============================================================================
-// Error Types
+// Error Types (API-specific)
 // ============================================================================
 
 export type MysqlError = {
@@ -289,8 +306,10 @@ export type ItemCancellation = {
 // Process Transaction Types
 // ============================================================================
 
+// NOTE: ProcessTransactionParams is kept here for API-level processing.
+// The dbPool parameter using Kysely instead of mysql2 Pool.
 export type ProcessTransactionParams = {
-  dbPool: Pool;
+  dbPool: Kysely<any>;
   tx: SyncPushTransactionPayload;
   txIndex: number;
   inputOutletId: number;
@@ -301,10 +320,6 @@ export type ProcessTransactionParams = {
   forcedRetryableErrno: number | null;
   taxContext: SyncPushTaxContext;
   metricsCollector: SyncIdempotencyMetricsCollector;
-};
-
-export type QueryExecutor = {
-  execute: PoolConnection["execute"];
 };
 
 // ============================================================================
@@ -328,7 +343,7 @@ export type VariantStockAdjustmentResult = {
 // ============================================================================
 
 export type OrchestrateSyncPushParams = {
-  dbPool: Pool;
+  dbPool: Kysely<any>;
   transactions: SyncPushTransactionPayload[];
   active_orders?: ActiveOrder[];
   order_updates?: OrderUpdate[];

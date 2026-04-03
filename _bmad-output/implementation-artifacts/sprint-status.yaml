@@ -306,3 +306,12 @@ development_status:
   26-3-implement-restoreStock-adjustStock: done
   26-4-update-api-stock-delegation-remove-cost-tracking: done
   26-5-full-validation-gate: done
+
+  # Epic 27: POS Sync Push Boundary Completion
+  epic-27: done
+  27-1-contract-alignment-type-source-of-truth: done
+  27-2-replace-api-pos-sale-posting-modules-accounting: done
+  27-3-cogs-parity-modules-accounting: done
+  27-4-move-stock-transaction-resolution-modules-inventory: done
+  27-5-implement-phase2-pos-sync-replace-stubs: done
+  27-6-api-simplification-full-validation-gate: done

@@ -11,6 +11,9 @@
   "include": ["src/**/*"],
   "references": [
     {"path": "../shared"},
-    {"path": "../sync-core"}
+    {"path": "../sync-core"},
+    {"path": "../modules/inventory-costing"},
+    {"path": "../modules/inventory"},
+    {"path": "../modules/accounting"}
   ]
 }

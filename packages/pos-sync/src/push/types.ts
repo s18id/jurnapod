@@ -12,6 +12,7 @@ import type {
   SyncIdempotencyMetricsCollector,
   SyncOperationResult
 } from "@jurnapod/sync-core";
+import type { ItemCostResult } from "@jurnapod/modules-inventory-costing";
 
 // ============================================================================
 // Result Types
@@ -267,3 +268,92 @@ export type OrderProcessingContext = {
   outletId: number;
   correlationId: string;
 };
+
+// ============================================================================
+// Domain Result Types (Story 27.1 - moved from API)
+// ============================================================================
+
+/**
+ * Stock conflict information for variant sales
+ */
+export type StockConflict = {
+  product_id: number;
+  variant_id?: number;
+  requested: number;
+  available: number;
+};
+
+/**
+ * Result of a stock deduction operation
+ */
+export interface StockDeductResult {
+  variantId: number;
+  quantity: number;
+  transactionId: number;
+  unitCost: number;
+  totalCost: number;
+  costResult: ItemCostResult;
+}
+
+/**
+ * Result of a variant sale push operation
+ */
+export interface SyncPushVariantSaleResult {
+  txId: string;
+  status: "accepted" | "conflict" | "error";
+  conflicts?: StockConflict[];
+  cogsPosted?: boolean;
+  postingJournalBatchId?: number;
+}
+
+/**
+ * Result of a variant stock adjustment push operation
+ */
+export interface SyncVariantStockAdjustResult {
+  txId: string;
+  adjustmentType: string;
+  status: "accepted" | "error";
+  postingJournalBatchId?: number;
+}
+
+/**
+ * Post-push result combining all push outcomes
+ */
+export interface PostPushResult {
+  txId: string;
+  status: "accepted" | "duplicate" | "conflict" | "error";
+  posTransactionId?: number;
+  message?: string;
+}
+
+// ============================================================================
+// Domain Errors (Story 27.1 - moved from API)
+// ============================================================================
+
+export class SyncStockConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SyncStockConflictError";
+  }
+}
+
+export class SyncStockOverflowError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SyncStockOverflowError";
+  }
+}
+
+export class SyncStockNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SyncStockNotFoundError";
+  }
+}
+
+export class SyncValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SyncValidationError";
+  }
+}
