@@ -617,7 +617,8 @@ export async function assignUserGlobalRole(
     throw new Error(`User ${userId} not found`);
   }
   const companyId = Number((userResult.rows[0] as { company_id: number }).company_id);
-  await sql`INSERT INTO user_role_assignments (company_id, user_id, role_id, outlet_id) VALUES (${companyId}, ${userId}, ${roleId}, NULL)`.execute(db);
+  // Use INSERT IGNORE for idempotency in tests
+  await sql`INSERT IGNORE INTO user_role_assignments (company_id, user_id, role_id, outlet_id) VALUES (${companyId}, ${userId}, ${roleId}, NULL)`.execute(db);
 }
 
 /**
@@ -640,7 +641,8 @@ export async function assignUserOutletRole(
     throw new Error(`Outlet ${outletId} not found`);
   }
   const companyId = Number((outletResult.rows[0] as { company_id: number }).company_id);
-  await sql`INSERT INTO user_role_assignments (company_id, user_id, role_id, outlet_id) VALUES (${companyId}, ${userId}, ${roleId}, ${outletId})`.execute(db);
+  // Use INSERT IGNORE for idempotency in tests
+  await sql`INSERT IGNORE INTO user_role_assignments (company_id, user_id, role_id, outlet_id) VALUES (${companyId}, ${userId}, ${roleId}, ${outletId})`.execute(db);
 }
 
 /**
@@ -659,7 +661,8 @@ export async function setModulePermission(
   permissionMask: number
 ): Promise<void> {
   const db = getDb();
-  await sql`INSERT INTO module_roles (company_id, role_id, module, permission_mask) VALUES (${companyId}, ${roleId}, ${module}, ${permissionMask})`.execute(db);
+  // Use INSERT ... ON DUPLICATE KEY UPDATE for idempotency in tests
+  await sql`INSERT INTO module_roles (company_id, role_id, module, permission_mask) VALUES (${companyId}, ${roleId}, ${module}, ${permissionMask}) ON DUPLICATE KEY UPDATE permission_mask = ${permissionMask}`.execute(db);
 }
 
 /**

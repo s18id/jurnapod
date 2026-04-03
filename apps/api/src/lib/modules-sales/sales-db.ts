@@ -166,6 +166,13 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     this._transaction = trx;
   }
 
+  /**
+   * Get the current transaction handle if inside a transaction, null otherwise.
+   */
+  getTransaction(): Transaction | null {
+    return this._transaction;
+  }
+
   // Order operations
   async findOrderById(companyId: number, orderId: number, forUpdate?: boolean): Promise<SalesOrderRow | null> {
     const forUpdateClause = forUpdate ? sql` FOR UPDATE` : sql``;

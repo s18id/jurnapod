@@ -7,9 +7,17 @@
  * Core types for payment management in the sales module.
  */
 
+import type { PostingResult } from "@jurnapod/shared";
+
 // =============================================================================
 // Payment Types
 // =============================================================================
+
+/**
+ * Journal posting result for payment operations.
+ * Alias for PostingResult from @jurnapod/shared.
+ */
+export type JournalPostingResult = PostingResult;
 
 export type SalesPaymentStatus = "DRAFT" | "POSTED" | "VOID";
 
@@ -91,6 +99,10 @@ export type UpdatePaymentInput = {
 export type PostPaymentInput = {
   settle_shortfall_as_loss?: boolean;
   shortfall_reason?: string;
+  /** Internal fields for journal posting - set by PaymentService before calling postingHook */
+  _paymentId?: number;
+  _companyId?: number;
+  _invoiceId?: number;
 };
 
 export type PaymentListFilters = {

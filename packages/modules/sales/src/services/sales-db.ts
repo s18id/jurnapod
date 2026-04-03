@@ -18,6 +18,7 @@ import type {
 } from "../types/sales.js";
 import type { SalesPayment, SalesPaymentSplit, PaymentListFilters } from "../types/payments.js";
 import type { SalesCreditNoteDetail, CreditNoteListFilters, CreditCapacity } from "../types/credit-notes.js";
+import type { Transaction } from "@jurnapod/db";
 
 // =============================================================================
 // Row Types (internal to the repository implementation)
@@ -129,6 +130,12 @@ interface CreditNoteLineRow {
 // =============================================================================
 
 export interface SalesDbExecutor {
+  /**
+   * Get the current transaction handle if inside a transaction, null otherwise.
+   * Used by PaymentPostingHook to pass the live transaction to journal posting.
+   */
+  getTransaction(): Transaction | null;
+
   // Order operations
   findOrderById(companyId: number, orderId: number, forUpdate?: boolean): Promise<SalesOrderRow | null>;
   findOrderByClientRef(companyId: number, clientRef: string): Promise<SalesOrderRow | null>;

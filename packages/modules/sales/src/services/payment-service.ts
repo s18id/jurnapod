@@ -12,10 +12,12 @@
  * Database access is performed via the injected SalesDb interface.
  */
 
+import { toMysqlDateTime, toMysqlDateTimeFromDateLike } from "@jurnapod/shared";
 import type { AccessScopeChecker } from "../interfaces/access-scope-checker.js";
 import {
   SalesPermissions
 } from "../interfaces/access-scope-checker.js";
+import type { PaymentPostingHook } from "../interfaces/payment-posting-hook.js";
 import type {
   SalesPayment,
   SalesPaymentSplit,
@@ -53,8 +55,13 @@ export class DatabaseReferenceError extends Error {
 
 const MONEY_SCALE = 100;
 
+// Type guard for MySQL errors
+function isMysqlError(error: unknown): error is { errno?: number; code?: string } {
+  return typeof error === "object" && error !== null && "errno" in error;
+}
+
 function normalizeMoney(value: number): number {
-  return Math.round(value * MONEY_SCALE) / MONEY_SCALE;
+  return Math.round((value + Number.EPSILON) * MONEY_SCALE) / MONEY_SCALE;
 }
 
 function hasMoreThanTwoDecimals(value: number): boolean {
@@ -104,23 +111,26 @@ export interface PaymentService {
 export interface PaymentServiceDeps {
   db: SalesDb;
   accessScopeChecker: AccessScopeChecker;
+  postingHook?: PaymentPostingHook;
 }
 
 // =============================================================================
 // Idempotency Helpers
 // =============================================================================
 
+// Patch A: Normalize datetimes for idempotency comparison.
+// Mirrors the API's payment-allocation.ts logic exactly.
 function normalizeIncomingDatetimeForCompare(paymentAt: string): string {
-  // Normalize datetime for idempotency comparison
-  // Incoming payloads are persisted as DATETIME (timezone-less)
-  const [datePart] = paymentAt.split("T");
-  return datePart || paymentAt;
+  const persistedValue = toMysqlDateTime(paymentAt);
+  const localInterpreted = new Date(persistedValue.replace(" ", "T"));
+  if (Number.isNaN(localInterpreted.getTime())) {
+    throw new Error("Invalid datetime");
+  }
+  return toMysqlDateTime(localInterpreted.toISOString());
 }
 
 function normalizeExistingDatetimeForCompare(paymentAt: string): string {
-  // Handle existing datetime format
-  const [datePart] = String(paymentAt).split(" ");
-  return datePart || String(paymentAt);
+  return toMysqlDateTimeFromDateLike(paymentAt);
 }
 
 function buildCanonicalInput(
@@ -178,7 +188,7 @@ function canonicalPaymentsEqual(a: CanonicalPaymentInput, b: CanonicalPaymentInp
 // =============================================================================
 
 export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
-  const { db, accessScopeChecker } = deps;
+  const { db, accessScopeChecker, postingHook } = deps;
 
   async function withTransaction<T>(operation: (executor: SalesDbExecutor) => Promise<T>): Promise<T> {
     return db.withTransaction(operation);
@@ -288,19 +298,21 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
               permission: SalesPermissions.READ_PAYMENT
             });
           }
+
+          const existingSplits = await executor.findPaymentSplits(companyId, existing.id);
+          const existingForCompare = existingSplits.length > 0
+            ? attachSplitsToPayment(existing, existingSplits)
+            : existing;
+
           // Enforce idempotency contract - compare canonical payloads
           const incomingCanonical = buildCanonicalInput(input);
-          const existingCanonical = buildCanonicalFromExisting(existing);
+          const existingCanonical = buildCanonicalFromExisting(existingForCompare);
 
           if (!canonicalPaymentsEqual(incomingCanonical, existingCanonical)) {
             throw new DatabaseConflictError("Idempotency conflict: payload mismatch");
           }
 
-          const splits = await executor.findPaymentSplits(companyId, existing.id);
-          if (splits.length > 0) {
-            return attachSplitsToPayment(existing, splits);
-          }
-          return existing;
+          return existingForCompare;
         }
       }
 
@@ -312,6 +324,16 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
           outletId: input.outlet_id,
           permission: SalesPermissions.CREATE_PAYMENT
         });
+      }
+
+      // P1: Validate invoice exists and belongs to same outlet
+      const invoice = await executor.findInvoiceById(companyId, input.invoice_id);
+      if (!invoice) {
+        throw new DatabaseReferenceError("Invoice not found");
+      }
+      const invoiceData = invoice as { outlet_id?: number };
+      if (invoiceData.outlet_id !== input.outlet_id) {
+        throw new DatabaseReferenceError("Invoice outlet mismatch");
       }
 
       await ensureAccountIsPayable(executor, companyId, effectiveAccountId);
@@ -326,20 +348,51 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
         input.payment_no
       );
 
-      const paymentId = await executor.insertPayment({
-        companyId,
-        outletId: input.outlet_id,
-        invoiceId: input.invoice_id,
-        paymentNo,
-        clientRef: input.client_ref,
-        paymentAt: input.payment_at,
-        accountId: effectiveAccountId,
-        method: input.method,
-        status: "DRAFT",
-        amount,
-        paymentAmountIdr: effectivePaymentAmount,
-        createdByUserId: actor?.userId
-      });
+      let paymentId: number;
+      try {
+        paymentId = await executor.insertPayment({
+          companyId,
+          outletId: input.outlet_id,
+          invoiceId: input.invoice_id,
+          paymentNo,
+          clientRef: input.client_ref,
+          paymentAt: toMysqlDateTime(input.payment_at),
+          accountId: effectiveAccountId,
+          method: input.method,
+          status: "DRAFT",
+          amount,
+          paymentAmountIdr: effectivePaymentAmount,
+          createdByUserId: actor?.userId
+        });
+      } catch (error) {
+        // P2: Handle duplicate key error for race condition on client_ref
+        if (isMysqlError(error) && error.errno === 1062 && input.client_ref) {
+          const existing = await executor.findPaymentByClientRef(companyId, input.client_ref);
+          if (existing) {
+            const existingSplits = await executor.findPaymentSplits(companyId, existing.id);
+            const existingForCompare = existingSplits.length > 0
+              ? attachSplitsToPayment(existing, existingSplits)
+              : existing;
+
+            const incomingCanonical = buildCanonicalInput(input);
+            const existingCanonical = buildCanonicalFromExisting(existingForCompare);
+            if (!canonicalPaymentsEqual(incomingCanonical, existingCanonical)) {
+              throw new DatabaseConflictError("Idempotency conflict: payload mismatch");
+            }
+            if (actor) {
+              await accessScopeChecker.assertOutletAccess({
+                actorUserId: actor.userId,
+                companyId,
+                outletId: existing.outlet_id,
+                permission: SalesPermissions.READ_PAYMENT
+              });
+            }
+            return existingForCompare;
+          }
+          throw new DatabaseConflictError("Duplicate payment");
+        }
+        throw error;
+      }
 
       // Phase 8: Insert split rows
       for (let i = 0; i < splitData.length; i++) {
@@ -406,6 +459,10 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
         return null;
       }
 
+      if (current.status === "VOID") {
+        throw new PaymentStatusError("Cannot modify a voided payment");
+      }
+
       if (current.status !== "DRAFT") {
         throw new PaymentStatusError("Payment is not editable");
       }
@@ -428,6 +485,20 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
             outletId: input.outlet_id,
             permission: SalesPermissions.UPDATE_PAYMENT
           });
+        }
+      }
+
+      // P2: Validate invoice when invoice_id or outlet_id is being changed
+      const nextOutletId = input.outlet_id ?? current.outlet_id;
+      const nextInvoiceId = input.invoice_id ?? current.invoice_id;
+      if (typeof input.invoice_id === "number" || typeof input.outlet_id === "number") {
+        const invoice = await executor.findInvoiceById(companyId, nextInvoiceId);
+        if (!invoice) {
+          throw new DatabaseReferenceError("Invoice not found");
+        }
+        const invoiceData = invoice as { outlet_id?: number };
+        if (invoiceData.outlet_id !== nextOutletId) {
+          throw new DatabaseReferenceError("Invoice outlet mismatch");
         }
       }
 
@@ -497,8 +568,6 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
         await ensureAccountIsPayable(executor, companyId, input.account_id);
       }
 
-      const nextOutletId = input.outlet_id ?? current.outlet_id;
-      const nextInvoiceId = input.invoice_id ?? current.invoice_id;
       const nextPaymentNo = input.payment_no ?? current.payment_no;
       const nextPaymentAt = input.payment_at ?? current.payment_at;
       const nextMethod = input.method ?? current.method;
@@ -590,9 +659,6 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
       }
 
       const invoiceData = invoice as { status?: string; grand_total?: number; paid_total?: number; outlet_id?: number };
-      if (!invoiceData) {
-        throw new PaymentAllocationError("Invoice not found");
-      }
 
       if (invoiceData.status === "VOID") {
         throw new PaymentAllocationError("Invoice is void");
@@ -632,7 +698,7 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
       }
 
       const userId = actor?.userId ?? null;
-      const shortfallSettledAt = options?.settle_shortfall_as_loss ? new Date() : undefined;
+      const shortfallSettledAt = options?.settle_shortfall_as_loss ? new Date() : null;
 
       await executor.updatePaymentStatus({
         companyId,
@@ -662,6 +728,17 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
         paymentStatus: newPaymentStatus,
         updatedByUserId: userId ?? undefined
       });
+
+      // Post to journal if hook is provided (graceful degradation if undefined)
+      const tx = executor.getTransaction();
+      if (postingHook && tx) {
+        await postingHook.postPaymentToJournal({
+          ...options,
+          _paymentId: paymentId,
+          _companyId: companyId,
+          _invoiceId: payment.invoice_id
+        }, tx);
+      }
 
       const postedPayment = await executor.findPaymentById(companyId, paymentId);
       if (!postedPayment) {

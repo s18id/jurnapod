@@ -9,3 +9,5 @@
 
 export { ApiAccessScopeChecker, getAccessScopeChecker } from "./access-scope-checker.js";
 export { ApiSalesDbExecutor, createApiSalesDb } from "./sales-db.js";
+export { ApiPaymentPostingHook } from "./payment-posting-hook.js";
+export { createComposedPaymentService, getComposedPaymentService } from "./payment-service-composition.js";

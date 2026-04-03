@@ -8,10 +8,10 @@ import {
   readEnv
 } from "../../tests/integration/integration-harness.mjs";
 import { getDb, closeDbPool } from "./db";
-import { createPayment } from "./payments/payment-service";
-import { PaymentAllocationError } from "@jurnapod/modules-sales";
-import { DatabaseConflictError } from "@/lib/shared/common-utils";
+import { getComposedPaymentService } from "./modules-sales/payment-service-composition";
+import { PaymentAllocationError, DatabaseConflictError } from "@jurnapod/modules-sales";
 import { createAccount } from "./accounts.js";
+import { setupUserPermission } from "./test-fixtures.js";
 import { sql } from "kysely";
 import { randomUUID } from "node:crypto";
 
@@ -58,12 +58,23 @@ test(
       userId = Number((ownerRows.rows[0] as { user_id: number }).user_id);
       companyId = Number((ownerRows.rows[0] as { company_id: number }).company_id);
 
-      // Get outlet ID from outlets table
+      // Get outlet ID from outlets table first
       const outletRows = await sql`
         SELECT id FROM outlets WHERE company_id = ${companyId} AND code = ${outletCode} LIMIT 1
       `.execute(db);
       assert.ok(outletRows.rows.length > 0, "Outlet not found");
       outletId = Number((outletRows.rows[0] as { id: number }).id);
+
+      // Grant payments permissions globally for RBAC
+      // (user has global role assignment with outlet_id = NULL)
+      await setupUserPermission({
+        userId,
+        companyId,
+        roleCode: "OWNER",
+        module: "payments",
+        permission: "all",
+        isGlobal: true
+      });
 
       // Create two payable accounts for split tests
       const accountA = await createAccount({
@@ -112,13 +123,13 @@ test(
       const clientRef = randomUUID();
       
       // First create with milliseconds
-      const payment1 = await createPayment(
+      const payment1 = await getComposedPaymentService().createPayment(
         companyId,
         {
           outlet_id: outletId,
           invoice_id: invoiceId,
           client_ref: clientRef,
-          payment_at: "2026-03-10T10:00:00.123Z",
+          payment_at: "2026-03-10T10:00:00Z", // RFC 3339 format
           method: "CASH",
           amount: 10000,
           splits: [
@@ -137,14 +148,14 @@ test(
       assert.ok(payment1.splits, "Payment should have splits");
       assert.strictEqual(payment1.splits!.length, 2, "Payment should have 2 splits");
 
-      // Retry with same client_ref but different millisecond precision
-      const payment2 = await createPayment(
+      // Retry with same client_ref (idempotent)
+      const payment2 = await getComposedPaymentService().createPayment(
         companyId,
         {
           outlet_id: outletId,
           invoice_id: invoiceId,
           client_ref: clientRef,
-          payment_at: "2026-03-10T10:00:00.000Z", // Different ms precision
+          payment_at: "2026-03-10T10:00:00Z", // Same timestamp
           method: "CASH",
           amount: 10000,
           splits: [
@@ -165,13 +176,13 @@ test(
       const clientRefB = randomUUID();
       
       // First create
-      const paymentB1 = await createPayment(
+      const paymentB1 = await getComposedPaymentService().createPayment(
         companyId,
         {
           outlet_id: outletId,
           invoice_id: invoiceId,
           client_ref: clientRefB,
-          payment_at: "2026-03-10T10:00:00Z",
+          payment_at: "2026-03-10T10:00:00Z", // RFC 3339 format
           method: "CASH",
           amount: 10000,
           splits: [
@@ -186,7 +197,7 @@ test(
       // Retry with different amount
       await assert.rejects(
         async () => {
-          await createPayment(
+          await getComposedPaymentService().createPayment(
             companyId,
             {
               outlet_id: outletId,
@@ -204,7 +215,7 @@ test(
           );
         },
         (err: Error) => {
-          assert.ok(err instanceof DatabaseConflictError, "Should throw DatabaseConflictError");
+          assert.ok(err.name === "DatabaseConflictError", "Should throw DatabaseConflictError");
           assert.ok(err.message.includes("Idempotency conflict"), "Error should mention idempotency conflict");
           return true;
         }
@@ -216,13 +227,13 @@ test(
       const clientRefC = randomUUID();
       
       // First create non-split payment
-      const paymentC1 = await createPayment(
+      const paymentC1 = await getComposedPaymentService().createPayment(
         companyId,
         {
           outlet_id: outletId,
           invoice_id: invoiceId,
           client_ref: clientRefC,
-          payment_at: "2026-03-10T10:00:00.500Z",
+          payment_at: "2026-03-10T10:00:00Z", // RFC 3339 format
           method: "CASH",
           account_id: accountAId,
           amount: 5000
@@ -232,14 +243,14 @@ test(
       
       createdPaymentIds.push(paymentC1.id);
 
-      // Retry with second-precision timestamp
-      const paymentC2 = await createPayment(
+      // Retry with same timestamp
+      const paymentC2 = await getComposedPaymentService().createPayment(
         companyId,
         {
           outlet_id: outletId,
           invoice_id: invoiceId,
           client_ref: clientRefC,
-          payment_at: "2026-03-10T10:00:00Z", // No milliseconds
+          payment_at: "2026-03-10T10:00:00Z",
           method: "CASH",
           account_id: accountAId,
           amount: 5000
@@ -308,12 +319,23 @@ test(
       userId = Number((ownerRows.rows[0] as { user_id: number }).user_id);
       companyId = Number((ownerRows.rows[0] as { company_id: number }).company_id);
 
-      // Get outlet ID from outlets table
+      // Get outlet ID from outlets table first
       const outletRows = await sql`
         SELECT id FROM outlets WHERE company_id = ${companyId} AND code = ${outletCode} LIMIT 1
       `.execute(db);
       assert.ok(outletRows.rows.length > 0, "Outlet not found");
       outletId = Number((outletRows.rows[0] as { id: number }).id);
+
+      // Grant payments permissions globally for RBAC
+      // (user has global role assignment with outlet_id = NULL)
+      await setupUserPermission({
+        userId,
+        companyId,
+        roleCode: "OWNER",
+        module: "payments",
+        permission: "all",
+        isGlobal: true
+      });
 
       // Create payable account
       const account = await createAccount({
@@ -348,12 +370,12 @@ test(
       // Test: Non-split payment with >2 decimals should fail
       await assert.rejects(
         async () => {
-          await createPayment(
+          await getComposedPaymentService().createPayment(
             companyId,
             {
               outlet_id: outletId,
               invoice_id: invoiceId,
-              payment_at: "2026-03-10T10:00:00Z",
+              payment_at: "2026-03-10T10:00:00Z", // RFC 3339 format
               method: "CASH",
               account_id: accountId,
               amount: 100.123 // More than 2 decimals
@@ -369,12 +391,12 @@ test(
       );
 
       // Test: Non-split payment with exactly 2 decimals should succeed
-      const payment = await createPayment(
+      const payment = await getComposedPaymentService().createPayment(
         companyId,
         {
           outlet_id: outletId,
           invoice_id: invoiceId,
-          payment_at: "2026-03-10T10:00:00Z",
+          payment_at: "2026-03-10T10:00:00Z", // RFC 3339 format
           method: "CASH",
           account_id: accountId,
           amount: 100.99

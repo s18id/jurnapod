@@ -17,18 +17,12 @@ import {
   SalesPaymentListQuerySchema
 } from "@jurnapod/shared";
 import {
-  createPayment,
-  getPayment,
-  updatePayment,
-  postPayment,
-  listPayments,
-  PaymentAllocationError
-} from "@/lib/payments";
-import {
+  PaymentAllocationError,
   DatabaseConflictError,
-  DatabaseForbiddenError,
-  DatabaseReferenceError
+  DatabaseReferenceError,
+  DatabaseForbiddenError
 } from "@jurnapod/modules-sales";
+import { getComposedPaymentService } from "@/lib/modules-sales/payment-service-composition";
 import { PaymentVarianceConfigError } from "@/lib/sales-posting";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { requireAccess } from "@/lib/auth-guard";
@@ -84,7 +78,7 @@ paymentRoutes.get("/", async (c) => {
     const company = await getCompany(auth.companyId);
     const timezone = company.timezone ?? 'UTC';
 
-    const report = await listPayments(auth.companyId, {
+    const report = await getComposedPaymentService().listPayments(auth.companyId, {
       outletIds,
       status: parsed.status,
       dateFrom: parsed.date_from,
@@ -127,7 +121,7 @@ paymentRoutes.get("/:id", async (c) => {
     }
 
     const paymentId = NumericIdSchema.parse(c.req.param("id"));
-    const payment = await getPayment(auth.companyId, paymentId);
+    const payment = await getComposedPaymentService().getPayment(auth.companyId, paymentId);
 
     if (!payment) {
       return errorResponse("NOT_FOUND", "Payment not found", 404);
@@ -168,7 +162,7 @@ paymentRoutes.patch("/:id", async (c) => {
     }
 
     // Validate outlet access before updating
-    const existingPayment = await getPayment(auth.companyId, paymentId);
+    const existingPayment = await getComposedPaymentService().getPayment(auth.companyId, paymentId);
     if (!existingPayment) {
       return errorResponse("NOT_FOUND", "Payment not found", 404);
     }
@@ -180,7 +174,7 @@ paymentRoutes.patch("/:id", async (c) => {
 
     const updateData = payload as Record<string, unknown>;
     
-    const updatedPayment = await updatePayment(auth.companyId, paymentId, {
+    const updatedPayment = await getComposedPaymentService().updatePayment(auth.companyId, paymentId, {
       outlet_id: updateData.outlet_id as number | undefined,
       invoice_id: updateData.invoice_id as number | undefined,
       payment_no: updateData.payment_no as string | undefined,
@@ -267,7 +261,7 @@ paymentRoutes.post("/:id/post", async (c) => {
     }
 
     // Check payment exists and user has outlet access
-    const existingPayment = await getPayment(auth.companyId, paymentId);
+    const existingPayment = await getComposedPaymentService().getPayment(auth.companyId, paymentId);
     if (!existingPayment) {
       return errorResponse("NOT_FOUND", "Payment not found", 404);
     }
@@ -277,7 +271,7 @@ paymentRoutes.post("/:id/post", async (c) => {
       return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
 
-    const postedPayment = await postPayment(auth.companyId, paymentId, { userId: auth.userId }, postOptions);
+    const postedPayment = await getComposedPaymentService().postPayment(auth.companyId, paymentId, { userId: auth.userId }, postOptions);
 
     if (!postedPayment) {
       return errorResponse("NOT_FOUND", "Payment not found", 404);
@@ -347,7 +341,7 @@ paymentRoutes.post("/", async (c) => {
       return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
 
-    const payment = await createPayment(auth.companyId, input, {
+    const payment = await getComposedPaymentService().createPayment(auth.companyId, input, {
       userId: auth.userId
     });
 

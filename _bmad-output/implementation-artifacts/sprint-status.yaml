@@ -315,3 +315,11 @@ development_status:
   27-4-move-stock-transaction-resolution-modules-inventory: done
   27-5-implement-phase2-pos-sync-replace-stubs: done
   27-6-api-simplification-full-validation-gate: done
+
+  # Epic 28: Sales Payments Extraction
+  epic-28: done
+  28-1-contract-permission-alignment: done
+  28-2-payment-service-parity-hardening: done
+  28-3-payment-posting-hook-transaction-safe: done
+  28-4-api-route-flip-library-cleanup: done
+  28-5-full-validation-gate: done

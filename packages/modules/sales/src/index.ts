@@ -57,6 +57,10 @@ export {
   SalesAuthorizationError
 } from "./interfaces/access-scope-checker.js";
 
+export {
+  type PaymentPostingHook
+} from "./interfaces/payment-posting-hook.js";
+
 // Re-export repository interfaces for API adapter implementation
 export type {
   // Invoice types re-exported for posting integration
@@ -127,7 +131,8 @@ export type {
   UpdatePaymentInput,
   PostPaymentInput,
   PaymentListFilters,
-  CanonicalPaymentInput
+  CanonicalPaymentInput,
+  JournalPostingResult
 } from "./types/payments.js";
 
 export {
@@ -162,6 +167,12 @@ export {
   createCreditNoteService,
   type CreditNoteService,
   type CreditNoteServiceDeps
+} from "./services/index.js";
+
+export {
+  createPaymentService,
+  type PaymentService,
+  type PaymentServiceDeps
 } from "./services/index.js";
 
 // Module stub for type-level marker

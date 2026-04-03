@@ -42,6 +42,8 @@ function mapSalesPermissionToModulePermission(
     // Payment permissions
     "payments:create": { module: "payments", permission: "create" },
     "payments:read": { module: "payments", permission: "read" },
+    "payments:update": { module: "payments", permission: "update" },
+    "payments:post": { module: "payments", permission: "update" },
     // Credit note permissions
     "credit_notes:create": { module: "credit_notes", permission: "create" },
     "credit_notes:read": { module: "credit_notes", permission: "read" },

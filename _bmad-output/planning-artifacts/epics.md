@@ -35,12 +35,12 @@
 | Epic | Title | Status | Sprint Plan |
 |------|-------|--------|-------------|
 | Epic 27 | POS Sync Push Boundary Completion | done | epic-27-sprint-plan |
+| Epic 28 | Sales Payments Extraction | done | epic-28-sprint-plan |
 
 ## Backlog
 
 | Epic | Title | Status | Sprint Plan |
 |------|-------|--------|-------------|
-| Epic 28 | Sales Payments Extraction | backlog | TBD |
 | Epic 29 | Fixed Assets / Depreciation | backlog | TBD |
 
 

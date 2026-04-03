@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import { describe, test, before, after } from "node:test";
 import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
 import { closeDbPool, getDb } from "../../lib/db";
-import { listPayments } from "../../lib/payments/payment-service";
+import { getComposedPaymentService } from "../../lib/modules-sales/payment-service-composition";
 import type { SalesPayment } from "@jurnapod/modules-sales";
 import { sql } from "kysely";
 
@@ -109,7 +109,7 @@ describe("Sales Payment Routes", { concurrency: false }, () => {
 
   describe("List Payments", () => {
     test("returns payments for company", async () => {
-      const result = await listPayments(testCompanyId, {
+      const result = await getComposedPaymentService().listPayments(testCompanyId, {
         outletIds: [testOutletId],
         limit: 10
       });
@@ -119,7 +119,7 @@ describe("Sales Payment Routes", { concurrency: false }, () => {
     });
 
     test("filters by status", async () => {
-      const result = await listPayments(testCompanyId, {
+      const result = await getComposedPaymentService().listPayments(testCompanyId, {
         outletIds: [testOutletId],
         status: "POSTED",
         limit: 10
@@ -133,7 +133,7 @@ describe("Sales Payment Routes", { concurrency: false }, () => {
 
     test("enforces company scoping - cannot see other company payments", async () => {
       // Query with a different company ID should return empty
-      const result = await listPayments(999999, {
+      const result = await getComposedPaymentService().listPayments(999999, {
         outletIds: [],
         limit: 10
       });
@@ -150,7 +150,7 @@ describe("Sales Payment Routes", { concurrency: false }, () => {
   describe("Company Scoping Enforcement", () => {
     test("payments are scoped to company", async () => {
       // List payments and verify they all belong to test company
-      const result = await listPayments(testCompanyId, {
+      const result = await getComposedPaymentService().listPayments(testCompanyId, {
         outletIds: [testOutletId],
         limit: 10
       });

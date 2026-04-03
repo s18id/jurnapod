@@ -34,3 +34,9 @@ export {
   type CreditNoteService,
   type CreditNoteServiceDeps
 } from "./credit-note-service.js";
+
+export {
+  createPaymentService,
+  type PaymentService,
+  type PaymentServiceDeps
+} from "./payment-service.js";

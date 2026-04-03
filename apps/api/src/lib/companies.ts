@@ -92,6 +92,11 @@ const MODULE_DEFINITIONS = [
     description: "Sales invoices"
   },
   {
+    code: "payments",
+    name: "Payments",
+    description: "Payment processing and management"
+  },
+  {
     code: "inventory",
     name: "Inventory",
     description: "Stock movements and recipes"
@@ -153,6 +158,7 @@ const MODULE_ROLE_DEFAULTS = [
   { roleCode: "SUPER_ADMIN", module: "journals", permissionMask: 15 },
   { roleCode: "SUPER_ADMIN", module: "cash_bank", permissionMask: 15 },
   { roleCode: "SUPER_ADMIN", module: "sales", permissionMask: 15 },
+  { roleCode: "SUPER_ADMIN", module: "payments", permissionMask: 15 },
   { roleCode: "SUPER_ADMIN", module: "inventory", permissionMask: 15 },
   { roleCode: "SUPER_ADMIN", module: "purchasing", permissionMask: 15 },
   { roleCode: "SUPER_ADMIN", module: "reports", permissionMask: 15 },
@@ -166,6 +172,7 @@ const MODULE_ROLE_DEFAULTS = [
   { roleCode: "OWNER", module: "journals", permissionMask: 15 },
   { roleCode: "OWNER", module: "cash_bank", permissionMask: 15 },
   { roleCode: "OWNER", module: "sales", permissionMask: 15 },
+  { roleCode: "OWNER", module: "payments", permissionMask: 15 },
   { roleCode: "OWNER", module: "inventory", permissionMask: 15 },
   { roleCode: "OWNER", module: "purchasing", permissionMask: 15 },
   { roleCode: "OWNER", module: "reports", permissionMask: 15 },
@@ -179,6 +186,7 @@ const MODULE_ROLE_DEFAULTS = [
   { roleCode: "COMPANY_ADMIN", module: "journals", permissionMask: 15 },
   { roleCode: "COMPANY_ADMIN", module: "cash_bank", permissionMask: 15 },
   { roleCode: "COMPANY_ADMIN", module: "sales", permissionMask: 15 },
+  { roleCode: "COMPANY_ADMIN", module: "payments", permissionMask: 15 },
   { roleCode: "COMPANY_ADMIN", module: "inventory", permissionMask: 15 },
   { roleCode: "COMPANY_ADMIN", module: "purchasing", permissionMask: 0 },
   { roleCode: "COMPANY_ADMIN", module: "reports", permissionMask: 2 },
@@ -192,6 +200,7 @@ const MODULE_ROLE_DEFAULTS = [
   { roleCode: "ADMIN", module: "journals", permissionMask: 15 },
   { roleCode: "ADMIN", module: "cash_bank", permissionMask: 15 },
   { roleCode: "ADMIN", module: "sales", permissionMask: 15 },
+  { roleCode: "ADMIN", module: "payments", permissionMask: 15 },
   { roleCode: "ADMIN", module: "inventory", permissionMask: 15 },
   { roleCode: "ADMIN", module: "purchasing", permissionMask: 15 },
   { roleCode: "ADMIN", module: "reports", permissionMask: 2 },
@@ -205,6 +214,7 @@ const MODULE_ROLE_DEFAULTS = [
   { roleCode: "CASHIER", module: "journals", permissionMask: 0 },
   { roleCode: "CASHIER", module: "cash_bank", permissionMask: 0 },
   { roleCode: "CASHIER", module: "sales", permissionMask: 3 },
+  { roleCode: "CASHIER", module: "payments", permissionMask: 3 },
   { roleCode: "CASHIER", module: "inventory", permissionMask: 2 },
   { roleCode: "CASHIER", module: "purchasing", permissionMask: 0 },
   { roleCode: "CASHIER", module: "reports", permissionMask: 2 },
@@ -218,6 +228,7 @@ const MODULE_ROLE_DEFAULTS = [
   { roleCode: "ACCOUNTANT", module: "journals", permissionMask: 2 },
   { roleCode: "ACCOUNTANT", module: "cash_bank", permissionMask: 3 },
   { roleCode: "ACCOUNTANT", module: "sales", permissionMask: 2 },
+  { roleCode: "ACCOUNTANT", module: "payments", permissionMask: 2 },
   { roleCode: "ACCOUNTANT", module: "inventory", permissionMask: 0 },
   { roleCode: "ACCOUNTANT", module: "purchasing", permissionMask: 2 },
   { roleCode: "ACCOUNTANT", module: "reports", permissionMask: 2 },
