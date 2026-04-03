@@ -1,20 +1,31 @@
 # AGENTS.md
 
-Important:
-- Never commit unless explicitly asked.
+> **Important**: Never commit unless explicitly asked.
 
-Routing:
-- product discovery, research, briefs -> @bmad-analyst
-- PRD creation, validation, epics, course correction -> @bmad-pm
-- architecture, technical design, implementation-readiness -> @bmad-architect
-- sprint planning, story creation, sprint coordination -> @bmad-sm
-- story implementation and code changes -> @bmad-dev
-- code review, adversarial review, and implementation validation -> @bmad-review
-- test generation for existing features -> @bmad-qa
-- quick flow and solo-dev execution -> @bmad-master
-- UX design workflows -> @bmad-ux-designer
-- documentation and editorial work -> @bmad-tech-writer
-- advanced test strategy, NFRs, CI, and traceability -> @bmad-testarch
+---
+
+## Agent Routing
+
+| When you need... | Use this agent |
+|------------------|----------------|
+| Implement a story (from spec) | `bmad-dev-story` |
+| Quick code change / bug fix | `bmad-quick-dev` |
+| Solo dev on a task | `bmad-quick-flow-solo-dev` |
+| Code review | `bmad-code-review` |
+| Edge case review | `bmad-review-edge-case-hunter` |
+| Test strategy / plan | `bmad-testarch-test-design` |
+| Generate unit/integration tests | `bmad-qa-generate-tests` |
+| Generate e2e tests | `bmad-qa-generate-e2e-tests` |
+| New feature requirements (PRD) | `bmad-create-prd` |
+| Architecture / tech design | `bmad-create-architecture` |
+| Break down requirements into stories | `bmad-create-epics-and-stories` |
+| Product management | `bmad-pm` |
+| Sprint planning | `bmad-sprint-planning` |
+| Sprint status | `bmad-sprint-status` |
+| Document existing project | `bmad-document-project` |
+| Technical writing | `bmad-tech-writer` |
+
+---
 
 ## Standardized Document Paths
 
@@ -24,530 +35,175 @@ Routing:
 | Stories | `_bmad-output/implementation-artifacts/stories/epic-{N}/story-{N}.{M}.md` |
 | Story completion notes | `_bmad-output/implementation-artifacts/stories/epic-{N}/story-{N}.{M}.completion.md` |
 | Tech specs | `docs/tech-specs/{name}.md` |
-| Epics | `docs/tech-specs/` (included in tech specs) |
 | ADRs | `docs/adr/adr-{NNN}-{slug}.md` |
 | Sprint planning artifacts | `_bmad-output/planning-artifacts/` |
-| BMAD output | `_bmad-output/` |
+
+---
 
 ## Product
-- Product: Jurnapod
-- Tagline: From cashier to ledger.
 
-## Repo-wide operating principles
-- This is a modular ERP monorepo.
-- Accounting/GL is the financial source of truth.
-- POS is offline-first and must remain safe under retries and unstable networks.
-- Shared contracts should stay aligned across apps and packages.
-- Favor correctness, auditability, and tenant isolation over cosmetic cleanup.
+- **Product**: Jurnapod
+- **Tagline**: From cashier to ledger.
+- **Type**: Modular ERP monorepo
+- **Financial center**: Accounting/GL is the source of truth
+- **POS**: Offline-first, safe under retries and unstable networks
 
-## Sync contract and versioning (canonical)
-- **Single protocol source of truth:**
-  - Sync pull request cursor: `since_version`
-  - Sync pull response cursor: `data_version`
-- Do **NOT** introduce alternative/alias protocol fields such as `sync_data_version` unless there is an explicit versioned API migration plan approved in architecture docs.
-- **Single storage source of truth:** `sync_versions` table.
-  - Data-sync version row uses `tier IS NULL`.
-  - Tiered sync rows use explicit tier values (`MASTER`, `OPERATIONAL`, `REALTIME`, `ADMIN`, `ANALYTICS`).
-- New code, tests, and migrations must not reintroduce runtime dependency on legacy tables `sync_data_versions` or `sync_tier_versions`.
+---
 
-## Database compatibility
-- All schema and migration SQL must run on both MySQL 8.0+ and MariaDB.
-- Keep migrations rerunnable/idempotent because MySQL-family DDL is non-atomic.
-- Avoid MySQL/MariaDB syntax drift in migrations (for example, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` is not portable across engines/versions).
-- For additive rerunnable DDL, prefer `information_schema` existence checks plus guarded dynamic `ALTER TABLE` statements.
+## Repo-Wide Operating Principles
 
-## Reservation time schema (canonical)
-- Canonical reservation time uses unix milliseconds in `BIGINT` columns:
-  - `reservation_start_ts` (source of truth for reporting and date-range filtering)
-  - `reservation_end_ts` (source of truth for calendar windows and overlap checks)
-- Keep API compatibility field `reservation_at`, but derive it from `reservation_start_ts` (do not treat legacy DATETIME parsing as canonical).
-- Overlap rule must remain `a_start < b_end && b_start < a_end`; `end == next start` is non-overlap.
-- Date-only filtering must resolve timezone in order `outlet -> company`; no UTC fallback for missing timezone.
-- Query/index rule: never wrap indexed timestamp columns in SQL functions; apply functions only on constants (or pass numeric boundaries from app layer).
-- For legacy rows with `duration_minutes IS NULL`, backfill `reservation_end_ts` using effective company default duration at migration time and freeze historical values.
+1. **Accounting/GL at the center** — Final business documents must reconcile to journal effects
+2. **POS offline-first** — Write locally first, sync via outbox
+3. **POS idempotency** — Use `client_tx_id` to prevent duplicates
+4. **Tenant isolation** — All data scoped to `company_id` and `outlet_id`
+5. **Finalized records are immutable** — Use `VOID` and `REFUND`, not silent mutation
+6. **Shared contracts** — Stay aligned across apps and packages
 
-## Import path conventions
-- Use `@/` alias for imports from `apps/api/src/`
+---
+
+## Canonical Sync Contract (MANDATORY)
+
+All sync operations must use these field names:
+
+| Direction | Field | Description |
+|-----------|-------|-------------|
+| Pull request cursor | `since_version` | Request data since this version |
+| Pull response cursor | `data_version` | Version of returned data |
+
+**Rules:**
+- ❌ Do **NOT** use alias fields like `sync_data_version`
+- ❌ Do **NOT** depend on legacy tables `sync_data_versions` or `sync_tier_versions`
+- ✅ Use `sync_versions` table as single storage authority:
+  - Data-sync version row: `tier IS NULL`
+  - Tiered sync rows: explicit `tier` value (`MASTER`, `OPERATIONAL`, `REALTIME`, `ADMIN`, `ANALYTICS`)
+
+---
+
+## Database Compatibility
+
+- All schema/SQL must run on **MySQL 8.0+** and **MariaDB**
+- Keep migrations **rerunnable/idempotent** (MySQL-family DDL is non-atomic)
+- Avoid `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` (not portable)
+- Use `information_schema` existence checks + guarded `ALTER TABLE`
+
+---
+
+## Canonical Reservation Time Schema
+
+- **Storage**: Unix milliseconds in `BIGINT` columns
+  - `reservation_start_ts` — Source of truth for reporting and date-range filtering
+  - `reservation_end_ts` — Source of truth for calendar windows and overlap checks
+- **API compatibility**: `reservation_at` derived from `reservation_start_ts` (not canonical)
+- **Overlap rule**: `a_start < b_end && b_start < a_end` — `end == next start` is **non-overlap**
+- **Timezone resolution order**: `outlet.timezone` → `company.timezone` (no UTC fallback)
+- **Query/index rule**: Never wrap indexed timestamp columns in SQL functions; apply functions only on constants
+
+---
+
+## Import Path Conventions
+
+- Use `@/` alias for imports from `apps/api/src/`:
   - `@/lib/db` → `apps/api/src/lib/db`
   - `@/lib/auth-guard` → `apps/api/src/lib/auth-guard`
-  - `@/lib/response` → `apps/api/src/lib/response`
-- Do NOT use relative paths like `../../../../src/lib/` - they fail to resolve in some contexts.
-- Example: `import { getDbPool } from "@/lib/db";`
+- ❌ Do **NOT** use relative paths like `../../../../src/lib/`
+- Packages should use **relative imports** (no `@/` alias)
 
-## Review guidelines
+---
 
-### Severity
-- Treat anything that can cause incorrect ledger balances, duplicate posting, duplicate POS transaction creation, tenant data leakage, or auth bypass as P0/P1.
-- Treat missing validation on money movement, posting, sync, import, auth, or tenant/outlet scoping as P1.
-- Treat missing or broken tests for critical accounting, sync, auth, or migration logic as P1 when the PR changes those areas.
-- Do not dismiss findings as "minor" by default.
-- Do not tolerate or hand-wave issues as acceptable merely because they look small.
-- Review outputs should use risk-based severity language such as P0/P1/P2/P3 or blocker/actionable follow-up.
-- Avoid labels like "minor", "low priority", or "nice to have" unless tied to a concrete operational or maintenance risk.
-- Every review finding must either:
-  - map to a concrete risk in correctness, readability, maintainability, consistency, operability, or test confidence, or
-  - be explicitly marked out-of-scope with rationale.
-- Purely cosmetic comments should be omitted unless they create a real correctness, readability, maintainability, consistency, or workflow risk.
+## Review Guidelines
 
-### Global invariants
-- Accounting/GL stays the center: final business documents must reconcile to journal effects.
-- POS remains offline-first: write locally first, then sync via outbox.
-- POS sync must remain idempotent via `client_tx_id`.
-- Operational data must enforce `company_id`, and `outlet_id` where relevant.
-- Finalized records should prefer immutable correction flows such as `VOID` and `REFUND`, not silent mutation.
+### Severity Classification
 
-### Contracts and validation
-- Prefer shared TypeScript + Zod contracts in `packages/shared`.
-- Flag breaking payload or schema changes that are not reflected across all affected apps/packages.
-- Flag missing validation at API and sync boundaries.
+| Severity | Issue Examples |
+|----------|----------------|
+| **P0/P1** | Incorrect ledger balances, duplicate posting, duplicate POS transaction, tenant data leakage, auth bypass |
+| **P1** | Missing validation on money movement, posting, sync, import, auth, or tenant/outlet scoping |
+| **P1** | Missing/broken tests for critical accounting, sync, auth, or migration logic |
+| **P2/P3** | Concrete risks in readability, maintainability, consistency, operability |
 
-### Money and persistence
-- Do not use `FLOAT` or `DOUBLE` for money.
-- Watch for unsafe rounding or hidden drift.
-- Business-critical writes should be transactionally safe and auditable.
+> ⚠️ Do not dismiss findings as "minor" by default. Every review finding must map to a concrete risk or be explicitly marked out-of-scope.
 
-### Testing expectations
-- Expect focused tests when changing:
-  - accounting posting
-  - POS sync
-  - auth / tenant scoping
-  - imports
-  - migrations
-  - financial reports
-- For API integration tests, expect API-driven setup/mutations; DB only for cleanup/read-only verification.
-- Flag new code paths that filter `audit_logs` by `result` instead of `success`.
+### Global Invariants
 
-### Test Commands and Directory Structure
+- Accounting/GL stays at center — journals are the financial source of truth
+- POS remains offline-first with `client_tx_id` idempotency
+- Operational data must enforce `company_id` and `outlet_id`
+- Finalized records use `VOID`/`REFUND`, not silent mutation
 
-**Always run tests from the repository root directory `/home/ahmad/jurnapod`**
+### Money and Persistence
 
-**API Unit Tests:**
-```bash
-cd /home/ahmad/jurnapod
-npm run test:unit -w @jurnapod/api
-```
+- ❌ **Never** use `FLOAT` or `DOUBLE` for money
+- ✅ Use `DECIMAL(19,4)` or `BIGINT` (cents)
+- Business-critical writes must be transactionally safe
 
-**Run a Single Test File (recommended for development):**
-```bash
-cd /home/ahmad/jurnapod
-npm run test:unit:single -w @jurnapod/api <path-to-test-file-or-directory>
-```
+### Contracts and Validation
 
-**Examples:**
-```bash
-# Run sync push tests
-npm run test:unit:single -w @jurnapod/api src/routes/sync/push.test.ts
+- Prefer shared TypeScript + Zod contracts in `packages/shared`
+- Flag breaking payload or schema changes not reflected across all consumers
+- Flag missing validation at API and sync boundaries
 
-# Run sync pull tests
-npm run test:unit:single -w @jurnapod/api src/routes/sync/pull.test.ts
+### Testing Expectations
 
-# Run auth tests
-npm run test:unit:single -w @jurnapod/api src/lib/auth.test.ts
+Focused tests required when changing:
+- Accounting posting / journal balancing
+- POS sync / idempotency
+- Auth / tenant scoping
+- Imports and migrations
+- Financial reports
 
-# Run all tests in a directory
-npm run test:unit:single -w @jurnapod/api src/routes/sync/
+Flag code that filters `audit_logs` by `result` instead of `success`.
 
-# Run tests matching a glob pattern
-npm run test:unit:single -w @jurnapod/api "src/lib/*.test.ts"
-
-# Run a specific test file
-npm run test:unit:single -w @jurnapod/api src/routes/sync/sync.test.ts
-
-# Run multiple specific test files (space-delimited, each quoted)
-npm run test:unit:single -w @jurnapod/api "src/lib/a.test.ts" "src/lib/b.test.ts" "src/lib/c.test.ts"
-```
-
-**Scoped Test Runs (faster feedback during development):**
-```bash
-# Run only route tests (~25 files)
-npm run test:unit:routes -w @jurnapod/api
-
-# Run only lib tests (~75 files)
-npm run test:unit:lib -w @jurnapod/api
-
-# Run critical path only (auth, sync, posting) - recommended for PR gates
-npm run test:unit:critical -w @jurnapod/api
-
-# Run domain-specific tests
-npm run test:unit:sales -w @jurnapod/api      # orders, payments, invoices
-npm run test:unit:sync -w @jurnapod/api        # push, pull sync
-npm run test:unit:import -w @jurnapod/api      # import route + lib
-```
-
-**API Type Check:**
-```bash
-cd /home/ahmad/jurnapod
-npm run typecheck -w @jurnapod/api
-```
-
-**API Build:**
-```bash
-cd /home/ahmad/jurnapod
-npm run build -w @jurnapod/api
-```
-
-**API Lint:**
-```bash
-cd /home/ahmad/jurnapod
-npm run lint -w @jurnapod/api
-```
-
-**Important:**
-- Use `-w @jurnapod/api` flag to run commands in the API workspace
-- Do NOT change into `apps/api` subdirectory - commands must run from root
-- This ensures proper monorepo workspace resolution
-
-**Quick Validation Script (run all checks):**
-```bash
-cd /home/ahmad/jurnapod
-echo "=== Running API Type Check ===" && \
-npm run typecheck -w @jurnapod/api && \
-echo "✓ Type check passed" && \
-echo "" && \
-echo "=== Running API Build ===" && \
-npm run build -w @jurnapod/api && \
-echo "✓ Build passed" && \
-echo "" && \
-echo "=== Running API Lint ===" && \
-npm run lint -w @jurnapod/api && \
-echo "✓ Lint passed" && \
-echo "" && \
-echo "=== Running API Unit Tests ===" && \
-npm run test:unit -w @jurnapod/api && \
-echo "✓ All tests passed"
-```
-
-**Alternative: Run all API validation in sequence:**
-```bash
-cd /home/ahmad/jurnapod
-npm run typecheck -w @jurnapod/api && npm run build -w @jurnapod/api && npm run lint -w @jurnapod/api && npm run test:unit -w @jurnapod/api
-```
-
-**Alternative: Run all API validation in sequence:**
-```bash
-cd /home/ahmad/jurnapod
-npm run typecheck -w @jurnapod/api && npm run build -w @jurnapod/api && npm run lint -w @jurnapod/api && npm run test:unit -w @jurnapod/api
-```
-
-### Backoffice Testing Commands
-
-**Backoffice Type Check:**
-```bash
-cd /home/ahmad/jurnapod
-npm run typecheck -w @jurnapod/backoffice
-```
-
-**Backoffice Build:**
-```bash
-cd /home/ahmad/jurnapod
-npm run build -w @jurnapod/backoffice
-```
-
-**Backoffice Lint:**
-```bash
-cd /home/ahmad/jurnapod
-npm run lint -w @jurnapod/backoffice
-```
-
-**Backoffice Tests:**
-```bash
-cd /home/ahmad/jurnapod
-npm run test -w @jurnapod/backoffice
-```
-
-### POS Testing Commands
-
-**POS Type Check:**
-```bash
-cd /home/ahmad/jurnapod
-npm run typecheck -w @jurnapod/pos
-```
-
-**POS Build:**
-```bash
-cd /home/ahmad/jurnapod
-npm run build -w @jurnapod/pos
-```
-
-**POS Lint:**
-```bash
-cd /home/ahmad/jurnapod
-npm run lint -w @jurnapod/pos
-```
-
-**POS Unit Tests:**
-```bash
-cd /home/ahmad/jurnapod
-npm run test -w @jurnapod/pos
-```
-
-**POS E2E Tests (requires build and running server):**
-```bash
-cd /home/ahmad/jurnapod
-# First install Playwright browsers (one-time setup)
-npm run qa:e2e:install -w @jurnapod/pos
-# Then run E2E tests
-npm run qa:e2e -w @jurnapod/pos
-```
-
-### Testing Command Summary by Workspace
-
-| Workspace | Type Check | Build | Lint | Unit Tests | Single Test | E2E Tests |
-|-----------|------------|-------|------|------------|-------------|-----------|
-| **API** | `npm run typecheck -w @jurnapod/api` | `npm run build -w @jurnapod/api` | `npm run lint -w @jurnapod/api` | `npm run test:unit -w @jurnapod/api` | `npm run test:unit:single -w @jurnapod/api <file>` | — |
-| **Backoffice** | `npm run typecheck -w @jurnapod/backoffice` | `npm run build -w @jurnapod/backoffice` | `npm run lint -w @jurnapod/backoffice` | `npm run test -w @jurnapod/backoffice` | — | — |
-| **POS** | `npm run typecheck -w @jurnapod/pos` | `npm run build -w @jurnapod/pos` | `npm run lint -w @jurnapod/pos` | `npm run test -w @jurnapod/pos` | — | `npm run qa:e2e -w @jurnapod/pos` |
-| **@jurnapod/sync-core** | `npm run typecheck -w @jurnapod/sync-core` | `npm run build -w @jurnapod/sync-core` | — | — | — | — |
-| **@jurnapod/pos-sync** | `npm run typecheck -w @jurnapod/pos-sync` | `npm run build -w @jurnapod/pos-sync` | — | `npm run test:run -w @jurnapod/pos-sync` | — | — |
-| **@jurnapod/backoffice-sync** | `npm run typecheck -w @jurnapod/backoffice-sync` | `npm run build -w @jurnapod/backoffice-sync` | — | `npm run test:run -w @jurnapod/backoffice-sync` | — | — |
-
-### Sync Packages Testing Commands
-
-**POS Sync Package:**
-```bash
-cd /home/ahmad/jurnapod
-npm run typecheck -w @jurnapod/pos-sync
-npm run build -w @jurnapod/pos-sync
-npm run test:run -w @jurnapod/pos-sync
-```
-
-**Backoffice Sync Package:**
-```bash
-cd /home/ahmad/jurnapod
-npm run typecheck -w @jurnapod/backoffice-sync
-npm run build -w @jurnapod/backoffice-sync
-npm run test:run -w @jurnapod/backoffice-sync
-```
-
-**Sync Core Package (types only):**
-```bash
-cd /home/ahmad/jurnapod
-npm run typecheck -w @jurnapod/sync-core
-npm run build -w @jurnapod/sync-core
-```
-
-**API Scoped Unit Tests:**
-- `test:unit:routes` — route tests (~25 files)
-- `test:unit:lib` — lib tests (~75 files)
-- `test:unit:critical` — auth, sync, posting (PR gate candidate)
-- `test:unit:sales` — orders, payments, invoices
-- `test:unit:sync` — push, pull sync
-- `test:unit:import` — import route + lib
-
-**Current Status (as of last validation):**
-- **API**: ✅ All checks passing (TypeScript, Build, Lint, 765 unit tests including auth, sync routes, accounts, inventory, tax-rates, and roles routes)
-- **Backoffice**: ✅ Type check, lint, and build passing; route screens lazy-loaded and vendor chunks split to avoid large-bundle warnings
-- **POS**: ⚠️ TypeScript, lint, and build passing; unit tests still need separate follow-up validation
-
-### Test cleanup (CRITICAL)
-- **All unit tests using `getDbPool()` must close the pool after completion.**
-- Without cleanup, tests hang indefinitely.
-- Required pattern:
-  ```typescript
-  // Close database pool after all tests
-  test.after(async () => {
-    await closeDbPool();
-  });
-  ```
-- Flag any test file that uses database connections but lacks this cleanup hook.
+---
 
 ## Definition of Done (MANDATORY)
 
-**Before marking ANY story as DONE, the following MUST be completed:**
+Before marking ANY story as DONE:
 
-### Implementation Checklist
+### Implementation
 - [ ] All Acceptance Criteria implemented with evidence
-- [ ] No known technical debt (or debt items formally created in sprint-status.yaml)
-- [ ] Code follows repo-wide operating principles (see above)
 - [ ] No breaking changes without cross-package alignment
 
-### Testing Requirements
-- [ ] Unit tests written and passing (show test output in completion notes)
+### Testing
+- [ ] Unit tests written and passing
 - [ ] Integration tests for API boundaries
-- [ ] Error path/happy path testing completed
-- [ ] Database pool cleanup hooks present (see Test Cleanup section)
+- [ ] Database pool cleanup hooks present
 
-### Quality Gates
+### Quality
 - [ ] Code review completed with no blockers
-- [ ] AI review conducted (use `bmad-code-review` agent)
-- [ ] Review feedback addressed or formally deferred
+- [ ] AI review conducted (`bmad-code-review` agent)
 
 ### Documentation
 - [ ] Schema changes documented (if applicable)
 - [ ] API changes reflected in contracts
 - [ ] Dev Notes include files modified/created
 
-### Production Readiness
-- [ ] Feature is deployable (no feature flags hiding incomplete work)
-- [ ] No hardcoded values or secrets in code
-- [ ] Performance considerations addressed
+---
 
-### Completion Evidence
-Story completion notes MUST include:
-- List of files created/modified
-- Test execution evidence (passing tests)
-- Screenshots or logs for UI changes
-- Any known limitations or follow-up work
+## Per-Package Documentation
 
-**IMPORTANT**: A story marked "DONE" with incomplete items is technical debt. Debt compounds. Do it right or formally track it.
+Each package has its own `AGENTS.md` with:
+- Package-specific commands
+- Architecture patterns
+- Module organization
+- Coding standards
+- Review checklists
 
-## AI Model Configuration
-
-BMAD uses the following model strategy:
-- **Primary**: `minimax-coding-plan/MiniMax-M2.7` (your MiniMax.io subscription) - 75% of agents
-- **Context-critical**: `kimi-for-coding/k2p5` (integration, orchestration, review, architecture) - 25% of agents
-- **Code tasks**: `openai/gpt-5.1-codex-mini` (when available - currently exhausted)
-
-**Current Week Status**: Codex tokens exhausted. All code tasks using kimi-k2.5 with decomposition pattern.
-
-## Agent Model Allocation Strategy
-
-BMAD agents are distributed across three AI models for optimal cost-effectiveness:
-
-### Model Tiers
-
-| Model | Agents | Use Case | Cost |
-|-------|--------|----------|------|
-| **minimax-m2.5** | 30 (75%) | Narrow scope, standardized workflows, external data | Low |
-| **kimi-k2.5** | 12 (30%) | Context-critical, integration, orchestration, architecture | Medium |
-
-### Agent Assignments by Model
-
-**minimax-m2.5** (Narrow Scope - 30 agents):
-- Quick dev: `bmad-quick-dev`, `bmad-quick-flow-solo-dev`
-- Testing: All `bmad-testarch-*`, `bmad-qa-generate-tests`, `bmad-qa-generate-e2e-tests`, `bmad-qa-validate`
-- Research: `bmad-market-research`, `bmad-domain-research`, `bmad-technical-research`
-- Utility: `bmad-shard-doc`, `bmad-index-docs`, `bmad-tech-writer`
-- Analysis: `bmad-analyst`, `bmad-create-product-brief`, `bmad-brainstorming`
-- UX: `bmad-ux-designer`, `bmad-create-ux-design`
-
-**kimi-k2.5** (Context-Critical - 12 agents):
-- Core: `bmad-master`, `bmad-party-mode`, `bmad-help`
-- Dev: `bmad-dev`, `bmad-dev-story`
-- Management: `bmad-pm`, `bmad-sm`, `bmad-retrospective`, `bmad-sprint-planning`, `bmad-sprint-status`, `bmad-correct-course`
-- Documentation: `bmad-document-project`, `bmad-generate-project-context`
-- Review: All `bmad-code-review`, `bmad-review-*`, `bmad-editorial-review-*`
-- Architecture: `bmad-architect`, `bmad-create-architecture`
-
-### Delegation Pattern for Development Work
-
-**DO NOT** implement directly. Decompose and delegate:
-
-1. **Break into narrow chunks** (2-4 hours each)
-2. **Delegate to minimax agents** for implementation
-3. **Review with kimi-k2.5** for integration and quality
-4. **Iterate** on issues found
-
-**Example - "Build notification service" (8h):**
-- Delegate to `bmad-quick-dev`: "Create package structure" (30min)
-- Delegate to `bmad-quick-flow-solo-dev`: "Implement SendGrid provider" (1.5h)
-- Delegate to `bmad-quick-dev`: "Create template system" (1.5h)
-- Delegate to `bmad-quick-flow-solo-dev`: "Add retry logic" (1h)
-- Delegate to `bmad-dev`: "Create email templates" (1h)
-- Delegate to `bmad-qa-generate-tests`: "Write tests" (1h)
-- **Review with** `bmad-code-review`: Integration check (30min)
-
-**Maximizes throughput**: 75% of work on cheapest model, quality assured by review.
-
-### When to Use Each Tier
-
-**Use minimax when:**
-- Task is narrow and focused (< 4 hours)
-- Clear acceptance criteria exist
-- Standard patterns/templates apply
-- External data sources involved
-- Testing or documentation tasks
-
-**Use kimi-k2.5 when:**
-- Project context and history matter
-- Integration between components
-- Orchestrating multiple agents
-- Story/epic creation and planning
-- Code review (catches minimax issues)
-- Critical business logic
-
-## Agent delegation
-
-Use the `skill` tool to load the appropriate agent based on the model allocation above. If unsure what to do, use `bmad-help`.
-
-### Development & Implementation
-
-| When you need... | Use this agent |
-|------------------|----------------|
-| Implement a story (from spec) | `bmad-dev-story` |
-| Quick code change / bug fix | `bmad-quick-dev` |
-| Solo dev on a task | `bmad-quick-flow-solo-dev` |
-| Code review | `bmad-code-review` |
-| Edge case review | `bmad-review-edge-case-hunter` |
-
-### Requirements & Design
-
-| When you need... | Use this agent |
-|------------------|----------------|
-| New feature requirements (PRD) | `bmad-create-prd` |
-| Edit existing PRD | `bmad-edit-prd` |
-| Validate PRD | `bmad-validate-prd` |
-| Create architecture / tech design | `bmad-create-architecture` |
-| Create UX design specs | `bmad-create-ux-design` |
-| Break down requirements into stories | `bmad-create-epics-and-stories` |
-| Quick tech spec | `bmad-quick-spec` |
-| Product brief | `bmad-create-product-brief` |
-
-### Testing & Quality
-
-| When you need... | Use this agent |
-|------------------|----------------|
-| Test strategy / plan | `bmad-testarch-test-design` |
-| Setup test framework | `bmad-testarch-framework` |
-| Expand test coverage | `bmad-testarch-automate` |
-| Acceptance tests (TDD) | `bmad-testarch-atdd` |
-| Traceability matrix | `bmad-testarch-trace` |
-| Review test quality | `bmad-testarch-test-review` |
-| NFR assessment | `bmad-testarch-nfr` |
-| Setup CI pipeline | `bmad-testarch-ci` |
-| Generate e2e tests | `bmad-qa-generate-e2e-tests` |
-| Generate unit/integration tests | `bmad-qa-generate-tests` |
-| Validate against acceptance criteria | `bmad-qa-validate` |
-
-### Research & Analysis
-
-| When you need... | Use this agent |
-|------------------|----------------|
-| Market research | `bmad-market-research` |
-| Domain/industry research | `bmad-domain-research` |
-| Technical research | `bmad-technical-research` |
-| Sprint status | `bmad-sprint-status` |
-| Sprint planning | `bmad-sprint-planning` |
-
-### Product & Process
-
-| When you need... | Use this agent |
-|------------------|----------------|
-| Product management | `bmad-pm` |
-| Run retrospective | `bmad-retrospective` |
-| Brainstorming / ideation | `bmad-brainstorming` |
-| Correct course (sprint change) | `bmad-correct-course` |
-| Check implementation readiness | `bmad-check-implementation-readiness` |
-
-### Documentation
-
-| When you need... | Use this agent |
-|------------------|----------------|
-| Document existing project | `bmad-document-project` |
-| Generate project context | `bmad-generate-project-context` |
-| Shard large document | `bmad-shard-doc` |
-| Index docs folder | `bmad-index-docs` |
-| Tech writing | `bmad-tech-writer` |
-| Editorial review (prose) | `bmad-editorial-review-prose` |
-| Editorial review (structure) | `bmad-editorial-review-structure` |
-
-### Specialized
-
-| When you need... | Use this agent |
-|------------------|----------------|
-| Master orchestrator | `bmad-master` |
-| Analyst | `bmad-analyst` |
-| Adversarial review | `bmad-review-adversarial-general` |
-| Party mode (group discussion) | `bmad-party-mode` |
-| Advanced elicitation | `bmad-advanced-elicitation` |
-| Learn testing | `bmad-teach-me-testing` |
+| Package | AGENTS.md Location |
+|---------|-------------------|
+| `@jurnapod/auth` | `packages/auth/AGENTS.md` |
+| `@jurnapod/db` | `packages/db/AGENTS.md` |
+| `@jurnapod/pos-sync` | `packages/pos-sync/AGENTS.md` |
+| `@jurnapod/backoffice-sync` | `packages/backoffice-sync/AGENTS.md` |
+| `@jurnapod/sync-core` | `packages/sync-core/AGENTS.md` |
+| `@jurnapod/shared` | `packages/shared/AGENTS.md` |
+| `@jurnapod/notifications` | `packages/notifications/AGENTS.md` |
+| `@jurnapod/offline-db` | `packages/offline-db/AGENTS.md` |
+| `@jurnapod/telemetry` | `packages/telemetry/AGENTS.md` |
+| `@jurnapod/modules-accounting` | `packages/modules/accounting/AGENTS.md` |
+| `@jurnapod/modules-inventory` | `packages/modules/inventory/AGENTS.md` |
+| `@jurnapod/modules-inventory-costing` | `packages/modules/inventory-costing/AGENTS.md` |
+| `@jurnapod/modules-platform` | `packages/modules/platform/AGENTS.md` |
+| `@jurnapod/modules-reporting` | `packages/modules/reporting/AGENTS.md` |
+| `@jurnapod/modules-reservations` | `packages/modules/reservations/AGENTS.md` |
+| `@jurnapod/modules-sales` | `packages/modules/sales/AGENTS.md` |
+| `@jurnapod/modules-treasury` | `packages/modules/treasury/AGENTS.md` |
