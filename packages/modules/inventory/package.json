@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@jurnapod/db": "0.1.0",
+    "@jurnapod/modules-inventory-costing": "0.1.0",
     "@jurnapod/shared": "0.1.0"
   },
   "devDependencies": {

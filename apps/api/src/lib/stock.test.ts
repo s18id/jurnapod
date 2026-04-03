@@ -329,7 +329,7 @@ describe("Stock Service", { concurrency: false }, () => {
       const referenceId = `test-deduct-cost-${Date.now()}`;
 
       // Set up cost basis for the product (create inbound cost layer first)
-      const { createCostLayer } = await import("../lib/cost-tracking.js");
+      const { createCostLayer } = await import("@jurnapod/modules-inventory-costing");
       const inboundTxResult = await sql`
         INSERT INTO inventory_transactions 
         (company_id, outlet_id, product_id, transaction_type, quantity_delta, reference_type, reference_id, created_at)

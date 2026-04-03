@@ -6,15 +6,13 @@
  * 
  * Core stock operations with database transaction support.
  * - Basic stock operations delegate to @jurnapod/modules-inventory
- * - Cost-dependent operations (deductStockWithCost, restoreStock, adjustStock, 
- *   deductStockForSaleWithCogs) are implemented here since they depend on
- *   cost-tracking which is API-internal.
+ * - Cost-dependent operations (deductStockWithCost, restoreStock, adjustStock)
+ *   delegate to @jurnapod/modules-inventory via getStockService()
+ * - deductStockForSaleWithCogs stays in API (composes stock + COGS posting)
  */
 
 import { getDb, type KyselySchema } from "@/lib/db";
 import { sql } from "kysely";
-import { createCostLayer, deductWithCost } from "@/lib/cost-tracking";
-import type { DeductionResult, ItemCostResult } from "@/lib/cost-tracking";
 
 // Transaction type constants
 export const TransactionType = {
@@ -29,28 +27,8 @@ export const TransactionType = {
 
 export type TransactionTypeValue = typeof TransactionType[keyof typeof TransactionType];
 
-// Types (some from modules-inventory, some defined here for cost-tracking dependent operations)
-export type { StockItem, StockCheckResult, StockReservationResult, StockTransaction, StockLevel, LowStockAlert } from "@jurnapod/modules-inventory";
-
-// Types for cost-tracking dependent operations (defined here since modules-inventory doesn't have them)
-export interface StockDeductResult {
-  itemId: number;
-  quantity: number;
-  transactionId: number;
-  unitCost: number;
-  totalCost: number;
-  costResult: ItemCostResult;
-}
-
-export interface StockAdjustmentInput {
-  company_id: number;
-  outlet_id: number | null;
-  product_id: number;
-  adjustment_quantity: number;
-  reason: string;
-  reference_id?: string;
-  user_id: number;
-}
+// Types (re-exported from modules-inventory)
+export type { StockItem, StockCheckResult, StockReservationResult, StockTransaction, StockLevel, LowStockAlert, StockDeductResult, StockAdjustmentInput } from "@jurnapod/modules-inventory";
 
 export interface DeductStockForSaleInput {
   company_id: number;
@@ -78,7 +56,7 @@ export { InventoryConflictError, InventoryReferenceError, InventoryForbiddenErro
 
 // Import service from modules-inventory for basic operations
 import { getStockService } from "@jurnapod/modules-inventory";
-import type { StockItem, StockCheckResult, StockReservationResult, StockTransaction, StockLevel, LowStockAlert } from "@jurnapod/modules-inventory";
+import type { StockItem, StockCheckResult, StockReservationResult, StockTransaction, StockLevel, LowStockAlert, StockDeductResult, StockAdjustmentInput } from "@jurnapod/modules-inventory";
 
 async function withExecutorTransaction<T>(
   db: KyselySchema,
@@ -88,60 +66,6 @@ async function withExecutorTransaction<T>(
     return callback(db);
   }
   return db.transaction().execute(async (trx) => callback(trx as unknown as KyselySchema));
-}
-
-interface StockRow {
-  product_id: number;
-  outlet_id: number | null;
-  quantity: string;
-  reserved_quantity: string;
-  available_quantity: string;
-  updated_at: Date;
-}
-
-interface CostSummaryRow {
-  current_avg_cost: string | null;
-}
-
-interface PriceRow {
-  price: string | null;
-}
-
-/**
- * Resolve unit cost for inbound stock movements.
- */
-async function resolveInboundUnitCost(
-  db: KyselySchema,
-  companyId: number,
-  itemId: number
-): Promise<number> {
-  const costRows = await sql<CostSummaryRow>`
-    SELECT current_avg_cost
-    FROM inventory_item_costs
-    WHERE company_id = ${companyId} AND item_id = ${itemId}
-  `.execute(db);
-
-  const avgCost = costRows.rows[0]?.current_avg_cost;
-  if (avgCost !== null && avgCost !== undefined && Number(avgCost) > 0) {
-    return Number(avgCost);
-  }
-
-  const priceRows = await sql<PriceRow>`
-    SELECT price
-    FROM item_prices
-    WHERE company_id = ${companyId} AND item_id = ${itemId}
-    ORDER BY updated_at DESC, id DESC
-    LIMIT 1
-  `.execute(db);
-
-  const price = priceRows.rows[0]?.price;
-  if (price !== null && price !== undefined && Number(price) > 0) {
-    return Number(price);
-  }
-
-  throw new Error(
-    `Unable to determine unit cost for item ${itemId}. No cost history or pricing data available.`
-  );
 }
 
 // ============================================================================
@@ -307,7 +231,8 @@ export async function deductStock(
 }
 
 // ============================================================================
-// COST-DEPENDENT OPERATIONS - Implemented here (depend on cost-tracking)
+// COST-DEPENDENT OPERATIONS - Delegate to modules-inventory
+// deductStockForSaleWithCogs stays in API (composes stock + COGS posting)
 // ============================================================================
 
 /**
@@ -326,111 +251,11 @@ export async function deductStockWithCost(
   db?: KyselySchema
 ): Promise<StockDeductResult[]> {
   const database = db ?? getDb();
-
-  return withExecutorTransaction(database, async (trx) => {
-    // Phase 1: Validate stock and create inventory transactions (pre-created stockTxIds)
-    const stockTxItems: Array<{ itemId: number; qty: number; stockTxId: number; quantity: number }> = [];
-    
-    for (const item of items) {
-      const stockRows = await sql<StockRow>`
-        SELECT quantity, available_quantity
-        FROM inventory_stock
-        WHERE company_id = ${company_id}
-          AND product_id = ${item.product_id}
-          AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
-        ORDER BY outlet_id IS NULL ASC
-        LIMIT 1
-        FOR UPDATE
-      `.execute(trx);
-
-      if (stockRows.rows.length === 0) {
-        throw new Error(`Stock not found for product ${item.product_id} in company ${company_id}`);
-      }
-
-      const stock = stockRows.rows[0];
-      if (Number(stock.quantity) < item.quantity) {
-        throw new Error(
-          `Insufficient stock for product ${item.product_id}: ` +
-          `requested ${item.quantity}, available ${stock.quantity}`
-        );
-      }
-
-      const txResult = await sql`
-        INSERT INTO inventory_transactions (
-          company_id,
-          outlet_id,
-          transaction_type,
-          reference_type,
-          reference_id,
-          product_id,
-          quantity_delta,
-          created_at
-        ) VALUES (${company_id}, ${outlet_id}, ${TransactionType.SALE}, 'SALE', ${reference_id}, ${item.product_id}, ${-item.quantity}, CURRENT_TIMESTAMP)
-      `.execute(trx);
-      const transactionId = Number(txResult.insertId);
-
-      stockTxItems.push({
-        itemId: item.product_id,
-        qty: item.quantity,
-        stockTxId: transactionId,
-        quantity: item.quantity
-      });
-    }
-
-    // Phase 2: Update stock quantities
-    for (const item of items) {
-      const updateResult = await sql`
-        UPDATE inventory_stock
-        SET quantity = quantity - ${item.quantity},
-            available_quantity = available_quantity - ${item.quantity},
-            updated_at = CURRENT_TIMESTAMP
-        WHERE company_id = ${company_id}
-          AND product_id = ${item.product_id}
-          AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
-          AND quantity >= ${item.quantity}
-      `.execute(trx);
-
-      if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
-        throw new Error(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
-      }
-    }
-
-    // Phase 3: Delegate cost calculation to costing package using stockTxId pattern
-    const deductionInput = stockTxItems.map(i => ({
-      itemId: i.itemId,
-      qty: i.qty,
-      stockTxId: i.stockTxId
-    }));
-
-    const deductionResult: DeductionResult = await deductWithCost(
-      company_id,
-      deductionInput,
-      trx as unknown as KyselySchema
-    );
-
-    // Phase 4: Build results matching existing StockDeductResult interface
-    // Map stockTxIds back to their corresponding items using the order
-    const results: StockDeductResult[] = [];
-    for (let i = 0; i < stockTxItems.length; i++) {
-      const stockTxItem = stockTxItems[i];
-      const costItem = deductionResult.itemCosts.find(c => c.stockTxId === stockTxItem.stockTxId);
-      
-      if (!costItem) {
-        throw new Error(`Cost calculation missing for item ${stockTxItem.itemId}`);
-      }
-
-      results.push({
-        itemId: stockTxItem.itemId,
-        quantity: stockTxItem.quantity,
-        transactionId: stockTxItem.stockTxId,
-        unitCost: costItem.unitCost,
-        totalCost: costItem.totalCost,
-        costResult: costItem,
-      });
-    }
-
-    return results;
-  });
+  const service = getStockService(database);
+  return service.deductStockWithCost(
+    { company_id, outlet_id, items, reference_id, user_id },
+    database
+  );
 }
 
 /**
@@ -520,62 +345,11 @@ export async function restoreStock(
   db?: KyselySchema
 ): Promise<boolean> {
   const database = db ?? getDb();
-
-  return withExecutorTransaction(database, async (trx) => {
-    for (const item of items) {
-      const updateResult = await sql`
-        UPDATE inventory_stock
-        SET quantity = quantity + ${item.quantity},
-            available_quantity = available_quantity + ${item.quantity},
-            updated_at = CURRENT_TIMESTAMP
-        WHERE company_id = ${company_id}
-          AND product_id = ${item.product_id}
-          AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
-      `.execute(trx);
-
-      if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
-        await sql`
-          INSERT INTO inventory_stock (
-            company_id,
-            outlet_id,
-            product_id,
-            quantity,
-            reserved_quantity,
-            available_quantity,
-            created_at,
-            updated_at
-          ) VALUES (${company_id}, ${outlet_id}, ${item.product_id}, ${item.quantity}, 0, ${item.quantity}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        `.execute(trx);
-      }
-
-      const txResult = await sql`
-        INSERT INTO inventory_transactions (
-          company_id,
-          outlet_id,
-          transaction_type,
-          reference_type,
-          reference_id,
-          product_id,
-          quantity_delta,
-          created_at
-        ) VALUES (${company_id}, ${outlet_id}, ${TransactionType.REFUND}, 'REFUND', ${reference_id}, ${item.product_id}, ${item.quantity}, CURRENT_TIMESTAMP)
-      `.execute(trx);
-
-      const unitCost = await resolveInboundUnitCost(trx as unknown as KyselySchema, company_id, item.product_id);
-      await createCostLayer(
-        {
-          companyId: company_id,
-          itemId: item.product_id,
-          transactionId: Number(txResult.insertId),
-          unitCost,
-          quantity: item.quantity,
-        },
-        trx as unknown as KyselySchema
-      );
-    }
-
-    return true;
-  });
+  const service = getStockService(database);
+  return service.restoreStock(
+    { company_id, outlet_id, items, reference_id, user_id },
+    database
+  );
 }
 
 /**
@@ -585,92 +359,7 @@ export async function adjustStock(
   input: StockAdjustmentInput,
   db?: KyselySchema
 ): Promise<boolean> {
-  const { company_id, outlet_id, product_id, adjustment_quantity, reference_id } = input;
   const database = db ?? getDb();
-
-  return withExecutorTransaction(database, async (trx) => {
-    const stockRows = await sql<StockRow>`
-      SELECT quantity, reserved_quantity, available_quantity
-      FROM inventory_stock
-      WHERE company_id = ${company_id}
-        AND product_id = ${product_id}
-        AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
-      ORDER BY outlet_id IS NULL ASC
-      LIMIT 1
-      FOR UPDATE
-    `.execute(trx);
-
-    let currentQty = 0;
-    let currentReserved = 0;
-
-    if (stockRows.rows.length > 0) {
-      currentQty = Number(stockRows.rows[0].quantity);
-      currentReserved = Number(stockRows.rows[0].reserved_quantity);
-    }
-
-    const newQty = currentQty + adjustment_quantity;
-    const newAvailable = newQty - currentReserved;
-
-    if (newQty < 0) {
-      return false;
-    }
-
-    if (stockRows.rows.length > 0) {
-      const updateResult = await sql`
-        UPDATE inventory_stock
-        SET quantity = ${newQty},
-            available_quantity = ${newAvailable},
-            updated_at = CURRENT_TIMESTAMP
-        WHERE company_id = ${company_id}
-          AND product_id = ${product_id}
-          AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
-      `.execute(trx);
-
-      if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
-        return false;
-      }
-    } else {
-      await sql`
-        INSERT INTO inventory_stock (
-          company_id,
-          outlet_id,
-          product_id,
-          quantity,
-          reserved_quantity,
-          available_quantity,
-          created_at,
-          updated_at
-        ) VALUES (${company_id}, ${outlet_id}, ${product_id}, ${newQty}, 0, ${newAvailable}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      `.execute(trx);
-    }
-
-    const txResult = await sql`
-      INSERT INTO inventory_transactions (
-        company_id,
-        outlet_id,
-        transaction_type,
-        reference_type,
-        reference_id,
-        product_id,
-        quantity_delta,
-        created_at
-      ) VALUES (${company_id}, ${outlet_id}, ${TransactionType.ADJUSTMENT}, 'ADJUSTMENT', ${reference_id ?? `ADJ-${Date.now()}`}, ${product_id}, ${adjustment_quantity}, CURRENT_TIMESTAMP)
-    `.execute(trx);
-
-    if (adjustment_quantity > 0) {
-      const unitCost = await resolveInboundUnitCost(trx as unknown as KyselySchema, company_id, product_id);
-      await createCostLayer(
-        {
-          companyId: company_id,
-          itemId: product_id,
-          transactionId: Number(txResult.insertId),
-          unitCost,
-          quantity: adjustment_quantity,
-        },
-        trx as unknown as KyselySchema
-      );
-    }
-
-    return true;
-  });
+  const service = getStockService(database);
+  return service.adjustStock(input, database);
 }

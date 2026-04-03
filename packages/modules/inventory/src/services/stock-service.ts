@@ -15,6 +15,8 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import { getInventoryDb } from "../db.js";
+import { createCostLayer, deductWithCost } from "@jurnapod/modules-inventory-costing";
+import type { DeductionResult, ItemCostResult } from "@jurnapod/modules-inventory-costing";
 import type {
   StockService,
   StockItem,
@@ -22,7 +24,11 @@ import type {
   StockReservationResult,
   StockTransaction,
   StockLevel,
-  LowStockAlert
+  LowStockAlert,
+  StockDeductResult,
+  DeductStockInput,
+  RestoreStockInput,
+  StockAdjustmentInput
 } from "../interfaces/stock-service.js";
 import {
   InventoryConflictError,
@@ -84,6 +90,51 @@ async function withExecutorTransaction<T>(
     return callback(db);
   }
   return db.transaction().execute(async (trx) => callback(trx as unknown as KyselySchema));
+}
+
+// Cost summary row type for resolveInboundUnitCost
+interface CostSummaryRow {
+  current_avg_cost: string | null;
+}
+
+// Price row type for resolveInboundUnitCost
+interface PriceRow {
+  price: string | null;
+}
+
+// Resolves unit cost for inbound stock movements
+async function resolveInboundUnitCost(
+  executor: KyselySchema,
+  companyId: number,
+  itemId: number
+): Promise<number> {
+  const costRows = await sql<CostSummaryRow>`
+    SELECT current_avg_cost
+    FROM inventory_item_costs
+    WHERE company_id = ${companyId} AND item_id = ${itemId}
+  `.execute(executor);
+
+  const avgCost = costRows.rows[0]?.current_avg_cost;
+  if (avgCost !== null && avgCost !== undefined && Number(avgCost) > 0) {
+    return Number(avgCost);
+  }
+
+  const priceRows = await sql<PriceRow>`
+    SELECT price
+    FROM item_prices
+    WHERE company_id = ${companyId} AND item_id = ${itemId}
+    ORDER BY updated_at DESC, id DESC
+    LIMIT 1
+  `.execute(executor);
+
+  const price = priceRows.rows[0]?.price;
+  if (price !== null && price !== undefined && Number(price) > 0) {
+    return Number(price);
+  }
+
+  throw new Error(
+    `Unable to determine unit cost for item ${itemId}. No cost history or pricing data available.`
+  );
 }
 
 // Stock Service Implementation
@@ -498,6 +549,293 @@ export class StockServiceImpl implements StockService {
   ): Promise<StockLevel | null> {
     const levels = await this.getStockLevels(companyId, outletId, [productId]);
     return levels[0] ?? null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cost-dependent operations (stubs - implementation in 26.2/26.3)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Deduct stock with cost layer consumption.
+   * Consumes cost layers via deductWithCost and records COGS.
+   * Atomically locks stock rows, creates inventory_transactions, updates stock,
+   * then delegates cost calculation to the costing package.
+   */
+  async deductStockWithCost(
+    input: DeductStockInput,
+    db: KyselySchema
+  ): Promise<StockDeductResult[]> {
+    const { company_id, outlet_id, items, reference_id, user_id } = input;
+
+    return withExecutorTransaction(db, async (trx) => {
+      // Phase 1: Validate stock and create inventory transactions (pre-created stockTxIds)
+      const stockTxItems: Array<{ itemId: number; qty: number; stockTxId: number; quantity: number }> = [];
+
+      for (const item of items) {
+        const stockRows = await sql<StockRow>`
+          SELECT quantity, available_quantity
+          FROM inventory_stock
+          WHERE company_id = ${company_id}
+            AND product_id = ${item.product_id}
+            AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+          ORDER BY outlet_id IS NULL ASC
+          LIMIT 1
+          FOR UPDATE
+        `.execute(trx);
+
+        if (stockRows.rows.length === 0) {
+          throw new Error(`Stock not found for product ${item.product_id} in company ${company_id}`);
+        }
+
+        const stock = stockRows.rows[0];
+        if (Number(stock.quantity) < item.quantity) {
+          throw new Error(
+            `Insufficient stock for product ${item.product_id}: ` +
+            `requested ${item.quantity}, available ${stock.quantity}`
+          );
+        }
+
+        const txResult = await sql`
+          INSERT INTO inventory_transactions (
+            company_id,
+            outlet_id,
+            transaction_type,
+            reference_type,
+            reference_id,
+            product_id,
+            quantity_delta,
+            created_at
+          ) VALUES (${company_id}, ${outlet_id}, ${TRANSACTION_TYPE.SALE}, 'SALE', ${reference_id}, ${item.product_id}, ${-item.quantity}, CURRENT_TIMESTAMP)
+        `.execute(trx);
+        const transactionId = Number(txResult.insertId);
+
+        stockTxItems.push({
+          itemId: item.product_id,
+          qty: item.quantity,
+          stockTxId: transactionId,
+          quantity: item.quantity
+        });
+      }
+
+      // Phase 2: Update stock quantities
+      for (const item of items) {
+        const updateResult = await sql`
+          UPDATE inventory_stock
+          SET quantity = quantity - ${item.quantity},
+              available_quantity = available_quantity - ${item.quantity},
+              updated_at = CURRENT_TIMESTAMP
+          WHERE company_id = ${company_id}
+            AND product_id = ${item.product_id}
+            AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+            AND quantity >= ${item.quantity}
+        `.execute(trx);
+
+        if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
+          throw new Error(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
+        }
+      }
+
+      // Phase 3: Delegate cost calculation to costing package using stockTxId pattern
+      const deductionInput = stockTxItems.map(i => ({
+        itemId: i.itemId,
+        qty: i.qty,
+        stockTxId: i.stockTxId
+      }));
+
+      const deductionResult: DeductionResult = await deductWithCost(
+        company_id,
+        deductionInput,
+        trx
+      );
+
+      // Phase 4: Build results matching existing StockDeductResult interface
+      // Map stockTxIds back to their corresponding items using the order
+      const results: StockDeductResult[] = [];
+      for (let i = 0; i < stockTxItems.length; i++) {
+        const stockTxItem = stockTxItems[i];
+        const costItem = deductionResult.itemCosts.find(c => c.stockTxId === stockTxItem.stockTxId);
+
+        if (!costItem) {
+          throw new Error(`Cost calculation missing for item ${stockTxItem.itemId}`);
+        }
+
+        results.push({
+          itemId: stockTxItem.itemId,
+          quantity: stockTxItem.quantity,
+          transactionId: stockTxItem.stockTxId,
+          unitCost: costItem.unitCost,
+          totalCost: costItem.totalCost,
+          costResult: costItem,
+        });
+      }
+
+      return results;
+    });
+  }
+
+  async restoreStock(
+    input: RestoreStockInput,
+    db: KyselySchema
+  ): Promise<boolean> {
+    const { company_id, outlet_id, items, reference_id } = input;
+
+    return withExecutorTransaction(db, async (executor) => {
+      for (const item of items) {
+        // Update inventory_stock: add to quantity and available_quantity
+        const updateResult = await sql`
+          UPDATE inventory_stock
+          SET quantity = quantity + ${item.quantity},
+              available_quantity = available_quantity + ${item.quantity},
+              updated_at = CURRENT_TIMESTAMP
+          WHERE company_id = ${company_id}
+            AND product_id = ${item.product_id}
+            AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+        `.execute(executor);
+
+        if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
+          // Insert new inventory_stock row if it doesn't exist
+          await sql`
+            INSERT INTO inventory_stock (
+              company_id,
+              outlet_id,
+              product_id,
+              quantity,
+              reserved_quantity,
+              available_quantity,
+              created_at,
+              updated_at
+            ) VALUES (${company_id}, ${outlet_id}, ${item.product_id}, ${item.quantity}, 0, ${item.quantity}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          `.execute(executor);
+        }
+
+        // Insert inventory_transactions record
+        const txResult = await sql`
+          INSERT INTO inventory_transactions (
+            company_id,
+            outlet_id,
+            transaction_type,
+            reference_type,
+            reference_id,
+            product_id,
+            quantity_delta,
+            created_at
+          ) VALUES (${company_id}, ${outlet_id}, ${TRANSACTION_TYPE.REFUND}, 'REFUND', ${reference_id}, ${item.product_id}, ${item.quantity}, CURRENT_TIMESTAMP)
+        `.execute(executor);
+
+        // Resolve unit cost and create cost layer
+        const unitCost = await resolveInboundUnitCost(executor, company_id, item.product_id);
+        await createCostLayer(
+          {
+            companyId: company_id,
+            itemId: item.product_id,
+            transactionId: Number(txResult.insertId),
+            unitCost,
+            quantity: item.quantity,
+          },
+          executor
+        );
+      }
+
+      return true;
+    });
+  }
+
+  async adjustStock(
+    input: StockAdjustmentInput,
+    db: KyselySchema
+  ): Promise<boolean> {
+    const { company_id, outlet_id, product_id, adjustment_quantity, reference_id } = input;
+
+    return withExecutorTransaction(db, async (executor) => {
+      // Lock the inventory_stock row with FOR UPDATE
+      const stockRows = await sql<StockRow>`
+        SELECT quantity, reserved_quantity, available_quantity
+        FROM inventory_stock
+        WHERE company_id = ${company_id}
+          AND product_id = ${product_id}
+          AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+        ORDER BY outlet_id IS NULL ASC
+        LIMIT 1
+        FOR UPDATE
+      `.execute(executor);
+
+      let currentQty = 0;
+      let currentReserved = 0;
+
+      if (stockRows.rows.length > 0) {
+        currentQty = Number(stockRows.rows[0].quantity);
+        currentReserved = Number(stockRows.rows[0].reserved_quantity);
+      }
+
+      const newQty = currentQty + adjustment_quantity;
+      const newAvailable = newQty - currentReserved;
+
+      if (newQty < 0) {
+        return false; // Stock cannot go negative
+      }
+
+      if (stockRows.rows.length > 0) {
+        // Update existing stock row
+        const updateResult = await sql`
+          UPDATE inventory_stock
+          SET quantity = ${newQty},
+              available_quantity = ${newAvailable},
+              updated_at = CURRENT_TIMESTAMP
+          WHERE company_id = ${company_id}
+            AND product_id = ${product_id}
+            AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+        `.execute(executor);
+
+        if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
+          return false;
+        }
+      } else {
+        // Insert new stock row if it doesn't exist
+        await sql`
+          INSERT INTO inventory_stock (
+            company_id,
+            outlet_id,
+            product_id,
+            quantity,
+            reserved_quantity,
+            available_quantity,
+            created_at,
+            updated_at
+          ) VALUES (${company_id}, ${outlet_id}, ${product_id}, ${newQty}, 0, ${newAvailable}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `.execute(executor);
+      }
+
+      // Insert inventory_transactions record
+      const txResult = await sql`
+        INSERT INTO inventory_transactions (
+          company_id,
+          outlet_id,
+          transaction_type,
+          reference_type,
+          reference_id,
+          product_id,
+          quantity_delta,
+          created_at
+        ) VALUES (${company_id}, ${outlet_id}, ${TRANSACTION_TYPE.ADJUSTMENT}, 'ADJUSTMENT', ${reference_id ?? `ADJ-${Date.now()}`}, ${product_id}, ${adjustment_quantity}, CURRENT_TIMESTAMP)
+      `.execute(executor);
+
+      // For positive adjustments, create inbound cost layer
+      if (adjustment_quantity > 0) {
+        const unitCost = await resolveInboundUnitCost(executor, company_id, product_id);
+        await createCostLayer(
+          {
+            companyId: company_id,
+            itemId: product_id,
+            transactionId: Number(txResult.insertId),
+            unitCost,
+            quantity: adjustment_quantity,
+          },
+          executor
+        );
+      }
+
+      return true;
+    });
   }
 }
 

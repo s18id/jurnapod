@@ -11,7 +11,7 @@ import {
   CostTrackingError,
   toMinorUnits,
   fromMinorUnits,
-} from "./cost-tracking";
+} from "@jurnapod/modules-inventory-costing";
 
 // ============================================================================
 // Money Helper Tests - Pure Functions

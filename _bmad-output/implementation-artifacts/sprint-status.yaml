@@ -298,3 +298,11 @@ development_status:
   25-2-extract-domain-types-errors-helpers: done
   25-3-cashbank-service-ports-adapters: done
   25-4-add-tests-update-adapter-validate-gate: done
+
+  # Epic 26: Extend modules-inventory with Cost-Dependent Stock Operations
+  epic-26: done
+  26-1-extend-stock-service-interface: done
+  26-2-implement-deductStockWithCost: done
+  26-3-implement-restoreStock-adjustStock: done
+  26-4-update-api-stock-delegation-remove-cost-tracking: done
+  26-5-full-validation-gate: done

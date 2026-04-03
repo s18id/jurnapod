@@ -11,6 +11,8 @@
  */
 
 import type { MutationAuditActor } from "./shared.js";
+import type { ItemCostResult } from "@jurnapod/modules-inventory-costing";
+import type { KyselySchema } from "@jurnapod/db";
 
 export type StockTransactionType = 
   | "SALE" 
@@ -71,6 +73,45 @@ export interface LowStockAlert {
   quantity: number;
   available_quantity: number;
   low_stock_threshold: number;
+}
+
+// -----------------------------------------------------------------------------
+// Cost-dependent types
+// -----------------------------------------------------------------------------
+
+export interface StockDeductResult {
+  itemId: number;
+  quantity: number;
+  transactionId: number;
+  unitCost: number;
+  totalCost: number;
+  costResult: ItemCostResult;
+}
+
+export interface DeductStockInput {
+  company_id: number;
+  outlet_id: number;
+  items: StockItem[];
+  reference_id: string;
+  user_id: number;
+}
+
+export interface RestoreStockInput {
+  company_id: number;
+  outlet_id: number;
+  items: StockItem[];
+  reference_id: string;
+  user_id: number;
+}
+
+export interface StockAdjustmentInput {
+  company_id: number;
+  outlet_id: number | null;
+  product_id: number;
+  adjustment_quantity: number;
+  reason: string;
+  reference_id?: string;
+  user_id: number;
 }
 
 export interface StockService {
@@ -171,4 +212,35 @@ export interface StockService {
     outletId: number,
     productId: number
   ): Promise<StockLevel | null>;
+
+  // ---------------------------------------------------------------------------
+  // Cost-dependent operations (implemented in story 26.2/26.3)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Deduct stock with cost layer consumption.
+   * Consumes cost layers via deductWithCost and records COGS.
+   */
+  deductStockWithCost(
+    input: DeductStockInput,
+    db: KyselySchema
+  ): Promise<StockDeductResult[]>;
+
+  /**
+   * Restore stock and create inbound cost layers.
+   * Creates new cost layers via createCostLayer.
+   */
+  restoreStock(
+    input: RestoreStockInput,
+    db: KyselySchema
+  ): Promise<boolean>;
+
+  /**
+   * Adjust stock quantity with optional cost layer creation.
+   * For inbound adjustments, creates new cost layers.
+   */
+  adjustStock(
+    input: StockAdjustmentInput,
+    db: KyselySchema
+  ): Promise<boolean>;
 }

@@ -26,19 +26,21 @@
 | Epic 20 | Schema Consolidation & JSON Normalization | done | epic-20-retrospective |
 | Epic 21 | API Sync Runtime Consolidation (Package-First) | done | — |
 | Epic 22 | Core Package Consolidation (Direct Removal) | done | — |
+| Epic 23 | API Detachment | done | — |
+| Epic 24 | Inventory Costing Boundary | done | epic-24-sprint-plan |
+| Epic 25 | Cash-Bank Domain Extraction | done | epic-25-sprint-plan |
 
 ## Active Epics
 
 | Epic | Title | Status | Sprint Plan |
 |------|-------|--------|-------------|
-| Epic 23 | API Detachment | in-progress | epic-23-sprint-plan |
+| Epic 26 | Extend modules-inventory with Cost-Dependent Stock Ops | in-progress | epic-26-sprint-plan |
 
 ## Backlog
 
 | Epic | Title | Status | Sprint Plan |
 |------|-------|--------|-------------|
-| Epic 24 | Inventory Costing Boundary | backlog | epic-24-sprint-plan |
-| Epic 25 | Cash-Bank Domain Extraction | backlog | epic-25-sprint-plan |
+
 
 ## Future Epics
 

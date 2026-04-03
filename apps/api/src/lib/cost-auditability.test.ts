@@ -10,7 +10,7 @@ import {
   getItemCostLayersWithConsumption,
   getItemCostSummaryExtended,
   createCostLayer,
-} from "./cost-tracking";
+} from "@jurnapod/modules-inventory-costing";
 import { createItem } from "./items/index.js";
 import { createCompanyBasic } from "./companies.js";
 import { createOutletBasic } from "./outlets.js";
