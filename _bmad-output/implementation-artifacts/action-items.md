@@ -1,6 +1,6 @@
 # Action Items Tracker
 
-**Last Updated:** 2026-04-04T09:00:00Z  
+**Last Updated:** 2026-04-04T14:00:00Z  
 **Review Cadence:** Monthly at sprint retrospective
 
 ---
@@ -10,10 +10,10 @@
 | Priority | Open | In Progress | Done | Won't Fix | Total |
 |----------|------|-------------|------|-----------|-------|
 | P0 | 0 | 0 | 4 | 0 | 4 |
-| P1 | 0 | 0 | 5 | 0 | 5 |
-| P2 | 0 | 0 | 4 | 0 | 4 |
-| P3 | 0 | 0 | 1 | 3 | 4 |
-| **Total** | **0** | **0** | **14** | **3** | **17** |
+| P1 | 1 | 0 | 5 | 0 | 6 |
+| P2 | 3 | 0 | 4 | 0 | 7 |
+| P3 | 1 | 0 | 1 | 3 | 5 |
+| **Total** | **5** | **0** | **14** | **3** | **22** |
 
 ---
 
@@ -32,6 +32,7 @@
 
 | ID | Action | From | Owner | Status | Notes |
 |----|--------|------|-------|--------|-------|
+| E30-A1 | Add "tenant labels for observability" to Definition of Done | Epic 30 | Bob | ⏳ Open | Update AGENTS.md DoD |
 | E20-A3 | Improve story discovery: verify table data + code usage before drop scope | Epic 20 | Alice | ✅ Done | Added Data & Migration Concerns section to story template |
 | E21-A2 | Document "analysis before action" checklist for HIGH risk stories | Epic 21 | Charlie | ✅ Done | Added HIGH Risk Story Analysis section to story template |
 | E22-A2 | Establish "action item capacity" in sprint planning (20%) | Epic 22 | Bob | ✅ Done | Added action item capacity allocation to retrospective workflow |
@@ -44,6 +45,9 @@
 
 | ID | Action | From | Owner | Status | Notes |
 |----|--------|------|-------|--------|-------|
+| E30-A2 | Document metric naming conventions (canonical patterns) | Epic 30 | Charlie | ⏳ Open | Before Epic 31 |
+| E30-A3 | Create alert authoring guide (rate calculation, heartbeat) | Epic 30 | Elena | ⏳ Open | Before Epic 31 |
+| E30-A4 | Add "monitor the monitoring" section to runbook | Epic 30 | Dana | ⏳ Open | Before Epic 31 |
 | E17-A6 | Track action items between epics in shared document | Epic 17 | Bob | ✅ Done | This document |
 | E21-P2 | Review thumbnail URL behavior difference (legacy vs new) | Epic 21 | Charlie + Elena | ✅ Done | Working as Intended - thumbnails fetched separately per canonical sync contract |
 | E15-A2 | Create spike template with strict time-box and stop conditions | Epic 15 | Bob | ✅ Done | Added Spike Template section to story template |
@@ -55,6 +59,7 @@
 
 | ID | Action | From | Owner | Status | Notes |
 |----|--------|------|-------|--------|-------|
+| E30-A5 | Document GL imbalance detection design decision | Epic 30 | Charlie | ⏳ Open | Next month |
 | E4-A1 | Audit remaining monolith patterns | Epic 4 | — | ❌ Won't Fix | Epic 4 was 20+ epics ago; codebase evolved significantly |
 | E14-A2 | Create production health metrics dashboard | Epic 14 | John | ❌ Won't Fix | Nice to have - infrastructure work, not critical path |
 | E15-A4 | Build technical debt burndown dashboard | Epic 15 | John | ❌ Won't Fix | Nice to have - infrastructure work, not critical path |
@@ -158,33 +163,6 @@ Items addressed organically through subsequent epics or no longer relevant.
 
 ---
 
-## Critical Remaining Items
-
-### E20-A2: Add typecheck gate to story completion criteria
-
-**Status:** ⏳ OPEN  
-**Priority:** P0  
-**Owner:** Bob  
-**Why Critical:** The Definition of Done in AGENTS.md does NOT include typecheck requirement.
-
-Current DoD:
-```markdown
-### Quality
-- [ ] Code review completed with no blockers
-- [ ] AI review conducted (`bmad-code-review` agent)
-```
-
-Missing:
-```markdown
-### Quality
-- [ ] `npm run typecheck -w @jurnapod/api` passes
-- [ ] `npm run build -w @jurnapod/api` passes
-- [ ] Code review completed with no blockers
-- [ ] AI review conducted (`bmad-code-review` agent)
-```
-
----
-
 ## How to Update This Document
 
 1. When an action item is completed:
@@ -211,4 +189,19 @@ Examples:
 
 ---
 
-_Last Updated: 2026-04-04T08:00:00Z_
+_Last Updated: 2026-04-04T14:00:00Z_
+
+---
+
+## Formal Closures (Epic 30 Cycle)
+
+| ID | Action | From | Status | Notes |
+|----|--------|------|--------|-------|
+| E20-A2 | Add typecheck gate to DoD | Epic 20 | ✅ Done | Added to AGENTS.md Definition of Done |
+| E26-A1 | Use domain errors in stock operations | Epic 26 | ✅ Done | InventoryReferenceError/InventoryConflictError |
+| E21-P2 | Review thumbnail URL behavior | Epic 21 | ✅ Done | Working as Intended |
+| E15-A2 | Create spike template | Epic 15 | ✅ Done | Spike Template section added to story template |
+| E27-A1 | Document parity check methodology | Epic 27 | ✅ Done | Duplicate Code Deletion Parity Check added |
+| TD-037 | Resolve ~300+ type errors in API package | Epic 19 | Epic 23 | Resolved during Epic 23 API Detachment |
+
+**New Action Items:** 5 open from Epic 30 retrospective (Grade A)
