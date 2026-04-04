@@ -1,104 +1,142 @@
-# Epic 31 Sprint Plan
+# Epic 31 Sprint Plan (Corrected)
 
 ## Overview
 
-**Epic:** API Detachment Completion
-**Duration:** 2 sprints
-**Goal:** Extract remaining domain logic from `apps/api/src/lib/`, thin routes, delete dead code.
+**Epic:** API Detachment Completion  
+**Duration:** 3 sprints (rebaselined from 2)  
+**Goal:** Complete final detachment from `apps/api/src/lib/`, enforce package boundaries, and safely remove dead `lib/modules-*` code only after adapter migration proof.
 
-## Story Dependencies
+## Rebaseline Summary
 
-### Sprint 1
+Previous estimates were materially low for extraction-heavy stories. This plan uses realistic complexity-based sizing.
+
+| Story | Previous | Corrected | Rationale |
+|---|---:|---:|---|
+| 31.1 Users/RBAC (1,520 LOC) | 8h | 24h | High auth/RBAC regression risk + integration surface |
+| 31.2 Companies (1,128 LOC) | 6h | 18h | Provisioning constants + initialization matrix |
+| 31.3 Reservations (~2,400 LOC consolidation) | 8h | 20h | Merge + duplicate removal + outlet scoping validations |
+| 31.4 Thin users/companies routes | 4h | 10h | Adapter conversion + tests + auth flow checks |
+| 31.5 Import/Export (~6,000 LOC) | 12h | 40h | Large extraction with parser/validator/batch coupling |
+| 31.6 Notifications (~800 LOC) | 4h | 12h | Outbox/template/token cohesion + API touchpoints |
+| 31.7 Thin accounts/inventory/reports routes | 6h | 14h | Large route files, mostly independent of 31.5/31.6 |
+| 31.8A Adapter migration prep + boundaries | 6h (in old 31.8) | 8h | Add hard lint/CI boundaries + migration checks |
+| 31.8B Deletion verification + final cleanup | (not split) | 10h | Safe delete only after references/tests are green |
+
+**Total:** 156h (vs previous 54h)
+
+## Corrected Dependency Graph
 
 ```
-31.1 (users extraction)
-  └── 31.2 (companies extraction) ── parallel
-        ├── 31.3 (reservations consolidation) ── sequential
-        └── 31.4 (route thinning) ── sequential
+31.1 ──┐
+       ├── 31.4 ──┐
+31.2 ──┘          │
+                  ├── 31.8A (adapter migration prep + boundaries)
+31.3 ─────────────┘
+
+31.5 ──┐
+31.6 ──┤ (parallel lane)
+       │
+31.7 ──┘ (independent thinning lane; does NOT depend on 31.5/31.6)
+
+31.8B (deletion verification + cleanup)
+  depends on: 31.5 + 31.6 + 31.7 + 31.8A
 ```
 
-### Sprint 2
+### Notes on Corrections
+- **31.7 dependency fixed:** no dependency on 31.5/31.6; it can run in parallel as route-thinning of accounts/inventory/reports.
+- **31.8 split:** execution is now explicitly two-phase:
+  - **31.8A:** adapter migration prep + import-boundary enforcement
+  - **31.8B:** deletion verification + final `lib/modules-*` deletion
 
-```
-31.5 (import/export) ── parallel with 31.6 (notifications)
-  └── 31.7 (route thinning enforcement) ── sequential
-        └── 31.8 (validation gate + cleanup) ── sequential
-```
+## Sprint Breakdown
 
-## Sprint 1
+## Sprint 1 (Core Extractions + First Route Thinning) — 72h
 
 ### Story 31.1: Extract Users/RBAC to `modules-platform`
-- **Estimate:** 8h
+- **Estimate:** 24h
 - **Priority:** P1
 - **Dependencies:** None
-- **Focus:** Extract `apps/api/src/lib/users.ts` (1,520 LOC) to `@jurnapod/modules-platform`. User CRUD, role management, module permissions, SuperAdmin protection.
 
 ### Story 31.2: Extract Companies/Provisioning to `modules-platform`
-- **Estimate:** 6h
+- **Estimate:** 18h
 - **Priority:** P1
 - **Dependencies:** None (parallel with 31.1)
-- **Focus:** Extract `apps/api/src/lib/companies.ts` (1,128 LOC). MODULE_DEFINITIONS, ROLE_DEFINITIONS, SETTINGS_DEFINITIONS, company provisioning.
 
 ### Story 31.3: Consolidate Reservations duplicate logic
-- **Estimate:** 8h
+- **Estimate:** 20h
 - **Priority:** P1
-- **Dependencies:** 31.1 + 31.2
-- **Focus:** Merge `table-occupancy.ts`, `reservation-groups.ts`, `outlet-tables.ts` from API into `@jurnapod/modules-reservations`. Remove duplicate implementations.
+- **Dependencies:** None (can run parallel lane)
 
 ### Story 31.4: Thin `routes/users.ts` and `routes/companies.ts`
-- **Estimate:** 4h
+- **Estimate:** 10h
 - **Priority:** P1
 - **Dependencies:** 31.1 + 31.2
-- **Focus:** Refactor routes to delegate to package services. Routes become thin HTTP adapters.
 
-## Sprint 2
+## Sprint 2 (Large Infra Extraction + Independent Route Thinning) — 66h
 
 ### Story 31.5: Import/Export infrastructure → `modules-platform`
-- **Estimate:** 12h
-- **Priority:** P2
-- **Dependencies:** None (can start Sprint 2 independently)
-- **Focus:** Move `lib/import/` and `lib/export/` (~6,000 LOC) to `@jurnapod/modules-platform`. Import session management, parsers, validators, batch operations.
+- **Estimate:** 40h
+- **Priority:** P1
+- **Dependencies:** 31.1 + 31.2 (shared platform contracts available)
 
 ### Story 31.6: Notifications consolidation (email/mailer)
-- **Estimate:** 4h
+- **Estimate:** 12h
 - **Priority:** P2
 - **Dependencies:** None (parallel with 31.5)
-- **Focus:** Move `lib/email-*.ts` and `lib/mailer.ts` (~800 LOC) to `@jurnapod/notifications`. Email templates, mailer, email outbox.
 
 ### Story 31.7: Route thinning enforcement (accounts, inventory, reports)
-- **Estimate:** 6h
-- **Priority:** P2
-- **Dependencies:** 31.5 + 31.6
-- **Focus:** Refactor `routes/accounts.ts`, `routes/inventory.ts`, `routes/reports.ts` to use package services. Remove business logic from routes.
+- **Estimate:** 14h
+- **Priority:** P1
+- **Dependencies:** None (parallel lane; independent from 31.5/31.6)
 
-### Story 31.8: Full validation gate + cleanup `lib/modules-*`
-- **Estimate:** 6h
+## Sprint 3 (Safe Cleanup and Final Validation) — 18h
+
+### Story 31.8A: Adapter migration prep + import-boundary enforcement
+- **Estimate:** 8h
 - **Priority:** P1
 - **Dependencies:** 31.3 + 31.4 + 31.7
-- **Focus:** Delete `lib/modules-accounting/` and `lib/modules-sales/` after route flipping. Run full typecheck + build + lint validation across all workspaces.
+- **Focus:** Verify route→package adapters are complete, install hard import boundary checks in lint/CI.
+
+### Story 31.8B: Deletion verification + dead code cleanup
+- **Estimate:** 10h
+- **Priority:** P1
+- **Dependencies:** 31.5 + 31.6 + 31.8A
+- **Focus:** Prove no runtime/test dependency on `apps/api/src/lib/modules-*`, then delete and revalidate.
 
 ---
 
-## Key Risks & Decisions
+## Import Boundary Enforcement (Mandatory)
 
-| # | Risk | Decision |
-|---|------|----------|
-| 1 | Users/RBAC extraction breaks auth flow | Extensive integration tests on auth flow; rollback plan |
-| 2 | Reservations duplicate logic drift | Consolidate quickly; single source of truth |
-| 3 | Import/Export is large/complex | Keep in `modules-platform`, not new package |
-| 4 | Deleting `lib/modules-*` breaks tests | Migrate tests to use package fixtures before deletion |
+Apply in workspace ESLint config for package code (`packages/**`):
+
+```js
+"import/no-restricted-paths": [
+  "error",
+  {
+    "zones": [
+      {
+        "target": "./packages",
+        "from": "./apps/api",
+        "message": "packages/** must not import from apps/api/**"
+      }
+    ]
+  }
+]
+```
+
+Required CI command:
+
+```bash
+npm run lint --workspaces --if-present
+```
+
+Hard failure condition: any `packages/** -> apps/api/**` import path detected.
 
 ---
 
 ## Validation Commands
 
-### Story 31.1
-```bash
-npm run typecheck -w @jurnapod/modules-platform
-npm run typecheck -w @jurnapod/api
-```
-
-### Story 31.2
+### Story 31.1 / 31.2 / 31.5
 ```bash
 npm run typecheck -w @jurnapod/modules-platform
 npm run typecheck -w @jurnapod/api
@@ -107,20 +145,14 @@ npm run typecheck -w @jurnapod/api
 ### Story 31.3
 ```bash
 npm run typecheck -w @jurnapod/modules-reservations
-npm run typecheck -w @jurnapod/api
 npm run test -w @jurnapod/modules-reservations
+npm run typecheck -w @jurnapod/api
 ```
 
-### Story 31.4
+### Story 31.4 / 31.7
 ```bash
 npm run typecheck -w @jurnapod/api
 npm run build -w @jurnapod/api
-```
-
-### Story 31.5
-```bash
-npm run typecheck -w @jurnapod/modules-platform
-npm run typecheck -w @jurnapod/api
 ```
 
 ### Story 31.6
@@ -129,14 +161,9 @@ npm run typecheck -w @jurnapod/notifications
 npm run typecheck -w @jurnapod/api
 ```
 
-### Story 31.7
+### Story 31.8A / 31.8B
 ```bash
-npm run typecheck -w @jurnapod/api
-npm run build -w @jurnapod/api
-```
-
-### Story 31.8
-```bash
+npm run lint --workspaces --if-present
 npm run typecheck --workspaces --if-present
 npm run build --workspaces --if-present
 ```

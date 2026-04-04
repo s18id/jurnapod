@@ -207,7 +207,7 @@ development_status:
   epic-18-retrospective: done
 
   # Epic 19: Pure Kysely Migration (API)
-  epic-19: technical_debt
+  epic-19: done
   19-1-migrate-api-lib-shared: done
   19-2-migrate-api-lib-foundation: done
   19-3-migrate-api-lib-items: done
@@ -222,7 +222,6 @@ development_status:
   19-12-migrate-api-routes: done
   19-13-final-verification: deferred (300+ type errors - TD-037)
   epic-19-retrospective: done
-  td-037-api-kysely-verification: open
 
   # Epic 20: Schema Consolidation & JSON Normalization
   epic-20: done
@@ -362,20 +361,21 @@ development_status:
   epic-30-retrospective: done
 
   # Epic 31: API Detachment Completion
-  epic-31: pending
-  31-1-extract-users-rbac: pending
-  31-2-extract-companies-provisioning: pending
-  31-3-consolidate-reservations-duplicate: pending
-  31-4-thin-routes-users-companies: pending
-  31-5-import-export-platform: pending
-  31-6-notifications-consolidation: pending
-  31-7-route-thinning-enforcement: pending
-  31-8-validation-gate-cleanup: pending
+  epic-31: backlog
+  31-1-extract-users-rbac: backlog
+  31-2-extract-companies-provisioning: backlog
+  31-3-consolidate-reservations-duplicate: backlog
+  31-4-thin-routes-users-companies: backlog
+  31-5-import-export-platform: backlog
+  31-6-notifications-consolidation: backlog
+  31-7-route-thinning-enforcement: backlog
+  31-8a-adapter-migration-prep: backlog
+  31-8b-deletion-verification: backlog
 
   # Epic 32: Financial Period Close & Reconciliation Workspace
-  epic-32: pending
-  32-1-fiscal-year-close: pending
-  32-2-multi-period-reconciliation-dashboard: pending
-  32-3-trial-balance-validation: pending
-  32-4-period-transition-audit-trail: pending
-  32-5-roll-forward-workspace: pending
+  epic-32: backlog
+  32-1-fiscal-year-close: backlog
+  32-2-multi-period-reconciliation-dashboard: backlog
+  32-3-trial-balance-validation: backlog
+  32-4-period-transition-audit-trail: backlog
+  32-5-roll-forward-workspace: backlog

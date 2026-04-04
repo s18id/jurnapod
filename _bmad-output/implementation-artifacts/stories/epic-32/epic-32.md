@@ -51,9 +51,19 @@ modules-platform (tenant/outlet scoping)
 
 apps/api/
   ├── routes/reports.ts → reconciliation workspace
-  ├── routes/fiscal-years.ts → period close procedures
+  ├── routes/accounts.ts (`/accounts/fiscal-years/*`) → period close procedures
   └── routes/admin-dashboards.ts → multi-period reconciliation
 ```
+
+### Hard Implementation Gate (Mandatory)
+
+Epic 32 cannot start until Epic 31 adapter contracts are proven in production-like validation:
+
+1. Story 31.7 complete (accounts/inventory/reports route thinning)
+2. Story 31.8A complete (adapter migration prep + boundary checks)
+3. CI import-boundary lint enforcement active (no `packages/** -> apps/api/**`)
+
+This gate prevents Epic 32 from building period-close workflows on unstable or partially detached route surfaces.
 
 ### Key Integration Points
 

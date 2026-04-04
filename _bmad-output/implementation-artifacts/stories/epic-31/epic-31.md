@@ -2,7 +2,7 @@
 
 **Status:** backlog
 **Date:** 2026-04-04
-**Stories:** 8 total (2 sprints)
+**Stories:** 9 total (3 sprints)
 **Sprint Plan:** `_bmad-output/planning-artifacts/epic-31-sprint-plan.md`
 
 ---
@@ -98,7 +98,8 @@ apps/api (thin HTTP adapters only)
 | Sprint | Stories | Focus |
 |--------|---------|-------|
 | Sprint 1 | 31.1 – 31.4 | Users, Companies, Reservations extraction + route thinning |
-| Sprint 2 | 31.5 – 31.8 | Import/Export, Notifications, Route thinning enforcement, Cleanup |
+| Sprint 2 | 31.5 – 31.7 | Import/Export, Notifications, Route thinning enforcement |
+| Sprint 3 | 31.8A, 31.8B | Adapter migration prep, import boundaries, deletion verification |
 
 ---
 
@@ -113,4 +114,5 @@ apps/api (thin HTTP adapters only)
 | [story-31.5](./story-31.5.md) | Import/Export infrastructure → `modules-platform` | pending |
 | [story-31.6](./story-31.6.md) | Notifications consolidation (email/mailer) | pending |
 | [story-31.7](./story-31.7.md) | Route thinning enforcement (accounts, inventory, reports) | pending |
-| [story-31.8](./story-31.8.md) | Full validation gate + cleanup `lib/modules-*` | pending |
+| [story-31.8A](./story-31.8A.md) | Adapter migration prep + import boundary enforcement | pending |
+| [story-31.8B](./story-31.8B.md) | Deletion verification + dead code cleanup | pending |
