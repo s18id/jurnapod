@@ -1,4 +1,4 @@
-# ADR-XXX: Period Close Architecture (Epic 32)
+# ADR-0016: Period Close Architecture (Epic 32)
 
 ## Status
 Proposed
