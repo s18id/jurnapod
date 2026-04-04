@@ -1,6 +1,6 @@
 # Action Items Tracker
 
-**Last Updated:** 2026-04-04T15:00:00Z
+**Last Updated:** 2026-04-04T16:00:00Z
 **Review Cadence:** Monthly at sprint retrospective
 
 ---
@@ -12,8 +12,8 @@
 | P0 | 0 | 4 | 0 | 4 |
 | P1 | 0 | 6 | 0 | 6 |
 | P2 | 0 | 7 | 0 | 7 |
-| P3 | 1 | 1 | 3 | 5 |
-| **Total** | **1** | **18** | **3** | **22** |
+| P3 | 0 | 2 | 3 | 5 |
+| **Total** | **0** | **19** | **3** | **22** |
 
 ---
 
@@ -37,9 +37,7 @@
 
 ## P3 - Low (Backlog)
 
-| ID | Action | From | Owner | Status | Notes |
-|----|--------|------|-------|--------|-------|
-| **E30-A5** | Document GL imbalance detection design decision | Epic 30 | Charlie | Open | Next month |
+*(empty — no open P3 items)*
 
 ---
 
@@ -82,6 +80,7 @@
 | ID | Action | From | Closed In | Notes |
 |----|--------|------|----------|-------|
 | E26-A1 | Use domain errors instead of generic Error in stock operations | Epic 26 | Epic 26 | Replaced generic Error with InventoryReferenceError/InventoryConflictError in stock-service.ts |
+| **E30-A5** | Document GL imbalance detection design decision | Epic 30 | Epic 30 | Created `docs/tech-specs/gl-imbalance-detection.md` |
 | E4-A1 | Audit remaining monolith patterns | Epic 4 | Epic 24 | Won't Fix - Epic 4 was 20+ epics ago; codebase evolved significantly |
 | E14-A2 | Create production health metrics dashboard | Epic 14 | Epic 24 | Won't Fix - Nice to have, infrastructure work |
 | E15-A4 | Build technical debt burndown dashboard | Epic 15 | Epic 24 | Won't Fix - Nice to have, infrastructure work |
