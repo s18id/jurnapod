@@ -1,6 +1,6 @@
 # Action Items Tracker
 
-**Last Updated:** 2026-04-04T14:00:00Z
+**Last Updated:** 2026-04-04T15:00:00Z
 **Review Cadence:** Monthly at sprint retrospective
 
 ---
@@ -10,32 +10,32 @@
 | Priority | Open | Done | Won't Fix | Total |
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
-| P1 | 1 | 5 | 0 | 6 |
-| P2 | 3 | 4 | 0 | 7 |
+| P1 | 0 | 6 | 0 | 6 |
+| P2 | 0 | 7 | 0 | 7 |
 | P3 | 1 | 1 | 3 | 5 |
-| **Total** | **5** | **14** | **3** | **22** |
+| **Total** | **1** | **18** | **3** | **22** |
 
 ---
 
 ## P0 - Critical (Do Immediately)
 
-| ID | Action | From | Owner | Status | Notes |
-|----|--------|------|-------|--------|-------|
-| **E30-A1** | Add "tenant labels for observability" to Definition of Done | Epic 30 | Bob | Open | Update AGENTS.md DoD |
+*(empty — no open P0 items)*
 
 ---
 
 ## P1 - High (Do Next Sprint)
 
-| ID | Action | From | Owner | Status | Notes |
-|----|--------|------|-------|--------|-------|
-| **E30-A2** | Document metric naming conventions (canonical patterns) | Epic 30 | Charlie | Open | Before Epic 31 |
-| **E30-A3** | Create alert authoring guide (rate calculation, heartbeat) | Epic 30 | Elena | Open | Before Epic 31 |
-| **E30-A4** | Add "monitor the monitoring" section to runbook | Epic 30 | Dana | Open | Before Epic 31 |
+*(empty — no open P1 items)*
 
 ---
 
 ## P2 - Medium (Do This Quarter)
+
+*(empty — no open P2 items)*
+
+---
+
+## P3 - Low (Backlog)
 
 | ID | Action | From | Owner | Status | Notes |
 |----|--------|------|-------|--------|-------|
@@ -53,6 +53,7 @@
 | E17-A3 | Document Phase 1/Phase 2 handoff contract | Epic 17 | Epic 24 | `docs/tech-specs/two-phase-sync-architecture.md` |
 | TD-037 | Resolve ~300+ type errors in API package | Epic 19 | Epic 23 | Resolved during Epic 23 API Detachment |
 | E20-A2 | Add typecheck gate to story completion criteria | Epic 20 | Epic 20 | Added to AGENTS.md Definition of Done |
+| **E30-A1** | Add "tenant labels for observability" to Definition of Done | Epic 30 | Epic 30 | Added Observability section to AGENTS.md DoD |
 
 ### P1
 
@@ -72,6 +73,9 @@
 | E21-P2 | Review thumbnail URL behavior difference (legacy vs new) | Epic 21 | Epic 21 | Working as Intended |
 | E15-A2 | Create spike template with strict time-box and stop conditions | Epic 15 | Epic 15 | Added Spike Template section to story template |
 | E27-A1 | Document parity check methodology for duplicate code deletion | Epic 27 | Epic 27 | Added Duplicate Code Deletion Parity Check section to story template |
+| **E30-A2** | Document metric naming conventions (canonical patterns) | Epic 30 | Epic 30 | Updated `packages/telemetry/README.md` with Naming Rules + How to Add |
+| **E30-A3** | Create alert authoring guide (rate calculation, heartbeat) | Epic 30 | Epic 30 | Created `docs/alert-authoring-guide.md` |
+| **E30-A4** | Add "monitor the monitoring" section to runbook | Epic 30 | Epic 30 | Added section to `apps/api/src/routes/admin-runbook.ts` |
 
 ### P3
 
@@ -145,4 +149,4 @@ Examples:
 - `E8-A1` = Epic 8, Action 1
 - `E15-A2` = Epic 15, Action 2
 
-_Last Updated: 2026-04-04T14:00:00Z_
+_Last Updated: 2026-04-04T15:00:00Z_

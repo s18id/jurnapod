@@ -174,6 +174,10 @@ Before marking ANY story as DONE:
 - [ ] Code review completed with no blockers
 - [ ] AI review conducted (`bmad-code-review` agent)
 
+### Observability
+- [ ] All tenant-scoped metrics include `company_id` label
+- [ ] Dashboard queries filter by authenticated tenant context
+
 ### Documentation
 - [ ] Schema changes documented (if applicable)
 - [ ] API changes reflected in contracts

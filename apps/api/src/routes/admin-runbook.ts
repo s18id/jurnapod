@@ -81,6 +81,8 @@ This runbook contains response procedures for common alerts and operational issu
    - [GL Imbalance Detected](#gl-imbalance-detected)
    - [Missing Journal Alert](#missing-journal-alert)
 3. [General Troubleshooting](#general-troubleshooting)
+4. [Monitoring Issues](#monitoring-issues)
+   - [Monitor the Monitoring](#monitor-the-monitoring)
 
 ---
 
@@ -275,6 +277,80 @@ This runbook contains response procedures for common alerts and operational issu
 
 **Related Metrics:**
 - \`journal_missing_alert_total\` - Missing journal count
+
+---
+
+## Monitoring Issues
+
+### Monitor the Monitoring
+
+**Why This Matters:**
+- Alert evaluation failures are invisible without self-monitoring
+- Dashboard query lag indicates system health issues
+- Silent monitoring failures = undetected outages
+
+**What to Monitor:**
+
+| Metric | Description |
+|--------|-------------|
+| \`alert_evaluation_total\` | Incremented each evaluation cycle |
+| \`alert_evaluation_duration_ms\` | How long evaluation takes |
+| \`alert_heartbeat_missing_total\` | Missed heartbeat events |
+| Dashboard query latency | Per-view query performance |
+
+**Alert Conditions:**
+
+| Condition | Threshold | Severity |
+|-----------|-----------|----------|
+| \`alert_evaluation_total\` not incrementing | 2x evaluation interval | Critical |
+| \`alert_evaluation_duration_ms\` | > 30 seconds | Critical |
+| Dashboard query latency | > 5 seconds | Warning |
+
+**Runbook Entries:**
+
+1. **If \`alert_evaluation_total\` not incrementing:**
+   - Check AlertManager process is running
+   - Verify cron/job scheduler is active
+   - Check for process crashes or restarts
+   \`\`\`bash
+   # Verify alert evaluation is running
+   curl http://localhost:3001/health/monitoring
+   \`\`\`
+
+2. **If dashboard latency spike:**
+   - Check database load and query performance
+   - Review recent deployments for query changes
+   \`\`\`sql
+   SHOW FULL PROCESSLIST;
+   \`\`\`
+
+3. **If heartbeat missing:**
+   - Check network connectivity between services
+   - Verify all dependent services are reachable
+
+**Health Check Endpoint:**
+
+\`\`\`bash
+curl http://localhost:3001/health/monitoring
+\`\`\`
+
+Returns alert evaluation status and last successful evaluation timestamp:
+
+\`\`\`json
+{
+  "status": "healthy",
+  "alertEvaluation": {
+    "lastEvaluationTime": "2026-04-04T10:30:00Z",
+    "evaluationCount": 12345,
+    "isRunning": true
+  }
+}
+\`\`\`
+
+**Reference:**
+- Alert evaluation service: \`packages/telemetry/src/runtime/alert-evaluation.ts\`
+- Alert manager: \`packages/telemetry/src/runtime/alert-manager.ts\`
+- Health endpoint: \`apps/api/src/lib/metrics/health.ts\`
 
 ---
 

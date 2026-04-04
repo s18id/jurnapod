@@ -45,34 +45,54 @@ console.log(`SLO compliance: ${compliance}%`); // 99.9%
 
 ### Metric Schema
 
-The telemetry package defines the following metric schemas for sync, outbox, and journal operations:
+The telemetry package defines canonical metric schemas for sync, outbox, and journal operations. All tenant-scoped metrics MUST include the `company_id` label.
 
 #### Sync Metrics
 
 | Metric Name | Type | Labels | Description |
 |-------------|------|--------|-------------|
-| `sync_push_latency_ms` | Histogram | outlet_id, status | Sync push operation latency in milliseconds |
-| `sync_push_total` | Counter | outlet_id, status | Total sync push operations |
-| `sync_pull_latency_ms` | Histogram | outlet_id, status | Sync pull operation latency in milliseconds |
-| `sync_pull_total` | Counter | outlet_id, status | Total sync pull operations |
-| `client_tx_id_duplicates_total` | Counter | outlet_id | Duplicate transaction suppressions |
+| `sync_push_latency_ms` | Histogram | `company_id`, `outlet_id`, `status` | Sync push operation latency in milliseconds |
+| `sync_push_total` | Counter | `company_id`, `outlet_id`, `status` | Total sync push operations |
+| `sync_pull_latency_ms` | Histogram | `company_id`, `outlet_id`, `status` | Sync pull operation latency in milliseconds |
+| `sync_pull_total` | Counter | `company_id`, `outlet_id`, `status` | Total sync pull operations |
+| `client_tx_id_duplicates_total` | Counter | `company_id`, `outlet_id` | Duplicate transaction suppressions |
+| `sync_conflicts_total` | Counter | `company_id`, `outlet_id` | Sync conflicts detected |
 
 #### Outbox Metrics
 
 | Metric Name | Type | Labels | Description |
 |-------------|------|--------|-------------|
-| `outbox_lag_items` | Gauge | outlet_id | Number of pending outbox items |
-| `outbox_retry_depth` | Gauge | outlet_id | Current retry attempt depth |
-| `outbox_failure_total` | Counter | outlet_id, reason | Outbox processing failures |
+| `outbox_lag_items` | Gauge | `company_id`, `outlet_id` | Number of pending outbox items |
+| `outbox_retry_depth` | Gauge | `company_id`, `outlet_id` | Current retry attempt depth |
+| `outbox_failure_total` | Counter | `company_id`, `outlet_id`, `reason` | Outbox processing failures |
 
-#### Journal Metrics
+#### Journal/Financial Metrics
 
 | Metric Name | Type | Labels | Description |
 |-------------|------|--------|-------------|
-| `journal_post_success_total` | Counter | domain | Successful journal postings |
-| `journal_post_failure_total` | Counter | domain, reason | Failed journal postings |
-| `gl_imbalance_detected_total` | Counter | — | GL imbalance alerts |
-| `journal_missing_alert_total` | Counter | — | Missing journal entry alerts |
+| `journal_post_success_total` | Counter | `company_id`, `domain` | Successful journal postings |
+| `journal_post_failure_total` | Counter | `company_id`, `domain`, `reason` | Failed journal postings |
+| `gl_imbalance_detected_total` | Counter | `company_id` | GL imbalance alerts when debit != credit |
+
+### Naming Rules
+
+- Use `snake_case` for all metric names
+- Include units in the name:
+  - `_ms` for latency/histogram metrics (e.g., `sync_push_latency_ms`)
+  - `_total` for counter metrics (e.g., `sync_push_total`)
+  - `_items` for gauge metrics representing counts (e.g., `outbox_lag_items`)
+- **Never use `_duration_seconds`** — use `_latency_ms` instead
+- All tenant-scoped metrics MUST include the `company_id` label
+- Use `_total` suffix for all Counter types
+
+### How to Add a New Metric
+
+1. **Propose name in epic documentation** — Align on naming before implementation
+2. **Verify no drift from existing collectors** — Check `packages/telemetry/src/metrics.ts` for existing metric name constants
+3. **Add to `packages/telemetry/src/metrics.ts`** — Define the metric name constant and label schema
+4. **Update alert rules in `config/alerts.yaml`** — Add corresponding alert threshold
+5. **Update dashboards in `apps/api/src/routes/admin-dashboards.ts`** — Include new metric in relevant panels
+6. **Update this document** — Add the new metric to the appropriate table above
 
 ### Counter
 
