@@ -360,3 +360,22 @@ development_status:
   30-6-fix-metric-contracts-alert-semantics: done
   30-7-wire-gl-imbalance-tenant-safety: done
   epic-30-retrospective: done
+
+  # Epic 31: API Detachment Completion
+  epic-31: pending
+  31-1-extract-users-rbac: pending
+  31-2-extract-companies-provisioning: pending
+  31-3-consolidate-reservations-duplicate: pending
+  31-4-thin-routes-users-companies: pending
+  31-5-import-export-platform: pending
+  31-6-notifications-consolidation: pending
+  31-7-route-thinning-enforcement: pending
+  31-8-validation-gate-cleanup: pending
+
+  # Epic 32: Financial Period Close & Reconciliation Workspace
+  epic-32: pending
+  32-1-fiscal-year-close: pending
+  32-2-multi-period-reconciliation-dashboard: pending
+  32-3-trial-balance-validation: pending
+  32-4-period-transition-audit-trail: pending
+  32-5-roll-forward-workspace: pending

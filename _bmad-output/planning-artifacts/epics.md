@@ -37,17 +37,14 @@
 | Epic 27 | POS Sync Push Boundary Completion | done | epic-27-sprint-plan |
 | Epic 28 | Sales Payments Extraction | done | epic-28-sprint-plan |
 | Epic 29 | Fixed Assets / Depreciation | done | epic-29-sprint-plan |
+| Epic 30 | Sync & Financial Observability | done | epic-30-sprint-plan |
 
 ## Backlog
 
 | Epic | Title | Status | Sprint Plan |
 |------|-------|--------|-------------|
-| Epic 30 | TBD | backlog | TBD |
-
-
-## Future Epics
-
-- TBD
+| Epic 31 | API Detachment Completion | backlog | epic-31-sprint-plan |
+| Epic 32 | Financial Period Close & Reconciliation Workspace | backlog | epic-32-sprint-plan |
 
 ---
 
