@@ -163,6 +163,40 @@ npm run test:verbose  # Verbose output
 
 ---
 
+## DB Testing Policy
+
+**NO MOCK DB for DB-backed business logic tests.** Use real DB integration via `.env`.
+
+This package (`@jurnapod/telemetry`) contains observability primitives (SLO, metrics, correlation) with NO database operations. All tests are unit tests for pure computation.
+
+If this package is extended to store telemetry data in a database, those tests MUST use real DB:
+
+```typescript
+// Load .env before other imports
+import path from 'path';
+import { config as loadEnv } from 'dotenv';
+loadEnv({ path: path.resolve(process.cwd(), '.env') });
+
+import { createKysely, type KyselySchema } from '@jurnapod/db';
+
+const db = createKysely({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+});
+
+// CRITICAL: Clean up in afterAll
+afterAll(async () => {
+  await db.destroy();
+});
+```
+
+**Non-DB logic (pure computation) may use unit tests without database.**
+
+---
+
 ## Security Rules
 
 ### Critical Constraints

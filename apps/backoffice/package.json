@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint . --max-warnings=0",
-    "test": "node --test --import tsx src/tests/all.test.ts",
+    "test": "node --import ../../scripts/test/load-root-env.mjs --test --import tsx src/tests/all.test.ts",
     "qa:e2e": "playwright test",
     "qa:e2e:headed": "playwright test --headed",
     "qa:e2e:install": "playwright install chromium",

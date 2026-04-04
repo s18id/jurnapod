@@ -118,6 +118,24 @@ npm run deploy:backoffice # Deploy Backoffice
 
 ---
 
+## 🧪 Test Environment Resolution
+
+Workspace test runs support monorepo-level defaults with workspace overrides:
+
+- Root `.env` is loaded first as the default.
+- If a workspace (`apps/*` or `packages/*`) has its own `.env`, it is loaded second and overrides root values.
+
+This applies when running tests from root with workspace targeting, for example:
+
+```bash
+npm test -w @jurnapod/api
+npm test -w @jurnapod/pos-sync
+```
+
+So you can keep shared DB/auth defaults in root `.env`, and only override per workspace when necessary.
+
+---
+
 ## 🔐 Security
 
 ### Auth Secrets

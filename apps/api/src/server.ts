@@ -44,6 +44,9 @@ import { cleanupStaleOperations } from "./lib/progress/progress-store.js";
 import { getDb } from "./lib/db.js";
 import { initializeDefaultMetrics, getMetricsOutput, getMetricsContentType } from "./lib/metrics/index.js";
 import { alertManager } from "./lib/alerts/alert-manager.js";
+import { alertEvaluationService } from "./lib/alerts/alert-evaluation.js";
+import { adminDashboardRoutes } from "./routes/admin-dashboards.js";
+import { adminRunbookRoutes } from "./routes/admin-runbook.js";
 
 // Validate environment configuration before starting server
 assertAppEnvReady();
@@ -211,6 +214,12 @@ app.route("/api/import", importRoutes);
 // Register progress routes
 app.route("/api/operations", progressRoutes);
 
+// Register admin dashboard routes
+app.route("/admin/dashboard", adminDashboardRoutes);
+
+// Register admin runbook routes
+app.route("/admin", adminRunbookRoutes);
+
 // Initialize sync modules after routes are registered
 try {
   await initializeSyncModules();
@@ -356,6 +365,10 @@ server.listen(PORT, HOST, () => {
   initializeDefaultMetrics();
   console.log("[metrics] Prometheus metrics initialized");
   
+  // Start alert evaluation service (only in production or when explicitly enabled)
+  alertEvaluationService.start();
+  console.log("[alert] Alert evaluation service started");
+  
   // Print registered routes in development
   if (process.env.NODE_ENV !== "production") {
     printRoutes(app);
@@ -368,6 +381,9 @@ const shutdown = async () => {
   
   // Stop WebSocket server
   wsManager.stop();
+  
+  // Stop alert evaluation service
+  alertEvaluationService.stop();
   
   // Cleanup sync modules
   await cleanupSyncModules();

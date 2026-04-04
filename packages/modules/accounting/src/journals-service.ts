@@ -48,6 +48,16 @@ export class JournalOutsideFiscalYearError extends Error {
 }
 
 /**
+ * Result of a GL imbalance check
+ */
+export interface GlImbalanceResult {
+  journalBatchId: number;
+  totalDebit: number;
+  totalCredit: number;
+  imbalance: number;
+}
+
+/**
  * Import audit service interface from accounts-service
  */
 import type { AuditServiceInterface } from "./accounts-service";
@@ -407,6 +417,126 @@ export class JournalsService {
       };
     });
   }
+
+  /**
+   * Check if a specific journal batch is balanced (debit = credit)
+   * Returns the imbalance details if unbalanced, null if balanced
+   */
+  async checkGlImbalance(batchId: number): Promise<GlImbalanceResult | null> {
+    const result = await sql<{
+      journal_batch_id: number;
+      total_debit: string;
+      total_credit: string;
+    }>`
+      SELECT 
+        journal_batch_id,
+        SUM(debit) as total_debit,
+        SUM(credit) as total_credit
+      FROM journal_lines
+      WHERE journal_batch_id = ${batchId}
+      GROUP BY journal_batch_id
+      HAVING SUM(debit) != SUM(credit)
+    `.execute(this.db);
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    const totalDebit = Number(row.total_debit);
+    const totalCredit = Number(row.total_credit);
+
+    return {
+      journalBatchId: Number(row.journal_batch_id),
+      totalDebit,
+      totalCredit,
+      imbalance: totalDebit - totalCredit
+    };
+  }
+
+  /**
+   * Find all GL imbalances for a specific company.
+   * 
+   * @param companyId - Company ID to scope the query (REQUIRED for tenant isolation)
+   * @returns Array of GL imbalance results for the given company
+   * 
+   * @warning Performance: On large datasets, this query scans all journal_lines for the company.
+   * Consider adding date filters (e.g., last 30 days) for frequent monitoring calls.
+   */
+  async findAllGlImbalances(companyId: number): Promise<GlImbalanceResult[]> {
+    const result = await sql<{
+      journal_batch_id: number;
+      total_debit: string;
+      total_credit: string;
+    }>`
+      SELECT 
+        journal_batch_id,
+        SUM(debit) as total_debit,
+        SUM(credit) as total_credit
+      FROM journal_lines
+      WHERE company_id = ${companyId}
+      GROUP BY journal_batch_id, company_id
+      HAVING SUM(debit) != SUM(credit)
+    `.execute(this.db);
+
+    return result.rows.map((row) => {
+      const totalDebit = Number(row.total_debit);
+      const totalCredit = Number(row.total_credit);
+      return {
+        journalBatchId: Number(row.journal_batch_id),
+        totalDebit,
+        totalCredit,
+        imbalance: totalDebit - totalCredit
+      };
+    });
+  }
+}
+
+/**
+ * Standalone function to check GL imbalance for a specific journal batch.
+ * This can be called without instantiating JournalsService.
+ * 
+ * @param db - Database client (KyselySchema or compatible)
+ * @param batchId - Journal batch ID to check
+ * @returns GlImbalanceResult if unbalanced, null if balanced
+ * 
+ * @note Tenant safety: journal_batches.id is AUTO_INCREMENT and globally unique.
+ * A batch ID uniquely identifies a single company's batch, so filtering by batchId
+ * alone provides proper tenant isolation. No companyId parameter is needed.
+ */
+export async function checkGlImbalanceByBatchId(
+  db: KyselySchema,
+  batchId: number
+): Promise<GlImbalanceResult | null> {
+  const result = await sql<{
+    journal_batch_id: number;
+    total_debit: string;
+    total_credit: string;
+  }>`
+    SELECT 
+      journal_batch_id,
+      SUM(debit) as total_debit,
+      SUM(credit) as total_credit
+    FROM journal_lines
+    WHERE journal_batch_id = ${batchId}
+    GROUP BY journal_batch_id
+    HAVING SUM(debit) != SUM(credit)
+  `.execute(db);
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  const row = result.rows[0];
+  const totalDebit = Number(row.total_debit);
+  const totalCredit = Number(row.total_credit);
+
+  return {
+    journalBatchId: Number(row.journal_batch_id),
+    totalDebit,
+    totalCredit,
+    imbalance: totalDebit - totalCredit
+  };
 }
 
 const mysqlDuplicateErrorCode = 1062;

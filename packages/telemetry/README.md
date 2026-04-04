@@ -43,6 +43,37 @@ console.log(`SLO compliance: ${compliance}%`); // 99.9%
 
 ## Metrics
 
+### Metric Schema
+
+The telemetry package defines the following metric schemas for sync, outbox, and journal operations:
+
+#### Sync Metrics
+
+| Metric Name | Type | Labels | Description |
+|-------------|------|--------|-------------|
+| `sync_push_latency_ms` | Histogram | outlet_id, status | Sync push operation latency in milliseconds |
+| `sync_push_total` | Counter | outlet_id, status | Total sync push operations |
+| `sync_pull_latency_ms` | Histogram | outlet_id, status | Sync pull operation latency in milliseconds |
+| `sync_pull_total` | Counter | outlet_id, status | Total sync pull operations |
+| `client_tx_id_duplicates_total` | Counter | outlet_id | Duplicate transaction suppressions |
+
+#### Outbox Metrics
+
+| Metric Name | Type | Labels | Description |
+|-------------|------|--------|-------------|
+| `outbox_lag_items` | Gauge | outlet_id | Number of pending outbox items |
+| `outbox_retry_depth` | Gauge | outlet_id | Current retry attempt depth |
+| `outbox_failure_total` | Counter | outlet_id, reason | Outbox processing failures |
+
+#### Journal Metrics
+
+| Metric Name | Type | Labels | Description |
+|-------------|------|--------|-------------|
+| `journal_post_success_total` | Counter | domain | Successful journal postings |
+| `journal_post_failure_total` | Counter | domain, reason | Failed journal postings |
+| `gl_imbalance_detected_total` | Counter | — | GL imbalance alerts |
+| `journal_missing_alert_total` | Counter | — | Missing journal entry alerts |
+
 ### Counter
 
 ```typescript
@@ -76,6 +107,44 @@ requestDuration.observe(
   { method: 'POST', path: '/sync/push', status: 200 },
   145.5  // duration in ms
 );
+```
+
+### SLO Configuration (YAML)
+
+Load SLO thresholds from YAML configuration:
+
+```typescript
+import { loadSLOConfig, getSyncLatencyThreshold } from '@jurnapod/telemetry/slo-config';
+
+const config = loadSLOConfig();
+
+// Get specific thresholds
+const p50 = getSyncLatencyThreshold(config, 'p50');  // 200ms
+const p95 = getSyncLatencyThreshold(config, 'p95');  // 500ms
+const p99 = getSyncLatencyThreshold(config, 'p99');  // 2000ms
+```
+
+The SLO configuration file (`config/slos.yaml`) contains:
+
+```yaml
+sync:
+  latency:
+    p50_threshold_ms: 200
+    p95_threshold_ms: 500
+    p99_threshold_ms: 2000
+  success_rate_threshold: 0.995
+  duplicate_rate_threshold: 0.001
+
+outbox:
+  lag_warning_threshold: 50
+  lag_critical_threshold: 100
+  retry_depth_warning: 2
+  retry_depth_critical: 5
+  failure_rate_threshold: 0.005
+
+journal:
+  posting_success_rate_threshold: 0.999
+  gl_balance_check_enabled: true
 ```
 
 ## Correlation
@@ -150,9 +219,10 @@ packages/telemetry/
 ├── src/
 │   ├── index.ts                    # Main exports
 │   ├── slo.ts                      # SLO definitions
-│   ├── metrics.ts                  # Metrics primitives
-│   ├── correlation.ts               # Correlation context
-│   └── labels.ts                    # Label schemas
+│   ├── slo-config.ts               # SLO YAML configuration loader
+│   ├── metrics.ts                  # Metrics primitives & schema
+│   ├── correlation.ts              # Correlation context
+│   └── labels.ts                   # Label schemas
 ```
 
 ## Related Packages

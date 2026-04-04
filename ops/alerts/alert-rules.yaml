@@ -52,7 +52,7 @@ groups:
         expr: |
           (
             rate(sync_conflicts_total[5m]) /
-            sum(rate(sync_push_duration_seconds_count[5m]) + rate(sync_pull_duration_seconds_count[5m]))
+            sum(rate(sync_push_latency_ms_count[5m]) + rate(sync_pull_latency_ms_count[5m]))
           ) * 100 > 1
         for: 5m
         labels:

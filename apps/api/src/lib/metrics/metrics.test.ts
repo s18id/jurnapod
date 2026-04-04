@@ -97,27 +97,44 @@ describe("SyncMetricsCollector", () => {
     assert.ok(syncMetrics.getRegistry());
   });
 
-  test("should record sync push duration", async () => {
-    syncMetrics.recordPushDuration("sales", 1.0);
-    syncMetrics.recordPushDuration("inventory", 2.0);
+  test("should record sync push latency", async () => {
+    syncMetrics.recordPushDuration("outlet-1", "sales", 100);
+    syncMetrics.recordPushDuration("outlet-1", "inventory", 200);
     
     const metrics = await syncMetrics.getRegistry().getMetricsAsJSON();
-    const pushMetric = metrics.find((m: { name: string }) => m.name === "sync_push_duration_seconds");
-    assert.ok(pushMetric, "sync_push_duration_seconds metric should exist");
+    const pushMetric = metrics.find((m: { name: string }) => m.name === "sync_push_latency_ms");
+    assert.ok(pushMetric, "sync_push_latency_ms metric should exist");
   });
 
-  test("should record sync pull duration", async () => {
-    syncMetrics.recordPullDuration("items", 0.5);
-    syncMetrics.recordPullDuration("prices", 1.5);
+  test("should record sync push operations", async () => {
+    syncMetrics.recordPushOperation("outlet-1", "success");
+    syncMetrics.recordPushOperation("outlet-1", "error");
     
     const metrics = await syncMetrics.getRegistry().getMetricsAsJSON();
-    const pullMetric = metrics.find((m: { name: string }) => m.name === "sync_pull_duration_seconds");
-    assert.ok(pullMetric, "sync_pull_duration_seconds metric should exist");
+    const pushTotalMetric = metrics.find((m: { name: string }) => m.name === "sync_push_total");
+    assert.ok(pushTotalMetric, "sync_push_total metric should exist");
+  });
+
+  test("should record sync pull latency", async () => {
+    syncMetrics.recordPullDuration("outlet-1", "items", 50);
+    syncMetrics.recordPullDuration("outlet-1", "prices", 150);
+    
+    const metrics = await syncMetrics.getRegistry().getMetricsAsJSON();
+    const pullMetric = metrics.find((m: { name: string }) => m.name === "sync_pull_latency_ms");
+    assert.ok(pullMetric, "sync_pull_latency_ms metric should exist");
+  });
+
+  test("should record sync pull operations", async () => {
+    syncMetrics.recordPullOperation("outlet-1", "success");
+    
+    const metrics = await syncMetrics.getRegistry().getMetricsAsJSON();
+    const pullTotalMetric = metrics.find((m: { name: string }) => m.name === "sync_pull_total");
+    assert.ok(pullTotalMetric, "sync_pull_total metric should exist");
   });
 
   test("should record sync conflicts", async () => {
-    syncMetrics.recordConflict();
-    syncMetrics.recordConflict();
+    syncMetrics.recordConflict("outlet-1");
+    syncMetrics.recordConflict("outlet-2");
     
     const metrics = await syncMetrics.getRegistry().getMetricsAsJSON();
     const conflictsMetric = metrics.find((m: { name: string }) => m.name === "sync_conflicts_total");

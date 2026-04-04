@@ -1,0 +1,72 @@
+# Alert Rules Configuration
+# Service Level Alerts for Jurnapod ERP
+#
+# These rules define when alerts should fire based on metrics thresholds.
+# Alerts are evaluated periodically and dispatched to configured webhooks.
+
+# Slack webhook URL (optional - if not set, alerts are logged only)
+# Can also be set via ALERT_WEBHOOK_URL environment variable
+webhook_url: ""
+
+# Alert deduplication settings
+deduplication:
+  # Cooldown period between repeated alerts (in seconds)
+  cooldown_seconds: 300  # 5 minutes
+
+# Alert rules
+alerts:
+  # Sync latency breach - fires when p95 sync push latency exceeds 500ms
+  - name: sync_latency_breach
+    metric: sync_push_latency_ms
+    threshold: 500
+    threshold_type: greater_than
+    severity: warning
+    window: 5m
+    description: "Sync push latency p95 exceeds 500ms threshold"
+
+  # Sync failure rate - fires when sync push failure rate exceeds 0.5%
+  - name: sync_failure_rate
+    metric: sync_push_total
+    labels:
+      status: error
+    threshold: 0.5
+    threshold_type: rate_percent
+    severity: critical
+    window: 5m
+    description: "Sync push failure rate exceeds 0.5%"
+
+  # Outbox lag critical - fires when outbox lag exceeds 100 items
+  - name: outbox_lag_critical
+    metric: outbox_lag_items
+    threshold: 100
+    threshold_type: greater_than
+    severity: critical
+    window: 1m
+    description: "Outbox lag exceeds 100 pending items"
+
+  # Journal failure rate - fires when journal posting failure rate exceeds 0.1%
+  - name: journal_failure_rate
+    metric: journal_post_failure_total
+    threshold: 0.1
+    threshold_type: rate_percent
+    severity: critical
+    window: 5m
+    description: "Journal posting failure rate exceeds 0.1%"
+
+  # GL imbalance detected - fires when any GL imbalance is detected
+  - name: gl_imbalance_detected
+    metric: gl_imbalance_detected_total
+    threshold: 0
+    threshold_type: greater_than
+    severity: critical
+    window: 1m
+    description: "GL imbalance detected (debit != credit in journal entry)"
+
+  # Heartbeat/dead man's switch - ensures alerting system is operational
+  - name: heartbeat
+    metric: alert_evaluation_total
+    threshold: 0
+    threshold_type: rate_minute
+    severity: warning
+    window: 5m
+    description: "Heartbeat alert - fires if alerting system stops evaluating"

@@ -13,6 +13,8 @@ import { collectDefaultMetrics, register } from "prom-client";
 export { ImportMetricsCollector, importMetrics } from "./import-metrics";
 export { ExportMetricsCollector, exportMetrics } from "./export-metrics";
 export { SyncMetricsCollector, syncMetrics } from "./sync-metrics";
+export { OutboxMetricsCollector, outboxMetrics, OUTBOX_FAILURE_REASONS, type OutboxFailureReason } from "./outbox-metrics";
+export { JournalMetricsCollector, journalMetrics, JOURNAL_DOMAINS, JOURNAL_FAILURE_REASONS, type JournalDomain, type JournalFailureReason } from "./journal-metrics";
 
 /**
  * Default metrics labels

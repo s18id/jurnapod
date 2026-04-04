@@ -25,9 +25,11 @@ import type { StockDeductResult } from "../../stock.js";
 import {
   SyncPushPostingHookError,
   type SyncPushPostingHookResult,
-  runSyncPushPostingHook
+  runSyncPushPostingHook,
+  checkGlImbalanceByBatchId
 } from "@jurnapod/modules-accounting";
 import { KyselyPosSyncPushPostingExecutor } from "./posting-executor.js";
+import { journalMetrics } from "../../metrics";
 import { postCogsForSale } from "@jurnapod/modules-accounting/posting/cogs";
 import {
   CogsPostingResult
@@ -413,6 +415,30 @@ export async function processSyncPushTransactionPhase2(
     try {
       const executor = new KyselyPosSyncPushPostingExecutor(db, acceptedContext);
       postingResult = await runSyncPushPostingHook(db, executor, acceptedContext);
+      // Record success - POS sync posting is part of sales domain
+      journalMetrics.recordPostSuccess(acceptedContext.companyId, "sales");
+
+      // GL Imbalance Check (Story 30.7)
+      // Verify the created journal batch is balanced after posting
+      if (
+        (postingResult.mode === "active" || postingResult.mode === "shadow") &&
+        acceptedContext.status === "COMPLETED" &&
+        postingResult.journalBatchId !== null
+      ) {
+        const imbalanceResult = await checkGlImbalanceByBatchId(db, postingResult.journalBatchId);
+        if (imbalanceResult !== null) {
+          // GL imbalance detected - record metric with tenant isolation
+          journalMetrics.recordGlImbalance(acceptedContext.companyId);
+          console.error("GL imbalance detected after posting", {
+            correlation_id: correlationId,
+            client_tx_id: acceptedContext.clientTxId,
+            journal_batch_id: postingResult.journalBatchId,
+            total_debit: imbalanceResult.totalDebit,
+            total_credit: imbalanceResult.totalCredit,
+            imbalance: imbalanceResult.imbalance
+          });
+        }
+      }
     } catch (postingHookError) {
       if (
         postingHookError instanceof SyncPushPostingHookError
@@ -425,9 +451,29 @@ export async function processSyncPushTransactionPhase2(
           balanceOk: false,
           reason: postingHookError.message
         };
+        // Record shadow mode failure
+        journalMetrics.recordPostFailure(acceptedContext.companyId, "sales", "posting_error");
       } else {
+        // Record actual posting failure for active mode
+        journalMetrics.recordPostFailure(acceptedContext.companyId, "sales", "posting_error");
         throw postingHookError;
       }
+    }
+
+    // Check for missing journal alert
+    // If active mode, COMPLETED status, but no journal created - that's a problem
+    if (
+      postingResult.mode === "active" &&
+      acceptedContext.status === "COMPLETED" &&
+      postingResult.journalBatchId === null
+    ) {
+      // This should not happen - posting succeeded but no journal was created
+      journalMetrics.recordMissingJournal();
+      console.error("Missing journal alert: posting completed but no journal created", {
+        correlation_id: correlationId,
+        client_tx_id: acceptedContext.clientTxId,
+        pos_transaction_id: acceptedContext.posTransactionId
+      });
     }
 
     await runAcceptedSyncPushHook(

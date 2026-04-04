@@ -26,6 +26,7 @@ import type {
   VariantSalePush,
   VariantStockAdjustmentPush
 } from "@jurnapod/pos-sync";
+import { outboxMetrics, type OutboxFailureReason } from "../../lib/metrics/index.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -122,6 +123,21 @@ syncPushRoutes.post("/", async (c) => {
       ...(phase1Results.variantStockAdjustmentResults && phase1Results.variantStockAdjustmentResults.length > 0 && { variant_stock_adjustment_results: phase1Results.variantStockAdjustmentResults })
     };
 
+    // Record outbox health metrics (Story 30.2 & 30.7 - tenant-isolated)
+    const duplicateCount = phase1Results.results.filter((r) => r.result === "DUPLICATE").length;
+    const errorResults = phase1Results.results.filter((r) => r.result === "ERROR");
+    
+    // Record duplicates with company_id for tenant isolation (Story 30.7)
+    if (duplicateCount > 0) {
+      outboxMetrics.recordDuplicate(auth.companyId, outlet_id);
+    }
+    
+    // Record failures with reason classification - tenant-isolated (Story 30.7)
+    for (const errorResult of errorResults) {
+      const reason = classifySyncErrorReason(errorResult.message);
+      outboxMetrics.recordFailure(auth.companyId, outlet_id, reason);
+    }
+
     console.info("POST /sync/push completed", {
       correlation_id: correlationId,
       company_id: auth.companyId,
@@ -151,5 +167,34 @@ syncPushRoutes.post("/", async (c) => {
     );
   }
 });
+
+/**
+ * Classify sync error message into outbox failure reason
+ */
+function classifySyncErrorReason(errorMessage: string | undefined): OutboxFailureReason {
+  if (!errorMessage) {
+    return "internal_error";
+  }
+  
+  const upperMessage = errorMessage.toUpperCase();
+  
+  if (upperMessage.includes("TIMEOUT") || upperMessage.includes("ECONNRESET") || upperMessage.includes("ETIMEDOUT")) {
+    return "timeout";
+  }
+  
+  if (upperMessage.includes("VALIDATION") || upperMessage.includes("INVALID") || upperMessage.includes("MISMATCH") || upperMessage.includes("REQUIRED")) {
+    return "validation_error";
+  }
+  
+  if (upperMessage.includes("CONFLICT") || upperMessage.includes("IDEMPOTENCY_CONFLICT")) {
+    return "conflict";
+  }
+  
+  if (upperMessage.includes("NETWORK") || upperMessage.includes("ECONNREFUSED") || upperMessage.includes("ENOTFOUND")) {
+    return "network_error";
+  }
+  
+  return "internal_error";
+}
 
 export { syncPushRoutes };

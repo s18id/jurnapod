@@ -1,301 +1,154 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-/**
- * Alert Manager
- * 
- * Evaluates alert conditions and dispatches webhook notifications.
- * Maintains alert state to prevent duplicate alerts.
- */
+// =============================================================================
+// ALERT MANAGER ADAPTER
+// =============================================================================
+// This is a thin adapter that re-exports from the package runtime.
+// The package runtime is the single source of truth for alert management.
+// =============================================================================
+
+import { register, Counter } from "prom-client";
 
 import {
-  ALERT_THRESHOLDS,
-  getThresholdValue,
-  getThresholdWindow,
+  AlertManager as PackageAlertManager,
+  getAlertThresholds,
+  getAlertCooldownMs,
   getWebhookConfig,
-  type AlertType,
-  type AlertSeverity,
-} from "./alert-rules";
+  type AlertEvent as PackageAlertEvent,
+  type AlertEvaluationResult as PackageAlertEvaluationResult,
+} from "@jurnapod/telemetry/runtime";
 
-import { withRetry } from "../retry";
+// Re-export types from package for backwards compatibility
+export type {
+  AlertEvent,
+  AlertEvaluationResult,
+} from "@jurnapod/telemetry/runtime";
 
-/**
- * Alert event structure
- */
-export interface AlertEvent {
-  type: AlertType;
-  severity: AlertSeverity;
-  name: string;
-  message: string;
-  value: number;
-  threshold: number;
-  windowSeconds: number;
-  timestamp: string;
-  labels?: Record<string, string>;
-}
+// Re-export the AlertType and AlertThreshold types from alert-rules
+export { type AlertSeverity, type ThresholdType, type AlertType, type AlertThreshold } from "./alert-rules";
+
+// =============================================================================
+// ALERT MANAGER WRAPPER
+// =============================================================================
 
 /**
- * Alert state for tracking firing alerts
+ * Alert Manager Adapter
+ * 
+ * Thin adapter that wraps the package's AlertManager to provide:
+ * 1. Backwards compatibility with existing API code
+ * 2. Singleton pattern for the global alertManager instance
+ * 3. API-specific initialization (using global prom-client register)
+ * 
+ * All actual logic is delegated to the package runtime.
  */
-interface AlertState {
-  firing: boolean;
-  lastValue: number;
-  lastChecked: number;
-  lastFired?: number;
-}
+class AlertManagerAdapter {
+  public inner: PackageAlertManager;
 
-/**
- * Alert evaluation result
- */
-export interface AlertEvaluationResult {
-  type: AlertType;
-  firing: boolean;
-  value: number;
-  threshold: number;
-  windowSeconds: number;
-}
-
-/**
- * Alert manager class
- */
-export class AlertManager {
-  private alertStates: Map<AlertType, AlertState> = new Map();
-  private readonly cooldownMs: number;
-
-  constructor(cooldownMs: number = 60000) {
-    // Initialize alert states
-    for (const threshold of ALERT_THRESHOLDS) {
-      this.alertStates.set(threshold.type, {
-        firing: false,
-        lastValue: 0,
-        lastChecked: Date.now(),
-      });
-    }
-
-    // Cooldown between alerts (default: 1 minute)
-    this.cooldownMs = cooldownMs;
+  constructor() {
+    // Create the package AlertManager with the global prom-client registry and config getters
+    this.inner = new PackageAlertManager(
+      register,
+      getAlertThresholds,
+      getAlertCooldownMs,
+      getWebhookConfig
+    );
+    
+    // Register alert_evaluation_total counter once in global registry, then
+    // hand counter ownership to package runtime (single source of truth).
+    const existing = register.getSingleMetric("alert_evaluation_total") as Counter<string> | undefined;
+    const counter = existing ?? new Counter({
+      name: "alert_evaluation_total",
+      help: "Total number of alert evaluation cycles performed",
+      registers: [register],
+    });
+    this.inner.registerEvaluationCounter({ inc: () => counter.inc() });
   }
 
   /**
    * Evaluate an alert condition
    */
-  evaluate(type: AlertType, value: number): AlertEvaluationResult {
-    const threshold = ALERT_THRESHOLDS.find((t) => t.type === type);
-    if (!threshold) {
-      throw new Error(`Unknown alert type: ${type}`);
-    }
-
-    const thresholdValue = getThresholdValue(threshold);
-    const windowSeconds = getThresholdWindow(threshold);
-
-    const state = this.alertStates.get(type)!;
-    state.lastValue = value;
-    state.lastChecked = Date.now();
-
-    const firing = value >= thresholdValue;
-    state.firing = firing;
-
-    return {
-      type,
-      firing,
-      value,
-      threshold: thresholdValue,
-      windowSeconds,
-    };
+  evaluate(type: Parameters<typeof this.inner.evaluate>[0], value: number): ReturnType<typeof this.inner.evaluate> {
+    return this.inner.evaluate(type, value);
   }
 
   /**
    * Check if alert should fire (respects cooldown)
    */
-  shouldFire(type: AlertType): boolean {
-    const state = this.alertStates.get(type);
-    if (!state || !state.firing) {
-      return false;
-    }
-
-    const now = Date.now();
-    const lastFired = state.lastFired ?? 0;
-
-    // Check cooldown
-    if (now - lastFired < this.cooldownMs) {
-      return false;
-    }
-
-    return true;
+  shouldFire(type: Parameters<typeof this.inner.shouldFire>[0]): ReturnType<typeof this.inner.shouldFire> {
+    return this.inner.shouldFire(type);
   }
 
   /**
    * Mark alert as fired
    */
-  markFired(type: AlertType): void {
-    const state = this.alertStates.get(type);
-    if (state) {
-      state.lastFired = Date.now();
-    }
+  markFired(type: Parameters<typeof this.inner.markFired>[0]): ReturnType<typeof this.inner.markFired> {
+    return this.inner.markFired(type);
   }
 
   /**
    * Get all firing alerts
    */
-  getFiringAlerts(): AlertType[] {
-    const firing: AlertType[] = [];
-    for (const [type, state] of this.alertStates) {
-      if (state.firing) {
-        firing.push(type);
-      }
-    }
-    return firing;
+  getFiringAlerts(): ReturnType<typeof this.inner.getFiringAlerts> {
+    return this.inner.getFiringAlerts();
   }
 
   /**
    * Get alert state
    */
-  getAlertState(type: AlertType): AlertState | undefined {
-    return this.alertStates.get(type);
+  getAlertState(type: Parameters<typeof this.inner.getAlertState>[0]): ReturnType<typeof this.inner.getAlertState> {
+    return this.inner.getAlertState(type);
   }
 
   /**
    * Create alert event from evaluation result
    */
-  createAlertEvent(result: AlertEvaluationResult, message: string, labels?: Record<string, string>): AlertEvent {
-    const threshold = ALERT_THRESHOLDS.find((t) => t.type === result.type)!;
-
-    return {
-      type: result.type,
-      severity: threshold.severity,
-      name: threshold.name,
-      message,
-      value: result.value,
-      threshold: result.threshold,
-      windowSeconds: result.windowSeconds,
-      timestamp: new Date().toISOString(),
-      labels,
-    };
+  createAlertEvent(result: PackageAlertEvaluationResult, message: string, labels?: Record<string, string>): PackageAlertEvent {
+    return this.inner.createAlertEvent(result, message);
   }
 
   /**
-   * Dispatch alert to webhook with exponential backoff retry
+   * Get current metric value from prom-client registry
    */
-  async dispatchAlert(event: AlertEvent): Promise<boolean> {
-    const config = getWebhookConfig();
-    if (!config) {
-      // No webhook configured, just log
-      console.warn(`[alert] Alert firing: ${event.name} (${event.severity}): ${event.message}`);
-      console.warn(`[alert] Value: ${event.value}, Threshold: ${event.threshold}, Window: ${event.windowSeconds}s`);
-      return false;
-    }
+  async getMetricValue(metricName: string, labels?: Record<string, string>): Promise<number> {
+    return this.inner.getMetricValue(metricName, labels);
+  }
 
-    const payload = this.formatWebhookPayload(event);
-
-    try {
-      await withRetry(
-        async () => {
-          const response = await fetch(config.url, {
-            method: config.method,
-            headers: config.headers,
-            body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(config.timeout ?? 5000),
-          });
-
-          if (!response.ok) {
-            throw new Error(`Webhook failed: ${response.status} ${response.statusText}`);
-          }
-        },
-        {
-          maxRetries: 3,
-          baseDelay: 1000,
-          onRetry: (attempt, error, delay) => {
-            console.warn(`[alert] Retry ${attempt}/3 in ${delay}ms: ${error.message}`);
-          },
-        }
-      );
-
-      console.info(`[alert] Alert dispatched: ${event.name} (${event.severity})`);
-      return true;
-    } catch (error) {
-      console.error(`[alert] Webhook error after retries: ${error instanceof Error ? error.message : "Unknown error"}`);
-      return false;
-    }
+  async evaluateAllAlerts(): Promise<PackageAlertEvaluationResult[]> {
+    return this.inner.evaluateAllAlerts();
   }
 
   /**
-   * Format webhook payload (Slack-compatible)
+   * Dispatch alert to webhook
+   * Delegates to package runtime for all dispatch/formatting logic.
    */
-  private formatWebhookPayload(event: AlertEvent): Record<string, unknown> {
-    const severityEmoji = {
-      P1: "🔴",
-      P2: "🟠",
-      P3: "🟡",
-    }[event.severity];
-
-    const color = {
-      P1: "#FF0000",
-      P2: "#FF8C00",
-      P3: "#FFD700",
-    }[event.severity];
-
-    return {
-      text: `${severityEmoji} Alert: ${event.name}`,
-      attachments: [
-        {
-          color,
-          fields: [
-            {
-              title: "Severity",
-              value: event.severity,
-              short: true,
-            },
-            {
-              title: "Type",
-              value: event.type,
-              short: true,
-            },
-            {
-              title: "Current Value",
-              value: String(event.value),
-              short: true,
-            },
-            {
-              title: "Threshold",
-              value: String(event.threshold),
-              short: true,
-            },
-            {
-              title: "Window",
-              value: `${event.windowSeconds}s`,
-              short: true,
-            },
-            {
-              title: "Time",
-              value: event.timestamp,
-              short: false,
-            },
-          ],
-          text: event.message,
-        },
-      ],
-      // Include full event for other webhook consumers
-      event: {
-        ...event,
-        labels: event.labels ?? {},
-      },
-    };
+  async dispatchAlert(event: PackageAlertEvent): Promise<boolean> {
+    return this.inner.dispatchAlert(event);
   }
 
   /**
    * Reset all alert states
    */
   reset(): void {
-    for (const state of this.alertStates.values()) {
-      state.firing = false;
-      state.lastValue = 0;
-      state.lastChecked = Date.now();
-      state.lastFired = undefined;
-    }
+    return this.inner.reset();
+  }
+
+  /**
+   * Reset the static evaluation cycle state (for testing)
+   */
+  static resetEvaluationCycleState(): void {
+    PackageAlertManager.resetEvaluationCycleState();
   }
 }
 
+// Export the class for backwards compatibility
+export { AlertManagerAdapter as AlertManager };
+
+// =============================================================================
+// SINGLETON INSTANCE
+// =============================================================================
+
 /**
- * Global singleton instance
+ * Global singleton instance for backwards compatibility
  */
-export const alertManager = new AlertManager();
+export const alertManager = new AlertManagerAdapter();

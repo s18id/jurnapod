@@ -145,8 +145,8 @@ export async function getSyncMetricsSnapshot(): Promise<SyncMetricsSnapshot> {
   const metrics = await register.getMetricsAsJSON();
   
   // Find sync metrics
-  const syncPushDuration = metrics.find(m => m.name === "sync_push_duration_seconds");
-  const syncPullDuration = metrics.find(m => m.name === "sync_pull_duration_seconds");
+  const syncPushDuration = metrics.find(m => m.name === "sync_push_latency_ms");
+  const syncPullDuration = metrics.find(m => m.name === "sync_pull_latency_ms");
   const syncConflicts = metrics.find(m => m.name === "sync_conflicts_total");
   
   // Count operations from histogram counts (each observation increments by 1)

@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { defineConfig } from 'vitest/config';
+import '../../scripts/test/load-root-env.mjs';
 
 export default defineConfig({
   test: {

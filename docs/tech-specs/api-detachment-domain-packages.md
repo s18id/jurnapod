@@ -1,7 +1,8 @@
 # Technical Specification: API Detachment Domain Packages
 
-**Status:** Draft  
+**Status:** ✅ Completed  
 **Date:** 2026-04-02  
+**Completed:** 2026-04-04  
 **Owner:** BMAD Architect  
 **Scope:** New domain packages extracted from `apps/api/src`:
 - `@jurnapod/modules-sales`
@@ -19,6 +20,47 @@ Define the architecture, boundaries, and contracts for four new domain packages 
 - business logic moves to `packages/`
 - API routes become thin HTTP adapters
 - tenant isolation, accounting correctness, and sync invariants remain intact.
+
+### 1.2 What Was Accomplished
+
+The API Detachment initiative (Epics 23-29) successfully extracted all major domain logic from `apps/api` to packages. The API now serves as a thin transport/adapter layer only.
+
+**Metrics:**
+
+| Metric | Value |
+|--------|-------|
+| Total Epics | 7 (Epic 23-29) |
+| Total LOC Removed | 5,850+ |
+| Stories Completed | 42 |
+| Grades | A to A+ across all epics |
+| Packages Extracted | 4 major packages |
+| API Routes Converted | Thin adapters only |
+
+**Epics Completed:**
+
+| Epic | Domain | LOC Removed | Grade |
+|------|--------|-------------|-------|
+| Epic 23 | API Detachment Foundation | — | A |
+| Epic 24 | Inventory Costing Boundary | — | A |
+| Epic 25 | Cash-Bank / Treasury | — | A |
+| Epic 26 | Stock Operations | — | A |
+| Epic 27 | POS Sync Push | 1,659+ | A+ |
+| Epic 28 | Sales Payments | 971 | A |
+| Epic 29 | Fixed Assets / Depreciation | 3,220 | A |
+
+**Files Deleted:**
+
+| File | LOC | Purpose |
+|------|-----|---------|
+| `sync-push-posting.ts` | 791 | POS sync posting |
+| `cogs-posting.ts` | 688 | COGS posting |
+| `sync/push/stock.ts` | 180 | Stock resolution |
+| POS sync stubs | 1,238 | Stubs replaced |
+| `payment-service.ts` | 763 | Payment service |
+| `payment-allocation.ts` | 208 | Payment allocation |
+| `fixed-assets/index.ts` | 648 | Fixed asset categories + assets |
+| `depreciation.ts` | 704 | Depreciation plan/run |
+| `fixed-assets-lifecycle.ts` | 1,868 | Lifecycle events |
 
 ### 1.2 Non-Goals
 
@@ -456,14 +498,29 @@ shared/db/telemetry -> domain modules -> apps/api adapters
 
 ---
 
-## 7. Rollout Sequence (Package-Level)
+## 7. Rollout Sequence (Actual Execution)
 
+**Planned Order:**
 1. Create package skeletons + base interfaces (`AccessScopeChecker`, deps factories).
 2. Extract `modules-sales` first (highest coupling with accounting; validates posting port).
 3. Extract `modules-inventory` (cross-table complexity).
 4. Extract `modules-reservations` (timestamp/timezone invariants).
 5. Extract `modules-reporting` (journal-truth report paths + timeout/classification helpers).
 6. Convert API routes to thin adapters and delete duplicate API-lib implementations per slice.
+
+**Actual Order (Epics 23-29):**
+
+| Epic | Package/Work | Key Files Deleted | LOC |
+|------|--------------|-------------------|-----|
+| Epic 23 | API Detachment Foundation | — | — |
+| Epic 24 | Inventory Costing Boundary | — | — |
+| Epic 25 | Cash-Bank / Treasury | — | — |
+| Epic 26 | Stock Operations | `cost-tracking.ts` | — |
+| Epic 27 | POS Sync Push | `sync-push-posting.ts`, `cogs-posting.ts`, `sync/push/stock.ts`, stubs | 1,659+ |
+| Epic 28 | Sales Payments | `payment-service.ts`, `payment-allocation.ts` | 971 |
+| Epic 29 | Fixed Assets / Depreciation | `fixed-assets/index.ts`, `depreciation.ts`, `fixed-assets-lifecycle.ts` | 3,220 |
+
+**Note:** The actual rollout combined package extraction with specific business domain extractions (POS sync, payments, fixed assets) rather than extracting entire packages at once.
 
 ---
 
@@ -478,8 +535,100 @@ shared/db/telemetry -> domain modules -> apps/api adapters
 
 ---
 
-## 9. Open Decisions
+## 9. Lessons Learned
 
-1. Whether to centralize common domain seam interfaces in a tiny shared internal package (or duplicate per package initially).
-2. Whether reservations timezone resolver should live in `modules-platform` as reusable settings facade.
-3. Exact report classification taxonomy ownership (`modules-reporting` vs `telemetry`).
+### Key Insights from Epics 23-29
+
+1. **Interface-first design enables parallel work**
+   - Story 26.1 (interface) enabled parallel implementation of 26.2 and 26.3
+   - Defining contracts before implementation allows stories to proceed independently
+
+2. **Parity checks before deletion are essential**
+   - Comparing implementations line by line prevents behavior drift on critical paths
+   - Epic 27: thorough parity checks prevented regressions on idempotency, COGS, stock
+
+3. **Transaction atomicity is non-negotiable**
+   - Any break in atomicity causes double-posting or data inconsistency
+   - Hook pattern (injection) preserves atomicity when extracting domain logic
+
+4. **Type source-of-truth prevents split-brain**
+   - 27.1 establishing packages as canonical types eliminated confusion
+   - Single source of truth for all sync push types
+
+5. **HIGH risk stories require mandatory analysis before coding**
+   - Epic 21: "analysis before action" checklist prevents breakage
+   - Story template now includes HIGH Risk Story Analysis section
+
+6. **Process improvements need dedicated capacity**
+   - E27-A1 (parity methodology documentation) took 3 epics to formalize
+   - Story template now includes Duplicate Code Deletion Parity Check section
+
+7. **20% action item capacity improves completion rates**
+   - Epic 22: reserving sprint capacity for action items
+   - Retrospective workflow now includes capacity allocation step
+
+---
+
+## 10. Process Improvements
+
+### Story Template Sections Added (Epics 20-29)
+
+The story template was enhanced with five new checklist sections:
+
+1. **Cross-Cutting Concerns** (Epic 17)
+   - Sync, idempotency, feature flags, validation
+
+2. **Data & Migration Concerns** (Epic 20)
+   - Table/data drop discovery checklist
+   - Archive-first strategy mandatory before dropping tables with data
+
+3. **HIGH Risk Story Analysis** (Epic 21)
+   - Code deletion/retirement checklist
+   - Breaking change analysis
+   - Consumer migration path documentation
+
+4. **Duplicate Code Deletion Parity Check** (Epic 27)
+   - Source vs target comparison
+   - Line-by-line behavioral parity checklist
+   - Integration tests required before deletion
+
+5. **Spike Template** (Epic 15)
+   - Time-box with max duration and deadline
+   - Research questions and stop conditions
+   - Exit criteria and escalation path
+
+### Definition of Done Enhanced (Epic 20)
+
+Added mandatory quality gates:
+- `npm run typecheck -w @jurnapod/api` passes
+- `npm run build -w @jurnapod/api` passes
+
+---
+
+## 11. Decisions Resolved
+
+1. **Common domain seam interfaces** — Duplicated per package initially (not centralized)
+2. **Reservations timezone resolver** — Lives in `modules-platform` as reusable settings facade
+3. **Report classification taxonomy** — Owned by `modules-reporting`
+
+---
+
+## 12. Action Items Status
+
+All action items from the API Detachment series have been resolved or formally closed.
+
+| Priority | Open | Done | Won't Fix |
+|----------|------|------|----------|
+| P0 | 0 | 4 | 0 |
+| P1 | 0 | 5 | 0 |
+| P2 | 0 | 4 | 0 |
+| P3 | 0 | 1 | 3 |
+| **Total** | **0** | **14** | **3** |
+
+---
+
+## 13. Retrospective References
+
+All epic retrospectives are documented:
+- `_bmad-output/implementation-artifacts/stories/epic-{N}/epic-{N}.retrospective.md`
+- Epics 20-29 retrospective grades: A-, A, A, A, A, A+, A, A, A, A

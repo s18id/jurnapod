@@ -381,4 +381,12 @@ When modifying this package:
 - `@jurnapod/db` — Database connectivity (Kysely factory)
 - `@jurnapod/api` — Uses this package for backoffice sync endpoints
 
+## Database Testing Policy (MANDATORY)
+
+**NO MOCK DB for DB-backed business logic tests.** Use real DB integration via `.env`.
+
+- Any code path that reads/writes SQL tables must be validated with a real database.
+- Use integration tests for DB-backed behavior; do not claim correctness with stubbed/mocked DB executors.
+- Always close/destroy DB clients/pools in teardown to avoid hanging test processes.
+
 For project-wide conventions, see root `AGENTS.md`.

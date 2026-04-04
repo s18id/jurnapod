@@ -1,0 +1,37 @@
+# Sync SLO Configuration
+# Service Level Objectives for Jurnapod ERP
+#
+# These thresholds define the SLOs for sync operations, outbox processing,
+# and journal posting. They are used for alerting and compliance monitoring.
+
+sync:
+  # Latency SLOs for sync push operations (in milliseconds)
+  latency:
+    p50_threshold_ms: 200
+    p95_threshold_ms: 500
+    p99_threshold_ms: 2000
+  
+  # Success rate threshold (0.995 = 99.5%)
+  success_rate_threshold: 0.995
+  
+  # Duplicate suppression rate threshold (0.001 = 0.1%)
+  duplicate_rate_threshold: 0.001
+
+outbox:
+  # Outbox lag thresholds (number of pending items)
+  lag_warning_threshold: 50
+  lag_critical_threshold: 100
+  
+  # Retry depth thresholds
+  retry_depth_warning: 2
+  retry_depth_critical: 5
+  
+  # Failure rate threshold (0.005 = 0.5%)
+  failure_rate_threshold: 0.005
+
+journal:
+  # Journal posting success rate threshold (0.999 = 99.9%)
+  posting_success_rate_threshold: 0.999
+  
+  # Enable GL balance check after posting
+  gl_balance_check_enabled: true

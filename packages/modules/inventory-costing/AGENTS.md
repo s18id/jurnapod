@@ -99,6 +99,49 @@ When modifying this package:
 
 ---
 
+## DB Testing Policy
+
+**NO MOCK DB for DB-backed business logic tests.** Use real DB integration via `.env`.
+
+DB-backed tests (tests that exercise database queries, transactions, or constraints) MUST use real database connections:
+
+```typescript
+// Load .env before other imports
+import path from 'path';
+import { config as loadEnv } from 'dotenv';
+loadEnv({ path: path.resolve(process.cwd(), '.env') });
+
+import { createKysely, type KyselySchema } from '@jurnapod/db';
+
+const db = createKysely({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+});
+
+// CRITICAL: Clean up in afterAll
+afterAll(async () => {
+  await db.destroy();
+});
+```
+
+**Why no mocks for DB-backed tests?**
+- Mocks don't catch SQL syntax errors, schema mismatches, or constraint violations
+- Mocks don't reveal transaction isolation issues
+- Integration with real DB catches performance problems early
+
+**What to mock instead:**
+- External HTTP services
+- Message queues
+- File system operations
+- Time (use `vi.useFakeTimers()`)
+
+**Non-DB logic (pure computation) may use unit tests without database.**
+
+---
+
 ## Related Packages
 
 - `@jurnapod/db` — Database connectivity

@@ -157,6 +157,42 @@ npm run test:watch  # Watch mode
 
 ---
 
+## DB Testing Policy
+
+**NO MOCK DB for DB-backed business logic tests.** Use real DB integration via `.env`.
+
+This package (`@jurnapod/notifications`) primarily handles email sending via external providers (SendGrid). It does NOT have direct database operations for message storage.
+
+If this package is extended to store notification history in a database, those tests MUST use real DB:
+
+```typescript
+// Load .env before other imports
+import path from 'path';
+import { config as loadEnv } from 'dotenv';
+loadEnv({ path: path.resolve(process.cwd(), '.env') });
+
+import { createKysely, type KyselySchema } from '@jurnapod/db';
+
+const db = createKysely({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+});
+
+// CRITICAL: Clean up in afterAll
+afterAll(async () => {
+  await db.destroy();
+});
+```
+
+**Email provider mocking is appropriate** since external services should be mocked in unit tests.
+
+**Non-DB logic (pure computation) may use unit tests without database.**
+
+---
+
 ## Security Rules
 
 ### Critical Constraints

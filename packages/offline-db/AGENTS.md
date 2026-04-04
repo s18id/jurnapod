@@ -153,6 +153,43 @@ describe('OfflineDb', () => {
 
 ---
 
+## DB Testing Policy
+
+**NO MOCK DB for DB-backed business logic tests.** Use real DB integration via `.env`.
+
+This package (`@jurnapod/offline-db`) uses IndexedDB (Dexie) for local storage, not a server-side database. The testing approach differs:
+
+- **Local IndexedDB (Dexie)**: Uses Dexie's in-memory/adapter approach for testing - this is appropriate since the data store IS the Dexie wrapper
+- **Server-side DB (MySQL/MariaDB via Kysely)**: For packages that use `@jurnapod/db`, DB-backed tests MUST use real database connections
+
+If your tests involve both offline-db AND server-side DB (e.g., sync operations), use real DB integration for the server-side portion:
+
+```typescript
+// Load .env before other imports
+import path from 'path';
+import { config as loadEnv } from 'dotenv';
+loadEnv({ path: path.resolve(process.cwd(), '.env') });
+
+import { createKysely, type KyselySchema } from '@jurnapod/db';
+
+const db = createKysely({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+});
+
+// CRITICAL: Clean up in afterAll
+afterAll(async () => {
+  await db.destroy();
+});
+```
+
+**Non-DB logic (pure computation) may use unit tests without database.**
+
+---
+
 ## Security Rules
 
 ### Critical Constraints

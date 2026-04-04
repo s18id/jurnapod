@@ -22,7 +22,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint . --max-warnings=0",
     "pretest": "npm run build -w @jurnapod/offline-db",
-    "test": "node --import tsx --test src/offline/__tests__/*.test.mjs"
+    "test": "node --import ../../scripts/test/load-root-env.mjs --import tsx --test src/offline/__tests__/*.test.mjs"
   },
   "dependencies": {
     "@capacitor/android": "8.0.1",

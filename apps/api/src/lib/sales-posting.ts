@@ -34,6 +34,35 @@ import {
   PAYMENT_VARIANCE_GAIN_MISSING_MESSAGE,
   PAYMENT_VARIANCE_LOSS_MISSING_MESSAGE
 } from "@jurnapod/modules-accounting";
+import { journalMetrics } from "./metrics";
+import type { JournalFailureReason } from "./metrics";
+
+/**
+ * Categorize a posting error into a failure reason
+ */
+function categorizePostingError(error: unknown): JournalFailureReason {
+  if (error instanceof PaymentVarianceConfigError) {
+    return "validation_error";
+  }
+  
+  const message = error instanceof Error ? error.message : String(error);
+  
+  if (message.includes("OUTLET_ACCOUNT_MAPPING_MISSING") ||
+      message.includes("TAX_ACCOUNT_MISSING") ||
+      message.includes("PAYMENT_VARIANCE")) {
+    return "validation_error";
+  }
+  
+  if (message.includes("UNBALANCED") || message.includes("IMBALANCE")) {
+    return "gl_imbalance";
+  }
+  
+  if (message.includes("MISSING") || message.includes("NOT_FOUND")) {
+    return "missing_reference";
+  }
+  
+  return "posting_error";
+}
 
 // Re-export for backward compatibility
 export {
@@ -299,7 +328,15 @@ export async function postSalesInvoiceToJournal(
     updated_at: invoice.updated_at
   };
 
-  return postSalesInvoice(dbExecutor as KyselySchema, executor, postingData);
+  try {
+    const result = await postSalesInvoice(dbExecutor as KyselySchema, executor, postingData);
+    journalMetrics.recordPostSuccess(invoice.company_id, "sales");
+    return result;
+  } catch (error) {
+    const reason = categorizePostingError(error);
+    journalMetrics.recordPostFailure(invoice.company_id, "sales", reason);
+    throw error;
+  }
 }
 
 export async function postSalesPaymentToJournal(
@@ -332,7 +369,15 @@ export async function postSalesPaymentToJournal(
     updated_at: payment.updated_at
   };
 
-  return postSalesPayment(dbExecutor as KyselySchema, executor, postingData, invoiceNo);
+  try {
+    const result = await postSalesPayment(dbExecutor as KyselySchema, executor, postingData, invoiceNo);
+    journalMetrics.recordPostSuccess(payment.company_id, "sales");
+    return result;
+  } catch (error) {
+    const reason = categorizePostingError(error);
+    journalMetrics.recordPostFailure(payment.company_id, "sales", reason);
+    throw error;
+  }
 }
 
 interface SalesCreditNoteDetail {
@@ -369,7 +414,15 @@ export async function postCreditNoteToJournal(
     updated_at: creditNote.updated_at
   };
 
-  return postCreditNote(dbExecutor as KyselySchema, executor, postingData);
+  try {
+    const result = await postCreditNote(dbExecutor as KyselySchema, executor, postingData);
+    journalMetrics.recordPostSuccess(creditNote.company_id, "sales");
+    return result;
+  } catch (error) {
+    const reason = categorizePostingError(error);
+    journalMetrics.recordPostFailure(creditNote.company_id, "sales", reason);
+    throw error;
+  }
 }
 
 export async function voidCreditNoteToJournal(
@@ -395,7 +448,15 @@ export async function voidCreditNoteToJournal(
     updated_at: creditNote.updated_at
   };
 
-  return voidCreditNote(dbExecutor as KyselySchema, executor, postingData);
+  try {
+    const result = await voidCreditNote(dbExecutor as KyselySchema, executor, postingData);
+    journalMetrics.recordPostSuccess(creditNote.company_id, "sales");
+    return result;
+  } catch (error) {
+    const reason = categorizePostingError(error);
+    journalMetrics.recordPostFailure(creditNote.company_id, "sales", reason);
+    throw error;
+  }
 }
 
 // =============================================================================

@@ -19,7 +19,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --import tsx src/posting.test.ts",
+    "test": "node --import ../../../scripts/test/load-root-env.mjs --test --import tsx src/posting.test.ts",
     "lint": "eslint src --config eslint.config.mjs"
   },
   "dependencies": {
