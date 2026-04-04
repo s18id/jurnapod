@@ -1,4 +1,4 @@
-last_updated: 2026-04-03T23:55:00Z
+last_updated: 2026-04-04T00:05:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -192,6 +192,7 @@ development_status:
   17-6-refactor-api-routes-thin-adapters: done
   17-7-delete-lib-sync-and-tests: done
   17-8-apply-backoffice-sync-pattern: done
+  epic-17-retrospective: done
 
   # Epic 18: Pure Kysely Migration (Packages Only)
   epic-18: done
@@ -203,9 +204,10 @@ development_status:
   18-5-migrate-backoffice-sync: done
   18-6-migrate-modules-accounting: done
   18-7-migrate-modules-platform: done
+  epic-18-retrospective: done
 
   # Epic 19: Pure Kysely Migration (API)
-  epic-19: done
+  epic-19: technical_debt
   19-1-migrate-api-lib-shared: done
   19-2-migrate-api-lib-foundation: done
   19-3-migrate-api-lib-items: done
@@ -218,7 +220,9 @@ development_status:
   19-10-migrate-api-lib-cost-recipe: done
   19-11-migrate-api-lib-reports: done
   19-12-migrate-api-routes: done
-  19-13-final-verification: done (0 type errors)
+  19-13-final-verification: deferred (300+ type errors - TD-037)
+  epic-19-retrospective: done
+  td-037-api-kysely-verification: open
 
   # Epic 20: Schema Consolidation & JSON Normalization
   epic-20: done
@@ -232,6 +236,7 @@ development_status:
   20-8-data-import-count-columns: done
   20-9-legacy-table-drops: done
   20-10-final-verification: done
+  epic-20-retrospective: done
 
   # Epic 21: API Sync Runtime Consolidation (Package-First)
   epic-21: done
@@ -239,6 +244,7 @@ development_status:
   21-2-extract-sync-push-adapters-from-route: done
   21-3-retire-legacy-api-pull-builder-runtime-path: done
   21-4-keep-and-bound-sync-check-duplicate-semantics: done
+  epic-21-retrospective: done
 
   # Epic 22: Core Package Consolidation (Direct Removal)
   epic-22: done
@@ -246,6 +252,7 @@ development_status:
   22-2-migrate-core-imports-to-modules-accounting: done
   22-3-remove-core-package-and-clean-lockfile: done
   22-4-run-exit-gates-and-closeout: done
+  epic-22-retrospective: done
 
   # Epic 23: API Detachment
   epic-23: done
@@ -282,6 +289,9 @@ development_status:
   23-5-1-remove-deprecated-api-lib-implementations: done
   23-5-2-freeze-package-public-apis: done
   23-5-3-run-full-workspace-validation-gate: done
+  epic-23-retrospective: done
+
+
   # Epic 24: Inventory Costing Boundary (COGS-aware stock extraction)
   epic-24: done
   # See epic-24-sprint-plan.md - NOT part of Epic 23 Sprint 4
@@ -291,6 +301,7 @@ development_status:
   24-4-update-cogs-posting-to-use-costing-contract: done
   24-5-update-sync-push-stock-handlers: done  # COGS-aware sync handlers
   24-6-full-validation-gate: done
+  epic-24-retrospective: done
 
   # Epic 25: Cash-Bank Domain Extraction to modules-treasury
   epic-25: done
@@ -298,6 +309,7 @@ development_status:
   25-2-extract-domain-types-errors-helpers: done
   25-3-cashbank-service-ports-adapters: done
   25-4-add-tests-update-adapter-validate-gate: done
+  epic-25-retrospective: done
 
   # Epic 26: Extend modules-inventory with Cost-Dependent Stock Operations
   epic-26: done
@@ -306,6 +318,7 @@ development_status:
   26-3-implement-restoreStock-adjustStock: done
   26-4-update-api-stock-delegation-remove-cost-tracking: done
   26-5-full-validation-gate: done
+  epic-26-retrospective: done
 
   # Epic 27: POS Sync Push Boundary Completion
   epic-27: done
@@ -315,6 +328,7 @@ development_status:
   27-4-move-stock-transaction-resolution-modules-inventory: done
   27-5-implement-phase2-pos-sync-replace-stubs: done
   27-6-api-simplification-full-validation-gate: done
+  epic-27-retrospective: done
 
   # Epic 28: Sales Payments Extraction
   epic-28: done
@@ -323,6 +337,7 @@ development_status:
   28-3-payment-posting-hook-transaction-safe: done
   28-4-api-route-flip-library-cleanup: done
   28-5-full-validation-gate: done
+  epic-28-retrospective: done
 
   # Epic 29: Fixed Assets / Depreciation Extraction
   epic-29: done
@@ -333,3 +348,4 @@ development_status:
   29-5-extract-lifecycle-service: done
   29-6-flip-routes-delete-libs: done
   29-7-integration-tests-gate: done
+  epic-29-retrospective: done

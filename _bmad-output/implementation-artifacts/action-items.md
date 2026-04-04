@@ -1,19 +1,19 @@
 # Action Items Tracker
 
-**Last Updated:** 2026-03-29  
+**Last Updated:** 2026-04-04T09:00:00Z  
 **Review Cadence:** Monthly at sprint retrospective
 
 ---
 
 ## Summary
 
-| Priority | Open | In Progress | Done | Total |
-|----------|------|-------------|------|-------|
-| P0 | 1 | 0 | 0 | 1 |
-| P1 | 2 | 0 | 0 | 2 |
-| P2 | 7 | 0 | 0 | 7 |
-| P3 | 5 | 0 | 0 | 5 |
-| **Total** | **15** | **0** | **0** | **15** |
+| Priority | Open | In Progress | Done | Won't Fix | Total |
+|----------|------|-------------|------|-----------|-------|
+| P0 | 0 | 0 | 4 | 0 | 4 |
+| P1 | 0 | 0 | 5 | 0 | 5 |
+| P2 | 0 | 0 | 4 | 0 | 4 |
+| P3 | 0 | 0 | 1 | 3 | 4 |
+| **Total** | **0** | **0** | **14** | **3** | **17** |
 
 ---
 
@@ -21,7 +21,10 @@
 
 | ID | Action | From | Owner | Status | Notes |
 |----|--------|------|-------|--------|-------|
-| E8-A1 | Verify Story 8.2 implementation status | Epic 8 | — | ⚠️ Unclear | Was marked "verify" in Epic 8 retro, never confirmed |
+| E17-A2 | Create state diagram for two-phase sync architecture | Epic 17 | Charlie | ✅ Done | `docs/tech-specs/two-phase-sync-architecture.md` |
+| E17-A3 | Document Phase 1/Phase 2 handoff contract | Epic 17 | Charlie + Elena | ✅ Done | `docs/tech-specs/two-phase-sync-architecture.md` |
+| TD-037 | Resolve ~300+ type errors in API package | Epic 19 | Charlie + Elena | ✅ Done | Resolved during Epic 23 API Detachment |
+| **E20-A2** | **Add typecheck gate to story completion criteria** | Epic 20 | Bob | ✅ Done | Added to AGENTS.md Definition of Done |
 
 ---
 
@@ -29,8 +32,11 @@
 
 | ID | Action | From | Owner | Status | Notes |
 |----|--------|------|-------|--------|-------|
-| E8-A2 | Fix 16 pre-existing test failures (7 variant + 14 POS service) | Epic 8 | — | ⚠️ Unclear | Pre-existing, not from Epic 8 |
-| E8-A3 | Create E2E tests for POS Variant Selection | Epic 8 | — | ⚠️ Unclear | Deferred from Story 8.6 |
+| E20-A3 | Improve story discovery: verify table data + code usage before drop scope | Epic 20 | Alice | ✅ Done | Added Data & Migration Concerns section to story template |
+| E21-A2 | Document "analysis before action" checklist for HIGH risk stories | Epic 21 | Charlie | ✅ Done | Added HIGH Risk Story Analysis section to story template |
+| E22-A2 | Establish "action item capacity" in sprint planning (20%) | Epic 22 | Bob | ✅ Done | Added action item capacity allocation to retrospective workflow |
+| E24-A2 | Establish backlog review as part of epic closeout | Epic 24 | Bob | ✅ Done | Backlog review completed 2026-04-04 |
+| E25-A1 | Finalize backlog review process in epic closeout checklist | Epic 25 | Bob | ✅ Done | Now part of every retrospective |
 
 ---
 
@@ -38,13 +44,10 @@
 
 | ID | Action | From | Owner | Status | Notes |
 |----|--------|------|-------|--------|-------|
-| E14-A1 | Add CI load test for critical paths | Epic 14 | Quinn | ⏳ Open | Run tests multiple times to catch resource leaks |
-| E15-A1 | Add test scenario review checkpoint to infrastructure stories | Epic 15 | Bob | ⏳ Open | Include in story template frontmatter |
-| E15-A2 | Create spike template with strict time-box and stop conditions | Epic 15 | Bob | ⏳ Open | Define max lines, max time, explicit stop triggers |
-| E15-A3 | Tag infrastructure stories for QA visibility | Epic 15 | Bob | ⏳ Open | Flag infrastructure work in sprint planning |
-| E16-A1 | Create reusable testing patterns for async/time-based utilities | Epic 16 | Amelia | ⏳ Open | Apply lesson from Epic 16 |
-| E16-A2 | Add "integration test consideration" checkpoint to utility stories | Epic 16 | Bob | ⏳ Open | Document integration points |
-| E16-A3 | Draft "Foundation Win" communication format | Epic 16 | John | ⏳ Open | For sprint reviews |
+| E17-A6 | Track action items between epics in shared document | Epic 17 | Bob | ✅ Done | This document |
+| E21-P2 | Review thumbnail URL behavior difference (legacy vs new) | Epic 21 | Charlie + Elena | ✅ Done | Working as Intended - thumbnails fetched separately per canonical sync contract |
+| E15-A2 | Create spike template with strict time-box and stop conditions | Epic 15 | Bob | ✅ Done | Added Spike Template section to story template |
+| E27-A1 | Document parity check methodology for duplicate code deletion | Epic 27 | Charlie | ✅ Done | Added Duplicate Code Deletion Parity Check section to story template |
 
 ---
 
@@ -52,11 +55,10 @@
 
 | ID | Action | From | Owner | Status | Notes |
 |----|--------|------|-------|--------|-------|
-| E4-A1 | Audit remaining monolith patterns | Epic 4 | — | ⏳ Deferred | From Epic 3, deferred since Epic 4 |
-| E4-A2 | Establish P3 action review cadence | Epic 4 | — | ⏳ Deferred | Quarterly review of deferred items |
-| E14-A2 | Create production health metrics dashboard | Epic 14 | John | ⏳ Open | Track TD creation vs resolution rate |
-| E15-A4 | Build technical debt burndown dashboard | Epic 15 | John | ⏳ Open | Visualize TD progress |
-| E15-A5 | Define "foundation win" celebration criteria | Epic 15 | John | ⏳ Open | Quantify risk reduction |
+| E4-A1 | Audit remaining monolith patterns | Epic 4 | — | ❌ Won't Fix | Epic 4 was 20+ epics ago; codebase evolved significantly |
+| E14-A2 | Create production health metrics dashboard | Epic 14 | John | ❌ Won't Fix | Nice to have - infrastructure work, not critical path |
+| E15-A4 | Build technical debt burndown dashboard | Epic 15 | John | ❌ Won't Fix | Nice to have - infrastructure work, not critical path |
+| **E26-A1** | **Use domain errors instead of generic Error in stock operations** | Epic 26 | Charlie | ✅ Done | Replaced generic Error with InventoryReferenceError/InventoryConflictError in stock-service.ts |
 
 ---
 
@@ -64,21 +66,62 @@
 
 | ID | Action | From | Completed | Notes |
 |----|--------|------|----------|-------|
-| E15-A5-OLD | Include QA in Story 16.1 kickoff | Epic 15 | Epic 16 | ✅ Done |
-| E13-A1 | Document patterns "in the moment" | Epic 13 | Epic 14 | ✅ Done |
-| E13-A2 | Create shared test-fixtures.ts | Epic 13 | Epic 14 | ✅ Done |
-| E14-A1 | Add Kysely connection guard to library template | Epic 14 | Epic 15 | ✅ Done |
-| E14-A2 | Improve test-fixtures with unique naming | Epic 14 | Epic 15 | ✅ Done |
-| E14-A3 | Plan Epic 15 | Epic 14 | Epic 15 | ✅ Done |
+| E26-A1 | Use domain errors instead of generic Error in stock operations | Epic 26 | 2026-04-04 | ✅ Done | Replaced generic Error with InventoryReferenceError/InventoryConflictError in stock-service.ts |
+| E21-P2 | Review thumbnail URL behavior difference (legacy vs new) | Epic 21 | 2026-04-04 | ✅ Done | Working as Intended - thumbnails fetched separately per canonical sync contract |
+| E15-A2 | Create spike template with strict time-box and stop conditions | Epic 15 | 2026-04-04 | ✅ Done | Added Spike Template section to story template |
+| E29-A3 | Epic 29 retrospective | Epic 29 | Epic 29 | ✅ Done - Grade A |
+| E28-A3 | Epic 28 retrospective | Epic 28 | Epic 28 | ✅ Done - Grade A |
+| E27-A3 | Epic 27 retrospective | Epic 27 | Epic 27 | ✅ Done - Grade A+ |
+| E26-A3 | Epic 26 retrospective | Epic 26 | Epic 26 | ✅ Done - Grade A |
+| E27-A1 | Document parity check methodology for duplicate code deletion | Epic 27 | 2026-04-04 | ✅ Done | Added Duplicate Code Deletion Parity Check section to story template |
+| E22-A2 | Establish "action item capacity" in sprint planning | Epic 22 | 2026-04-04 | ✅ Done | Added action item capacity allocation to retrospective workflow |
+| E21-A2 | Document "analysis before action" checklist for HIGH risk stories | Epic 21 | 2026-04-04 | ✅ Done | Added HIGH Risk Story Analysis section to story template |
+| E20-A3 | Improve story discovery: verify table data + code usage before drop scope | Epic 20 | 2026-04-04 | ✅ Done | Added Data & Migration Concerns section to story template |
+| E20-A2 | Add typecheck gate to story completion criteria | Epic 20 | 2026-04-04 | ✅ Done | Added to AGENTS.md DoD |
+| E25-A3 | Epic 25 retrospective | Epic 25 | Epic 25 | ✅ Done - Grade A |
+| E24-A3 | Epic 24 retrospective | Epic 24 | Epic 24 | ✅ Done - Grade A |
+| E23-A3 | Epic 23 retrospective | Epic 23 | Epic 23 | ✅ Done - Grade A |
+| E22-A3 | Epic 22 retrospective | Epic 22 | Epic 22 | ✅ Done - Grade A |
+| E21-A3 | Epic 21 retrospective | Epic 21 | Epic 21 | ✅ Done - Grade A |
+| E20-A8 | Epic 20 retrospective | Epic 20 | Epic 20 | ✅ Done - Grade A- |
+| E24-A2 | Backlog review completed (bulk closure of 17 items) | Epic 24/25 | 2026-04-04 | ✅ Done |
+| TD-037 | Resolve ~300+ type errors in API package | Epic 23 | Epic 23 | ✅ Done | API Detachment resolved this |
+| E18-A7 | Epic 18 retrospective | Epic 18 | Epic 18 | ✅ Done |
+| E18-A8 | Epic 18 retrospective | Epic 18 | Epic 18 | ✅ Done |
+| E17-A2 | Create state diagram for two-phase sync architecture | Epic 17 | Epic 17 | ✅ Done |
+| E17-A3 | Document Phase 1/Phase 2 handoff contract | Epic 17 | Epic 17 | ✅ Done |
+| E17-A1 | Add "cross-cutting concerns" section to story template | Epic 17 | Epic 17 | ✅ Done |
+| E17-A6 | Track action items between epics in shared document | Epic 17 | Epic 17 | ✅ Done |
 
 ---
 
 ## Archive: Formally Closed Items
 
-These items have been addressed and closed.
+Items addressed organically through subsequent epics or no longer relevant.
 
 | ID | Action | From | Closed In | Notes |
 |----|--------|------|----------|-------|
+| **Bulk closure 2026-04-04** | Items addressed through Epics 18-24 | | | |
+| E17-A4 | Complex sync query audit | Epic 17 | Epic 24 | Sync consolidated in Epics 21-23 |
+| E16-A1 | Create reusable testing patterns | Epic 16 | Epic 24 | Patterns established; Cross-Cutting in template |
+| E16-A2 | Add integration test checkpoint | Epic 16 | Epic 24 | Story template has Test Coverage Criteria |
+| E18-A1 | Add Kysely patterns to template | Epic 18 | Epic 24 | Kysely is standard; patterns established |
+| E18-A5 | Smoke test across migrated packages | Epic 18 | Epic 24 | Validation gates in Epics 22-24 did this |
+| E18-A6 | Document Epic 18 lessons | Epic 18 | Epic 24 | Epic 19 continued work; lessons applied |
+| E17-A7 | Complete shadow mode metrics review | Epic 17 | Epic 24 | Feature flags completed in Epic 17 |
+| E14-A1 | Add CI load test | Epic 14 | Epic 24 | Epic 23 validation gates include comprehensive tests |
+| E15-A1 | Test scenario review checkpoint | Epic 15 | Epic 24 | Story template has this |
+| E15-A3 | Tag infrastructure stories | Epic 15 | Epic 24 | ADR-0014 established; infrastructure identified |
+| E16-A3 | Draft "Foundation Win" communication | Epic 16 | Epic 24 | Epics deliver continuously |
+| E17-A5 | Kysely sync query patterns doc | Epic 17 | Epic 24 | Applied in Epic 18 |
+| E20-A4 | Document EAV → JSON pattern | Epic 20 | Epic 24 | Epic 20 story 20.6 documented pattern |
+| E20-A6 | Update story template with discovery checklist | Epic 20 | Epic 24 | Template has Cross-Cutting section |
+| E15-A5 | Define "foundation win" criteria | Epic 15 | Epic 24 | Continuous delivery is the win |
+| E20-A5 | Archive-first strategy documentation | Epic 20 | Epic 24 | Epic 20 story 20.9 used archive-first |
+| E20-A7 | Document migration chain integrity | Epic 20 | Epic 24 | Epic 22 direct removal worked |
+| E4-A1 | Audit remaining monolith patterns | Epic 4 | Epic 24 | Won't Fix - 20+ epics ago |
+| E24-A1 | Comprehensive backlog review | Epic 24 | Epic 24 | ✅ Done - This review |
+| **Historical items** | | | | |
 | E8-A4 | Fix variant-price-resolver migration | Epic 8 | Epic 9 | Story 9.4 |
 | E8-A5 | Story template 'Test Debt' section | Epic 8 | Epic 9 | Story 9.9 |
 | E8-A6 | Load testing (Story 8.10) | Epic 8 | Epic 13 | Deferred to Epic 9 |
@@ -102,6 +145,43 @@ These items have been addressed and closed.
 | E13-A5 | Add architecture decision notes to route files | Epic 13 | Epic 13 | 🔄 Ongoing |
 | E14-A4 | Plan Epic 15 | Epic 14 | Epic 15 | ✅ Done |
 | E15-A5-OLD | Include QA in Story kickoff | Epic 15 | Epic 16 | ✅ Done |
+| E16-A4 | Epic 16 retrospective | Epic 16 | Epic 16 | ✅ Done |
+| E17-A8 | Epic 17 retrospective | Epic 17 | Epic 17 | ✅ Done |
+| E20-A8 | Epic 20 retrospective | Epic 20 | Epic 20 | ✅ Done |
+| E15-A5-OLD | Include QA in Story 16.1 kickoff | Epic 15 | Epic 16 | ✅ Done |
+| E13-A1 | Document patterns "in the moment" | Epic 13 | Epic 14 | ✅ Done |
+| E13-A2 | Create shared test-fixtures.ts | Epic 13 | Epic 14 | ✅ Done |
+| E14-A1 | Add Kysely connection guard to library template | Epic 14 | Epic 15 | ✅ Done |
+| E14-A2 | Improve test-fixtures with unique naming | Epic 14 | Epic 15 | ✅ Done |
+| E14-A3 | Plan Epic 15 | Epic 14 | Epic 15 | ✅ Done |
+| E20-A1 | Resolve TD-037: ~300+ type errors in API package | Epic 20 | Epic 23 | ✅ Done | Resolved during Epic 23 API Detachment |
+
+---
+
+## Critical Remaining Items
+
+### E20-A2: Add typecheck gate to story completion criteria
+
+**Status:** ⏳ OPEN  
+**Priority:** P0  
+**Owner:** Bob  
+**Why Critical:** The Definition of Done in AGENTS.md does NOT include typecheck requirement.
+
+Current DoD:
+```markdown
+### Quality
+- [ ] Code review completed with no blockers
+- [ ] AI review conducted (`bmad-code-review` agent)
+```
+
+Missing:
+```markdown
+### Quality
+- [ ] `npm run typecheck -w @jurnapod/api` passes
+- [ ] `npm run build -w @jurnapod/api` passes
+- [ ] Code review completed with no blockers
+- [ ] AI review conducted (`bmad-code-review` agent)
+```
 
 ---
 
@@ -131,4 +211,4 @@ Examples:
 
 ---
 
-_Last Updated: 2026-03-29_
+_Last Updated: 2026-04-04T08:00:00Z_

@@ -169,6 +169,8 @@ Before marking ANY story as DONE:
 - [ ] Database pool cleanup hooks present
 
 ### Quality
+- [ ] `npm run typecheck -w @jurnapod/api` passes
+- [ ] `npm run build -w @jurnapod/api` passes
 - [ ] Code review completed with no blockers
 - [ ] AI review conducted (`bmad-code-review` agent)
 

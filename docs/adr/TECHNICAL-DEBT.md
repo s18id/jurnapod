@@ -1,7 +1,7 @@
 # Technical Debt Registry
 
 **Status:** Living Document  
-**Last Updated:** 2026-03-28  
+**Last Updated:** 2026-04-04  
 **Review Cadence:** Per-epic (before closing epic retrospective)
 
 ---
@@ -184,11 +184,11 @@ This document serves as the central registry for all known technical debt in the
 
 | Priority | Open | Resolved | Total |
 |----------|------|---------|-------|
-| P1 | 0 | 3 | 3 |
+| P1 | 0 | 4 | 4 |
 | P2 | 0 | 18 | 18 |
 | P3 | 0 | 9 | 9 |
 | P4 | 0 | 3 | 3 |
-| **Total** | **0** | **33** | **33** |
+| **Total** | **0** | **34** | **34** |
 
 ---
 
@@ -291,6 +291,22 @@ Run the [TD Health Check Template](./td-health-check-template.md) before every e
 
 ---
 
+### Epic 19: Pure Kysely Migration (API)
+
+| ID | Description | Priority | Status | ADR/Story |
+|----|-------------|----------|--------|-----------|
+| TD-037 | API Kysely migration verification deferred (~300+ type errors) | P1 | **RESOLVED** | Epic 23 API Detachment |
+
+**Description:** Epic 19 migrated the API package from mysql2 patterns to Kysely but deferred final typecheck verification. Approximately 300+ type errors remained in the API package.
+
+**Resolution:** Resolved during Epic 23 API Detachment. The extensive refactoring of API routes and domain extraction fixed the type issues as a side effect.
+- `npm run typecheck -w @jurnapod/api` passes (0 errors)
+- `npm run build -w @jurnapod/api` passes
+
+**Owner:** Charlie + Elena
+
+---
+
 ## Changelog
 
 | Date | Change | Author |
@@ -312,6 +328,7 @@ Run the [TD Health Check Template](./td-health-check-template.md) before every e
 | 2026-03-28 | Resolved TD-030 - Effective date filtering migration (Story 15.3) | Story 15.4 |
 | 2026-03-29 | Resolved TD-031 - Alert retry with exponential backoff (Story 16.1) | Story 16.1 |
 | 2026-03-29 | Resolved TD-032 - Batch processing utility with delays (Story 16.2) | Story 16.2 |
+| 2026-04-04 | Resolved TD-037 - API Kysely type errors (~300+ type errors) | Epic 23 API Detachment |
 
 ---
 

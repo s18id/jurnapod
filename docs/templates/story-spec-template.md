@@ -61,6 +61,40 @@ So that **{benefit}**.
 
 {Technical guidance, architecture decisions, patterns to follow, previous learnings}
 
+## Cross-Cutting Concerns
+
+Complete this section if the story involves sync operations, data persistence, or cross-module interactions.
+
+### Audit Integration
+- [ ] Audit events required? (`startEvent`, `completeEvent`, `failEvent`)
+- [ ] Audit fields to capture: `company_id`, `outlet_id`, `user_id`, `module_id`, `operation`, `duration_ms`
+- [ ] Audit tier: `MASTER` | `OPERATIONAL` | `REALTIME` | `ADMIN` | `ANALYTICS`
+
+### Idempotency
+- [ ] Idempotency key field: `client_tx_id` | `update_id` | `cancellation_id` | `adjustment_id` | `other: ___`
+- [ ] Duplicate handling: `return DUPLICATE` | `skip and log` | `throw error`
+- [ ] Idempotency service: `syncIdempotencyService` from `@jurnapod/sync-core`
+
+### Feature Flags
+- [ ] Feature flag required? Yes / No
+- [ ] Flag name: `___`
+- [ ] Rollout modes: `shadow` | `10` | `50` | `100` (percentage)
+- [ ] Shadow mode behavior: `log metrics` | `compare outputs` | `no-op`
+
+### Validation Rules
+- [ ] `company_id` must match authenticated company
+- [ ] `service_type: 'DINE_IN'` requires `table_id`
+- [ ] Other validation constraints: ___
+
+### Error Handling
+- [ ] Retryable errors: `ERROR_CLASSIFICATION.RETRYABLE`
+- [ ] Non-retryable errors: `ERROR_CLASSIFICATION.NON_RETRYABLE`
+- [ ] Error response format: `{ success: false, error_message: string }`
+
+### Health Check
+- [ ] Health check required? Yes / No
+- [ ] Checks: database connectivity | external API | cache | other: ___
+
 ## File List
 
 - `file1.md` (new)

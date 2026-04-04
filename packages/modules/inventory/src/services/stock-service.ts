@@ -134,7 +134,7 @@ async function resolveInboundUnitCost(
     return Number(price);
   }
 
-  throw new Error(
+  throw new InventoryReferenceError(
     `Unable to determine unit cost for item ${itemId}. No cost history or pricing data available.`
   );
 }
@@ -586,12 +586,12 @@ export class StockServiceImpl implements StockService {
         `.execute(trx);
 
         if (stockRows.rows.length === 0) {
-          throw new Error(`Stock not found for product ${item.product_id} in company ${company_id}`);
+          throw new InventoryReferenceError(`Stock not found for product ${item.product_id} in company ${company_id}`);
         }
 
         const stock = stockRows.rows[0];
         if (Number(stock.quantity) < item.quantity) {
-          throw new Error(
+          throw new InventoryConflictError(
             `Insufficient stock for product ${item.product_id}: ` +
             `requested ${item.quantity}, available ${stock.quantity}`
           );
@@ -633,7 +633,7 @@ export class StockServiceImpl implements StockService {
         `.execute(trx);
 
         if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
-          throw new Error(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
+          throw new InventoryConflictError(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
         }
       }
 
@@ -658,7 +658,7 @@ export class StockServiceImpl implements StockService {
         const costItem = deductionResult.itemCosts.find(c => c.stockTxId === stockTxItem.stockTxId);
 
         if (!costItem) {
-          throw new Error(`Cost calculation missing for item ${stockTxItem.itemId}`);
+          throw new InventoryReferenceError(`Cost calculation missing for item ${stockTxItem.itemId}`);
         }
 
         results.push({
@@ -869,7 +869,7 @@ export class StockServiceImpl implements StockService {
         `.execute(trx);
 
         if (variantRows.rows.length === 0) {
-          throw new Error(`Variant ${variantId} not found or inactive`);
+          throw new InventoryReferenceError(`Variant ${variantId} not found or inactive`);
         }
 
         const resolvedItemId = variantRows.rows[0].item_id;
@@ -887,7 +887,7 @@ export class StockServiceImpl implements StockService {
           // Use inventory_stock variant tracking
           const currentQty = Number(stockRows.rows[0].quantity);
           if (currentQty < item.quantity) {
-            throw new Error(`Insufficient stock for variant ${variantId}: ${currentQty} < ${item.quantity}`);
+            throw new InventoryConflictError(`Insufficient stock for variant ${variantId}: ${currentQty} < ${item.quantity}`);
           }
 
           // Update inventory_stock for variant
@@ -931,12 +931,12 @@ export class StockServiceImpl implements StockService {
           `.execute(trx);
 
           if (variantStockRows.rows.length === 0) {
-            throw new Error(`Variant ${variantId} not found or inactive`);
+            throw new InventoryReferenceError(`Variant ${variantId} not found or inactive`);
           }
 
           const currentStock = Number(variantStockRows.rows[0].stock_quantity);
           if (currentStock < item.quantity) {
-            throw new Error(`Insufficient stock for variant ${variantId}: ${currentStock} < ${item.quantity}`);
+            throw new InventoryConflictError(`Insufficient stock for variant ${variantId}: ${currentStock} < ${item.quantity}`);
           }
 
           await sql`
@@ -1004,12 +1004,12 @@ export class StockServiceImpl implements StockService {
               `.execute(trx);
 
               if (stockRows.rows.length === 0) {
-                throw new Error(`Stock not found for product ${item.product_id} in company ${companyId}`);
+                throw new InventoryReferenceError(`Stock not found for product ${item.product_id} in company ${companyId}`);
               }
 
               const stock = stockRows.rows[0];
               if (Number(stock.quantity) < item.quantity) {
-                throw new Error(
+                throw new InventoryConflictError(
                   `Insufficient stock for product ${item.product_id}: ` +
                   `requested ${item.quantity}, available ${stock.quantity}`
                 );
@@ -1045,7 +1045,7 @@ export class StockServiceImpl implements StockService {
               `.execute(trx);
 
               if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
-                throw new Error(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
+                throw new InventoryConflictError(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
               }
             }
 
@@ -1068,7 +1068,7 @@ export class StockServiceImpl implements StockService {
               const costItem = deductionResult.itemCosts.find(c => c.stockTxId === stockTxItem.stockTxId);
 
               if (!costItem) {
-                throw new Error(`Cost calculation missing for item ${stockTxItem.itemId}`);
+                throw new InventoryReferenceError(`Cost calculation missing for item ${stockTxItem.itemId}`);
               }
 
               results.push({

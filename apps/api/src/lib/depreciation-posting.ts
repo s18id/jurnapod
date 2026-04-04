@@ -20,7 +20,6 @@ import {
 
 // Re-export types
 export type { DepreciationPlan, DepreciationRun } from "@jurnapod/modules-accounting";
-import type { DepreciationPlan, DepreciationRun } from "./depreciation";
 
 const DEPRECIATION_DOC_TYPE = "DEPRECIATION";
 
@@ -54,8 +53,8 @@ class ApiDepreciationPostingExecutor implements DepreciationPostingExecutor {
 
 export async function postDepreciationRunToJournal(
   db: KyselySchema,
-  plan: DepreciationPlan,
-  run: DepreciationRun
+  plan: DepreciationPlanType,
+  run: DepreciationRunType
 ): Promise<PostingResult> {
   const executor = new ApiDepreciationPostingExecutor();
   return postDepreciationRun(db, executor, plan, run);
