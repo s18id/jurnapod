@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    ...
+    - run: npm run build
+
+  typecheck:
+    ...
+    - run: npm run build
+    - run: npm run typecheck --workspaces --if-present
+
+  lint:
+    ...
+    - run: npm run lint --workspaces --if-present
