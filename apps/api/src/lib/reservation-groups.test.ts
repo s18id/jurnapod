@@ -96,7 +96,8 @@ async function createTestGroup(
   }
 
   // Create reservation group
-  const futureTime = toDbDateTime(new Date(Date.now() + 24 * 60 * 60 * 1000));
+  // Use ISO string with timezone (Z suffix) - module contract requires RFC3339/ISO instant
+  const futureTime = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   const { groupId, reservationIds } = await createReservationGroupWithTables({
     companyId: ctx.companyId,
     outletId: ctx.outletId,
@@ -341,9 +342,9 @@ test(
     const fixtures = await createTestGroup(ctx, 3, 6);
 
     try {
-      // Mark first reservation as ARRIVED
+      // Mark first reservation as ARRIVED (must update both status string AND status_id)
       const db = getDb();
-      await sql`UPDATE reservations SET status = 'ARRIVED' WHERE id = ${fixtures.reservationIds[0]}`.execute(db);
+      await sql`UPDATE reservations SET status = 'ARRIVED', status_id = 3 WHERE id = ${fixtures.reservationIds[0]}`.execute(db);
 
       await assert.rejects(
         async () =>
@@ -633,8 +634,8 @@ test(
     try {
       const db = getDb();
       
-      // Mark one reservation as ARRIVED to trigger business rule violation
-      await sql`UPDATE reservations SET status = 'ARRIVED' WHERE id = ${fixtures.reservationIds[0]}`.execute(db);
+      // Mark one reservation as ARRIVED to trigger business rule violation (must update both status AND status_id)
+      await sql`UPDATE reservations SET status = 'ARRIVED', status_id = 3 WHERE id = ${fixtures.reservationIds[0]}`.execute(db);
 
       // Capture state before failed update
       const before = await sql`

@@ -54,8 +54,8 @@ describe("Permission System", { concurrency: false }, () => {
 
   describe("Permission Bitmask System", () => {
     test("permission constants are correct", () => {
-      assert.strictEqual(MODULE_PERMISSION_BITS.create, 1, "Create permission bit should be 1");
-      assert.strictEqual(MODULE_PERMISSION_BITS.read, 2, "Read permission bit should be 2");
+      assert.strictEqual(MODULE_PERMISSION_BITS.read, 1, "Read permission bit should be 1");
+      assert.strictEqual(MODULE_PERMISSION_BITS.create, 2, "Create permission bit should be 2");
       assert.strictEqual(MODULE_PERMISSION_BITS.update, 4, "Update permission bit should be 4");
       assert.strictEqual(MODULE_PERMISSION_BITS.delete, 8, "Delete permission bit should be 8");
     });

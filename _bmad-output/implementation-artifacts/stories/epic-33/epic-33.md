@@ -1,7 +1,8 @@
 # Epic 33: Permission System Consolidation
 
-**Status:** in-progress  
-**Date:** 2026-04-05  
+**Status:** ✅ DONE
+**Date:** 2026-04-05
+**Completed:** 2026-04-05
 **Stories:** 4 total  
 
 ---
@@ -79,7 +80,24 @@ All duplicate constants are **removed**, not aliased. No backward compatibility 
 
 | # | Title | Status |
 |---|-------|--------|
-| [story-33.1](./story-33.1.md) | Create shared RBAC contracts | pending |
-| [story-33.2](./story-33.2.md) | Migrate `@jurnapod/auth` to shared | pending |
-| [story-33.3](./story-33.3.md) | Migrate `modules-platform` to shared | pending |
-| [story-33.4](./story-33.4.md) | Fix SUPER_ADMIN login bypass | pending |
+| [story-33.1](./story-33.1.md) | Create shared RBAC contracts | done |
+| [story-33.2](./story-33.2.md) | Migrate `@jurnapod/auth` to shared | done |
+| [story-33.3](./story-33.3.md) | Migrate `modules-platform` to shared | done |
+| [story-33.4](./story-33.4.md) | Fix SUPER_ADMIN login bypass | done |
+
+---
+
+## Post-Epic Test Fix
+
+### Permission Bit Constants Test (2026-04-05)
+
+**Issue:** Test `permission constants are correct` in `apps/api/src/routes/permissions.test.ts` expected old incorrect values (`create=1, read=2`).
+
+**Root Cause:** During Epic 33, permission bit values were corrected in `@jurnapod/auth` but the API test expectations were not updated.
+
+**Fix:** Updated test expectations to match corrected values:
+- `MODULE_PERMISSION_BITS.read = 1`
+- `MODULE_PERMISSION_BITS.create = 2`
+
+**Files Modified:**
+- `apps/api/src/routes/permissions.test.ts`

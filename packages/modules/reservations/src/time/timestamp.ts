@@ -66,9 +66,16 @@ export const RESERVATION_MIN_DURATION_MINUTES = 15;
 
 /**
  * Convert UTC ISO instant to unix milliseconds
+ * @throws Error if the instant string is not valid RFC3339 format with timezone offset
  */
 export function toUnixMs(utcInstant: UtcInstant): UnixMs {
-  return Temporal.Instant.from(utcInstant).epochMilliseconds;
+  try {
+    return Temporal.Instant.from(utcInstant).epochMilliseconds;
+  } catch {
+    throw new Error(
+      `reservationAt must be RFC3339 with timezone offset (e.g. 2026-04-06T10:00:00Z), got: ${utcInstant}`
+    );
+  }
 }
 
 /**

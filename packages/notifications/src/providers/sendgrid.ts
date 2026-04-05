@@ -9,9 +9,15 @@ export class SendGridProvider implements EmailProvider {
 
   async send(options: EmailOptions): Promise<SendResult> {
     try {
+      const fromAddress = options.from || '';
+      const from = options.fromName 
+        ? `"${options.fromName}" <${fromAddress}>` 
+        : fromAddress;
+
       const msg: sgMail.MailDataRequired = {
         to: options.to,
-        from: options.from || '',
+        from,
+        replyTo: options.replyTo,
         subject: options.subject,
         text: options.text || '',
         html: options.html || '',

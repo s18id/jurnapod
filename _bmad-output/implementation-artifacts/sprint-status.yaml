@@ -361,16 +361,19 @@ development_status:
   epic-30-retrospective: done
 
   # Epic 31: API Detachment Completion
-  epic-31: in-progress
+  epic-31: done
   31-1-extract-users-rbac: done
   31-2-extract-companies-provisioning: done
   31-3-consolidate-reservations-duplicate: done
   31-4-thin-routes-users-companies: done
   31-5-import-export-platform: deferred  # Moved to Epic 36 (scope too large for story)
-  31-6-notifications-consolidation: backlog
-  31-7-route-thinning-enforcement: backlog
-  31-8a-adapter-migration-prep: backlog
-  31-8b-deletion-verification: backlog
+  31-6-notifications-consolidation: done
+  31-7a-inventory-route-thinning: done
+  31-7b-reports-route-thinning: done
+  31-7c-accounts-route-thinning: done  # no refactoring needed, ADR-0016 created
+  31-8a-adapter-migration-prep: done  # Boundaries verified, lint fixes applied
+  31-8b-deletion-verification: done  # PARTIAL - deferred remaining deletion to Epic 36 (TD: 20+ imports still exist)
+  31-post-epic-test-fixes: done  # Date handling, Temporal timezone, status_id fixtures
 
   # Epic 33: Permission System Consolidation
   epic-33: done
@@ -378,6 +381,7 @@ development_status:
   33-2-migrate-auth-to-shared: done
   33-3-migrate-platform-to-shared: done
   33-4-fix-superadmin-login-bypass: done
+  33-5-permission-bit-test-fix: done  # Post-epic test fix - corrected test expectations
 
   # Epic 32: Financial Period Close & Reconciliation Workspace
   epic-32: backlog
@@ -411,3 +415,11 @@ development_status:
   37-2-extract-outbox-domain-service: backlog
   37-3-api-integration-thin-adapter: backlog
   37-4-parity-hardening-concurrency: backlog
+
+  # Post-Epic Test Fixes (discovered after Epic 31 completion)
+  # These fixes address test failures found during validation
+  post-epic-31-fixes:
+    auth-permission-bit-test: done  # Epic 33 - fixed permission constant test expectations
+    reservations-date-handling: done  # Epic 31 - fixed toIsoString for Date/string types
+    reservations-temporal-timezone: done  # Epic 31 - fixed RFC3339 timezone requirement
+    reservations-status-id-fixture: done  # Epic 31 - fixed test fixtures to update both status and status_id

@@ -120,7 +120,6 @@ export class RefreshTokenManager {
       }
 
       // Revoke old token
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await trx.updateTable("auth_refresh_tokens")
       .set({ revoked_at: new Date()})
         .where('id', '=', current.id)
@@ -160,7 +159,6 @@ export class RefreshTokenManager {
 
   async revoke(refreshToken: string): Promise<boolean> {
     const tokenHash = this.hashToken(refreshToken);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await this.adapter.db
       .updateTable('auth_refresh_tokens')
       .set({ revoked_at: new Date() })

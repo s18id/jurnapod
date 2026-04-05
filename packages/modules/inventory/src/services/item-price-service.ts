@@ -156,6 +156,7 @@ export class ItemPriceServiceImpl implements ItemPriceService {
       isActive?: boolean;
       includeDefaults?: boolean;
       variantId?: number | null;
+      itemId?: number;
     }
   ): Promise<ItemPrice[]> {
     const db = getInventoryDb();
@@ -214,6 +215,11 @@ export class ItemPriceServiceImpl implements ItemPriceService {
       } else {
         query = query.where("ip.variant_id", "=", filters.variantId);
       }
+    }
+
+    // Filter by item_id
+    if (typeof filters?.itemId === "number") {
+      query = query.where("ip.item_id", "=", filters.itemId);
     }
 
     const rows = await query.orderBy("ip.outlet_id", "asc").orderBy("ip.id", "asc").execute();

@@ -10,6 +10,8 @@
  * - POST /inventory/items - Create new item
  *
  * Required role: OWNER, ADMIN, ACCOUNTANT, or CASHIER (read operations)
+ * 
+ * Architecture: Thin HTTP adapter - all business logic delegated to @jurnapod/modules-inventory
  */
 
 import { Hono } from "hono";
@@ -21,7 +23,8 @@ import {
 import {
   authenticateRequest,
   requireAccess,
-  type AuthContext
+  type AuthContext,
+  type AuthenticatedRouteGuard
 } from "../lib/auth-guard.js";
 import { userHasOutletAccess } from "../lib/auth.js";
 import { errorResponse, successResponse } from "../lib/response.js";
@@ -33,9 +36,10 @@ import {
   DatabaseForbiddenError
 } from "../lib/master-data-errors.js";
 import { itemGroupsAdapter } from "../lib/item-groups/adapter.js";
-import { ItemGroupBulkConflictError } from "../lib/item-groups/index.js";
+import { ItemGroupBulkConflictError } from "@jurnapod/modules-inventory";
 import { checkUserAccess } from "../lib/auth.js";
 import { canManageCompanyDefaults } from "../lib/auth/permissions.js";
+import type { ModulePermission } from "@jurnapod/auth";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -78,6 +82,25 @@ function parseOptionalIsActive(value: string | null): boolean | undefined {
   return undefined;
 }
 
+/**
+ * Creates a reusable access check guard for inventory module permissions.
+ * Reduces repeated auth pattern in routes.
+ */
+function requireInventoryAccess(permission: ModulePermission): AuthenticatedRouteGuard {
+  return requireAccess({
+    module: "inventory",
+    permission
+  });
+}
+
+/**
+ * Check if user can access company defaults (global role check).
+ */
+async function canAccessCompanyDefaults(userId: number, companyId: number): Promise<boolean> {
+  const access = await checkUserAccess({ userId, companyId });
+  return access?.hasGlobalRole || access?.isSuperAdmin || false;
+}
+
 // =============================================================================
 // Inventory Routes
 // =============================================================================
@@ -100,11 +123,7 @@ inventoryRoutes.get("/items", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission
-  const accessResult = await requireAccess({
-    module: "inventory",
-    permission: "read"
-  })(c.req.raw, auth);
-
+  const accessResult = await requireInventoryAccess("read")(c.req.raw, auth);
   if (accessResult !== null) {
     return accessResult;
   }
@@ -137,19 +156,15 @@ inventoryRoutes.get("/items", async (c) => {
 
 // GET /inventory/variant-stats - Get variant statistics for multiple items
 inventoryRoutes.get("/variant-stats", async (c) => {
-  try {
-    const auth = c.get("auth");
-    
+  const auth = c.get("auth");
+  
   // Check access permission using bitmask system
-  const accessResult = await requireAccess({
-    module: "inventory",
-    permission: "read"
-  })(c.req.raw, auth);
+  const accessResult = await requireInventoryAccess("read")(c.req.raw, auth);
+  if (accessResult !== null) {
+    return accessResult;
+  }
 
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
+  try {
     const url = new URL(c.req.raw.url);
     const itemIdsParam = url.searchParams.get("item_ids");
 
@@ -188,11 +203,7 @@ inventoryRoutes.get("/items/:id", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission
-  const accessResult = await requireAccess({
-    module: "inventory",
-    permission: "read"
-  })(c.req.raw, auth);
-
+  const accessResult = await requireInventoryAccess("read")(c.req.raw, auth);
   if (accessResult !== null) {
     return accessResult;
   }
@@ -200,9 +211,8 @@ inventoryRoutes.get("/items/:id", async (c) => {
   try {
     const itemId = NumericIdSchema.parse(c.req.param("id"));
 
-    // Get item by ID with company scoping
-    const { getItemById } = await import("../lib/item-variants.js");
-    const item = await getItemById(itemId, auth.companyId);
+    // Get item by ID with company scoping - delegated to itemsAdapter
+    const item = await itemsAdapter.findItemById(auth.companyId, itemId);
 
     if (!item) {
       return errorResponse("NOT_FOUND", "Item not found", 404);
@@ -224,11 +234,7 @@ inventoryRoutes.post("/items", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission using bitmask system
-  const accessResult = await requireAccess({
-    module: "inventory",
-    permission: "create"
-  })(c.req.raw, auth);
-
+  const accessResult = await requireInventoryAccess("create")(c.req.raw, auth);
   if (accessResult !== null) {
     return accessResult;
   }
@@ -273,11 +279,7 @@ inventoryRoutes.patch("/items/:id", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission using bitmask system
-  const accessResult = await requireAccess({
-    module: "inventory",
-    permission: "update"
-  })(c.req.raw, auth);
-
+  const accessResult = await requireInventoryAccess("update")(c.req.raw, auth);
   if (accessResult !== null) {
     return accessResult;
   }
@@ -324,11 +326,7 @@ inventoryRoutes.delete("/items/:id", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission using bitmask system
-  const accessResult = await requireAccess({
-    module: "inventory",
-    permission: "delete"
-  })(c.req.raw, auth);
-
+  const accessResult = await requireInventoryAccess("delete")(c.req.raw, auth);
   if (accessResult !== null) {
     return accessResult;
   }
@@ -369,18 +367,14 @@ inventoryRoutes.get("/item-groups", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission
-  const accessResult = await requireAccess({
-    module: "inventory",
-    permission: "read"
-  })(c.req.raw, auth);
-
+  const accessResult = await requireInventoryAccess("read")(c.req.raw, auth);
   if (accessResult !== null) {
     return accessResult;
   }
 
   try {
-    const { listItemGroups } = await import("../lib/item-groups/index.js");
-    const groups = await listItemGroups(auth.companyId);
+    // Delegated to itemGroupsAdapter - no legacy lib imports
+    const groups = await itemGroupsAdapter.listItemGroups(auth.companyId);
     return successResponse(groups);
   } catch (error) {
     console.error("GET /inventory/item-groups failed", error);
@@ -393,19 +387,15 @@ inventoryRoutes.get("/item-groups/:id", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission using bitmask
-  const accessResult = await requireAccess({
-    module: "inventory",
-    permission: "read"
-  })(c.req.raw, auth);
-
+  const accessResult = await requireInventoryAccess("read")(c.req.raw, auth);
   if (accessResult !== null) {
     return accessResult;
   }
 
   try {
     const groupId = NumericIdSchema.parse(c.req.param("id"));
-    const { findItemGroupById } = await import("../lib/item-groups/index.js");
-    const group = await findItemGroupById(auth.companyId, groupId);
+    // Delegated to itemGroupsAdapter - no legacy lib imports
+    const group = await itemGroupsAdapter.findItemGroupById(auth.companyId, groupId);
 
     if (!group) {
       return errorResponse("NOT_FOUND", "Item group not found", 404);
@@ -427,11 +417,7 @@ inventoryRoutes.post("/item-groups", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission using bitmask
-  const accessResult = await requireAccess({
-    module: "inventory",
-    permission: "create"
-  })(c.req.raw, auth);
-
+  const accessResult = await requireInventoryAccess("create")(c.req.raw, auth);
   if (accessResult !== null) {
     return accessResult;
   }
@@ -475,11 +461,7 @@ inventoryRoutes.post("/item-groups", async (c) => {
 inventoryRoutes.post("/item-groups/bulk", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "inventory",
-    permission: "create"
-  })(c.req.raw, auth);
-
+  const accessResult = await requireInventoryAccess("create")(c.req.raw, auth);
   if (accessResult !== null) {
     return accessResult;
   }
@@ -533,11 +515,7 @@ inventoryRoutes.patch("/item-groups/:id", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission using bitmask
-  const accessResult = await requireAccess({
-    module: "inventory",
-    permission: "update"
-  })(c.req.raw, auth);
-
+  const accessResult = await requireInventoryAccess("update")(c.req.raw, auth);
   if (accessResult !== null) {
     return accessResult;
   }
@@ -587,11 +565,7 @@ inventoryRoutes.delete("/item-groups/:id", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission using bitmask
-  const accessResult = await requireAccess({
-    module: "inventory",
-    permission: "delete"
-  })(c.req.raw, auth);
-
+  const accessResult = await requireInventoryAccess("delete")(c.req.raw, auth);
   if (accessResult !== null) {
     return accessResult;
   }
@@ -629,11 +603,7 @@ inventoryRoutes.get("/item-prices/active", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission
-  const accessResult = await requireAccess({
-    module: "inventory",
-    permission: "read"
-  })(c.req.raw, auth);
-
+  const accessResult = await requireInventoryAccess("read")(c.req.raw, auth);
   if (accessResult !== null) {
     return accessResult;
   }
@@ -678,19 +648,15 @@ inventoryRoutes.get("/item-prices/active", async (c) => {
 
 // POST /inventory/item-prices - Create new item price
 inventoryRoutes.post("/item-prices", async (c) => {
-  try {
-    const auth = c.get("auth");
-    
+  const auth = c.get("auth");
+  
   // Check access permission using bitmask system
-  const accessResult = await requireAccess({
-    module: "inventory",
-    permission: "create"
-  })(c.req.raw, auth);
+  const accessResult = await requireInventoryAccess("create")(c.req.raw, auth);
+  if (accessResult !== null) {
+    return accessResult;
+  }
 
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
+  try {
     const payload = await c.req.json();
     const input = ItemPriceCreateSchema.parse(payload);
 
@@ -743,28 +709,20 @@ inventoryRoutes.post("/item-prices", async (c) => {
 
 // GET /inventory/item-prices - List item prices
 inventoryRoutes.get("/item-prices", async (c) => {
+  const auth = c.get("auth");
+  
+  // Check access permission using bitmask system
+  const accessResult = await requireInventoryAccess("read")(c.req.raw, auth);
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
   try {
-    const auth = c.get("auth");
-    
-    // Check access permission using bitmask system
-    const accessResult = await requireAccess({
-      module: "inventory",
-      permission: "read"
-    })(c.req.raw, auth);
-
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
     const url = new URL(c.req.raw.url);
     const outletIdParam = url.searchParams.get("outlet_id");
     
     // Check if user can access company defaults
-    const access = await checkUserAccess({
-      userId: auth.userId,
-      companyId: auth.companyId
-    });
-    const canAccessCompanyDefaults = access?.hasGlobalRole || access?.isSuperAdmin || false;
+    const canAccessDefaults = await canAccessCompanyDefaults(auth.userId, auth.companyId);
 
     let itemPrices;
     if (outletIdParam) {
@@ -772,7 +730,7 @@ inventoryRoutes.get("/item-prices", async (c) => {
       // When filtering by outlet, only include company defaults if user has access
       itemPrices = await itemPricesAdapter.listItemPrices(auth.companyId, {
         outletId,
-        includeDefaults: canAccessCompanyDefaults
+        includeDefaults: canAccessDefaults
       });
     } else {
       itemPrices = await itemPricesAdapter.listItemPrices(auth.companyId);
@@ -791,19 +749,15 @@ inventoryRoutes.get("/item-prices", async (c) => {
 
 // GET /inventory/item-prices/:id - Get item price by ID
 inventoryRoutes.get("/item-prices/:id", async (c) => {
+  const auth = c.get("auth");
+  
+  // Check access permission using bitmask system
+  const accessResult = await requireInventoryAccess("read")(c.req.raw, auth);
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
   try {
-    const auth = c.get("auth");
-    
-    // Check access permission using bitmask system
-    const accessResult = await requireAccess({
-      module: "inventory",
-      permission: "read"
-    })(c.req.raw, auth);
-
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
     const priceId = NumericIdSchema.parse(c.req.param("id"));
 
     const itemPrice = await itemPricesAdapter.findItemPriceById(auth.companyId, priceId);
@@ -814,12 +768,8 @@ inventoryRoutes.get("/item-prices/:id", async (c) => {
     // Check if this is a company default price (outlet_id is null)
     if (itemPrice.outlet_id === null) {
       // Check if user has global role to access company defaults
-      const access = await checkUserAccess({
-        userId: auth.userId,
-        companyId: auth.companyId
-      });
-      const canManageCompanyDefaults = access?.hasGlobalRole || access?.isSuperAdmin || false;
-      if (!canManageCompanyDefaults) {
+      const canManageDefaults = await canAccessCompanyDefaults(auth.userId, auth.companyId);
+      if (!canManageDefaults) {
         return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
     } else {
@@ -847,19 +797,15 @@ inventoryRoutes.get("/item-prices/:id", async (c) => {
 
 // PATCH /inventory/item-prices/:id - Update item price
 inventoryRoutes.patch("/item-prices/:id", async (c) => {
+  const auth = c.get("auth");
+  
+  // Check access permission using bitmask system
+  const accessResult = await requireInventoryAccess("update")(c.req.raw, auth);
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
   try {
-    const auth = c.get("auth");
-    
-    // Check access permission using bitmask system
-    const accessResult = await requireAccess({
-      module: "inventory",
-      permission: "update"
-    })(c.req.raw, auth);
-
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
     const priceId = NumericIdSchema.parse(c.req.param("id"));
     const payload = await c.req.json();
     const input = ItemPriceUpdateSchema.parse(payload);
@@ -871,11 +817,7 @@ inventoryRoutes.patch("/item-prices/:id", async (c) => {
     }
 
     // Check if user has global role (for company defaults)
-    const access = await checkUserAccess({
-      userId: auth.userId,
-      companyId: auth.companyId
-    });
-    const canManageCompanyDefaults = access?.hasGlobalRole || access?.isSuperAdmin || false;
+    const canManageDefaults = await canAccessCompanyDefaults(auth.userId, auth.companyId);
 
     // Validate outlet access if the price is outlet-specific
     if (existingPrice.outlet_id) {
@@ -883,7 +825,7 @@ inventoryRoutes.patch("/item-prices/:id", async (c) => {
       if (!hasAccess) {
         return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
-    } else if (!canManageCompanyDefaults) {
+    } else if (!canManageDefaults) {
       // Company default price requires global role
       return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
@@ -894,7 +836,7 @@ inventoryRoutes.patch("/item-prices/:id", async (c) => {
       is_active: input.is_active
     }, {
       userId: auth.userId,
-      canManageCompanyDefaults
+      canManageCompanyDefaults: canManageDefaults
     });
 
     return successResponse(updatedItemPrice);
@@ -922,30 +864,23 @@ inventoryRoutes.patch("/item-prices/:id", async (c) => {
 
 // DELETE /inventory/item-prices/:id - Delete item price
 inventoryRoutes.delete("/item-prices/:id", async (c) => {
+  const auth = c.get("auth");
+  
+  // Check access permission using bitmask system
+  const accessResult = await requireInventoryAccess("delete")(c.req.raw, auth);
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
   try {
-    const auth = c.get("auth");
-    
-    // Check access permission using bitmask system
-    const accessResult = await requireAccess({
-      module: "inventory",
-      permission: "delete"
-    })(c.req.raw, auth);
-
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
     const priceId = NumericIdSchema.parse(c.req.param("id"));
 
     // Check if user has global role (for company defaults) before calling delete
-    const access = await checkUserAccess({
-      userId: auth.userId,
-      companyId: auth.companyId
-    });
+    const canManageDefaults = await canAccessCompanyDefaults(auth.userId, auth.companyId);
 
     await itemPricesAdapter.deleteItemPrice(auth.companyId, priceId, {
       userId: auth.userId,
-      canManageCompanyDefaults: access?.hasGlobalRole || access?.isSuperAdmin || false
+      canManageCompanyDefaults: canManageDefaults
     });
 
     return successResponse({
@@ -972,19 +907,15 @@ inventoryRoutes.delete("/item-prices/:id", async (c) => {
 
 // GET /inventory/items/:id/variants/:variantId/prices - List variant-specific prices
 inventoryRoutes.get("/items/:id/variants/:variantId/prices", async (c) => {
+  const auth = c.get("auth");
+  
+  // Check access permission
+  const accessResult = await requireInventoryAccess("read")(c.req.raw, auth);
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
   try {
-    const auth = c.get("auth");
-    
-    // Check access permission
-    const accessResult = await requireAccess({
-      module: "inventory",
-      permission: "read"
-    })(c.req.raw, auth);
-
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
     const itemId = NumericIdSchema.parse(c.req.param("id"));
     const variantId = NumericIdSchema.parse(c.req.param("variantId"));
 
@@ -992,11 +923,7 @@ inventoryRoutes.get("/items/:id/variants/:variantId/prices", async (c) => {
     const outletIdParam = url.searchParams.get("outlet_id");
     
     // Check if user can access company defaults
-    const access = await checkUserAccess({
-      userId: auth.userId,
-      companyId: auth.companyId
-    });
-    const canAccessCompanyDefaults = access?.hasGlobalRole || access?.isSuperAdmin || false;
+    const canAccessDefaults = await canAccessCompanyDefaults(auth.userId, auth.companyId);
 
     let variantPrices;
     if (outletIdParam) {
@@ -1004,7 +931,7 @@ inventoryRoutes.get("/items/:id/variants/:variantId/prices", async (c) => {
       variantPrices = await itemPricesAdapter.listItemPrices(auth.companyId, {
         outletId,
         variantId,
-        includeDefaults: canAccessCompanyDefaults
+        includeDefaults: canAccessDefaults
       });
     } else {
       variantPrices = await itemPricesAdapter.listItemPrices(auth.companyId, {
@@ -1025,44 +952,37 @@ inventoryRoutes.get("/items/:id/variants/:variantId/prices", async (c) => {
 
 // GET /inventory/items/:id/prices - List all prices for an item (including variant prices)
 inventoryRoutes.get("/items/:id/prices", async (c) => {
+  const auth = c.get("auth");
+  
+  // Check access permission
+  const accessResult = await requireInventoryAccess("read")(c.req.raw, auth);
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
   try {
-    const auth = c.get("auth");
-    
-    // Check access permission
-    const accessResult = await requireAccess({
-      module: "inventory",
-      permission: "read"
-    })(c.req.raw, auth);
-
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
     const itemId = NumericIdSchema.parse(c.req.param("id"));
 
     const url = new URL(c.req.raw.url);
     const outletIdParam = url.searchParams.get("outlet_id");
     
     // Check if user can access company defaults
-    const access = await checkUserAccess({
-      userId: auth.userId,
-      companyId: auth.companyId
-    });
-    const canAccessCompanyDefaults = access?.hasGlobalRole || access?.isSuperAdmin || false;
+    const canAccessDefaults = await canAccessCompanyDefaults(auth.userId, auth.companyId);
 
     let itemPrices;
     if (outletIdParam) {
       const outletId = NumericIdSchema.parse(outletIdParam);
+      // Filter at package level using itemId - no post-filtering in route
       itemPrices = await itemPricesAdapter.listItemPrices(auth.companyId, {
         outletId,
-        includeDefaults: canAccessCompanyDefaults
+        itemId,
+        includeDefaults: canAccessDefaults
       });
-      // Filter for this item only
-      itemPrices = itemPrices.filter(p => p.item_id === itemId);
     } else {
-      itemPrices = await itemPricesAdapter.listItemPrices(auth.companyId);
-      // Filter for this item only
-      itemPrices = itemPrices.filter(p => p.item_id === itemId);
+      // Filter at package level using itemId - no post-filtering in route
+      itemPrices = await itemPricesAdapter.listItemPrices(auth.companyId, {
+        itemId
+      });
     }
 
     return successResponse(itemPrices);

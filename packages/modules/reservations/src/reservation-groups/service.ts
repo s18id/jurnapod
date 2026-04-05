@@ -13,6 +13,7 @@ import type { KyselySchema } from "@jurnapod/db";
 import type { ReservationAuditPort } from "../interfaces/audit-port.js";
 import { NOOP_AUDIT_PORT } from "../interfaces/audit-port.js";
 import { toUnixMs } from "../time/timestamp.js";
+import { toDbDateTime } from "../reservations/utils.js";
 import {
   RESERVATION_STATUS,
   BLOCKING_STATUS_IDS,
@@ -134,7 +135,7 @@ export async function createReservationGroupWithTables(
           ${input.customerName},
           ${input.customerPhone},
           ${input.guestCount},
-          ${input.reservationAt},
+          ${toDbDateTime(input.reservationAt)},
           ${startTs},
           ${endTs},
           ${input.durationMinutes ?? 120},
@@ -643,9 +644,13 @@ export async function updateReservationGroup(
       const addedTableIds = finalTableIds.filter((id) => !currentTableIds.includes(id));
 
       // Calculate time range for conflict check
-      const reservationAt =
-        input.updates.reservationAt ?? (await getFirstReservationTime(trx, input.groupId));
-      const startTs = toUnixMs(reservationAt);
+      // If reservationAt is provided (string RFC3339), parse it; otherwise use stored timestamp (unix ms)
+      let startTs: number;
+      if (input.updates.reservationAt) {
+        startTs = toUnixMs(input.updates.reservationAt);
+      } else {
+        startTs = await getFirstReservationTime(trx, input.groupId);
+      }
       const durationMs = (input.updates.durationMinutes ?? 120) * 60 * 1000;
       const endTs = startTs + durationMs;
 
@@ -706,9 +711,13 @@ export async function updateReservationGroup(
 
     // 5. Handle time/duration changes (conflict check on ALL tables)
     if (input.updates.reservationAt !== undefined || input.updates.durationMinutes !== undefined) {
-      const reservationAt =
-        input.updates.reservationAt ?? (await getFirstReservationTime(trx, input.groupId));
-      const startTs = toUnixMs(reservationAt);
+      // If reservationAt is provided (string RFC3339), parse it; otherwise use stored timestamp (unix ms)
+      let startTs: number;
+      if (input.updates.reservationAt) {
+        startTs = toUnixMs(input.updates.reservationAt);
+      } else {
+        startTs = await getFirstReservationTime(trx, input.groupId);
+      }
       const durationMs = (input.updates.durationMinutes ?? 120) * 60 * 1000;
       const endTs = startTs + durationMs;
 
@@ -779,7 +788,7 @@ export async function updateReservationGroup(
         const startTs = toUnixMs(input.updates.reservationAt);
         const durationMs = (input.updates.durationMinutes ?? 120) * 60 * 1000;
         const endTs = startTs + durationMs;
-        updateQuery = sql`${updateQuery}, reservation_at = ${input.updates.reservationAt}`;
+        updateQuery = sql`${updateQuery}, reservation_at = ${toDbDateTime(input.updates.reservationAt)}`;
         updateQuery = sql`${updateQuery}, reservation_start_ts = ${startTs}`;
         updateQuery = sql`${updateQuery}, reservation_end_ts = ${endTs}`;
         updateQuery = sql`${updateQuery}, duration_minutes = ${input.updates.durationMinutes ?? 120}`;
@@ -821,9 +830,13 @@ export async function updateReservationGroup(
     const newReservationIds: number[] = [];
 
     if (addedTableIds.length > 0) {
-      const reservationAt =
-        input.updates.reservationAt ?? (await getFirstReservationTime(trx, input.groupId));
-      const startTs = toUnixMs(reservationAt);
+      // If reservationAt is provided (string RFC3339), parse it; otherwise use stored timestamp (unix ms)
+      let startTs: number;
+      if (input.updates.reservationAt) {
+        startTs = toUnixMs(input.updates.reservationAt);
+      } else {
+        startTs = await getFirstReservationTime(trx, input.groupId);
+      }
       const durationMs = (input.updates.durationMinutes ?? 120) * 60 * 1000;
       const endTs = startTs + durationMs;
 
@@ -856,7 +869,7 @@ export async function updateReservationGroup(
               ? input.updates.customerPhone
               : firstReservation?.customer_phone ?? null},
             ${input.updates.guestCount ?? group.total_guest_count},
-            ${reservationAt},
+            ${toDbDateTime(new Date(startTs))},
             ${startTs},
             ${endTs},
             ${input.updates.durationMinutes ?? 120},
@@ -924,17 +937,17 @@ export async function updateReservationGroup(
  *
  * @param trx - Transaction or database instance
  * @param groupId - Reservation group ID
- * @returns ISO 8601 datetime string
+ * @returns Unix milliseconds (canonical timestamp storage)
  * @throws Error if group has no reservations (data integrity violation)
  */
-async function getFirstReservationTime(trx: KyselySchema, groupId: number): Promise<string> {
+async function getFirstReservationTime(trx: KyselySchema, groupId: number): Promise<number> {
   const rows = await sql`
-    SELECT reservation_at FROM reservations WHERE reservation_group_id = ${groupId} LIMIT 1
+    SELECT reservation_start_ts FROM reservations WHERE reservation_group_id = ${groupId} LIMIT 1
   `.execute(trx);
 
   if (!rows.rows[0]) {
     throw new Error(`Reservation group ${groupId} has no reservations - data integrity violation`);
   }
 
-  return (rows.rows[0] as { reservation_at: string }).reservation_at;
+  return (rows.rows[0] as { reservation_start_ts: number }).reservation_start_ts;
 }

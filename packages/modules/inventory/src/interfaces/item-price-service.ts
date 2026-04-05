@@ -35,6 +35,7 @@ export interface ItemPriceService {
       isActive?: boolean;
       includeDefaults?: boolean;
       variantId?: number | null;
+      itemId?: number;
     }
   ): Promise<ItemPrice[]>;
 

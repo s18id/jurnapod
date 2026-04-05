@@ -7,6 +7,7 @@ export interface EmailOptions {
   text?: string;
   from?: string;
   fromName?: string;
+  replyTo?: string;
 }
 
 export interface SendResult {
@@ -16,13 +17,36 @@ export interface SendResult {
   retryCount: number;
 }
 
-export interface EmailConfig {
-  provider: 'sendgrid' | 'ses';
+export interface SmtpEmailConfig {
+  provider: 'smtp';
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  secure: boolean;
+  tlsRejectUnauthorized: boolean;
+  fromAddress: string;
+  fromName: string;
+  templateDir?: string;
+}
+
+export interface SendGridEmailConfig {
+  provider: 'sendgrid';
   apiKey: string;
   fromAddress: string;
   fromName: string;
   templateDir?: string;
 }
+
+export interface SesEmailConfig {
+  provider: 'ses';
+  apiKey: string;
+  fromAddress: string;
+  fromName: string;
+  templateDir?: string;
+}
+
+export type EmailConfig = SmtpEmailConfig | SendGridEmailConfig | SesEmailConfig;
 
 export interface TemplateData {
   [key: string]: string | number | boolean | object | undefined;
@@ -34,8 +58,8 @@ export interface EmailTemplate {
   text: string;
 }
 
-export abstract class EmailProvider {
-  abstract send(options: EmailOptions): Promise<SendResult>;
+export interface EmailProvider {
+  send(options: EmailOptions): Promise<SendResult>;
 }
 
 export interface NotificationService {

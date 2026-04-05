@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { TemplateEngine } from '../src/templates';
-import * as fs from 'fs';
+import * as fs from 'fs/promises';
 import * as path from 'path';
 
-// Mock fs and path modules
-vi.mock('fs');
+// Mock fs/promises and path modules
+vi.mock('fs/promises');
 vi.mock('path', async () => {
   const actual = await vi.importActual('path') as typeof import('path');
   return {
@@ -221,8 +221,8 @@ describe('TemplateEngine', () => {
 <h1>Hello {{name}}</h1>
 <p>Welcome to {{company}}</p>`;
 
-      (fs.existsSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(true);
-      (fs.readFileSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(customTemplate);
+      (fs.access as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+      (fs.readFile as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(customTemplate);
 
       const result = await engine.render('custom-template', {
         name: 'Custom User',
@@ -235,7 +235,7 @@ describe('TemplateEngine', () => {
     });
 
     it('should fall back to built-in when custom template not found', async () => {
-      (fs.existsSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (fs.access as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('ENOENT'));
 
       const result = await engine.render('user-invitation', {
         name: 'Test',
@@ -249,10 +249,8 @@ describe('TemplateEngine', () => {
     });
 
     it('should handle custom template read errors gracefully', async () => {
-      (fs.existsSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(true);
-      (fs.readFileSync as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        throw new Error('Permission denied');
-      });
+      (fs.access as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+      (fs.readFile as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Permission denied'));
 
       // Should fall back to built-in
       const result = await engine.render('user-invitation', {
@@ -270,8 +268,8 @@ describe('TemplateEngine', () => {
       const customTemplate = `Subject: Welcome to {{company}}!
 <h1>Hello {{name}}</h1>`;
 
-      (fs.existsSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(true);
-      (fs.readFileSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(customTemplate);
+      (fs.access as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+      (fs.readFile as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(customTemplate);
 
       const result = await engine.render('welcome', {
         name: 'Test',
@@ -285,8 +283,8 @@ describe('TemplateEngine', () => {
       const customTemplate = `<h1>Hello {{name}}</h1>
 <p>Welcome!</p>`;
 
-      (fs.existsSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(true);
-      (fs.readFileSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(customTemplate);
+      (fs.access as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+      (fs.readFile as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(customTemplate);
 
       const result = await engine.render('no-subject', {
         name: 'Test',
@@ -299,8 +297,8 @@ describe('TemplateEngine', () => {
       const customTemplate = `Subject: Simple Subject
 <p>Simple body</p>`;
 
-      (fs.existsSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(true);
-      (fs.readFileSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(customTemplate);
+      (fs.access as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+      (fs.readFile as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(customTemplate);
 
       const result = await engine.render('simple', {});
 
@@ -311,7 +309,7 @@ describe('TemplateEngine', () => {
 
   describe('Template Not Found', () => {
     it('should throw error for unknown template', async () => {
-      (fs.existsSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (fs.access as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('ENOENT'));
 
       await expect(
         engine.render('non-existent-template', {})
@@ -347,8 +345,8 @@ describe('TemplateEngine', () => {
     });
 
     it('should handle HTML entities', async () => {
-      (fs.existsSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(true);
-      (fs.readFileSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      (fs.access as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+      (fs.readFile as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
         'Subject: Test\n<p>Test &amp; Example &lt;tag&gt; &nbsp; space</p>'
       );
 
@@ -359,8 +357,8 @@ describe('TemplateEngine', () => {
     });
 
     it('should handle br tags', async () => {
-      (fs.existsSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(true);
-      (fs.readFileSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      (fs.access as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+      (fs.readFile as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
         'Subject: Test\n<p>Line 1<br/>Line 2<br>Line 3</p>'
       );
 
@@ -413,8 +411,8 @@ describe('TemplateEngine', () => {
     });
 
     it('should handle deeply nested template variables', async () => {
-      (fs.existsSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(true);
-      (fs.readFileSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      (fs.access as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+      (fs.readFile as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
         `Subject: Welcome {{user.name}}
 <h1>Hello {{user.profile.firstName}} {{user.profile.lastName}}</h1>
 <p>Company: {{company.details.name}}</p>`

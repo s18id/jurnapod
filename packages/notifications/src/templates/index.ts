@@ -1,5 +1,5 @@
 import { EmailTemplate, TemplateData } from '../types';
-import * as fs from 'fs';
+import * as fs from 'fs/promises';
 import * as path from 'path';
 import Handlebars from 'handlebars';
 
@@ -47,22 +47,21 @@ export class TemplateEngine {
     const templatePath = path.join(this.templateDir, `${templateName}.hbs`);
     
     try {
-      if (fs.existsSync(templatePath)) {
-        const content = fs.readFileSync(templatePath, 'utf-8');
-        // Parse template for subject line
-        const lines = content.split('\n');
-        const subjectLine = lines.find(line => line.startsWith('Subject:'));
-        const subject = subjectLine ? subjectLine.replace('Subject:', '').trim() : 'Notification';
-        
-        // Remove subject line and get body
-        const body = lines.filter(line => !line.startsWith('Subject:')).join('\n');
-        
-        return {
-          html: body,
-          text: this.htmlToText(body),
-          subject
-        };
-      }
+      await fs.access(templatePath);
+      const content = await fs.readFile(templatePath, 'utf-8');
+      // Parse template for subject line
+      const lines = content.split('\n');
+      const subjectLine = lines.find((line: string) => line.startsWith('Subject:'));
+      const subject = subjectLine ? subjectLine.replace('Subject:', '').trim() : 'Notification';
+      
+      // Remove subject line and get body
+      const body = lines.filter((line: string) => !line.startsWith('Subject:')).join('\n');
+      
+      return {
+        html: body,
+        text: this.htmlToText(body),
+        subject
+      };
     } catch {
       // Fall back to built-in
     }

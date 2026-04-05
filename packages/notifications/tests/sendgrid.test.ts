@@ -107,11 +107,10 @@ describe('SendGridProvider', () => {
         fromName: 'Test Sender',
       });
 
-      // fromName is handled at the EmailService level, not SendGridProvider
-      // But we verify it's passed through correctly
+      // fromName is now formatted into the from field by SendGridProvider
       expect(sgMail.send).toHaveBeenCalledWith(expect.objectContaining({
         to: 'recipient@example.com',
-        from: 'sender@example.com',
+        from: '"Test Sender" <sender@example.com>',
       }));
     });
 

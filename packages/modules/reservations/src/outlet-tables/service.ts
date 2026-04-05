@@ -46,6 +46,11 @@ interface OutletTableCodeRow {
   code: string;
 }
 
+function toIsoString(val: Date | string): string {
+  if (typeof val === 'string') return val;
+  return val.toISOString();
+}
+
 function normalizeOutletTable(row: OutletTableRow): OutletTableFullResponse {
   const normalizedStatusId = row.status_id ?? OutletTableStatus.AVAILABLE;
   return {
@@ -58,8 +63,8 @@ function normalizeOutletTable(row: OutletTableRow): OutletTableFullResponse {
     capacity: row.capacity,
     status: row.status,
     status_id: normalizedStatusId,
-    created_at: row.created_at.toISOString(),
-    updated_at: row.updated_at.toISOString()
+    created_at: toIsoString(row.created_at),
+    updated_at: toIsoString(row.updated_at)
   };
 }
 

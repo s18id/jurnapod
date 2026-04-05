@@ -166,7 +166,6 @@ export class EmailTokenManager {
       }
 
       // Atomically update - set used_at where it's NULL
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const updateResult: any = await trx
         .updateTable('email_tokens')
         .set({ used_at: new Date() })

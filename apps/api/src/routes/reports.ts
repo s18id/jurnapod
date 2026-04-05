@@ -9,15 +9,23 @@
  * GET /reports/profit-loss - Profit & Loss report
  * GET /reports/pos-transactions - POS transaction history
  * GET /reports/journals - Journal entries
+ * GET /reports/daily-sales - Daily sales summary
+ * GET /reports/pos-payments - POS payments summary
+ * GET /reports/general-ledger - General ledger detail
+ * GET /reports/worksheet - Trial balance worksheet
+ * GET /reports/receivables-ageing - Receivables ageing report
+ *
+ * Route handlers are thin HTTP adapters that:
+ * - Parse request parameters
+ * - Build report context (auth, date range, outlets, timezone)
+ * - Call report service
+ * - Map response
  */
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { CompanyService } from "@jurnapod/modules-platform";
-import { listUserOutletIds, userHasOutletAccess, checkUserAccess, type RoleCode } from "@/lib/auth";
-import { requireAccess } from "@/lib/auth-guard";
-import { getDb } from "@/lib/db";
-import { errorResponse, successResponse } from "@/lib/response";
+import { authenticateRequest } from "@/lib/auth-guard";
+import { successResponse } from "@/lib/response";
 import {
   getTrialBalance,
   getProfitLoss,
@@ -30,21 +38,27 @@ import {
   getTrialBalanceWorksheet,
 } from "@/lib/reports";
 import {
-  withQueryTimeout,
-  QueryTimeoutError,
-  getDatasetSizeBucket,
-  classifyReportError,
-  emitReportMetrics,
-  QUERY_TIMEOUT_MS,
-  type ReportType,
-} from "@/lib/report-telemetry";
-import { resolveDefaultFiscalYearDateRange, FiscalYearSelectionError } from "@/lib/fiscal-years";
-import { authenticateRequest } from "@/lib/auth-guard";
+  reportQuerySchema,
+  reportPaginationSchema,
+  buildReportContext,
+  parseReportQuery,
+  parseReportPaginationQuery,
+  type ReportContext,
+} from "@/lib/report-context";
+import {
+  executeReport,
+  emitReportSuccess,
+  handleReportError,
+} from "@/lib/report-error-handler";
 import type { AuthContext } from "@/lib/auth-guard";
+import type { ReportType } from "@/lib/report-telemetry";
 
 const reportRoutes = new Hono();
 
+// ============================================================================
 // Auth middleware
+// ============================================================================
+
 reportRoutes.use("/*", async (c, next) => {
   const authResult = await authenticateRequest(c.req.raw);
   if (!authResult.success) {
@@ -55,137 +69,17 @@ reportRoutes.use("/*", async (c, next) => {
   await next();
 });
 
-// Company service for fetching company details (e.g., timezone)
-const companyService = new CompanyService(getDb());
-
-// ============================================================================
-// Shared Query Schema and Helpers
-// ============================================================================
-
-const querySchema = z.object({
-  outlet_id: z.coerce.number().int().positive().optional(),
-  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-});
-
-const paginationSchema = z.object({
-  outlet_id: z.coerce.number().int().positive().optional(),
-  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  limit: z.coerce.number().int().positive().max(100).optional(),
-  offset: z.coerce.number().int().min(0).optional(),
-});
-
-/**
- * Check if user is exclusively a Cashier (has no elevated roles).
- * Cashiers should only see their own transactions in POS reports.
- */
-const elevatedRoles = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"] as const;
-
-async function isCashierOnly(auth: { userId: number; companyId: number }): Promise<boolean> {
-  const elevatedAccess = await checkUserAccess({
-    userId: auth.userId,
-    companyId: auth.companyId,
-    allowedRoles: elevatedRoles as readonly RoleCode[]
-  });
-  if (elevatedAccess?.hasRole) {
-    return false;
-  }
-
-  const cashierAccess = await checkUserAccess({
-    userId: auth.userId,
-    companyId: auth.companyId,
-    allowedRoles: ["CASHIER"] as const
-  });
-  return cashierAccess?.hasRole ?? false;
-}
-
-function getDefaultDateRange(): { dateFrom: string; dateTo: string } {
-  const now = new Date();
-  const to = now.toISOString().slice(0, 10);
-  const fromDate = new Date(now);
-  fromDate.setDate(now.getDate() - 30);
-  const from = fromDate.toISOString().slice(0, 10);
-  return { dateFrom: from, dateTo: to };
-}
-
-async function resolveDateRange(
-  companyId: number,
-  parsed: { date_from?: string; date_to?: string }
-): Promise<{ dateFrom: string; dateTo: string }> {
-  if (parsed.date_from || parsed.date_to) {
-    const defaults = getDefaultDateRange();
-    return {
-      dateFrom: parsed.date_from ?? defaults.dateFrom,
-      dateTo: parsed.date_to ?? defaults.dateTo
-    };
-  }
-  return resolveDefaultFiscalYearDateRange(companyId);
-}
-
-function handleReportError(error: unknown, startTime: number, companyId: number, reportType: string) {
-  const errorClass = classifyReportError(error);
-  const latencyMs = Date.now() - startTime;
-
-  const bucket = getDatasetSizeBucket(0);
-  emitReportMetrics(null, {
-    reportType: reportType as ReportType,
-    companyId,
-    datasetSizeBucket: bucket,
-    latencyMs,
-    errorClass,
-  });
-
-  if (error instanceof QueryTimeoutError) {
-    return errorResponse(
-      "TIMEOUT",
-      "Report generation timed out. Please try a smaller date range.",
-      504
-    );
-  }
-
-  if (error instanceof z.ZodError) {
-    return errorResponse(
-      "VALIDATION_ERROR",
-      "Invalid request parameters: " + error.errors.map(e => e.message).join(", "),
-      400
-    );
-  }
-
-  if (error instanceof FiscalYearSelectionError) {
-    return errorResponse("FISCAL_YEAR_REQUIRED", error.message, 400);
-  }
-
-  if (error instanceof Error && error.message === "Forbidden") {
-    return errorResponse("FORBIDDEN", "Forbidden", 403);
-  }
-
-  console.error(`GET /reports/${reportType} failed:`, error);
-  return errorResponse("INTERNAL_SERVER_ERROR", `${reportType} report failed`, 500);
-}
-
 // ============================================================================
 // GET /reports/trial-balance - Trial balance report
 // ============================================================================
 
 reportRoutes.get("/trial-balance", async (c) => {
-  const auth = c.get("auth") as AuthContext;
   const startTime = Date.now();
   const REPORT_TYPE = "trial_balance";
 
   try {
-    // Check module permission for accounting reports
-    const accessResult = await requireAccess({
-      module: "accounting",
-      permission: "report"
-    })(c.req.raw, auth);
-
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
     const url = new URL(c.req.raw.url);
-    const parsed = querySchema.extend({
+    const parsed = reportQuerySchema.extend({
       as_of: z.string().datetime({ offset: true }).optional()
     }).parse({
       outlet_id: url.searchParams.get("outlet_id") ?? undefined,
@@ -194,33 +88,23 @@ reportRoutes.get("/trial-balance", async (c) => {
       as_of: url.searchParams.get("as_of") ?? undefined,
     });
 
-    const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
+    const { error, context } = await buildReportContext(c, "accounting", parsed);
+    if (error) return error;
+    if (!context) throw new Error("Context not built");
 
-    let outletIds: number[];
-    if (parsed.outlet_id) {
-      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
-      if (!hasAccess) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-      outletIds = [parsed.outlet_id];
-    } else {
-      outletIds = await listUserOutletIds(auth.userId, auth.companyId);
-    }
-
-    const company = await companyService.getCompany({ companyId: auth.companyId });
-    const timezone = company.timezone ?? 'UTC';
-
-    const rows = await withQueryTimeout(
-      getTrialBalance({
-        companyId: auth.companyId,
-        outletIds,
-        dateFrom,
-        dateTo,
+    const rows = await executeReport(
+      REPORT_TYPE as ReportType,
+      context.auth.companyId,
+      () => getTrialBalance({
+        companyId: context.auth.companyId,
+        outletIds: context.outletIds,
+        dateFrom: context.dateFrom,
+        dateTo: context.dateTo,
         asOf: parsed.as_of,
         includeUnassignedOutlet: !parsed.outlet_id,
-        timezone
+        timezone: context.timezone
       }),
-      QUERY_TIMEOUT_MS
+      { startTime }
     );
 
     const totals = rows.reduce(
@@ -232,27 +116,20 @@ reportRoutes.get("/trial-balance", async (c) => {
       { total_debit: 0, total_credit: 0, balance: 0 }
     );
 
-    const latencyMs = Date.now() - startTime;
-    const bucket = getDatasetSizeBucket(rows.length);
-    emitReportMetrics(null, {
-      reportType: REPORT_TYPE as ReportType,
-      companyId: auth.companyId,
-      datasetSizeBucket: bucket,
-      latencyMs,
-      rowCount: rows.length,
-    });
+    emitReportSuccess(REPORT_TYPE as ReportType, context.auth.companyId, startTime, rows.length);
 
     return successResponse({
       filters: {
-        outlet_ids: outletIds,
-        date_from: dateFrom,
-        date_to: dateTo,
+        outlet_ids: context.outletIds,
+        date_from: context.dateFrom,
+        date_to: context.dateTo,
         as_of: parsed.as_of ?? null
       },
       totals,
       rows
     });
   } catch (error) {
+    const auth = c.get("auth") as AuthContext;
     return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
   }
 });
@@ -262,73 +139,42 @@ reportRoutes.get("/trial-balance", async (c) => {
 // ============================================================================
 
 reportRoutes.get("/profit-loss", async (c) => {
-  const auth = c.get("auth") as AuthContext;
   const startTime = Date.now();
   const REPORT_TYPE = "profit_loss";
 
   try {
-    // Check module permission for accounting reports
-    const accessResult = await requireAccess({
-      module: "accounting",
-      permission: "report"
-    })(c.req.raw, auth);
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
     const url = new URL(c.req.raw.url);
-    const parsed = querySchema.parse({
-      outlet_id: url.searchParams.get("outlet_id") ?? undefined,
-      date_from: url.searchParams.get("date_from") ?? undefined,
-      date_to: url.searchParams.get("date_to") ?? undefined,
-    });
+    const parsed = parseReportQuery(reportQuerySchema, url);
 
-    const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
+    const { error, context } = await buildReportContext(c, "accounting", parsed);
+    if (error) return error;
+    if (!context) throw new Error("Context not built");
 
-    let outletIds: number[];
-    if (parsed.outlet_id) {
-      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
-      if (!hasAccess) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-      outletIds = [parsed.outlet_id];
-    } else {
-      outletIds = await listUserOutletIds(auth.userId, auth.companyId);
-    }
-
-    const company = await companyService.getCompany({ companyId: auth.companyId });
-    const timezone = company.timezone ?? 'UTC';
-
-    const result = await withQueryTimeout(
-      getProfitLoss({
-        companyId: auth.companyId,
-        outletIds,
-        dateFrom,
-        dateTo,
-        timezone
+    const result = await executeReport(
+      REPORT_TYPE as ReportType,
+      context.auth.companyId,
+      () => getProfitLoss({
+        companyId: context.auth.companyId,
+        outletIds: context.outletIds,
+        dateFrom: context.dateFrom,
+        dateTo: context.dateTo,
+        timezone: context.timezone
       }),
-      QUERY_TIMEOUT_MS
+      { startTime, rowCount: (r) => r.rows.length }
     );
 
-    const latencyMs = Date.now() - startTime;
-    const bucket = getDatasetSizeBucket(result.rows.length);
-    emitReportMetrics(null, {
-      reportType: REPORT_TYPE as ReportType,
-      companyId: auth.companyId,
-      datasetSizeBucket: bucket,
-      latencyMs,
-      rowCount: result.rows.length,
-    });
+    emitReportSuccess(REPORT_TYPE as ReportType, context.auth.companyId, startTime, result.rows.length);
 
     return successResponse({
       filters: {
-        outlet_ids: outletIds,
-        date_from: dateFrom,
-        date_to: dateTo,
+        outlet_ids: context.outletIds,
+        date_from: context.dateFrom,
+        date_to: context.dateTo,
       },
       ...result
     });
   } catch (error) {
+    const auth = c.get("auth") as AuthContext;
     return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
   }
 });
@@ -338,22 +184,12 @@ reportRoutes.get("/profit-loss", async (c) => {
 // ============================================================================
 
 reportRoutes.get("/pos-transactions", async (c) => {
-  const auth = c.get("auth") as AuthContext;
   const startTime = Date.now();
   const REPORT_TYPE = "pos_transactions";
 
   try {
-    // Check module permission for POS reports
-    const accessResult = await requireAccess({
-      module: "pos",
-      permission: "report"
-    })(c.req.raw, auth);
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
     const url = new URL(c.req.raw.url);
-    const parsed = paginationSchema.extend({
+    const parsed = reportPaginationSchema.extend({
       status: z.enum(["COMPLETED", "VOID", "REFUND"]).optional(),
       as_of_id: z.coerce.number().int().positive().optional(),
     }).parse({
@@ -366,61 +202,40 @@ reportRoutes.get("/pos-transactions", async (c) => {
       as_of_id: url.searchParams.get("as_of_id") ?? undefined,
     });
 
-    const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
-
-    let outletIds: number[];
-    if (parsed.outlet_id) {
-      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
-      if (!hasAccess) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-      outletIds = [parsed.outlet_id];
-    } else {
-      outletIds = await listUserOutletIds(auth.userId, auth.companyId);
-    }
-
-    const company = await companyService.getCompany({ companyId: auth.companyId });
-    const timezone = company.timezone ?? 'UTC';
-
-    // Cashiers should only see their own transactions
-    const cashierOnly = await isCashierOnly(auth);
+    const { error, context } = await buildReportContext(c, "pos", parsed, { supportsCashierOnly: true });
+    if (error) return error;
+    if (!context) throw new Error("Context not built");
 
     const limit = Math.min(parsed.limit ?? 50, 100);
     const offset = parsed.offset ?? 0;
 
-    const result = await withQueryTimeout(
-      listPosTransactions({
-        companyId: auth.companyId,
-        outletIds,
-        dateFrom,
-        dateTo,
-        timezone,
+    const result = await executeReport(
+      REPORT_TYPE as ReportType,
+      context.auth.companyId,
+      () => listPosTransactions({
+        companyId: context.auth.companyId,
+        outletIds: context.outletIds,
+        dateFrom: context.dateFrom,
+        dateTo: context.dateTo,
+        timezone: context.timezone,
         status: parsed.status,
-        userId: cashierOnly ? auth.userId : undefined,
+        userId: context.cashierOnly ? context.auth.userId : undefined,
         limit,
         offset,
         asOfId: parsed.as_of_id,
       }),
-      QUERY_TIMEOUT_MS
+      { startTime, rowCount: (r) => r.transactions.length }
     );
 
-    const latencyMs = Date.now() - startTime;
-    const bucket = getDatasetSizeBucket(result.transactions.length);
-    emitReportMetrics(null, {
-      reportType: REPORT_TYPE as ReportType,
-      companyId: auth.companyId,
-      datasetSizeBucket: bucket,
-      latencyMs,
-      rowCount: result.transactions.length,
-    });
+    emitReportSuccess(REPORT_TYPE as ReportType, context.auth.companyId, startTime, result.transactions.length);
 
     return successResponse({
       filters: {
-        outlet_ids: outletIds,
-        date_from: dateFrom,
-        date_to: dateTo,
+        outlet_ids: context.outletIds,
+        date_from: context.dateFrom,
+        date_to: context.dateTo,
         status: parsed.status ?? null,
-        user_id: cashierOnly ? auth.userId : null,
+        user_id: context.cashierOnly ? context.auth.userId : null,
         as_of: result.as_of,
         as_of_id: result.as_of_id,
       },
@@ -433,6 +248,7 @@ reportRoutes.get("/pos-transactions", async (c) => {
       transactions: result.transactions
     });
   } catch (error) {
+    const auth = c.get("auth") as AuthContext;
     return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
   }
 });
@@ -442,22 +258,12 @@ reportRoutes.get("/pos-transactions", async (c) => {
 // ============================================================================
 
 reportRoutes.get("/journals", async (c) => {
-  const auth = c.get("auth") as AuthContext;
   const startTime = Date.now();
   const REPORT_TYPE = "journals";
 
   try {
-    // Check module permission for accounting reports
-    const accessResult = await requireAccess({
-      module: "accounting",
-      permission: "report"
-    })(c.req.raw, auth);
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
     const url = new URL(c.req.raw.url);
-    const parsed = paginationSchema.extend({
+    const parsed = reportPaginationSchema.extend({
       as_of: z.string().datetime({ offset: true }).optional(),
       as_of_id: z.coerce.number().int().positive().optional(),
     }).parse({
@@ -470,56 +276,38 @@ reportRoutes.get("/journals", async (c) => {
       as_of_id: url.searchParams.get("as_of_id") ?? undefined,
     });
 
-    const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
-
-    let outletIds: number[];
-    if (parsed.outlet_id) {
-      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
-      if (!hasAccess) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-      outletIds = [parsed.outlet_id];
-    } else {
-      outletIds = await listUserOutletIds(auth.userId, auth.companyId);
-    }
-
-    const company = await companyService.getCompany({ companyId: auth.companyId });
-    const timezone = company.timezone ?? 'UTC';
+    const { error, context } = await buildReportContext(c, "accounting", parsed);
+    if (error) return error;
+    if (!context) throw new Error("Context not built");
 
     const limit = Math.min(parsed.limit ?? 50, 100);
     const offset = parsed.offset ?? 0;
 
-    const result = await withQueryTimeout(
-      listJournalBatches({
-        companyId: auth.companyId,
-        outletIds,
-        dateFrom,
-        dateTo,
-        timezone,
+    const result = await executeReport(
+      REPORT_TYPE as ReportType,
+      context.auth.companyId,
+      () => listJournalBatches({
+        companyId: context.auth.companyId,
+        outletIds: context.outletIds,
+        dateFrom: context.dateFrom,
+        dateTo: context.dateTo,
+        timezone: context.timezone,
         limit,
         offset,
         asOf: parsed.as_of,
         asOfId: parsed.as_of_id,
         includeUnassignedOutlet: !parsed.outlet_id,
       }),
-      QUERY_TIMEOUT_MS
+      { startTime, rowCount: (r) => r.journals.length }
     );
 
-    const latencyMs = Date.now() - startTime;
-    const bucket = getDatasetSizeBucket(result.journals.length);
-    emitReportMetrics(null, {
-      reportType: REPORT_TYPE as ReportType,
-      companyId: auth.companyId,
-      datasetSizeBucket: bucket,
-      latencyMs,
-      rowCount: result.journals.length,
-    });
+    emitReportSuccess(REPORT_TYPE as ReportType, context.auth.companyId, startTime, result.journals.length);
 
     return successResponse({
       filters: {
-        outlet_ids: outletIds,
-        date_from: dateFrom,
-        date_to: dateTo,
+        outlet_ids: context.outletIds,
+        date_from: context.dateFrom,
+        date_to: context.dateTo,
         as_of: result.as_of,
         as_of_id: result.as_of_id,
       },
@@ -532,6 +320,7 @@ reportRoutes.get("/journals", async (c) => {
       journals: result.journals
     });
   } catch (error) {
+    const auth = c.get("auth") as AuthContext;
     return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
   }
 });
@@ -541,22 +330,12 @@ reportRoutes.get("/journals", async (c) => {
 // ============================================================================
 
 reportRoutes.get("/daily-sales", async (c) => {
-  const auth = c.get("auth") as AuthContext;
   const startTime = Date.now();
   const REPORT_TYPE = "daily_sales";
 
   try {
-    // Check module permission for POS reports
-    const accessResult = await requireAccess({
-      module: "pos",
-      permission: "report"
-    })(c.req.raw, auth);
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
     const url = new URL(c.req.raw.url);
-    const parsed = querySchema.extend({
+    const parsed = reportQuerySchema.extend({
       status: z.enum(["COMPLETED", "VOID", "REFUND"]).optional(),
     }).parse({
       outlet_id: url.searchParams.get("outlet_id") ?? undefined,
@@ -565,49 +344,39 @@ reportRoutes.get("/daily-sales", async (c) => {
       status: url.searchParams.get("status") ?? undefined,
     });
 
-    const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
+    const { error, context } = await buildReportContext(c, "pos", parsed, { supportsCashierOnly: true });
+    if (error) return error;
+    if (!context) throw new Error("Context not built");
 
-    let outletIds: number[];
-    if (parsed.outlet_id) {
-      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
-      if (!hasAccess) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-      outletIds = [parsed.outlet_id];
-    } else {
-      outletIds = await listUserOutletIds(auth.userId, auth.companyId);
-    }
-
-    const company = await companyService.getCompany({ companyId: auth.companyId });
-    const timezone = company.timezone ?? 'UTC';
-
-    // Cashiers should only see their own transactions
-    const cashierOnly = await isCashierOnly(auth);
-
-    const rows = await withQueryTimeout(
-      listDailySalesSummary({
-        companyId: auth.companyId,
-        outletIds,
-        dateFrom,
-        dateTo,
-        timezone,
-        userId: cashierOnly ? auth.userId : undefined,
+    const rows = await executeReport(
+      REPORT_TYPE as ReportType,
+      context.auth.companyId,
+      () => listDailySalesSummary({
+        companyId: context.auth.companyId,
+        outletIds: context.outletIds,
+        dateFrom: context.dateFrom,
+        dateTo: context.dateTo,
+        timezone: context.timezone,
+        userId: context.cashierOnly ? context.auth.userId : undefined,
         status: parsed.status,
       }),
-      QUERY_TIMEOUT_MS
+      { startTime }
     );
+
+    emitReportSuccess(REPORT_TYPE as ReportType, context.auth.companyId, startTime, rows.length);
 
     return successResponse({
       filters: {
-        outlet_ids: outletIds,
-        date_from: dateFrom,
-        date_to: dateTo,
-        user_id: cashierOnly ? auth.userId : null,
+        outlet_ids: context.outletIds,
+        date_from: context.dateFrom,
+        date_to: context.dateTo,
+        user_id: context.cashierOnly ? context.auth.userId : null,
         status: parsed.status ?? null,
       },
       rows
     });
   } catch (error) {
+    const auth = c.get("auth") as AuthContext;
     return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
   }
 });
@@ -617,22 +386,12 @@ reportRoutes.get("/daily-sales", async (c) => {
 // ============================================================================
 
 reportRoutes.get("/pos-payments", async (c) => {
-  const auth = c.get("auth") as AuthContext;
   const startTime = Date.now();
   const REPORT_TYPE = "pos_payments";
 
   try {
-    // Check module permission for POS reports
-    const accessResult = await requireAccess({
-      module: "pos",
-      permission: "report"
-    })(c.req.raw, auth);
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
     const url = new URL(c.req.raw.url);
-    const parsed = querySchema.extend({
+    const parsed = reportQuerySchema.extend({
       status: z.enum(["COMPLETED", "VOID", "REFUND"]).optional(),
     }).parse({
       outlet_id: url.searchParams.get("outlet_id") ?? undefined,
@@ -641,49 +400,39 @@ reportRoutes.get("/pos-payments", async (c) => {
       status: url.searchParams.get("status") ?? undefined,
     });
 
-    const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
+    const { error, context } = await buildReportContext(c, "pos", parsed, { supportsCashierOnly: true });
+    if (error) return error;
+    if (!context) throw new Error("Context not built");
 
-    let outletIds: number[];
-    if (parsed.outlet_id) {
-      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
-      if (!hasAccess) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-      outletIds = [parsed.outlet_id];
-    } else {
-      outletIds = await listUserOutletIds(auth.userId, auth.companyId);
-    }
-
-    const company = await companyService.getCompany({ companyId: auth.companyId });
-    const timezone = company.timezone ?? 'UTC';
-
-    // Cashiers should only see their own transactions
-    const cashierOnly = await isCashierOnly(auth);
-
-    const rows = await withQueryTimeout(
-      listPosPaymentsSummary({
-        companyId: auth.companyId,
-        outletIds,
-        dateFrom,
-        dateTo,
-        timezone,
-        userId: cashierOnly ? auth.userId : undefined,
+    const rows = await executeReport(
+      REPORT_TYPE as ReportType,
+      context.auth.companyId,
+      () => listPosPaymentsSummary({
+        companyId: context.auth.companyId,
+        outletIds: context.outletIds,
+        dateFrom: context.dateFrom,
+        dateTo: context.dateTo,
+        timezone: context.timezone,
+        userId: context.cashierOnly ? context.auth.userId : undefined,
         status: parsed.status,
       }),
-      QUERY_TIMEOUT_MS
+      { startTime }
     );
+
+    emitReportSuccess(REPORT_TYPE as ReportType, context.auth.companyId, startTime, rows.length);
 
     return successResponse({
       filters: {
-        outlet_ids: outletIds,
-        date_from: dateFrom,
-        date_to: dateTo,
-        user_id: cashierOnly ? auth.userId : null,
+        outlet_ids: context.outletIds,
+        date_from: context.dateFrom,
+        date_to: context.dateTo,
+        user_id: context.cashierOnly ? context.auth.userId : null,
         status: parsed.status ?? null,
       },
       rows
     });
   } catch (error) {
+    const auth = c.get("auth") as AuthContext;
     return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
   }
 });
@@ -693,20 +442,10 @@ reportRoutes.get("/pos-payments", async (c) => {
 // ============================================================================
 
 reportRoutes.get("/general-ledger", async (c) => {
-  const auth = c.get("auth") as AuthContext;
   const startTime = Date.now();
   const REPORT_TYPE = "general_ledger";
 
   try {
-    // Check module permission for accounting reports
-    const accessResult = await requireAccess({
-      module: "accounting",
-      permission: "report"
-    })(c.req.raw, auth);
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
     const url = new URL(c.req.raw.url);
     const parsed = z.object({
       outlet_id: z.coerce.number().int().positive().optional(),
@@ -724,48 +463,41 @@ reportRoutes.get("/general-ledger", async (c) => {
       line_offset: url.searchParams.get("line_offset") ?? undefined,
     });
 
-    const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
+    const { error, context } = await buildReportContext(c, "accounting", parsed);
+    if (error) return error;
+    if (!context) throw new Error("Context not built");
 
-    let outletIds: number[];
-    if (parsed.outlet_id) {
-      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
-      if (!hasAccess) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-      outletIds = [parsed.outlet_id];
-    } else {
-      outletIds = await listUserOutletIds(auth.userId, auth.companyId);
-    }
-
-    const company = await companyService.getCompany({ companyId: auth.companyId });
-    const timezone = company.timezone ?? 'UTC';
-
-    const rows = await withQueryTimeout(
-      getGeneralLedgerDetail({
-        companyId: auth.companyId,
-        outletIds,
-        dateFrom,
-        dateTo,
+    const rows = await executeReport(
+      REPORT_TYPE as ReportType,
+      context.auth.companyId,
+      () => getGeneralLedgerDetail({
+        companyId: context.auth.companyId,
+        outletIds: context.outletIds,
+        dateFrom: context.dateFrom,
+        dateTo: context.dateTo,
         accountId: parsed.account_id,
-        timezone,
+        timezone: context.timezone,
         lineLimit: parsed.line_limit,
         lineOffset: parsed.line_offset,
       }),
-      QUERY_TIMEOUT_MS
+      { startTime }
     );
+
+    emitReportSuccess(REPORT_TYPE as ReportType, context.auth.companyId, startTime, rows.length);
 
     return successResponse({
       filters: {
-        outlet_ids: outletIds,
+        outlet_ids: context.outletIds,
         account_id: parsed.account_id ?? null,
-        date_from: dateFrom,
-        date_to: dateTo,
+        date_from: context.dateFrom,
+        date_to: context.dateTo,
         line_limit: parsed.line_limit ?? null,
         line_offset: parsed.line_offset ?? null,
       },
       rows
     });
   } catch (error) {
+    const auth = c.get("auth") as AuthContext;
     return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
   }
 });
@@ -775,63 +507,42 @@ reportRoutes.get("/general-ledger", async (c) => {
 // ============================================================================
 
 reportRoutes.get("/worksheet", async (c) => {
-  const auth = c.get("auth") as AuthContext;
   const startTime = Date.now();
   const REPORT_TYPE = "worksheet";
 
   try {
-    // Check module permission for accounting reports
-    const accessResult = await requireAccess({
-      module: "accounting",
-      permission: "report"
-    })(c.req.raw, auth);
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
     const url = new URL(c.req.raw.url);
-    const parsed = querySchema.parse({
-      outlet_id: url.searchParams.get("outlet_id") ?? undefined,
-      date_from: url.searchParams.get("date_from") ?? undefined,
-      date_to: url.searchParams.get("date_to") ?? undefined,
-    });
+    const parsed = parseReportQuery(reportQuerySchema, url);
 
-    const { dateFrom, dateTo } = await resolveDateRange(auth.companyId, parsed);
+    const { error, context } = await buildReportContext(c, "accounting", parsed);
+    if (error) return error;
+    if (!context) throw new Error("Context not built");
 
-    let outletIds: number[];
-    if (parsed.outlet_id) {
-      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
-      if (!hasAccess) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
-      }
-      outletIds = [parsed.outlet_id];
-    } else {
-      outletIds = await listUserOutletIds(auth.userId, auth.companyId);
-    }
-
-    const company = await companyService.getCompany({ companyId: auth.companyId });
-    const timezone = company.timezone ?? 'UTC';
-
-    const result = await withQueryTimeout(
-      getTrialBalanceWorksheet({
-        companyId: auth.companyId,
-        outletIds,
-        dateFrom,
-        dateTo,
-        timezone,
+    const result = await executeReport(
+      REPORT_TYPE as ReportType,
+      context.auth.companyId,
+      () => getTrialBalanceWorksheet({
+        companyId: context.auth.companyId,
+        outletIds: context.outletIds,
+        dateFrom: context.dateFrom,
+        dateTo: context.dateTo,
+        timezone: context.timezone,
       }),
-      QUERY_TIMEOUT_MS
+      { startTime, rowCount: (r) => r.length }
     );
+
+    emitReportSuccess(REPORT_TYPE as ReportType, context.auth.companyId, startTime, result.length);
 
     return successResponse({
       filters: {
-        outlet_ids: outletIds,
-        date_from: dateFrom,
-        date_to: dateTo,
+        outlet_ids: context.outletIds,
+        date_from: context.dateFrom,
+        date_to: context.dateTo,
       },
       ...result
     });
   } catch (error) {
+    const auth = c.get("auth") as AuthContext;
     return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
   }
 });
@@ -841,20 +552,10 @@ reportRoutes.get("/worksheet", async (c) => {
 // ============================================================================
 
 reportRoutes.get("/receivables-ageing", async (c) => {
-  const auth = c.get("auth") as AuthContext;
   const startTime = Date.now();
   const REPORT_TYPE = "receivables_ageing";
 
   try {
-    // Check module permission for accounting reports
-    const accessResult = await requireAccess({
-      module: "accounting",
-      permission: "report"
-    })(c.req.raw, auth);
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
     const url = new URL(c.req.raw.url);
     const parsed = z.object({
       outlet_id: z.coerce.number().int().positive().optional(),
@@ -864,30 +565,51 @@ reportRoutes.get("/receivables-ageing", async (c) => {
       as_of_date: url.searchParams.get("as_of_date") ?? undefined,
     });
 
+    // For receivables ageing, we need special handling since it doesn't use date_from/date_to
+    const auth = c.get("auth") as AuthContext;
+
+    // Check module permission
+    const { requireAccess } = await import("@/lib/auth-guard");
+    const accessGuard = requireAccess({ module: "accounting", permission: "report" });
+    const accessResult = await accessGuard(c.req.raw, auth);
+    if (accessResult !== null) return accessResult;
+
+    // Outlet scope resolution
     let outletIds: number[];
     if (parsed.outlet_id) {
+      const { userHasOutletAccess, listUserOutletIds } = await import("@/lib/auth");
       const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
       if (!hasAccess) {
-        return errorResponse("FORBIDDEN", "Forbidden", 403);
+        return Response.json({ success: false, error: { code: "FORBIDDEN", message: "Forbidden" } }, { status: 403 });
       }
       outletIds = [parsed.outlet_id];
     } else {
+      const { listUserOutletIds } = await import("@/lib/auth");
       outletIds = await listUserOutletIds(auth.userId, auth.companyId);
     }
 
+    // Timezone resolution
+    const { CompanyService } = await import("@jurnapod/modules-platform");
+    const { getDb } = await import("@/lib/db");
+    const companyService = new CompanyService(getDb());
     const company = await companyService.getCompany({ companyId: auth.companyId });
     const timezone = company.timezone ?? 'UTC';
+
     const asOfDate = parsed.as_of_date ?? new Date().toISOString().slice(0, 10);
 
-    const result = await withQueryTimeout(
-      getReceivablesAgeingReport({
+    const result = await executeReport(
+      REPORT_TYPE as ReportType,
+      auth.companyId,
+      () => getReceivablesAgeingReport({
         companyId: auth.companyId,
         outletIds,
         asOfDate,
         timezone,
       }),
-      QUERY_TIMEOUT_MS
+      { startTime, rowCount: (r) => r.invoices.length }
     );
+
+    emitReportSuccess(REPORT_TYPE as ReportType, auth.companyId, startTime, result.invoices.length);
 
     return successResponse({
       filters: {
@@ -897,6 +619,7 @@ reportRoutes.get("/receivables-ageing", async (c) => {
       ...result
     });
   } catch (error) {
+    const auth = c.get("auth") as AuthContext;
     return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
   }
 });

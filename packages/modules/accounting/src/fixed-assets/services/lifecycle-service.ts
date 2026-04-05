@@ -1575,7 +1575,6 @@ export class LifecycleService {
 
     const journalBatchId = Number(batchResult.insertId);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     type JournalLine = Record<string, any>;
 
     const lines: JournalLine[] = [];

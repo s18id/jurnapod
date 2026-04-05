@@ -6,7 +6,7 @@
 |-------|-------|
 | Story | story-31.7 |
 | Title | Route Thinning Enforcement (accounts, inventory, reports) |
-| Status | pending |
+| Status | **SUPERSEDED** - Split into 31.7a, 31.7b, 31.7c |
 | Type | Route Thinning |
 | Sprint | 2 of 3 |
 | Priority | P1 |

@@ -63,12 +63,16 @@ export async function processPendingEmails(): Promise<{ processed: number; sent:
   for (const row of rows) {
     try {
       const mailer = await getMailer();
-      await mailer.sendMail({
+      const result = await mailer.send({
         to: row.to_email,
         subject: row.subject,
         html: row.html,
         text: row.text,
       });
+
+      if (!result.success) {
+        throw new Error(result.error ?? "Email send failed");
+      }
 
       await db
         .updateTable("email_outbox")

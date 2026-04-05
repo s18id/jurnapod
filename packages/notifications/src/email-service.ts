@@ -1,14 +1,15 @@
 import { EmailOptions, SendResult, EmailConfig, TemplateData, EmailProvider } from './types';
 import { SendGridProvider } from './providers/sendgrid';
+import { SmtpProvider } from './providers/smtp';
 import { TemplateEngine } from './templates';
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_BASE = 1000; // 1 second
 
-// Simple email regex for validation
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// RFC 5322-compliant email regex (simplified)
+const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
 
-export class EmailService implements EmailProvider {
+export class EmailService {
   private provider: EmailProvider;
   private config: EmailConfig;
   private templateEngine: TemplateEngine;
@@ -23,11 +24,22 @@ export class EmailService implements EmailProvider {
     switch (config.provider) {
       case 'sendgrid':
         return new SendGridProvider(config.apiKey);
+      case 'smtp':
+        return new SmtpProvider({
+          host: config.host,
+          port: config.port,
+          user: config.user,
+          password: config.password,
+          secure: config.secure,
+          tlsRejectUnauthorized: config.tlsRejectUnauthorized,
+          fromName: config.fromName,
+          fromEmail: config.fromAddress,
+        });
       case 'ses':
         // TODO: Implement SES provider
         throw new Error('SES provider not yet implemented');
       default:
-        throw new Error(`Unknown provider: ${config.provider}`);
+        throw new Error(`Unknown provider: ${(config as EmailConfig).provider}`);
     }
   }
 
@@ -129,24 +141,61 @@ export class EmailService implements EmailProvider {
 
 // Factory function for creating service from environment
 export function createEmailServiceFromEnv(): EmailService {
-  const provider = process.env.EMAIL_PROVIDER as 'sendgrid' | 'ses';
-  const apiKey = process.env.EMAIL_API_KEY;
+  const provider = process.env.EMAIL_PROVIDER as 'sendgrid' | 'smtp' | 'ses';
   const fromAddress = process.env.EMAIL_FROM_ADDRESS;
   const fromName = process.env.EMAIL_FROM_NAME;
   const templateDir = process.env.EMAIL_TEMPLATE_DIR;
 
-  if (!provider || !apiKey || !fromAddress) {
+  if (!provider || !fromAddress) {
     throw new Error(
       'Missing required email configuration. ' +
-      'Set EMAIL_PROVIDER, EMAIL_API_KEY, and EMAIL_FROM_ADDRESS'
+      'Set EMAIL_PROVIDER and EMAIL_FROM_ADDRESS'
     );
   }
 
-  return new EmailService({
-    provider,
-    apiKey,
-    fromAddress,
-    fromName: fromName || 'Jurnapod',
-    templateDir,
-  });
+  if (provider === 'sendgrid' || provider === 'ses') {
+    const apiKey = process.env.EMAIL_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        `Missing EMAIL_API_KEY for ${provider.toUpperCase()} provider`
+      );
+    }
+    return new EmailService({
+      provider,
+      apiKey,
+      fromAddress,
+      fromName: fromName || 'Jurnapod',
+      templateDir,
+    });
+  }
+
+  if (provider === 'smtp') {
+    const host = process.env.EMAIL_SMTP_HOST;
+    const port = process.env.EMAIL_SMTP_PORT;
+    const user = process.env.EMAIL_SMTP_USER;
+    const password = process.env.EMAIL_SMTP_PASSWORD;
+    const secure = process.env.EMAIL_SMTP_SECURE;
+    const tlsRejectUnauthorized = process.env.EMAIL_SMTP_TLS_REJECT_UNAUTHORIZED;
+
+    if (!host || !user || !password) {
+      throw new Error(
+        'Missing SMTP configuration. Set EMAIL_SMTP_HOST, EMAIL_SMTP_USER, and EMAIL_SMTP_PASSWORD'
+      );
+    }
+
+    return new EmailService({
+      provider: 'smtp',
+      host,
+      port: port ? parseInt(port, 10) : 587,
+      user,
+      password,
+      secure: secure === 'true',
+      tlsRejectUnauthorized: tlsRejectUnauthorized !== 'false',
+      fromAddress,
+      fromName: fromName || 'Jurnapod',
+      templateDir,
+    });
+  }
+
+  throw new Error(`Unknown email provider: ${provider}`);
 }
