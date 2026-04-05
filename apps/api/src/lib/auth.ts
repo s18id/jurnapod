@@ -109,22 +109,45 @@ function passwordHashPolicyFromEnv(): PasswordHashPolicy {
   };
 }
 
+async function checkUserHasSuperAdminRole(userId: number): Promise<boolean> {
+  const db = getDb();
+  const row = await db
+    .selectFrom("user_role_assignments as ura")
+    .innerJoin("roles as r", "r.id", "ura.role_id")
+    .where("ura.user_id", "=", userId)
+    .where("r.code", "=", "SUPER_ADMIN")
+    .where("ura.outlet_id", "is", null)
+    .select(["ura.id"])
+    .executeTakeFirst();
+  return row !== undefined;
+}
+
 async function findUserForLogin(
   companyCode: string,
   email: string
 ): Promise<UserLoginRow | null> {
   const db = getDb();
   
+  // Query WITHOUT deleted_at check to allow SUPER_ADMIN login when company is deleted
   const row = await db
     .selectFrom("users as u")
     .innerJoin("companies as c", "c.id", "u.company_id")
     .where("c.code", "=", companyCode)
-    .where("c.deleted_at", "is", null)
     .where("u.email", "=", email)
-    .select(["u.id", "u.company_id", "u.email", "u.password_hash", "u.is_active"])
+    .select(["u.id", "u.company_id", "u.email", "u.password_hash", "u.is_active", "c.deleted_at"])
     .executeTakeFirst();
 
-  return row ?? null;
+  if (!row) return null;
+
+  // If company deleted, only SUPER_ADMIN can login
+  if (row.deleted_at !== null) {
+    const isSuperAdmin = await checkUserHasSuperAdminRole(row.id);
+    if (!isSuperAdmin) {
+      return null;
+    }
+  }
+
+  return row;
 }
 
 async function signAccessToken(user: AccessTokenUser): Promise<string> {

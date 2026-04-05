@@ -22,11 +22,12 @@ import {
   DatabaseReferenceError,
   DatabaseForbiddenError
 } from "@jurnapod/modules-sales";
+import { CompanyService } from "@jurnapod/modules-platform";
 import { getComposedPaymentService } from "@/lib/modules-sales/payment-service-composition";
 import { PaymentVarianceConfigError } from "@/lib/sales-posting";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { requireAccess } from "@/lib/auth-guard";
-import { getCompany } from "@/lib/companies";
+import { getDb } from "@/lib/db";
 import { errorResponse, successResponse } from "@/lib/response";
 import type { AuthContext } from "@/lib/auth-guard";
 
@@ -34,6 +35,9 @@ const paymentRoutes = new Hono();
 
 const numberingTemplateConflictMessage =
   "No numbering template configured. Please configure document numbering in settings.";
+
+// Company service for fetching company details (e.g., timezone)
+const companyService = new CompanyService(getDb());
 
 // ============================================================================
 // GET /sales/payments - List payments with filtering
@@ -75,7 +79,7 @@ paymentRoutes.get("/", async (c) => {
     }
 
     // Get company timezone for date boundary conversion
-    const company = await getCompany(auth.companyId);
+    const company = await companyService.getCompany({ companyId: auth.companyId });
     const timezone = company.timezone ?? 'UTC';
 
     const report = await getComposedPaymentService().listPayments(auth.companyId, {

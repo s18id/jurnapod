@@ -159,8 +159,9 @@ test('buildPermissionMask - partial params work correctly', () => {
 });
 
 test('MODULE_PERMISSION_BITS has correct bit values', () => {
-  assert.strictEqual(MODULE_PERMISSION_BITS.create, 1, 'create should be 1 (00001)');
-  assert.strictEqual(MODULE_PERMISSION_BITS.read, 2, 'read should be 2 (00010)');
+  // Canonical layout: READ=1, CREATE=2, UPDATE=4, DELETE=8, REPORT=16
+  assert.strictEqual(MODULE_PERMISSION_BITS.read, 1, 'read should be 1 (00001)');
+  assert.strictEqual(MODULE_PERMISSION_BITS.create, 2, 'create should be 2 (00010)');
   assert.strictEqual(MODULE_PERMISSION_BITS.update, 4, 'update should be 4 (00100)');
   assert.strictEqual(MODULE_PERMISSION_BITS.delete, 8, 'delete should be 8 (01000)');
   assert.strictEqual(MODULE_PERMISSION_BITS.report, 16, 'report should be 16 (10000)');

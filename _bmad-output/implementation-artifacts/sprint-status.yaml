@@ -1,4 +1,4 @@
-last_updated: 2026-04-04T14:00:00Z
+last_updated: 2026-04-05T00:00:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -361,16 +361,23 @@ development_status:
   epic-30-retrospective: done
 
   # Epic 31: API Detachment Completion
-  epic-31: backlog
-  31-1-extract-users-rbac: backlog
-  31-2-extract-companies-provisioning: backlog
-  31-3-consolidate-reservations-duplicate: backlog
-  31-4-thin-routes-users-companies: backlog
+  epic-31: in-progress
+  31-1-extract-users-rbac: done
+  31-2-extract-companies-provisioning: done
+  31-3-consolidate-reservations-duplicate: in-progress
+  31-4-thin-routes-users-companies: done
   31-5-import-export-platform: backlog
   31-6-notifications-consolidation: backlog
   31-7-route-thinning-enforcement: backlog
   31-8a-adapter-migration-prep: backlog
   31-8b-deletion-verification: backlog
+
+  # Epic 33: Permission System Consolidation
+  epic-33: done
+  33-1-shared-rbac-contracts: done
+  33-2-migrate-auth-to-shared: done
+  33-3-migrate-platform-to-shared: done
+  33-4-fix-superadmin-login-bypass: done
 
   # Epic 32: Financial Period Close & Reconciliation Workspace
   epic-32: backlog

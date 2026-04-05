@@ -13,9 +13,10 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { CompanyService } from "@jurnapod/modules-platform";
 import { listUserOutletIds, userHasOutletAccess, checkUserAccess, type RoleCode } from "@/lib/auth";
 import { requireAccess } from "@/lib/auth-guard";
-import { getCompany } from "@/lib/companies";
+import { getDb } from "@/lib/db";
 import { errorResponse, successResponse } from "@/lib/response";
 import {
   getTrialBalance,
@@ -53,6 +54,9 @@ reportRoutes.use("/*", async (c, next) => {
   c.set("auth", authResult.auth);
   await next();
 });
+
+// Company service for fetching company details (e.g., timezone)
+const companyService = new CompanyService(getDb());
 
 // ============================================================================
 // Shared Query Schema and Helpers
@@ -203,7 +207,7 @@ reportRoutes.get("/trial-balance", async (c) => {
       outletIds = await listUserOutletIds(auth.userId, auth.companyId);
     }
 
-    const company = await getCompany(auth.companyId);
+    const company = await companyService.getCompany({ companyId: auth.companyId });
     const timezone = company.timezone ?? 'UTC';
 
     const rows = await withQueryTimeout(
@@ -292,7 +296,7 @@ reportRoutes.get("/profit-loss", async (c) => {
       outletIds = await listUserOutletIds(auth.userId, auth.companyId);
     }
 
-    const company = await getCompany(auth.companyId);
+    const company = await companyService.getCompany({ companyId: auth.companyId });
     const timezone = company.timezone ?? 'UTC';
 
     const result = await withQueryTimeout(
@@ -375,7 +379,7 @@ reportRoutes.get("/pos-transactions", async (c) => {
       outletIds = await listUserOutletIds(auth.userId, auth.companyId);
     }
 
-    const company = await getCompany(auth.companyId);
+    const company = await companyService.getCompany({ companyId: auth.companyId });
     const timezone = company.timezone ?? 'UTC';
 
     // Cashiers should only see their own transactions
@@ -479,7 +483,7 @@ reportRoutes.get("/journals", async (c) => {
       outletIds = await listUserOutletIds(auth.userId, auth.companyId);
     }
 
-    const company = await getCompany(auth.companyId);
+    const company = await companyService.getCompany({ companyId: auth.companyId });
     const timezone = company.timezone ?? 'UTC';
 
     const limit = Math.min(parsed.limit ?? 50, 100);
@@ -574,7 +578,7 @@ reportRoutes.get("/daily-sales", async (c) => {
       outletIds = await listUserOutletIds(auth.userId, auth.companyId);
     }
 
-    const company = await getCompany(auth.companyId);
+    const company = await companyService.getCompany({ companyId: auth.companyId });
     const timezone = company.timezone ?? 'UTC';
 
     // Cashiers should only see their own transactions
@@ -650,7 +654,7 @@ reportRoutes.get("/pos-payments", async (c) => {
       outletIds = await listUserOutletIds(auth.userId, auth.companyId);
     }
 
-    const company = await getCompany(auth.companyId);
+    const company = await companyService.getCompany({ companyId: auth.companyId });
     const timezone = company.timezone ?? 'UTC';
 
     // Cashiers should only see their own transactions
@@ -733,7 +737,7 @@ reportRoutes.get("/general-ledger", async (c) => {
       outletIds = await listUserOutletIds(auth.userId, auth.companyId);
     }
 
-    const company = await getCompany(auth.companyId);
+    const company = await companyService.getCompany({ companyId: auth.companyId });
     const timezone = company.timezone ?? 'UTC';
 
     const rows = await withQueryTimeout(
@@ -805,7 +809,7 @@ reportRoutes.get("/worksheet", async (c) => {
       outletIds = await listUserOutletIds(auth.userId, auth.companyId);
     }
 
-    const company = await getCompany(auth.companyId);
+    const company = await companyService.getCompany({ companyId: auth.companyId });
     const timezone = company.timezone ?? 'UTC';
 
     const result = await withQueryTimeout(
@@ -871,7 +875,7 @@ reportRoutes.get("/receivables-ageing", async (c) => {
       outletIds = await listUserOutletIds(auth.userId, auth.companyId);
     }
 
-    const company = await getCompany(auth.companyId);
+    const company = await companyService.getCompany({ companyId: auth.companyId });
     const timezone = company.timezone ?? 'UTC';
     const asOfDate = parsed.as_of_date ?? new Date().toISOString().slice(0, 10);
 

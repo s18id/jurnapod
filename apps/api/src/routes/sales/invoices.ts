@@ -27,9 +27,10 @@ import {
   DatabaseReferenceError,
   InvoiceStatusError
 } from "@jurnapod/modules-sales";
+import { CompanyService } from "@jurnapod/modules-platform";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { requireAccess } from "@/lib/auth-guard";
-import { getCompany } from "@/lib/companies";
+import { getDb } from "@/lib/db";
 import { errorResponse, successResponse } from "@/lib/response";
 import type { AuthContext } from "@/lib/auth-guard";
 import { createApiSalesDb } from "@/lib/modules-sales/sales-db";
@@ -47,6 +48,9 @@ const invoiceService: InvoiceService = createInvoiceService({
 
 const numberingTemplateConflictMessage =
   "No numbering template configured. Please configure document numbering in settings.";
+
+// Company service for fetching company details (e.g., timezone)
+const companyService = new CompanyService(getDb());
 
 // Helper to parse outlet_id from request body for auth guard
 async function parseOutletIdFromBody(request: Request): Promise<number | null> {
@@ -102,7 +106,7 @@ invoiceRoutes.get("/", async (c) => {
     }
 
     // Get company timezone for date boundary conversion
-    const company = await getCompany(auth.companyId);
+    const company = await companyService.getCompany({ companyId: auth.companyId });
     const timezone = company.timezone ?? 'UTC';
 
     const report = await invoiceService.listInvoices(auth.companyId, {

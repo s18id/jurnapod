@@ -57,7 +57,7 @@ import {
   FixedAssetHasEventsError,
   isDuplicateKeyError,
 } from "@jurnapod/modules-accounting";
-import { createCompanyBasic } from "../lib/companies.js";
+import { CompanyService } from "@jurnapod/modules-platform";
 import { createOutletBasic } from "../lib/outlets.js";
 import { sql } from "kysely";
 
@@ -115,7 +115,7 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
 
     // Create a second company for tenant isolation tests
     const runId = Date.now().toString(36);
-    const company2 = await createCompanyBasic({
+    const company2 = await new CompanyService(getDb()).createCompanyBasic({
       code: `TEST2-${runId}`.slice(0, 20),
       name: `Test Company 2 ${runId}`
     });

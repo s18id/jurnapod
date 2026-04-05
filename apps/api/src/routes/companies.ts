@@ -22,14 +22,12 @@ import {
   type AuthContext
 } from "../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../lib/response.js";
+import { getDb } from "../lib/db.js";
 import {
-  createCompany,
-  listCompanies,
-  getCompany,
-  updateCompany,
-  CompanyCodeExistsError,
-  CompanyNotFoundError
-} from "../lib/companies.js";
+  CompanyService,
+  CompanyNotFoundError,
+  CompanyCodeExistsError
+} from "@jurnapod/modules-platform";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -37,13 +35,16 @@ declare module "hono" {
   }
 }
 
-// =============================================================================
-// Constants
-// =============================================================================
-
-const COMPANIES_ROLES_READ = ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT", "CASHIER"] as const;
-const COMPANIES_ROLES_WRITE = ["OWNER", "COMPANY_ADMIN"] as const;
-const COMPANIES_ROLES_CREATE = ["SUPER_ADMIN", "OWNER"] as const;
+/**
+ * Extract client IP address from request headers.
+ */
+function getClientIp(request: Request): string | null {
+  return (
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    request.headers.get("x-real-ip") ||
+    null
+  );
+}
 
 // =============================================================================
 // Request Schemas
@@ -60,7 +61,8 @@ const CreateCompanySchema = z.object({
   address_line2: z.string().trim().max(191).nullable().optional(),
   city: z.string().trim().max(100).nullable().optional(),
   postal_code: z.string().trim().max(20).nullable().optional(),
-  timezone: z.string().trim().max(50).nullable().optional()
+  timezone: z.string().trim().max(50).nullable().optional(),
+  currency_code: z.string().trim().min(3).max(3).nullable().optional()
 });
 
 const UpdateCompanySchema = z.object({
@@ -73,7 +75,8 @@ const UpdateCompanySchema = z.object({
   address_line2: z.string().trim().max(191).nullable().optional(),
   city: z.string().trim().max(100).nullable().optional(),
   postal_code: z.string().trim().max(20).nullable().optional(),
-  timezone: z.string().trim().max(50).nullable().optional()
+  timezone: z.string().trim().max(50).nullable().optional(),
+  currency_code: z.string().trim().min(3).max(3).nullable().optional()
 });
 
 // =============================================================================
@@ -92,6 +95,9 @@ companyRoutes.use("/*", async (c, next) => {
   c.set("auth", authResult.auth);
   await next();
 });
+
+// Service instance
+const companyService = new CompanyService(getDb());
 
 // GET /companies - List companies
 // - SUPER_ADMIN: can see all companies
@@ -118,7 +124,7 @@ companyRoutes.get("/", async (c) => {
     const isSuperAdmin = auth.role === "SUPER_ADMIN";
     const companyIdFilter = isSuperAdmin ? undefined : auth.companyId;
 
-    const companies = await listCompanies({
+    const companies = await companyService.listCompanies({
       companyId: companyIdFilter,
       includeDeleted: isActive === "false" ? true : false
     });
@@ -148,7 +154,7 @@ companyRoutes.post("/", async (c) => {
     const payload = await c.req.json();
     const input = CreateCompanySchema.parse(payload);
 
-    const company = await createCompany({
+    const company = await companyService.createCompany({
       code: input.code,
       name: input.name,
       legal_name: input.legal_name,
@@ -160,8 +166,10 @@ companyRoutes.post("/", async (c) => {
       city: input.city,
       postal_code: input.postal_code,
       timezone: input.timezone,
+      currency_code: input.currency_code,
       actor: {
-        userId: auth.userId
+        userId: auth.userId,
+        ipAddress: getClientIp(c.req.raw)
       }
     });
 
@@ -198,7 +206,7 @@ companyRoutes.get("/:id", async (c) => {
       }
     }
 
-    const company = await getCompany(companyId);
+    const company = await companyService.getCompany({ companyId });
     return successResponse(company);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -233,7 +241,7 @@ companyRoutes.patch("/:id", async (c) => {
     const payload = await c.req.json();
     const input = UpdateCompanySchema.parse(payload);
 
-    const company = await updateCompany({
+    const company = await companyService.updateCompany({
       companyId,
       name: input.name,
       legal_name: input.legal_name,
@@ -245,8 +253,10 @@ companyRoutes.patch("/:id", async (c) => {
       city: input.city,
       postal_code: input.postal_code,
       timezone: input.timezone,
+      currency_code: input.currency_code,
       actor: {
-        userId: auth.userId
+        userId: auth.userId,
+        ipAddress: getClientIp(c.req.raw)
       }
     });
 

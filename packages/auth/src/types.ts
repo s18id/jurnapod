@@ -115,16 +115,22 @@ export const ROLE_CODES = [
 
 export type RoleCode = (typeof ROLE_CODES)[number];
 
-/** Module-level permissions (bitmask values) */
+/** Module-level permissions (bitmask values) - lowercase keys for auth compatibility */
 export type ModulePermission = "create" | "read" | "update" | "delete" | "report";
 
-/** Permission bit values for module_roles.permission_mask */
+/**
+ * Permission bit values matching @jurnapod/shared/PERMISSION_BITS.
+ * Canonical layout: READ=1, CREATE=2, UPDATE=4, DELETE=8, REPORT=16
+ * 
+ * NOTE: These are the CORRECT bit positions. Previous auth layout had
+ * create=1, read=2 which was inconsistent with platform.
+ */
 export const MODULE_PERMISSION_BITS: Record<ModulePermission, number> = {
-  create: 1,   // 00001
-  read: 2,     // 00010
-  update: 4,   // 00100
-  delete: 8,   // 01000
-  report: 16   // 10000
+  read: 1,     // 0b00001 - READ permission
+  create: 2,   // 0b00010 - CREATE permission
+  update: 4,   // 0b00100 - UPDATE permission
+  delete: 8,   // 0b01000 - DELETE permission
+  report: 16   // 0b10000 - REPORT permission
 };
 
 // ---------------------------------------------------------------------------

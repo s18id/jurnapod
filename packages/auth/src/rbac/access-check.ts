@@ -190,21 +190,29 @@ export class RBACManager {
   /**
    * Get full user profile with all roles and outlet assignments.
    * Returns null if user doesn't exist or is inactive.
+   * SUPER_ADMIN can access even if company is deleted.
    */
   async getUserWithRoles(userId: number, companyId: number): Promise<AuthenticatedUser | null> {
-    // Get user basic info using query builder
+    // Get user basic info using query builder (without deleted_at filter)
     const userRow = await this.adapter.db
       .selectFrom('users as u')
       .innerJoin('companies as c', 'c.id', 'u.company_id')
       .where('u.id', '=', userId)
       .where('u.company_id', '=', companyId)
       .where('u.is_active', '=', 1)
-      .where('c.deleted_at', 'is', null)
-      .select(['u.id', 'u.company_id', 'u.email', 'c.timezone as company_timezone'])
+      .select(['u.id', 'u.company_id', 'u.email', 'c.timezone as company_timezone', 'c.deleted_at'])
       .executeTakeFirst();
 
     if (!userRow) {
       return null;
+    }
+
+    // If company is deleted, only SUPER_ADMIN can proceed
+    if (userRow.deleted_at !== null) {
+      const isSuperAdmin = await this.isSuperAdminUser(userId);
+      if (!isSuperAdmin) {
+        return null;
+      }
     }
 
     // Get global roles (outlet_id IS NULL, is_global = 1)
@@ -290,6 +298,7 @@ export class RBACManager {
   /**
    * Get minimal user data needed for JWT token verification.
    * Returns null if user doesn't exist or is inactive.
+   * SUPER_ADMIN can access even if company is deleted.
    */
   async getUserForTokenVerification(userId: number, companyId: number): Promise<AccessTokenUser | null> {
     const row = await this.adapter.db
@@ -298,12 +307,19 @@ export class RBACManager {
       .where('u.id', '=', userId)
       .where('u.company_id', '=', companyId)
       .where('u.is_active', '=', 1)
-      .where('c.deleted_at', 'is', null)
-      .select(['u.id', 'u.company_id', 'u.email'])
+      .select(['u.id', 'u.company_id', 'u.email', 'c.deleted_at'])
       .executeTakeFirst();
 
     if (!row) {
       return null;
+    }
+
+    // If company is deleted, only SUPER_ADMIN can proceed
+    if (row.deleted_at !== null) {
+      const isSuperAdmin = await this.isSuperAdminUser(userId);
+      if (!isSuperAdmin) {
+        return null;
+      }
     }
 
     return {
@@ -377,6 +393,23 @@ export class RBACManager {
       .execute();
 
     return rows.map((r) => r.outlet_id as number);
+  }
+
+  /**
+   * Check if user has SUPER_ADMIN global role.
+   * Queries user_role_assignments WITHOUT company_id filter because
+   * SUPER_ADMIN is a platform-wide role, not scoped to any company.
+   */
+  private async isSuperAdminUser(userId: number): Promise<boolean> {
+    const row = await this.adapter.db
+      .selectFrom("user_role_assignments as ura")
+      .innerJoin("roles as r", "r.id", "ura.role_id")
+      .where("ura.user_id", "=", userId)
+      .where("r.code", "=", "SUPER_ADMIN")
+      .where("ura.outlet_id", "is", null)
+      .select(["ura.id"])
+      .executeTakeFirst();
+    return row !== undefined;
   }
 
   /**

@@ -11,5 +11,6 @@ export type FeatureFlagKey =
 
 export * from "./audit";
 export * from "./audit-service";
+export * from "./companies";
 export * from "./feature-flags";
 export * from "./settings";
