@@ -29,5 +29,8 @@ export * from "./service-sessions/index.js";
 // Table sync module - re-export everything
 export * from "./table-sync/index.js";
 
+// Reservation groups module - re-export everything
+export * from "./reservation-groups/index.js";
+
 // Module type marker
 export type ReservationsModuleStub = "reservations";

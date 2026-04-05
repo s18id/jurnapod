@@ -1,4 +1,4 @@
-last_updated: 2026-04-05T00:00:00Z
+last_updated: 2026-04-05T01:00:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -364,7 +364,7 @@ development_status:
   epic-31: in-progress
   31-1-extract-users-rbac: done
   31-2-extract-companies-provisioning: done
-  31-3-consolidate-reservations-duplicate: in-progress
+  31-3-consolidate-reservations-duplicate: done
   31-4-thin-routes-users-companies: done
   31-5-import-export-platform: backlog
   31-6-notifications-consolidation: backlog

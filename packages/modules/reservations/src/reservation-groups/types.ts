@@ -13,6 +13,14 @@ import type {
 export type { ReservationGroupDetail, TableSuggestion };
 
 /**
+ * Actor performing a mutation, used for audit logging
+ */
+export interface ReservationGroupActor {
+  userId: number;
+  ipAddress?: string | null;
+}
+
+/**
  * Input for creating a reservation group
  */
 export interface CreateReservationGroupInput {
@@ -25,6 +33,7 @@ export interface CreateReservationGroupInput {
   reservationAt: string; // ISO 8601 datetime
   durationMinutes: number | null;
   notes: string | null;
+  actor: ReservationGroupActor;
 }
 
 /**
@@ -95,6 +104,7 @@ export interface GetReservationGroupInput {
 export interface DeleteReservationGroupInput {
   companyId: number;
   groupId: number;
+  actor: ReservationGroupActor;
 };
 
 /**
@@ -121,6 +131,7 @@ export interface UpdateReservationGroupInput {
     notes?: string | null;
     tableIds?: number[]; // If provided, replaces current tables
   };
+  actor: ReservationGroupActor;
 }
 
 /**

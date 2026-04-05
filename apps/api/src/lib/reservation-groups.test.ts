@@ -106,7 +106,8 @@ async function createTestGroup(
     tableIds,
     reservationAt: futureTime,
     durationMinutes: 120,
-    notes: "Test notes"
+    notes: "Test notes",
+    actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
   });
 
   return { tableIds, groupId, reservationIds };
@@ -143,7 +144,8 @@ test(
         companyId: ctx.companyId,
         outletId: ctx.outletId,
         groupId: fixtures.groupId,
-        updates: { customerName: "Updated Name" }
+        updates: { customerName: "Updated Name" },
+        actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
       });
 
       assert.strictEqual(result.groupId, fixtures.groupId);
@@ -177,7 +179,8 @@ test(
           customerName: "Test Group",
           customerPhone: "+9876543210",
           notes: "Updated test notes"
-        }
+        },
+        actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
       });
 
       // Verify via direct query
@@ -223,7 +226,8 @@ test(
         companyId: ctx.companyId,
         outletId: ctx.outletId,
         groupId: fixtures.groupId,
-        updates: { tableIds: allTableIds }
+        updates: { tableIds: allTableIds },
+        actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
       });
 
       assert.strictEqual(result.updatedTables.length, 5);
@@ -256,7 +260,8 @@ test(
         companyId: ctx.companyId,
         outletId: ctx.outletId,
         groupId: fixtures.groupId,
-        updates: { tableIds: keepTableIds }
+        updates: { tableIds: keepTableIds },
+        actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
       });
 
       assert.strictEqual(result.updatedTables.length, 2);
@@ -290,7 +295,8 @@ test(
         groupId: fixtures.groupId,
         updates: {
           guestCount: 10
-        }
+        },
+        actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
       });
 
       // Verify guest count updated
@@ -317,7 +323,8 @@ test(
           companyId: ctx.companyId,
           outletId: ctx.outletId,
           groupId: 999999,
-          updates: { customerName: "Test" }
+          updates: { customerName: "Test" },
+          actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
         }),
       (error: unknown) => {
         return error instanceof Error && error.message.includes("not found");
@@ -344,7 +351,8 @@ test(
             companyId: ctx.companyId,
             outletId: ctx.outletId,
             groupId: fixtures.groupId,
-            updates: { customerName: "Updated Name" }
+            updates: { customerName: "Updated Name" },
+            actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
           }),
         {
           message: /have started|cannot edit group/i
@@ -373,7 +381,8 @@ test(
             companyId: ctx.companyId,
             outletId: ctx.outletId,
             groupId: fixtures.groupId,
-            updates: { tableIds: fixtures.tableIds.slice(0, 2) }
+            updates: { tableIds: fixtures.tableIds.slice(0, 2) },
+            actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
           }),
         {
           message: /insufficient capacity/i
@@ -413,7 +422,8 @@ test(
             companyId: ctx.companyId,
             outletId: ctx.outletId,
             groupId: fixtures.groupId,
-            updates: { reservationAt: conflictTimeIso }
+            updates: { reservationAt: conflictTimeIso },
+            actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
           }),
         (error: unknown) => {
           return error instanceof Error && error.message.includes("conflict detected");
@@ -446,7 +456,8 @@ test(
             companyId: ctx.companyId,
             outletId: ctx.outletId,
             groupId: fixtures.groupId,
-            updates: { tableIds: fixtures.tableIds }
+            updates: { tableIds: fixtures.tableIds },
+            actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
           }),
         {
           message: /data integrity violation/i
@@ -477,7 +488,8 @@ test(
             companyId: 999999, // Wrong company
             outletId: ctx.outletId,
             groupId: fixtures.groupId,
-            updates: { customerName: "Hacker" }
+            updates: { customerName: "Hacker" },
+            actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
           }),
         (error: unknown) => {
           return error instanceof Error && error.message.includes("not found");
@@ -505,7 +517,8 @@ test(
             companyId: ctx.companyId,
             outletId: 999999, // Wrong outlet
             groupId: fixtures.groupId,
-            updates: { customerName: "Hacker" }
+            updates: { customerName: "Hacker" },
+            actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
           }),
         (error: unknown) => {
           return error instanceof Error && error.message.includes("not found");
@@ -536,7 +549,8 @@ test(
         updates: {
           tableIds: keepTableIds,
           guestCount: 8
-        }
+        },
+        actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
       });
 
       assert.strictEqual(result.updatedTables.length, 2);
@@ -576,7 +590,8 @@ test(
             companyId: ctx.companyId,
             outletId: ctx.outletId,
             groupId: fixtures.groupId,
-            updates: { tableIds: fixtures.tableIds.slice(0, 2) }
+            updates: { tableIds: fixtures.tableIds.slice(0, 2) },
+            actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
           }),
         { message: /insufficient capacity/i }
       );
@@ -636,7 +651,8 @@ test(
             companyId: ctx.companyId,
             outletId: ctx.outletId,
             groupId: fixtures.groupId,
-            updates: { customerName: "Should Not Persist", notes: "Corrupted" }
+            updates: { customerName: "Should Not Persist", notes: "Corrupted" },
+            actor: { userId: ctx.userId, ipAddress: "127.0.0.1" }
           }),
         { message: /have started|cannot edit group/i }
       );
