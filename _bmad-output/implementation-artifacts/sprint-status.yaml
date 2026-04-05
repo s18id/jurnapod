@@ -1,4 +1,4 @@
-last_updated: 2026-04-05T01:30:00Z
+last_updated: 2026-04-05T02:00:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -395,3 +395,19 @@ development_status:
   36-4-lift-route-orchestration: backlog
   36-5-convert-routes-to-thin-adapters: backlog
   36-6-migration-hardening-rollout: backlog
+
+  # Epic 35: Shared Actor Type Unification
+  epic-35: deferred
+  35-1-add-actor-to-shared: backlog
+  35-2-migrate-modules-reservations: backlog
+  35-3-migrate-modules-platform: backlog
+  35-4-migrate-modules-sales: backlog
+  35-5-migrate-remaining-packages: backlog
+  35-6-update-api-wrappers-cleanup: backlog
+
+  # Epic 37: Email Outbox Infrastructure
+  epic-37: deferred
+  37-1-define-outbox-domain-model: backlog
+  37-2-extract-outbox-domain-service: backlog
+  37-3-api-integration-thin-adapter: backlog
+  37-4-parity-hardening-concurrency: backlog
