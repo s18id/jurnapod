@@ -13,6 +13,8 @@ Epic 32 work may begin only when all are true:
 1. Epic 31 route-thinning lane complete for accounting/reporting surfaces (Story 31.7)
 2. Epic 31 adapter migration prep complete with proven package adapter contracts (Story 31.8A)
 3. Import boundary lint enforcement active in CI (no `packages/** -> apps/api/**`)
+   - **Note:** ESLint boundary rules are already implemented in package configs (`no-restricted-imports`)
+   - **Action Item 2 from retrospective:** CI pipeline setup pending — ensure lint gates are wired to fail on boundary violations
 
 ## Rebaseline Summary
 

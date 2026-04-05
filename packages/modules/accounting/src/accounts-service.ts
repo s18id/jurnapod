@@ -21,6 +21,7 @@ export interface AccountsDbClient extends KyselySchema {}
  * Custom error classes for domain-specific errors
  */
 export class AccountCodeExistsError extends Error {
+  code = "ACCOUNT_CODE_EXISTS";
   constructor(code: string, companyId: number) {
     super(`Account code '${code}' already exists in company ${companyId}`);
     this.name = "AccountCodeExistsError";
@@ -28,6 +29,7 @@ export class AccountCodeExistsError extends Error {
 }
 
 export class CircularReferenceError extends Error {
+  code = "ACCOUNT_CIRCULAR_REFERENCE";
   constructor(accountId: number, parentId: number) {
     super(`Circular reference detected: account ${accountId} cannot have parent ${parentId}`);
     this.name = "CircularReferenceError";
@@ -35,6 +37,7 @@ export class CircularReferenceError extends Error {
 }
 
 export class AccountInUseError extends Error {
+  code = "ACCOUNT_IN_USE";
   constructor(accountId: number, reason: string) {
     super(`Account ${accountId} is in use: ${reason}`);
     this.name = "AccountInUseError";
@@ -42,6 +45,7 @@ export class AccountInUseError extends Error {
 }
 
 export class AccountNotFoundError extends Error {
+  code = "ACCOUNT_NOT_FOUND";
   constructor(accountId: number, companyId: number) {
     super(`Account ${accountId} not found in company ${companyId}`);
     this.name = "AccountNotFoundError";
@@ -49,6 +53,7 @@ export class AccountNotFoundError extends Error {
 }
 
 export class ParentAccountCompanyMismatchError extends Error {
+  code = "PARENT_ACCOUNT_COMPANY_MISMATCH";
   constructor(parentId: number, companyId: number) {
     super(`Parent account ${parentId} does not belong to company ${companyId}`);
     this.name = "ParentAccountCompanyMismatchError";
@@ -56,6 +61,7 @@ export class ParentAccountCompanyMismatchError extends Error {
 }
 
 export class AccountTypeCompanyMismatchError extends Error {
+  code = "ACCOUNT_TYPE_COMPANY_MISMATCH";
   constructor(accountTypeId: number, companyId: number) {
     super(`Account type ${accountTypeId} does not belong to company ${companyId}`);
     this.name = "AccountTypeCompanyMismatchError";

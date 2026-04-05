@@ -1,9 +1,10 @@
 # Epic 32: Financial Period Close & Reconciliation Workspace
 
-**Status:** backlog
-**Date:** 2026-04-04
+**Status:** done
+**Date:** 2026-04-05
 **Stories:** 5 total (1 sprint)
 **Sprint Plan:** `_bmad-output/planning-artifacts/epic-32-sprint-plan.md`
+**Commits:** `b9305ca` → `dc05502` (7 commits)
 
 ---
 
@@ -43,17 +44,25 @@ Epic 32 operationalizes period-end financial workflows for the Jurnapod ERP. Usi
 ### Dependency Direction
 
 ```
-modules-accounting (reconciliation)
-  ├── journals-service (journals — already extracted)
-  └── fiscal-year-service (fiscal years)
-
-modules-platform (tenant/outlet scoping)
+modules-accounting/
+  ├── reconciliation/     → ReconciliationDashboardService
+  ├── trial-balance/      → TrialBalanceService
+  └── fiscal-year/        → FiscalYearService (extracted in dc05502)
+modules-platform/
+  └── audit/              → PeriodTransitionAuditService
 
 apps/api/
-  ├── routes/reports.ts → reconciliation workspace
-  ├── routes/accounts.ts (`/accounts/fiscal-years/*`) → period close procedures
-  └── routes/admin-dashboards.ts → multi-period reconciliation
+  ├── routes/admin-dashboards/ → reconciliation + trial balance endpoints
+  ├── routes/accounts.ts       → fiscal year close endpoints
+  ├── routes/audit.ts          → period transition audit endpoints
+  └── lib/
+      ├── fiscal-years.ts       → thin adapter to modules-accounting/fiscal-year
+      └── period-close-workspace.ts → composition service (package consumers only)
 ```
+
+### Package Boundary Resolution
+
+During Epic 32, an ADR-0014 boundary violation was discovered: `fiscal-years.ts` (1317 lines of domain logic) was placed in `apps/api/src/lib/` instead of `modules-accounting`. Resolved in commit `dc05502` by extracting to `packages/modules/accounting/src/fiscal-year/`. See `_bmad-output/implementation-artifacts/epic-32-service-migration.md` for full details.
 
 ### Hard Implementation Gate (Mandatory)
 
@@ -77,23 +86,41 @@ This gate prevents Epic 32 from building period-close workflows on unstable or p
 
 ## Success Criteria
 
-- [ ] Fiscal year close procedure works end-to-end
-- [ ] Multi-period reconciliation dashboard shows GL vs subledger
-- [ ] Trial balance validates without GL imbalance
-- [ ] Period transition audit trail records who/when/what
-- [ ] Roll-forward workspace accessible via built-in dashboard
-- [ ] All Epic 30 observability metrics wired into reconciliation views
-- [ ] `npm run typecheck -w @jurnapod/api` passes
-- [ ] `npm run build -w @jurnapod/api` passes
+- [x] Fiscal year close procedure works end-to-end
+- [x] Multi-period reconciliation dashboard shows GL vs subledger
+- [x] Trial balance validates without GL imbalance
+- [x] Period transition audit trail records who/when/what
+- [x] Roll-forward workspace accessible via built-in dashboard
+- [x] All Epic 30 observability metrics wired into reconciliation views
+- [x] `npm run typecheck -w @jurnapod/api` passes
+- [x] `npm run build -w @jurnapod/api` passes
+- [x] ADR-0014 boundary compliance verified (fiscal-year extraction in dc05502)
+- [x] P0 idempotency bug fixed (closeRequestId return value)
+- [x] Error code consistency across all fiscal-year error classes
 
 ---
 
 ## Stories
 
-| # | Title | Status |
-|---|-------|--------|
-| [story-32.1](./story-32.1.md) | Fiscal year close procedure | pending |
-| [story-32.2](./story-32.2.md) | Multi-period reconciliation dashboard | pending |
-| [story-32.3](./story-32.3.md) | Trial balance validation with variance reporting | pending |
-| [story-32.4](./story-32.4.md) | Period transition audit trail | pending |
-| [story-32.5](./story-32.5.md) | Roll-forward workspace UI | pending |
+| # | Title | Status | Commit |
+|---|-------|--------|--------|
+| [story-32.1](./story-32.1.md) | Fiscal year close procedure | ✅ done | f3990b8 |
+| [story-32.2](./story-32.2.md) | Multi-period reconciliation dashboard | ✅ done | f3990b8 |
+| [story-32.3](./story-32.3.md) | Trial balance validation with variance reporting | ✅ done | 2b5891e |
+| [story-32.4](./story-32.4.md) | Period transition audit trail | ✅ done | 2b5891e |
+| [story-32.5](./story-32.5.md) | Roll-forward workspace UI | ✅ done | 5f2b4b2 |
+
+## Post-Implementation Fixes
+
+| Fix | Severity | Description | Commit |
+|-----|----------|-------------|--------|
+| Net income calculation | P1 | Math.abs() bug in closing entries | 8c2e1cc |
+| Audit trail chicken-and-egg | P1 | Workspace checkAuditTrail returned "passed" for IN_PROGRESS with no audit | 8c2e1cc |
+| Idempotency race condition | P1 | closeFiscalYearWithTransaction read-then-write in separate transactions | 8c2e1cc |
+| GL imbalance tenant scoping | P1 | checkGlImbalanceByBatchId missing companyId filter | 8c2e1cc |
+| Account type validation | P2 | sanitizeAccountTypes() defense-in-depth whitelist | 8c2e1cc |
+| Outlet scope validation | P2 | assertOutletBelongsToCompany() in cash-provider | 8c2e1cc |
+| Fiscal-year extraction | ADR-0014 | Domain logic moved from API lib to modules-accounting | dc05502 |
+| closeRequestId return value | P0 | executeCloseWithLocking returned timestamp instead of caller ID | dc05502 |
+| Error code consistency | P1 | Added machine-readable codes to all fiscal-year error classes | dc05502 |
+| Adapter singleton risk | P1 | Replaced lazy singleton with per-call factory in API adapter | dc05502 |

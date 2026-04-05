@@ -217,6 +217,7 @@ export class CogsPostingMapper implements PostingMapper {
 // =============================================================================
 
 export class CogsCalculationError extends Error {
+  code = "COGS_CALCULATION_ERROR";
   constructor(message: string) {
     super(message);
     this.name = "CogsCalculationError";
@@ -224,6 +225,7 @@ export class CogsCalculationError extends Error {
 }
 
 export class CogsAccountConfigError extends Error {
+  code = "COGS_ACCOUNT_CONFIG_ERROR";
   constructor(message: string) {
     super(message);
     this.name = "CogsAccountConfigError";
@@ -231,6 +233,7 @@ export class CogsAccountConfigError extends Error {
 }
 
 export class CogsPostingError extends Error {
+  code = "COGS_POSTING_ERROR";
   constructor(message: string) {
     super(message);
     this.name = "CogsPostingError";

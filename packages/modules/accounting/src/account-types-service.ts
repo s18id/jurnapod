@@ -20,6 +20,7 @@ export interface AccountTypesDbClient extends KyselySchema {}
  * Custom error classes for domain-specific errors
  */
 export class AccountTypeNameExistsError extends Error {
+  code = "ACCOUNT_TYPE_NAME_EXISTS";
   constructor(name: string, companyId: number) {
     super(`Account type '${name}' already exists in company ${companyId}`);
     this.name = "AccountTypeNameExistsError";
@@ -27,6 +28,7 @@ export class AccountTypeNameExistsError extends Error {
 }
 
 export class AccountTypeNotFoundError extends Error {
+  code = "ACCOUNT_TYPE_NOT_FOUND";
   constructor(accountTypeId: number, companyId: number) {
     super(`Account type ${accountTypeId} not found in company ${companyId}`);
     this.name = "AccountTypeNotFoundError";
@@ -34,6 +36,7 @@ export class AccountTypeNotFoundError extends Error {
 }
 
 export class AccountTypeInUseError extends Error {
+  code = "ACCOUNT_TYPE_IN_USE";
   constructor(accountTypeId: number) {
     super(`Account type ${accountTypeId} is in use by one or more accounts`);
     this.name = "AccountTypeInUseError";

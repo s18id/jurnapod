@@ -20,6 +20,7 @@ export interface JournalsDbClient extends KyselySchema {}
  * Custom error classes
  */
 export class JournalNotBalancedError extends Error {
+  code = "JOURNAL_NOT_BALANCED";
   constructor(totalDebit: number, totalCredit: number) {
     super(`Journal entry not balanced: debit=${totalDebit}, credit=${totalCredit}`);
     this.name = "JournalNotBalancedError";
@@ -27,6 +28,7 @@ export class JournalNotBalancedError extends Error {
 }
 
 export class JournalNotFoundError extends Error {
+  code = "JOURNAL_NOT_FOUND";
   constructor(batchId: number) {
     super(`Journal batch ${batchId} not found`);
     this.name = "JournalNotFoundError";
@@ -34,6 +36,7 @@ export class JournalNotFoundError extends Error {
 }
 
 export class InvalidJournalLineError extends Error {
+  code = "INVALID_JOURNAL_LINE";
   constructor(message: string) {
     super(message);
     this.name = "InvalidJournalLineError";
@@ -41,6 +44,7 @@ export class InvalidJournalLineError extends Error {
 }
 
 export class JournalOutsideFiscalYearError extends Error {
+  code = "JOURNAL_OUTSIDE_FISCAL_YEAR";
   constructor(entryDate: string) {
     super(`Journal entry date ${entryDate} is outside any open fiscal year`);
     this.name = "JournalOutsideFiscalYearError";

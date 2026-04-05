@@ -415,6 +415,14 @@ development_status:
     p2-014-unused-variable: done  # Removed unused typePlaceholders in dashboard-service.ts
     p2-017-as-any-cast: done  # Removed as any cast for logAction in period-transition.ts
     p2-018-portable-json-extraction: done  # Replaced MySQL-specific ->> with portable JSON_EXTRACT() in period-transition.ts
+  epic-32-post-review-fixes:
+    p0-001-close-request-id: done  # executeCloseWithLocking returned wrong closeRequestId - broke idempotency
+    p1-001-error-codes: done  # Added machine-readable code to 6 fiscal-year error classes
+    p1-002-adapter-singleton: done  # Replaced lazy singleton with per-call factory in API adapter
+  epic-32-adr-0014-extraction:
+    fiscal-year-domain-extraction: done  # Moved 1317-line fiscal-years.ts to modules-accounting/fiscal-year
+    period-close-workspace-refactor: done  # Refactored to consume package APIs only
+  epic-32-retrospective: done  # 2026-04-05 - 5 action items generated
 
   # Epic 36: Import/Export Infrastructure (deferred - moved from Epic 31-5)
   epic-36: deferred

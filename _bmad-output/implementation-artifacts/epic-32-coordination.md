@@ -2,36 +2,34 @@
 
 ## Stories Status
 
-| Story | Status | Owner |
-|-------|--------|-------|
-| 32.1 Fiscal Year Close | ✅ Done | Committed |
-| 32.2 Reconciliation Dashboard | ✅ Done | Committed |
-| 32.3 Trial Balance Validation | in_progress | |
-| 32.4 Period Transition Audit | ✅ Done | Committed |
-| 32.5 Roll Forward Workspace | backlog | depends on 32.3, 32.4 |
+| Story | Status | Owner | Commit |
+|-------|--------|-------|--------|
+| 32.1 Fiscal Year Close | ✅ Done | bmad-dev | f3990b8 |
+| 32.2 Reconciliation Dashboard | ✅ Done | bmad-dev | f3990b8 |
+| 32.3 Trial Balance Validation | ✅ Done | bmad-dev | 2b5891e |
+| 32.4 Period Transition Audit | ✅ Done | bmad-dev | 2b5891e |
+| 32.5 Roll Forward Workspace | ✅ Done | bmad-dev | 5f2b4b2 |
 
-## Phase 1: Stories 32.3 and 32.4 (Parallel)
+## Post-Story Fixes
 
-**Dev 1: Story 32.3**
-- Files: `apps/api/src/lib/trial-balance-service.ts`, `apps/api/src/routes/admin-dashboards.ts`
-- Also reads: `packages/modules/accounting/src/reconciliation/`, `packages/telemetry/`
+After implementation, bmad-review identified the following issues during code review:
 
-**Dev 2: Story 32.4**
-- Files: `apps/api/src/lib/period-transition-audit.ts`, `apps/api/src/routes/audit.ts`
-- Also reads: `packages/modules/platform/audit/`, `packages/modules/accounting/`
+| ID | Severity | File | Issue |
+|----|----------|------|-------|
+| P0-001 | P0 | `fiscal-year/service.ts` | `executeCloseWithLocking` returned `context.requestedAtEpochMs.toString()` as `closeRequestId` instead of caller-provided ID — broke idempotency contract |
+| P1-001 | P1 | `fiscal-year/errors.ts` | 6 error classes missing machine-readable `code` properties |
+| P1-002 | P1 | `fiscal-years.ts` (API adapter) | Lazy singleton could bind to stale `getDb()` context |
+| P2-001 | P2 | `fiscal-year/service.ts` | Floating-point epsilon comparison for monetary values (`> 0.001`) |
+| P2-002 | P2 | `fiscal-year/service.ts` | Sign convention assumptions in closing entries not explicitly documented |
 
-## Phase 2: Story 32.5 (After 32.3, 32.4)
+All fixes committed in `8c2e1cc` and `dc05502`.
 
-**Dev 1 or 2: Story 32.5**
-- Depends on: 32.1, 32.2, 32.3, 32.4
-- Files: `apps/api/src/routes/admin-dashboards.ts`, `apps/api/src/lib/period-close-workspace.ts`
+## Architecture Discovery
 
-## Conflict Prevention
+During Epic 32, an ADR-0014 boundary violation was caught:
+- `fiscal-years.ts` (1317 lines) was placed in `apps/api/src/lib/` — pure domain logic that belonged in `modules-accounting`
+- Discovered and resolved via bmad-architect consultation
+- Fiscal year domain extracted to `packages/modules/accounting/src/fiscal-year/`
+- API layer converted to thin adapter consuming package service
 
-- 32.3 and 32.4 must NOT modify each other's files
-- 32.5 reads from all prior stories' outputs
-- 32.5 must NOT modify fiscal-years.ts or reconciliation-dashboard.ts
-
-## Sync Point
-
-After 32.3 and 32.4 complete, sync before starting 32.5.
+See: `epic-32-service-migration.md` for full migration details.

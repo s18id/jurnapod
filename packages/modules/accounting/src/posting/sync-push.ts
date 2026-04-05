@@ -40,6 +40,7 @@ export interface SyncPushPostingContext {
 }
 
 export class SyncPushPostingHookError extends Error {
+  code = "SYNC_PUSH_POSTING_HOOK_FAILED";
   readonly mode: SyncPushPostingMode;
   readonly hookCause: unknown;
 

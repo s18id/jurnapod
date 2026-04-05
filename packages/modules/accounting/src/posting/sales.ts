@@ -360,6 +360,7 @@ export class SalesPostingRepository implements PostingRepository {
 // =============================================================================
 
 export class PaymentVarianceConfigError extends Error {
+  code = "PAYMENT_VARIANCE_CONFIG_ERROR";
   constructor(message: string) {
     super(message);
     this.name = "PaymentVarianceConfigError";

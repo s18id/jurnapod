@@ -22,6 +22,7 @@ export interface PostingOptions {
 }
 
 export class UnbalancedJournalError extends Error {
+  code = "UNBALANCED_JOURNAL";
   constructor() {
     super("UNBALANCED_JOURNAL");
     this.name = "UnbalancedJournalError";
