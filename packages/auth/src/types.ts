@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import type { Kysely } from 'kysely';
-import type { DB } from '@jurnapod/db/kysely';
+import type { DatabaseSchema as DB } from '@jurnapod/db';
 
 /**
  * Database adapter interface for auth package.
