@@ -28,6 +28,7 @@ import {
   TrialBalanceService,
   type TrialBalanceQuery,
 } from "@jurnapod/modules-accounting/trial-balance";
+import { getPeriodCloseWorkspace } from "../lib/period-close-workspace.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -770,6 +771,52 @@ adminDashboardRoutes.get("/reconciliation/:accountId/drilldown", async (c) => {
   } catch (error) {
     console.error("GET /admin/dashboard/reconciliation/:accountId/drilldown failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to load variance drilldown", 500);
+  }
+});
+
+// =============================================================================
+// Period Close Workspace - GET /admin/dashboards/period-close-workspace
+// =============================================================================
+
+const periodCloseWorkspaceQuerySchema = z.object({
+  fiscal_year_id: z.string().transform(Number).pipe(z.number().positive()),
+});
+
+adminDashboardRoutes.get("/period-close-workspace", async (c) => {
+  try {
+    const auth = c.get("auth");
+    const companyId = auth.companyId;
+
+    // Parse and validate query parameters
+    const url = new URL(c.req.url);
+    const rawQuery = {
+      fiscal_year_id: url.searchParams.get("fiscal_year_id") ?? undefined,
+    };
+
+    const parseResult = periodCloseWorkspaceQuerySchema.safeParse(rawQuery);
+    if (!parseResult.success) {
+      return errorResponse(
+        "BAD_REQUEST",
+        `Invalid query parameters: ${parseResult.error.errors.map((e) => e.message).join(", ")}`,
+        400
+      );
+    }
+
+    const validated = parseResult.data;
+
+    // Get period close workspace data
+    const workspace = await getPeriodCloseWorkspace({
+      companyId,
+      fiscalYearId: validated.fiscal_year_id,
+    });
+
+    return c.json({
+      success: true,
+      data: workspace,
+    });
+  } catch (error) {
+    console.error("GET /admin/dashboard/period-close-workspace failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to load period close workspace", 500);
   }
 });
 

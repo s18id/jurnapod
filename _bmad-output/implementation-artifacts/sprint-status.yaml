@@ -386,16 +386,16 @@ development_status:
   33-5-permission-bit-test-fix: done  # Post-epic test fix - corrected test expectations
 
   # Epic 32: Financial Period Close & Reconciliation Workspace
-  epic-32: in_progress
+  epic-32: done
   epic-32-preparation:
     settings-port: done  # SettingsPort in modules-platform
     fiscal-year-close-prep: done  # Idempotency table, close procedure, FiscalYearGuard
     subledger-provider-prep: done  # SubledgerBalanceProvider interface, CASH impl
   32-1-fiscal-year-close: done  # Close procedure with 3-step entries, transaction, idempotency
   32-2-multi-period-reconciliation-dashboard: done  # ReconciliationDashboardService, drilldown endpoint
-  32-3-trial-balance-validation: review
-  32-4-period-transition-audit-trail: backlog
-  32-5-roll-forward-workspace: backlog
+  32-3-trial-balance-validation: done
+  32-4-period-transition-audit-trail: done
+  32-5-roll-forward-workspace: done  # PeriodCloseWorkspaceService, GET /admin/dashboards/period-close-workspace
 
   # Epic 36: Import/Export Infrastructure (deferred - moved from Epic 31-5)
   epic-36: deferred
