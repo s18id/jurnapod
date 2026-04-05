@@ -13,11 +13,11 @@ import { z } from "zod";
 import { authenticateRequest, requireAccess, type AuthContext } from "@/lib/auth-guard.js";
 import { errorResponse } from "@/lib/response.js";
 import {
-  queryPeriodTransitionAudits,
-  getPeriodTransitionAuditById,
+  PeriodTransitionAuditService,
   PERIOD_TRANSITION_ACTION,
   type PeriodTransitionAuditQuery
-} from "@/lib/period-transition-audit.js";
+} from "@jurnapod/modules-platform/audit/period-transition";
+import { AuditService } from "@jurnapod/modules-platform";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -125,7 +125,12 @@ auditRoutes.get("/period-transitions", async (c) => {
       offset: queryParams.offset ?? 0,
     };
 
-    const result = await queryPeriodTransitionAudits(query);
+    const { getDb } = await import("@/lib/db.js");
+    const { AuditService } = await import("@jurnapod/modules-platform");
+    const auditService = new AuditService(getDb() as any);
+    const periodTransitionService = new PeriodTransitionAuditService(getDb() as any, auditService as any);
+
+    const result = await periodTransitionService.queryAudits(query);
 
     return c.json({
       success: true,
@@ -169,7 +174,12 @@ auditRoutes.get("/period-transitions/:id", async (c) => {
   }
 
   try {
-    const record = await getPeriodTransitionAuditById(companyId, auditId);
+    const { getDb } = await import("@/lib/db.js");
+    const { AuditService } = await import("@jurnapod/modules-platform");
+    const auditService = new AuditService(getDb() as any);
+    const periodTransitionService = new PeriodTransitionAuditService(getDb() as any, auditService as any);
+
+    const record = await periodTransitionService.getAuditById(companyId, auditId);
 
     if (!record) {
       return errorResponse("NOT_FOUND", "Period transition audit record not found", 404);

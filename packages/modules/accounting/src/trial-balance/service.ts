@@ -16,7 +16,6 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
-import type { KyselySchema as ApiKyselySchema } from "../lib/db.js";
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -102,9 +101,9 @@ export interface TrialBalanceEntry {
 }
 
 /**
- * GL imbalance check result for a batch
+ * GL imbalance check result for a batch (trial balance variant)
  */
-export interface GlImbalanceResult {
+export interface TrialBalanceGlImbalanceResult {
   batchId: number;
   batchDescription: string | null;
   totalDebits: number;
@@ -150,7 +149,7 @@ export interface PreCloseValidationResult {
     imbalance: number;
     isBalanced: boolean;
   };
-  glImbalanceDetails: GlImbalanceResult[];
+      glImbalanceDetails: TrialBalanceGlImbalanceResult[];
   /** All accounts with variance issues */
   accountsWithVariance: TrialBalanceEntry[];
   /** All accounts with subledger variance */
@@ -273,8 +272,8 @@ export class TrialBalanceService {
   private readonly varianceWarningThreshold: number;
   private readonly varianceCriticalThreshold: number;
 
-  constructor(db: ApiKyselySchema, config?: TrialBalanceServiceConfig) {
-    this.db = db as KyselySchema;
+  constructor(db: KyselySchema, config?: TrialBalanceServiceConfig) {
+    this.db = db;
     this.varianceWarningThreshold = config?.varianceWarningThreshold ?? DEFAULT_VARIANCE_WARNING_THRESHOLD;
     this.varianceCriticalThreshold = config?.varianceCriticalThreshold ?? DEFAULT_VARIANCE_CRITICAL_THRESHOLD;
   }
@@ -617,7 +616,7 @@ export class TrialBalanceService {
     companyId: number,
     periodStart: Date,
     periodEnd: Date
-  ): Promise<GlImbalanceResult[]> {
+  ): Promise<TrialBalanceGlImbalanceResult[]> {
     const result = await sql<{
       batch_id: number;
       batch_description: string | null;
@@ -758,7 +757,7 @@ export class TrialBalanceService {
         AND jl.line_date >= ${periodStart}
         AND jl.line_date <= ${periodEnd}
         AND jl.company_id = ${companyId}
-        ${outletId ? sql`AND jl.outlet_id = ${outletId}` : sql``}
+      ${outletId ? sql`AND jl.outlet_id = ${outletId}` : sql``}
       LEFT JOIN journal_batches jb ON jb.id = jl.journal_batch_id
       WHERE a.company_id = ${companyId}
         AND a.is_active = 1

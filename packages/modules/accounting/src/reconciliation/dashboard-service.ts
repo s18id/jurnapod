@@ -15,7 +15,6 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
-import type { KyselySchema as ApiKyselySchema } from "../lib/db.js";
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -254,8 +253,8 @@ function determineStatus(variance: number, hasSubledgerData: boolean): Reconcili
 export class ReconciliationDashboardService {
   private readonly db: KyselySchema;
 
-  constructor(db: ApiKyselySchema) {
-    this.db = db as KyselySchema;
+  constructor(db: KyselySchema) {
+    this.db = db;
   }
 
   /**

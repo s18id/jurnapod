@@ -20,11 +20,12 @@ import {
   TEST_TIMEOUT_MS
 } from "./integration-harness.mjs";
 import {
-  logPeriodTransition,
-  queryPeriodTransitionAudits,
+  PeriodTransitionAuditService,
   PERIOD_TRANSITION_ACTION,
   PERIOD_STATUS
-} from "../../src/lib/period-transition-audit.js";
+} from "@jurnapod/modules-platform/audit/period-transition";
+import { AuditService } from "@jurnapod/modules-platform";
+import { getDbPool } from "../../src/lib/db.js";
 
 const testContext = setupIntegrationTests(test);
 
@@ -95,8 +96,13 @@ test(
       // Login to get access token
       const accessToken = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword, serverLogs);
 
+      // Create service instances
+      const db = await getDbPool();
+      const auditService = new AuditService(db);
+      const periodTransitionService = new PeriodTransitionAuditService(db, auditService);
+
       // Step 1: Log a period transition using the library function
-      await logPeriodTransition(
+      await periodTransitionService.logTransition(
         {
           company_id: companyId,
           user_id: ownerId,
@@ -115,7 +121,7 @@ test(
       );
 
       // Step 2: Query the period transition audit logs
-      const queryResult = await queryPeriodTransitionAudits({
+      const queryResult = await periodTransitionService.queryAudits({
         company_id: companyId,
         fiscal_year_id: fiscalYearId,
         limit: 100
@@ -133,7 +139,7 @@ test(
       assert.deepStrictEqual(transition.metadata.journal_entry_ids, [1, 2, 3]);
 
       // Step 3: Test query with action filter
-      const filteredResult = await queryPeriodTransitionAudits({
+      const filteredResult = await periodTransitionService.queryAudits({
         company_id: companyId,
         action: PERIOD_TRANSITION_ACTION.CLOSE,
         limit: 100
@@ -145,7 +151,7 @@ test(
       }
 
       // Step 4: Test query with actor filter
-      const actorResult = await queryPeriodTransitionAudits({
+      const actorResult = await periodTransitionService.queryAudits({
         company_id: companyId,
         actor_user_id: ownerId,
         limit: 100
@@ -231,6 +237,10 @@ test(
   async () => {
     const db = testContext.db;
 
+    // Create service instances
+    const auditService = new AuditService(db);
+    const periodTransitionService = new PeriodTransitionAuditService(db, auditService);
+
     const companyCode = readEnv("JP_COMPANY_CODE", "JP");
     const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
     const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
@@ -284,7 +294,7 @@ test(
       }
 
       // Log a period transition
-      await logPeriodTransition(
+      await periodTransitionService.logTransition(
         {
           company_id: companyId,
           user_id: ownerId,
@@ -299,7 +309,7 @@ test(
       );
 
       // Query should only return records where success = 1
-      const queryResult = await queryPeriodTransitionAudits({
+      const queryResult = await periodTransitionService.queryAudits({
         company_id: companyId,
         fiscal_year_id: fiscalYearId,
         limit: 100

@@ -11,6 +11,7 @@ export * from "./account-types-service";
 export * from "./journals-service";
 export * from "./reconciliation/index.js";
 export * from "./reconciliation/subledger/index.js";
+export * from "./trial-balance/index.js";
 // Fixed assets subdomain - re-exported with conflict resolution for DepreciationPlan/DepreciationRun
 // (Those types are already exported from posting/ with different meanings)
 export {

@@ -14,9 +14,17 @@
       "types": "./dist/posting/cogs.d.ts",
       "default": "./dist/posting/cogs.js"
     },
+    "./reconciliation": {
+      "types": "./dist/reconciliation/index.d.ts",
+      "default": "./dist/reconciliation/index.js"
+    },
     "./reconciliation/subledger": {
       "types": "./dist/reconciliation/subledger/index.d.ts",
       "default": "./dist/reconciliation/subledger/index.js"
+    },
+    "./trial-balance": {
+      "types": "./dist/trial-balance/index.d.ts",
+      "default": "./dist/trial-balance/index.js"
     }
   },
   "files": ["dist", "README.md"],

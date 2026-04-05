@@ -12,6 +12,22 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 
+// Re-export dashboard service
+export {
+  ReconciliationDashboardService,
+  type AccountTypeFilter,
+  type ReconciliationStatus,
+  type ReconciliationDashboardQuery,
+  type GlBalance,
+  type SubledgerBalance,
+  type ReconciliationVariance,
+  type PeriodTrend,
+  type DrilldownLine,
+  type VarianceDrilldownResult,
+  type GlImbalanceMetric,
+  type ReconciliationDashboard,
+} from "./dashboard-service.js";
+
 /**
  * Database client interface for dependency injection
  */

@@ -23,11 +23,11 @@ import {
   type ReconciliationDashboardQuery,
   type AccountTypeFilter,
   type ReconciliationStatus,
-} from "../lib/reconciliation-dashboard.js";
+} from "@jurnapod/modules-accounting/reconciliation";
 import {
   TrialBalanceService,
   type TrialBalanceQuery,
-} from "../lib/trial-balance-service.js";
+} from "@jurnapod/modules-accounting/trial-balance";
 
 declare module "hono" {
   interface ContextVariableMap {
