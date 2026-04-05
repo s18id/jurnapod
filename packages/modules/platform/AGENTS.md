@@ -91,6 +91,53 @@ await settings.updateSettings(1, {
 | FeatureFlags | `feature-flags/index.ts` | Module/feature enablement |
 | SyncAudit | `sync/audit-service.ts` | Audit sync for backoffice |
 
+### SettingsPort Architecture
+
+The package provides a typed, cached settings access layer for module packages via `SettingsPort`.
+
+**Architecture:**
+```
+Module Packages → SettingsPort → Typed Tables + Legacy Fallback + Cache
+```
+
+**Key files:**
+- `settings/port.ts` — Interface definition
+- `settings/adapter.ts` — Kysely implementation with dual-read
+- `settings/cache.ts` — 30-second TTL LRU cache
+
+**Usage:**
+
+```typescript
+import { createSettingsPort } from '@jurnapod/modules-platform/settings';
+
+const settings = createSettingsPort(db);
+
+// Get typed setting
+const costingMethod = await settings.get(
+  'inventory.costing_method',
+  companyId,
+  { outletId }
+);
+
+// Resolve with defaults (outlet → company → registry default)
+const allowMultipleOpen = await settings.resolve(
+  companyId,
+  'accounting.allow_multiple_open_fiscal_years',
+  { outletId, defaultValue: false }
+);
+```
+
+**Dual-Read Pattern:**
+1. Query typed tables (`settings_strings`, `settings_numbers`, `settings_booleans`)
+2. Fall back to legacy `company_settings` table
+3. Lazy-migrate legacy values to typed tables on read
+4. Return typed value from `SETTINGS_REGISTRY` default if not found
+
+**Cascade Resolution:**
+- Outlet-specific value (if `outletId` provided)
+- Company-wide fallback (if no outlet override)
+- Registry default (from `SETTINGS_REGISTRY`)
+
 ### File Structure
 
 ```
@@ -105,6 +152,9 @@ packages/modules/platform/
 │   │
 │   ├── settings/
 │   │   ├── index.ts               # Settings exports
+│   │   ├── port.ts                # SettingsPort interface (NEW)
+│   │   ├── adapter.ts             # Kysely adapter (NEW)
+│   │   ├── cache.ts               # Cache layer (NEW)
 │   │   └── encryption.ts          # Encrypted settings
 │   │
 │   ├── feature-flags/

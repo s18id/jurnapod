@@ -58,6 +58,8 @@ import {
   fromMinorUnits,
 } from "./types/costing.js";
 
+import { KyselySettingsAdapter, type SettingsPort } from "@jurnapod/modules-platform/settings";
+
 // -----------------------------------------------------------------------------
 // Internal Row Types
 // -----------------------------------------------------------------------------
@@ -362,41 +364,53 @@ export function getCostingStrategy(method: CostingMethod): CostingStrategy {
 
 /**
  * Get the costing method configured for a company.
- * Reads from company_settings with fallback to legacy key.
+ * Uses SettingsPort for canonical key with fallback to legacy key.
+ * 
+ * Priority:
+ * 1. 'inventory.costing_method' (canonical key in typed settings tables)
+ * 2. 'inventory_costing_method' (legacy key in company_settings)
+ * Default: 'AVG'
  */
 export async function getCompanyCostingMethod(
   companyId: number,
   db: KyselySchema
 ): Promise<CostingMethod> {
-  // Read costing method from company_settings
-  // Priority:
-  // 1. 'inventory.costing_method' (canonical key used by settings system)
-  // 2. 'inventory_costing_method' (legacy key for backward compatibility)
-  // Default: 'AVG'
-  const rows = await sql<SettingRow>`
+  const settingsPort = new KyselySettingsAdapter(db);
+
+  // Try canonical key first via SettingsPort (handles typed tables + legacy fallback + registry default)
+  const canonicalMethod = await settingsPort.resolve<string>(companyId, "inventory.costing_method", {
+    defaultValue: "AVG"
+  });
+
+  // If canonical key returned a non-default value, use it
+  if (canonicalMethod !== "AVG") {
+    return canonicalMethod as CostingMethod;
+  }
+
+  // Canonical returned "AVG" - could be default OR actual value
+  // Check legacy key directly to maintain backward compatibility
+  const legacyRows = await sql<SettingRow>`
     SELECT value_json, value_type, \`key\`
     FROM company_settings 
-    WHERE company_id = ${companyId} AND \`key\` IN ('inventory.costing_method', 'inventory_costing_method') AND outlet_id IS NULL
-    ORDER BY FIELD(\`key\`, 'inventory.costing_method', 'inventory_costing_method'), updated_at DESC, id DESC
+    WHERE company_id = ${companyId} AND \`key\` = 'inventory_costing_method' AND outlet_id IS NULL
     LIMIT 1
   `.execute(db);
 
-  const setting = rows.rows[0];
-  
-  if (!setting) {
-    return "AVG"; // Default when not configured
+  const legacySetting = legacyRows.rows[0];
+
+  if (!legacySetting) {
+    return "AVG"; // No legacy value found, use default
   }
 
-  // Parse JSON value
+  // Parse JSON value from legacy
   let method: string;
   try {
-    const parsed = JSON.parse(setting.value_json);
-    method = typeof parsed === 'string' ? parsed : String(parsed);
+    const parsed = JSON.parse(legacySetting.value_json);
+    method = typeof parsed === "string" ? parsed : String(parsed);
   } catch {
-    // If not valid JSON, treat as string directly
-    method = String(setting.value_json).replace(/^"|"$/g, '');
+    method = String(legacySetting.value_json).replace(/^"|"$/g, "");
   }
-  
+
   // Validate method is one of allowed values
   if (method !== "AVG" && method !== "FIFO" && method !== "LIFO") {
     throw new InvalidCostingMethodError(method);

@@ -475,6 +475,25 @@ export interface FiscalYears {
   updated_by_user_id: Generated<number | null>;
 }
 
+export interface FiscalYearCloseRequests {
+  id: Generated<number>;
+  company_id: number;
+  fiscal_year_id: number;
+  close_request_id: string;
+  status: "PENDING" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED";
+  fiscal_year_status_before: string;
+  fiscal_year_status_after: string;
+  result_json: string | null;
+  failure_code: string | null;
+  failure_message: string | null;
+  requested_by_user_id: number;
+  requested_at_ts: number;
+  started_at_ts: number | null;
+  completed_at_ts: number | null;
+  created_at_ts: number;
+  updated_at_ts: number;
+}
+
 export interface FixedAssetBooks {
   accum_depreciation: Generated<Decimal>;
   accum_impairment: Generated<Decimal>;
@@ -1601,6 +1620,7 @@ export interface DB {
   export_files: ExportFiles;
   feature_flags: FeatureFlags;
   fiscal_years: FiscalYears;
+  fiscal_year_close_requests: FiscalYearCloseRequests;
   fixed_asset_books: FixedAssetBooks;
   fixed_asset_categories: FixedAssetCategories;
   fixed_asset_disposals: FixedAssetDisposals;

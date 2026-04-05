@@ -8,6 +8,7 @@
  * types that require custom definitions.
  */
 
+import type { ColumnType } from "kysely";
 import type { DB } from './schema';
 
 /**

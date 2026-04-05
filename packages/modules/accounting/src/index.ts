@@ -29,7 +29,6 @@ export type {
   FixedAsset,
   FixedAssetCreateInput,
   FixedAssetUpdateInput,
-  FixedAssetFilters,
   AssetBook,
   LifecycleEvent,
   LifecycleEventCreateInput,
@@ -44,6 +43,7 @@ export type {
   FixedAssetPorts,
   AccessScopeChecker,
   FiscalYearGuard,
+  FiscalYearContext,
   // Status constants
   FIXED_ASSET_STATUS,
   DEPRECIATION_METHOD,

@@ -7,6 +7,15 @@ import { encrypt, decrypt, type EncryptedPayload } from "./encryption.js";
 
 export { type EncryptedPayload } from "./encryption.js";
 
+// SettingsPort types and errors
+export { type SettingsPort, SettingValidationError, InvalidSettingsContextError } from "./port.js";
+
+// Cache
+export { SettingsCache, settingsCache } from "./cache.js";
+
+// Kysely adapter
+export { KyselySettingsAdapter } from "./adapter.js";
+
 export class PlatformSettingNotFoundError extends Error {}
 
 /**

@@ -47,6 +47,14 @@ export class JournalOutsideFiscalYearError extends Error {
   }
 }
 
+export class FiscalYearClosedError extends Error {
+  code = "FISCAL_YEAR_CLOSED";
+  constructor(fiscalYearId: number) {
+    super(`Fiscal year ${fiscalYearId} is closed and cannot accept new journal entries`);
+    this.name = "FiscalYearClosedError";
+  }
+}
+
 /**
  * Result of a GL imbalance check
  */
@@ -194,7 +202,8 @@ export class JournalsService {
   }
 
   private async ensureEntryDateInOpenFiscalYear(companyId: number, entryDate: string): Promise<void> {
-    const result = await sql<{ id: number }>`
+    // First check if there's an OPEN fiscal year containing this date
+    const openResult = await sql<{ id: number }>`
       SELECT id
       FROM fiscal_years
       WHERE company_id = ${companyId}
@@ -204,9 +213,27 @@ export class JournalsService {
       LIMIT 1
     `.execute(this.db);
 
-    if (result.rows.length === 0) {
-      throw new JournalOutsideFiscalYearError(entryDate);
+    if (openResult.rows.length > 0) {
+      return; // Found valid open fiscal year
     }
+
+    // Check if there's a CLOSED fiscal year that contains this date
+    const closedResult = await sql<{ id: number }>`
+      SELECT id
+      FROM fiscal_years
+      WHERE company_id = ${companyId}
+        AND status = 'CLOSED'
+        AND start_date <= ${entryDate}
+        AND end_date >= ${entryDate}
+      LIMIT 1
+    `.execute(this.db);
+
+    if (closedResult.rows.length > 0) {
+      throw new FiscalYearClosedError(Number(closedResult.rows[0].id));
+    }
+
+    // No fiscal year found for this date at all
+    throw new JournalOutsideFiscalYearError(entryDate);
   }
 
   /**

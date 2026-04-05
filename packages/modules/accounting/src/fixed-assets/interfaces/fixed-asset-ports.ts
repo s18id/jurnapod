@@ -19,10 +19,30 @@ export interface AccessScopeChecker {
 }
 
 /**
+ * Context passed to FiscalYearGuard operations
+ */
+export interface FiscalYearContext {
+  companyId: number;
+  userId?: number;
+}
+
+/**
  * Port for fiscal year boundary validation.
  */
 export interface FiscalYearGuard {
   ensureDateWithinOpenFiscalYear(companyId: number, date: string): Promise<void>;
+
+  /**
+   * Ensures the fiscal year is open for transactions.
+   * Throws FiscalYearClosedError if the fiscal year is closed.
+   */
+  ensureFiscalYearIsOpen(fiscalYearId: number, ctx: FiscalYearContext): Promise<void>;
+
+  /**
+   * Ensures the fiscal year allows updates (not locked or in close process).
+   * Throws FiscalYearCloseConflictError if the fiscal year is being closed.
+   */
+  ensureFiscalYearAllowsUpdate(fiscalYearId: number, ctx: FiscalYearContext): Promise<void>;
 }
 
 /**

@@ -61,6 +61,31 @@ const result = await calculateMovingAverageCost(
 // Returns: { unitCost: 2500, totalCost: 25000, layersUsed: [...] }
 ```
 
+### Settings Access
+
+This package accesses company settings via `SettingsPort` from `@jurnapod/modules-platform/settings`.
+
+**Key settings used:**
+- `inventory.costing_method` — AVG, FIFO, LIFO (default: AVG)
+- Legacy fallback: `inventory_costing_method`
+
+**Usage:**
+
+```typescript
+import { createSettingsPort } from '@jurnapod/modules-platform/settings';
+
+const settings = createSettingsPort(db);
+
+const method = await settings.resolve<CostingMethod>(
+  companyId,
+  'inventory.costing_method',
+  { defaultValue: 'AVG' }
+);
+```
+
+**Migration note:**
+Previously this package directly queried `company_settings`. It now uses SettingsPort with dual-read (typed tables + legacy fallback).
+
 ---
 
 ## Module Organization

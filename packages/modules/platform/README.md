@@ -97,6 +97,40 @@ await settings.updateSettings(1, {
 const apiKey = await settings.getEncrypted(companyId, 'api_key');
 ```
 
+## SettingsPort
+
+The SettingsPort provides typed, cached settings access with cascade resolution.
+
+```typescript
+import { createSettingsPort } from '@jurnapod/modules-platform/settings';
+
+const settings = createSettingsPort(db);
+
+// Get a setting with outlet override
+const method = await settings.get(
+  'inventory.costing_method',
+  companyId,
+  { outletId: 1 }
+);
+
+// Resolve with full cascade (outlet → company → default)
+const value = await settings.resolve(
+  companyId,
+  'accounting.allow_multiple_open_fiscal_years',
+  { outletId: 1, defaultValue: false }
+);
+```
+
+### Settings Resolution Order
+
+1. **Outlet-specific** — `outlet_id = {outletId}` (if outletId provided)
+2. **Company-wide** — `outlet_id IS NULL`
+3. **Registry default** — From `SETTINGS_REGISTRY`
+
+### Caching
+
+Settings are cached for 30 seconds to reduce database hits. Cache is automatically invalidated on updates.
+
 ## Audit Actions
 
 | Action | Description |

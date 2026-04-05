@@ -15,14 +15,50 @@ import {
 } from "@jurnapod/shared";
 import { getDb, type KyselySchema } from "./db";
 import { toRfc3339Required } from "@jurnapod/shared";
+import { KyselySettingsAdapter } from "@jurnapod/modules-platform/settings";
 
-export class FiscalYearNotFoundError extends Error {}
+export class FiscalYearNotFoundError extends Error {
+  code = "FISCAL_YEAR_NOT_FOUND";
+}
 export class FiscalYearCodeExistsError extends Error {}
 export class FiscalYearDateRangeError extends Error {}
 export class FiscalYearOverlapError extends Error {}
 export class FiscalYearOpenConflictError extends Error {}
 export class FiscalYearNotOpenError extends Error {}
 export class FiscalYearSelectionError extends Error {}
+export class FiscalYearAlreadyClosedError extends Error {
+  code = "FISCAL_YEAR_ALREADY_CLOSED";
+}
+export class FiscalYearCloseConflictError extends Error {
+  code = "FISCAL_YEAR_CLOSE_CONFLICT";
+}
+export class FiscalYearClosePreconditionError extends Error {
+  code = "FISCAL_YEAR_CLOSE_PRECONDITION_FAILED";
+}
+
+/**
+ * Status values for fiscal year close request lifecycle
+ */
+export const FISCAL_YEAR_CLOSE_STATUS = {
+  PENDING: "PENDING",
+  IN_PROGRESS: "IN_PROGRESS",
+  SUCCEEDED: "SUCCEEDED",
+  FAILED: "FAILED"
+} as const;
+
+export type FiscalYearCloseStatus = (typeof FISCAL_YEAR_CLOSE_STATUS)[keyof typeof FISCAL_YEAR_CLOSE_STATUS];
+
+export interface CloseFiscalYearResult {
+  success: boolean;
+  fiscalYearId: number;
+  closeRequestId: string;
+  status: FiscalYearCloseStatus;
+  previousStatus: string;
+  newStatus: string;
+  resultJson?: Record<string, unknown>;
+  failureCode?: string;
+  failureMessage?: string;
+}
 
 const MYSQL_DUPLICATE_ERROR_CODE = 1062;
 const ALLOW_MULTIPLE_OPEN_SETTING: SettingKey = "accounting.allow_multiple_open_fiscal_years";
@@ -92,41 +128,16 @@ async function resolveCompanySettingOutletId(
   return Number(outletId);
 }
 
-async function readCompanySetting(
-  db: KyselySchema,
-  companyId: number,
-  outletId: number,
-  key: SettingKey
-): Promise<SettingValue> {
-  const row = await db
-    .selectFrom("company_settings")
-    .where("company_id", "=", companyId)
-    .where("outlet_id", "=", outletId)
-    .where(sql`\`key\``, "=", key)
-    .limit(1)
-    .select("value_json")
-    .executeTakeFirst();
-
-  const stored = row?.value_json;
-  if (typeof stored === "string") {
-    try {
-      const parsed = JSON.parse(stored);
-      return parseSettingValue(key, parsed);
-    } catch {
-      return SETTINGS_REGISTRY[key].defaultValue;
-    }
-  }
-
-  return SETTINGS_REGISTRY[key].defaultValue;
-}
-
 async function allowMultipleOpenFiscalYears(
   db: KyselySchema,
   companyId: number,
   outletId?: number
 ): Promise<boolean> {
   const resolvedOutletId = outletId ?? (await resolveCompanySettingOutletId(db, companyId));
-  const value = await readCompanySetting(db, companyId, resolvedOutletId, ALLOW_MULTIPLE_OPEN_SETTING);
+  const settingsPort = new KyselySettingsAdapter(db);
+  const value = await settingsPort.resolve<boolean>(companyId, ALLOW_MULTIPLE_OPEN_SETTING, {
+    outletId: resolvedOutletId
+  });
   return Boolean(value);
 }
 
@@ -419,4 +430,263 @@ export async function resolveDefaultFiscalYearDateRange(
 
 function isMysqlError(error: unknown): error is { errno?: number } {
   return typeof error === "object" && error !== null && "errno" in error;
+}
+
+interface CloseFiscalYearContext {
+  companyId: number;
+  requestedByUserId: number;
+  requestedAtEpochMs: number;
+  reason?: string;
+}
+
+/**
+ * Closes a fiscal year with idempotency protection.
+ * 
+ * Idempotency logic:
+ * 1. Check if (company_id, fiscal_year_id, close_request_id) exists → return existing result
+ * 2. If not exists, insert with status = PENDING
+ * 3. Use SELECT ... FOR UPDATE to lock fiscal_year row first
+ * 4. Transition through states: PENDING → IN_PROGRESS → SUCCEEDED/FAILED
+ * 
+ * Lock ordering (prevent deadlocks):
+ * - Always lock fiscal_year row FIRST
+ * - Then lock period rows ordered by period_start_date ASC (if periods table exists)
+ * 
+ * @param db Database instance
+ * @param fiscalYearId The fiscal year ID to close
+ * @param closeRequestId Unique idempotency key for this close operation
+ * @param context Company and user context for the operation
+ * @returns CloseFiscalYearResult with the outcome
+ */
+export async function closeFiscalYear(
+  db: KyselySchema,
+  fiscalYearId: number,
+  closeRequestId: string,
+  context: CloseFiscalYearContext
+): Promise<CloseFiscalYearResult> {
+  const { companyId, requestedByUserId, requestedAtEpochMs } = context;
+  const now = requestedAtEpochMs;
+
+  // Step 1: Check for existing close request (idempotency)
+  const existingRequest = await db
+    .selectFrom("fiscal_year_close_requests")
+    .where("company_id", "=", companyId)
+    .where("fiscal_year_id", "=", fiscalYearId)
+    .where("close_request_id", "=", closeRequestId)
+    .select([
+      "id",
+      "status",
+      "fiscal_year_status_before",
+      "fiscal_year_status_after",
+      "result_json",
+      "failure_code",
+      "failure_message"
+    ])
+    .executeTakeFirst();
+
+  if (existingRequest) {
+    // Return existing result for idempotent replay
+    return {
+      success: existingRequest.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED,
+      fiscalYearId,
+      closeRequestId,
+      status: existingRequest.status as FiscalYearCloseStatus,
+      previousStatus: existingRequest.fiscal_year_status_before,
+      newStatus: existingRequest.fiscal_year_status_after,
+      resultJson: existingRequest.result_json
+        ? JSON.parse(existingRequest.result_json)
+        : undefined,
+      failureCode: existingRequest.failure_code ?? undefined,
+      failureMessage: existingRequest.failure_message ?? undefined
+    };
+  }
+
+  // Step 2: Insert new close request with PENDING status
+  const insertResult = await db
+    .insertInto("fiscal_year_close_requests")
+    .values({
+      company_id: companyId,
+      fiscal_year_id: fiscalYearId,
+      close_request_id: closeRequestId,
+      status: FISCAL_YEAR_CLOSE_STATUS.PENDING,
+      fiscal_year_status_before: "UNKNOWN",
+      fiscal_year_status_after: "CLOSED",
+      requested_by_user_id: requestedByUserId,
+      requested_at_ts: requestedAtEpochMs,
+      created_at_ts: now,
+      updated_at_ts: now
+    })
+    .executeTakeFirst();
+
+  const closeRequestDbId = Number(insertResult.insertId);
+
+  // Step 3: Execute close with row locking and retry logic
+  const maxRetries = 3;
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await db.transaction().execute(async (trx) => {
+        // Lock fiscal_year row FIRST to prevent deadlocks
+        const lockedFiscalYear = await trx
+          .selectFrom("fiscal_years")
+          .where("id", "=", fiscalYearId)
+          .forUpdate()
+          .select(["id", "company_id", "status"])
+          .executeTakeFirst();
+
+        if (!lockedFiscalYear) {
+          throw new FiscalYearNotFoundError(`Fiscal year ${fiscalYearId} not found`);
+        }
+
+        // Verify company ownership
+        if (Number(lockedFiscalYear.company_id) !== companyId) {
+          throw new FiscalYearNotFoundError(`Fiscal year ${fiscalYearId} not found for company ${companyId}`);
+        }
+
+        // Check if already closed
+        if (lockedFiscalYear.status === "CLOSED") {
+          throw new FiscalYearAlreadyClosedError(
+            `Fiscal year ${fiscalYearId} is already closed`
+          );
+        }
+
+        // Transition to IN_PROGRESS
+        await trx
+          .updateTable("fiscal_year_close_requests")
+          .set({
+            status: FISCAL_YEAR_CLOSE_STATUS.IN_PROGRESS,
+            fiscal_year_status_before: lockedFiscalYear.status,
+            started_at_ts: Date.now(),
+            updated_at_ts: Date.now()
+          })
+          .where("id", "=", closeRequestDbId)
+          .execute();
+
+        // Perform the actual close operation
+        // Update fiscal year status to CLOSED
+        await trx
+          .updateTable("fiscal_years")
+          .set({
+            status: "CLOSED",
+            updated_by_user_id: requestedByUserId
+          })
+          .where("id", "=", fiscalYearId)
+          .execute();
+
+        // Complete the close request
+        const completedAt = Date.now();
+        await trx
+          .updateTable("fiscal_year_close_requests")
+          .set({
+            status: FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED,
+            result_json: JSON.stringify({
+              closedAt: completedAt,
+              closedByUserId: requestedByUserId,
+              reason: context.reason ?? null
+            }),
+            completed_at_ts: completedAt,
+            updated_at_ts: completedAt
+          })
+          .where("id", "=", closeRequestDbId)
+          .execute();
+
+        return {
+          success: true,
+          fiscalYearId,
+          closeRequestId,
+          status: FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED as FiscalYearCloseStatus,
+          previousStatus: lockedFiscalYear.status,
+          newStatus: "CLOSED",
+          resultJson: {
+            closedAt: completedAt,
+            closedByUserId: requestedByUserId,
+            reason: context.reason ?? null
+          }
+        };
+      });
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Handle lock timeout with retry
+      if (lastError.message.includes("Lock wait timeout") && attempt < maxRetries) {
+        // Exponential backoff
+        const backoffMs = Math.pow(2, attempt) * 100;
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        continue;
+      }
+
+      // Handle deadlock - rollback and retry
+      if (lastError.message.includes("Deadlock") && attempt < maxRetries) {
+        // Exponential backoff
+        const backoffMs = Math.pow(2, attempt) * 100;
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        continue;
+      }
+
+      // Max retries exceeded or non-retryable error - mark as failed
+      break;
+    }
+  }
+
+  // Handle failure case
+  const failureAt = Date.now();
+  const failureCode = lastError instanceof FiscalYearAlreadyClosedError
+    ? "FISCAL_YEAR_ALREADY_CLOSED"
+    : lastError instanceof FiscalYearNotFoundError
+      ? "FISCAL_YEAR_NOT_FOUND"
+      : "CLOSE_FAILED";
+
+  // Update close request as failed
+  try {
+    await db
+      .updateTable("fiscal_year_close_requests")
+      .set({
+        status: FISCAL_YEAR_CLOSE_STATUS.FAILED,
+        failure_code: failureCode,
+        failure_message: lastError?.message ?? "Unknown error",
+        completed_at_ts: failureAt,
+        updated_at_ts: failureAt
+      })
+      .where("id", "=", closeRequestDbId)
+      .execute();
+  } catch {
+    // Ignore update errors on failure path
+  }
+
+  // Re-throw appropriate error types
+  if (lastError instanceof FiscalYearNotFoundError) {
+    throw lastError;
+  }
+  if (lastError instanceof FiscalYearAlreadyClosedError) {
+    throw lastError;
+  }
+  if (lastError instanceof Error) {
+    throw new FiscalYearCloseConflictError(
+      `Failed to close fiscal year after ${maxRetries} attempts: ${lastError.message}`
+    );
+  }
+  // This should never be reached since lastError is always an Error from catch block
+  const unknownError = lastError ?? new Error("Unknown error during fiscal year close");
+  throw new FiscalYearCloseConflictError(
+    `Failed to close fiscal year: ${unknownError.message}`
+  );
+}
+
+/**
+ * Check if a fiscal year is closed (for journal posting guards)
+ */
+export async function isFiscalYearClosed(
+  db: KyselySchema,
+  companyId: number,
+  fiscalYearId: number
+): Promise<boolean> {
+  const fiscalYear = await db
+    .selectFrom("fiscal_years")
+    .where("id", "=", fiscalYearId)
+    .where("company_id", "=", companyId)
+    .select(["status"])
+    .executeTakeFirst();
+
+  return fiscalYear?.status === "CLOSED";
 }

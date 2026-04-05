@@ -116,6 +116,43 @@ const inventoryJournal = await postingService.postInventoryMovement({
 | `REVENUE` | Credit | Sales Revenue, Service Income |
 | `EXPENSE` | Debit | COGS, Rent, Wages |
 
+## Reconciliation
+
+The accounting module provides GL vs subledger reconciliation via `SubledgerBalanceProvider`.
+
+### Subledger Balance Providers
+
+```typescript
+import { CashSubledgerProvider } from '@jurnapod/modules-accounting/reconciliation/subledger';
+
+const provider = new CashSubledgerProvider(db);
+const result = await provider.getBalance({
+  companyId: 1,
+  asOfEpochMs: Date.now(),
+});
+```
+
+### Canonical Sign Convention
+
+- **Debit = positive**
+- **Credit = negative**
+
+### Fiscal Year Close
+
+The `closeFiscalYear` function provides idempotent fiscal year closure:
+
+```typescript
+import { closeFiscalYear } from '@jurnapod/modules-accounting/reconciliation';
+
+const result = await closeFiscalYear(db, fiscalYearId, closeRequestId, {
+  companyId: 1,
+  requestedByUserId: 5,
+  requestedAtEpochMs: Date.now(),
+});
+```
+
+Concurrent requests with same `closeRequestId` return the same result (idempotent).
+
 ## Architecture
 
 ```

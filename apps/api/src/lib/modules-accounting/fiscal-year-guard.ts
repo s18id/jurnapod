@@ -8,8 +8,9 @@
  * using the API's fiscal year infrastructure.
  */
 
-import type { FiscalYearGuard } from "@jurnapod/modules-accounting";
-import { ensureDateWithinOpenFiscalYear } from "@/lib/fiscal-years";
+import type { FiscalYearGuard, FiscalYearContext } from "@jurnapod/modules-accounting";
+import { FiscalYearClosedError } from "@jurnapod/modules-accounting";
+import { ensureDateWithinOpenFiscalYear, getFiscalYearById } from "@/lib/fiscal-years";
 
 /**
  * ApiFiscalYearGuard
@@ -27,6 +28,36 @@ export class ApiFiscalYearGuard implements FiscalYearGuard {
     date: string
   ): Promise<void> {
     await ensureDateWithinOpenFiscalYear(companyId, date);
+  }
+
+  /**
+   * Ensures the fiscal year is open for transactions.
+   * Throws FiscalYearClosedError if the fiscal year is closed.
+   */
+  async ensureFiscalYearIsOpen(fiscalYearId: number, ctx: FiscalYearContext): Promise<void> {
+    const fiscalYear = await getFiscalYearById(ctx.companyId, fiscalYearId);
+    if (!fiscalYear) {
+      throw new Error(`Fiscal year ${fiscalYearId} not found`);
+    }
+    if (fiscalYear.status === "CLOSED") {
+      throw new FiscalYearClosedError(fiscalYearId);
+    }
+  }
+
+  /**
+   * Ensures the fiscal year allows updates (not locked or in close process).
+   * Currently this is the same as ensureFiscalYearIsOpen but allows for
+   * future expansion to handle close-in-progress states.
+   * Throws FiscalYearClosedError if the fiscal year is closed.
+   */
+  async ensureFiscalYearAllowsUpdate(fiscalYearId: number, ctx: FiscalYearContext): Promise<void> {
+    const fiscalYear = await getFiscalYearById(ctx.companyId, fiscalYearId);
+    if (!fiscalYear) {
+      throw new Error(`Fiscal year ${fiscalYearId} not found`);
+    }
+    if (fiscalYear.status === "CLOSED") {
+      throw new FiscalYearClosedError(fiscalYearId);
+    }
   }
 }
 
