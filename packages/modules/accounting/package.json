@@ -13,6 +13,10 @@
     "./posting/cogs": {
       "types": "./dist/posting/cogs.d.ts",
       "default": "./dist/posting/cogs.js"
+    },
+    "./reconciliation/subledger": {
+      "types": "./dist/reconciliation/subledger/index.d.ts",
+      "default": "./dist/reconciliation/subledger/index.js"
     }
   },
   "files": ["dist", "README.md"],

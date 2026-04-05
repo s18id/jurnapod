@@ -16,6 +16,13 @@ import { Hono } from "hono";
 import { authenticateRequest, requireAccess, type AuthContext } from "../lib/auth-guard.js";
 import { errorResponse } from "../lib/response.js";
 import { getOutboxMetricsSnapshot, getSyncHealthMetricsSnapshot, getJournalHealthMetricsSnapshot, type OutboxMetricsSnapshot, type SyncHealthMetricsSnapshot, type JournalHealthMetricsSnapshot } from "../lib/metrics/dashboard-metrics.js";
+import { register } from "prom-client";
+import {
+  ReconciliationDashboardService,
+  type ReconciliationDashboardQuery,
+  type AccountTypeFilter,
+  type ReconciliationStatus,
+} from "../lib/reconciliation-dashboard.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -527,6 +534,123 @@ adminDashboardRoutes.get("/financial", async (c) => {
   } catch (error) {
     console.error("GET /admin/dashboard/financial failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to load financial dashboard", 500);
+  }
+});
+
+// =============================================================================
+// Reconciliation Dashboard - GET /admin/dashboard/reconciliation
+// =============================================================================
+
+adminDashboardRoutes.get("/reconciliation", async (c) => {
+  try {
+    const auth = c.get("auth");
+    const companyId = auth.companyId;
+
+    // Parse query parameters
+    const url = new URL(c.req.url);
+    const fiscalYearId = url.searchParams.get("fiscal_year_id") ? Number(url.searchParams.get("fiscal_year_id")) : undefined;
+    const periodId = url.searchParams.get("period_id") ? Number(url.searchParams.get("period_id")) : undefined;
+    const outletId = url.searchParams.get("outlet_id") ? Number(url.searchParams.get("outlet_id")) : undefined;
+    
+    const accountTypesParam = url.searchParams.get("account_types");
+    const accountTypes: AccountTypeFilter[] | undefined = accountTypesParam 
+      ? accountTypesParam.split(",").map(t => t.trim().toUpperCase() as AccountTypeFilter)
+      : undefined;
+    
+    const statusesParam = url.searchParams.get("statuses");
+    const statuses: ReconciliationStatus[] | undefined = statusesParam
+      ? statusesParam.split(",").map(s => s.trim().toUpperCase() as ReconciliationStatus)
+      : undefined;
+    
+    const includeDrilldown = url.searchParams.get("include_drilldown") === "true";
+    const trendPeriods = url.searchParams.get("trend_periods") ? Number(url.searchParams.get("trend_periods")) : 3;
+
+    // Build query
+    const query: ReconciliationDashboardQuery = {
+      companyId,
+      outletId,
+      fiscalYearId,
+      periodId,
+      accountTypes,
+      statuses,
+      includeDrilldown,
+      trendPeriods,
+    };
+
+    // Get dashboard data
+    const { getDb } = await import("../lib/db.js");
+    const dashboardService = new ReconciliationDashboardService(getDb() as any);
+    
+    const dashboard = await dashboardService.getDashboard(query);
+
+    // Get Epic 30 gl_imbalance_detected_total metric from prometheus registry
+    const metrics = await register.getMetricsAsJSON();
+    const glImbalanceMetric = metrics.find((m: { name: string }) => m.name === "gl_imbalance_detected_total");
+    const filteredGlImbalance = glImbalanceMetric?.values?.filter((v: { labels: Record<string, unknown> }) => 
+      String(v.labels.company_id) === String(companyId)
+    ) ?? [];
+    const glImbalanceCount = filteredGlImbalance.reduce((sum: number, v: { value: number }) => sum + v.value, 0);
+
+    // Enhance with Epic 30 metric
+    const enhancedDashboard = {
+      ...dashboard,
+      glImbalanceMetric: {
+        ...dashboard.glImbalanceMetric,
+        totalImbalances: dashboard.glImbalanceMetric.totalImbalances + glImbalanceCount,
+      },
+    };
+
+    return c.json({
+      success: true,
+      data: enhancedDashboard,
+    });
+  } catch (error) {
+    console.error("GET /admin/dashboard/reconciliation failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to load reconciliation dashboard", 500);
+  }
+});
+
+// =============================================================================
+// Reconciliation Drilldown - GET /admin/dashboard/reconciliation/:accountId/drilldown
+// =============================================================================
+
+adminDashboardRoutes.get("/reconciliation/:accountId/drilldown", async (c) => {
+  try {
+    const auth = c.get("auth");
+    const companyId = auth.companyId;
+    const accountId = Number(c.req.param("accountId"));
+
+    if (isNaN(accountId)) {
+      return errorResponse("BAD_REQUEST", "Invalid account ID", 400);
+    }
+
+    // Parse query parameters
+    const url = new URL(c.req.url);
+    const fiscalYearId = url.searchParams.get("fiscal_year_id") ? Number(url.searchParams.get("fiscal_year_id")) : undefined;
+    const periodId = url.searchParams.get("period_id") ? Number(url.searchParams.get("period_id")) : undefined;
+
+    // Get drilldown data
+    const { getDb } = await import("../lib/db.js");
+    const dashboardService = new ReconciliationDashboardService(getDb() as any);
+    
+    const drilldown = await dashboardService.getVarianceDrilldown(
+      companyId,
+      accountId,
+      periodId,
+      fiscalYearId
+    );
+
+    if (!drilldown) {
+      return errorResponse("NOT_FOUND", "Account not found", 404);
+    }
+
+    return c.json({
+      success: true,
+      data: drilldown,
+    });
+  } catch (error) {
+    console.error("GET /admin/dashboard/reconciliation/:accountId/drilldown failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to load variance drilldown", 500);
   }
 });
 

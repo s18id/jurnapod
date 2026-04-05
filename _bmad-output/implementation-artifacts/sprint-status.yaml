@@ -391,8 +391,8 @@ development_status:
     settings-port: done  # SettingsPort in modules-platform
     fiscal-year-close-prep: done  # Idempotency table, close procedure, FiscalYearGuard
     subledger-provider-prep: done  # SubledgerBalanceProvider interface, CASH impl
-  32-1-fiscal-year-close: backlog  # Now ready to implement (prep complete)
-  32-2-multi-period-reconciliation-dashboard: backlog  # Now ready to implement (prep complete)
+  32-1-fiscal-year-close: in_progress
+  32-2-multi-period-reconciliation-dashboard: done  # ReconciliationDashboardService, drilldown endpoint
   32-3-trial-balance-validation: backlog
   32-4-period-transition-audit-trail: backlog
   32-5-roll-forward-workspace: backlog

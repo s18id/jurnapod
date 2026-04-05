@@ -321,6 +321,10 @@ export class CashSubledgerProvider implements SubledgerBalanceProvider {
   /**
    * Get bank transactions that haven't been posted to GL.
    * These show as variance in the reconciliation.
+   *
+   * Only includes cash_bank_transactions that do NOT have corresponding
+   * journal batches (i.e., have not been posted to the general ledger).
+   * This prevents double-counting of transactions already reflected in journal_lines.
    */
   private async getBankTransactionsBalance(
     companyId: number,
@@ -343,12 +347,15 @@ export class CashSubledgerProvider implements SubledgerBalanceProvider {
     const result = await sql<{ amount: string }>`
       SELECT cbt.amount
       FROM cash_bank_transactions cbt
+      LEFT JOIN journal_batches jb ON jb.doc_id = cbt.id
+        AND jb.doc_type LIKE 'CASH_BANK_%'
       WHERE cbt.company_id = ${companyId}
         AND cbt.status = 'POSTED'
         AND cbt.transaction_date >= ${periodStart}
         AND cbt.transaction_date <= ${periodEnd}
         AND ${accountFilter}
         AND ${outletFilter}
+        AND jb.id IS NULL
     `.execute(this.db);
 
     let debitTotal = 0;
@@ -427,8 +434,8 @@ export class CashSubledgerProvider implements SubledgerBalanceProvider {
     }
 
     // Get bank transaction drilldown (only those without GL journal lines)
-    // This requires identifying bank tx that weren't posted to GL
-    // For now, we include them as SUBLEDGER_TX source type
+    // Excludes bank transactions that have been posted to GL via journal_batches
+    // to prevent double-counting with journal_lines.
     const bankTxResult = await sql<CashBankTxRow>`
       SELECT
         cbt.id,
@@ -440,6 +447,8 @@ export class CashSubledgerProvider implements SubledgerBalanceProvider {
         cbt.transaction_type,
         cbt.outlet_id
       FROM cash_bank_transactions cbt
+      LEFT JOIN journal_batches jb ON jb.doc_id = cbt.id
+        AND jb.doc_type LIKE 'CASH_BANK_%'
       WHERE cbt.company_id = ${companyId}
         AND cbt.status = 'POSTED'
         AND cbt.transaction_date >= ${periodStart}
@@ -448,6 +457,7 @@ export class CashSubledgerProvider implements SubledgerBalanceProvider {
           cbt.source_account_id IN (${sql.join(cashAccountIds.map(id => sql`${id}`), sql`, `)})
           OR cbt.destination_account_id IN (${sql.join(cashAccountIds.map(id => sql`${id}`), sql`, `)})
         )
+        AND jb.id IS NULL
       ORDER BY cbt.transaction_date ASC, cbt.id ASC
       LIMIT ${limit}
     `.execute(this.db);

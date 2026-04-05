@@ -53,12 +53,22 @@ import {
 import {
   listFiscalYears,
   createFiscalYear,
+  getFiscalYearById,
   FiscalYearNotFoundError,
   FiscalYearCodeExistsError,
   FiscalYearDateRangeError,
   FiscalYearOverlapError,
   FiscalYearOpenConflictError,
-  FiscalYearNotOpenError
+  FiscalYearNotOpenError,
+  getFiscalYearClosePreview,
+  getFiscalYearStatus,
+  FiscalYearAlreadyClosedError,
+  FiscalYearClosePreconditionError,
+  RetainedEarningsAccountNotFoundError,
+  closeFiscalYear,
+  FISCAL_YEAR_CLOSE_STATUS,
+  type ClosePreviewResult,
+  type FiscalYearStatusResult
 } from "../lib/fiscal-years.js";
 import {
   getComposedCategoryService,
@@ -997,6 +1007,355 @@ accountRoutes.get("/fiscal-years", async (c) => {
 
     console.error("GET /accounts/fiscal-years failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to list fiscal years", 500);
+  }
+});
+
+// GET /accounts/fiscal-years/:id/status - Get fiscal year status including period information
+accountRoutes.get("/fiscal-years/:id/status", async (c) => {
+  try {
+    const auth = c.get("auth");
+
+    // Check access permission using bitmask
+    const accessResult = await requireAccess({
+      module: "accounts",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const fiscalYearId = NumericIdSchema.parse(c.req.param("id"));
+
+    // Verify company ownership (getFiscalYearStatus checks company_id internally)
+    const status = await getFiscalYearStatus(auth.companyId, fiscalYearId);
+
+    return successResponse(status);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid fiscal year ID", 400);
+    }
+
+    if (error instanceof FiscalYearNotFoundError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
+
+    console.error("GET /accounts/fiscal-years/:id/status failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to get fiscal year status", 500);
+  }
+});
+
+// GET /accounts/fiscal-years/:id/close-preview - Preview closing entries before approval
+accountRoutes.get("/fiscal-years/:id/close-preview", async (c) => {
+  try {
+    const auth = c.get("auth");
+
+    // Check access permission using bitmask
+    const accessResult = await requireAccess({
+      module: "accounts",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const fiscalYearId = NumericIdSchema.parse(c.req.param("id"));
+
+    // Verify company ownership (getFiscalYearClosePreview checks company_id internally)
+    const preview = await getFiscalYearClosePreview(auth.companyId, fiscalYearId);
+
+    return successResponse(preview);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid fiscal year ID", 400);
+    }
+
+    if (error instanceof FiscalYearNotFoundError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
+
+    if (error instanceof FiscalYearAlreadyClosedError) {
+      return errorResponse("FISCAL_YEAR_ALREADY_CLOSED", error.message, 409);
+    }
+
+    if (error instanceof RetainedEarningsAccountNotFoundError) {
+      return errorResponse("RETAINED_EARNINGS_NOT_FOUND", error.message, 400);
+    }
+
+    console.error("GET /accounts/fiscal-years/:id/close-preview failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to preview closing entries", 500);
+  }
+});
+
+// POST /accounts/fiscal-years/:id/close - Initiate fiscal year close procedure
+accountRoutes.post("/fiscal-years/:id/close", async (c) => {
+  try {
+    const auth = c.get("auth");
+
+    // Check access permission using bitmask
+    const accessResult = await requireAccess({
+      module: "accounts",
+      permission: "update"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const fiscalYearId = NumericIdSchema.parse(c.req.param("id"));
+
+    // Parse optional request body
+    const payload = await c.req.json().catch(() => ({}));
+    const closeRequestId = (payload as { close_request_id?: string }).close_request_id 
+      ?? `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+    const reason = (payload as { reason?: string }).reason;
+
+    // Get the fiscal year first to check status
+    const fiscalYear = await getFiscalYearById(auth.companyId, fiscalYearId);
+    if (!fiscalYear) {
+      return errorResponse("NOT_FOUND", `Fiscal year ${fiscalYearId} not found`, 404);
+    }
+
+    if (fiscalYear.status === "CLOSED") {
+      return errorResponse("FISCAL_YEAR_ALREADY_CLOSED", `Fiscal year ${fiscalYearId} is already closed`, 409);
+    }
+
+    // Get the close preview to validate preconditions
+    // This will throw if preconditions aren't met (e.g., no retained earnings account)
+    const preview = await getFiscalYearClosePreview(auth.companyId, fiscalYearId);
+
+    // Import closeFiscalYear to create the close request
+    const { getDb } = await import("../lib/db.js");
+    const db = getDb();
+
+    // Call closeFiscalYear to create the request (without actually closing yet)
+    // The idempotency mechanism will handle if this was already called
+    const closeResult = await closeFiscalYear(
+      db,
+      fiscalYearId,
+      closeRequestId,
+      {
+        companyId: auth.companyId,
+        requestedByUserId: auth.userId ?? 0,
+        requestedAtEpochMs: Date.now(),
+        reason: reason ?? "Fiscal year close initiated"
+      }
+    );
+
+    // If the close request already existed and succeeded, return info about that
+    if (closeResult.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED) {
+      return successResponse({
+        success: true,
+        fiscalYearId: closeResult.fiscalYearId,
+        closeRequestId: closeResult.closeRequestId,
+        status: closeResult.status,
+        message: "Fiscal year was already closed",
+        previousStatus: closeResult.previousStatus,
+        newStatus: closeResult.newStatus
+      });
+    }
+
+    // Return the close request info for the next step (approve)
+    return successResponse({
+      success: false,
+      fiscalYearId: closeResult.fiscalYearId,
+      closeRequestId: closeResult.closeRequestId,
+      status: closeResult.status,
+      message: "Fiscal year close initiated. Proceed to approve to post closing entries.",
+      canApprove: true,
+      netIncome: preview.netIncome,
+      totalIncome: preview.totalIncome,
+      totalExpenses: preview.totalExpenses,
+      closingEntriesCount: preview.closingEntries.length
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid fiscal year ID", 400);
+    }
+
+    if (error instanceof FiscalYearNotFoundError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
+
+    if (error instanceof FiscalYearAlreadyClosedError) {
+      return errorResponse("FISCAL_YEAR_ALREADY_CLOSED", error.message, 409);
+    }
+
+    if (error instanceof RetainedEarningsAccountNotFoundError) {
+      return errorResponse("RETAINED_EARNINGS_NOT_FOUND", error.message, 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "FISCAL_YEAR_CLOSE_CONFLICT") {
+      return errorResponse("CLOSE_CONFLICT", err.message || "Close operation conflict", 409);
+    }
+
+    console.error("POST /accounts/fiscal-years/:id/close failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to initiate fiscal year close", 500);
+  }
+});
+
+// POST /accounts/fiscal-years/:id/close/approve - Approve and post closing entries
+accountRoutes.post("/fiscal-years/:id/close/approve", async (c) => {
+  try {
+    const auth = c.get("auth");
+
+    // Check access permission using bitmask
+    const accessResult = await requireAccess({
+      module: "accounts",
+      permission: "update"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const fiscalYearId = NumericIdSchema.parse(c.req.param("id"));
+
+    // Parse optional request body
+    const payload = await c.req.json().catch(() => ({}));
+    const closeRequestId = (payload as { close_request_id?: string }).close_request_id 
+      ?? `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+
+    // Import the journals service to post the closing entries
+    const { JournalsService, checkGlImbalanceByBatchId } = await import("@jurnapod/modules-accounting");
+    const { getDb } = await import("../lib/db.js");
+    const db = getDb();
+    const journalsService = new JournalsService(db);
+
+    // Wrap ALL operations in a single transaction for atomicity
+    // If any step fails, everything rolls back - no partial state
+    const result = await db.transaction().execute(async (trx) => {
+      // 1. Get preview within transaction for consistent reads
+      const preview = await getFiscalYearClosePreview(auth.companyId, fiscalYearId, trx);
+
+      const postedBatchIds: number[] = [];
+      let hasImbalance = false;
+      let imbalanceDetails: { batchId: number; imbalance: number } | null = null;
+
+      if (preview.closingEntries.length > 0) {
+        // Create a single balanced journal entry for all closing entries
+        const lines = preview.closingEntries.map(entry => ({
+          account_id: entry.accountId,
+          debit: entry.debit,
+          credit: entry.credit,
+          description: entry.description
+        }));
+
+        // Verify the entries balance
+        const totalDebit = lines.reduce((sum, l) => sum + l.debit, 0);
+        const totalCredit = lines.reduce((sum, l) => sum + l.credit, 0);
+
+        if (Math.abs(totalDebit - totalCredit) > 0.001) {
+          throw new Error(
+            `ENTRIES_NOT_BALANCED:Closing entries are not balanced: debit=${totalDebit}, credit=${totalCredit}`
+          );
+        }
+
+        try {
+          // 2. Post journal entries within transaction
+          const journalResult = await journalsService.createManualEntry(
+            {
+              company_id: auth.companyId,
+              entry_date: preview.entryDate,
+              description: preview.description,
+              lines
+            },
+            auth.userId,
+            trx  // Pass transaction for atomicity
+          );
+          postedBatchIds.push(journalResult.id);
+
+          // Check for GL imbalance within transaction
+          const imbalanceResult = await checkGlImbalanceByBatchId(trx, journalResult.id);
+          if (imbalanceResult) {
+            hasImbalance = true;
+            imbalanceDetails = {
+              batchId: imbalanceResult.journalBatchId,
+              imbalance: imbalanceResult.imbalance
+            };
+          }
+        } catch (journalError) {
+          const err = journalError as { code?: string; message?: string };
+          if (err.code === "FISCAL_YEAR_CLOSED") {
+            throw Object.assign(new Error("FISCAL_YEAR_CLOSED"), { code: "FISCAL_YEAR_CLOSED" });
+          }
+          throw journalError;
+        }
+      }
+
+      // 3. Update fiscal year status within same transaction
+      // This ensures atomicity - either both journal entries AND fiscal year close succeed, or both fail
+      const closeResult = await closeFiscalYear(
+        db,
+        fiscalYearId,
+        closeRequestId,
+        {
+          companyId: auth.companyId,
+          requestedByUserId: auth.userId ?? 0,
+          requestedAtEpochMs: Date.now(),
+          reason: `Fiscal year close approved. Posted ${postedBatchIds.length} closing entry batch(es).`
+        },
+        trx  // Pass transaction for atomicity
+      );
+
+      return {
+        success: closeResult.success,
+        fiscalYearId: closeResult.fiscalYearId,
+        closeRequestId: closeResult.closeRequestId,
+        status: closeResult.status,
+        previousStatus: closeResult.previousStatus,
+        newStatus: closeResult.newStatus,
+        postedBatchIds,
+        netIncome: preview.netIncome,
+        totalIncome: preview.totalIncome,
+        totalExpenses: preview.totalExpenses,
+        hasImbalance,
+        imbalanceDetails: imbalanceDetails ?? undefined
+      };
+    });
+
+    return successResponse(result);
+  } catch (error) {
+    // Check for our custom "ENTRIES_NOT_BALANCED" error format
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage.startsWith("ENTRIES_NOT_BALANCED:")) {
+      const details = errorMessage.replace("ENTRIES_NOT_BALANCED:", "");
+      return errorResponse("ENTRIES_NOT_BALANCED", details, 400);
+    }
+
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid fiscal year ID", 400);
+    }
+
+    if (error instanceof FiscalYearNotFoundError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
+
+    if (error instanceof FiscalYearAlreadyClosedError) {
+      return errorResponse("FISCAL_YEAR_ALREADY_CLOSED", error.message, 409);
+    }
+
+    if (error instanceof FiscalYearClosePreconditionError) {
+      return errorResponse("CLOSE_PRECONDITION_FAILED", error.message, 400);
+    }
+
+    if (error instanceof RetainedEarningsAccountNotFoundError) {
+      return errorResponse("RETAINED_EARNINGS_NOT_FOUND", error.message, 400);
+    }
+
+    const err = error as { code?: string; message?: string };
+    if (err.code === "FISCAL_YEAR_CLOSE_CONFLICT") {
+      return errorResponse("CLOSE_CONFLICT", err.message || "Close operation conflict", 409);
+    }
+
+    if (err.code === "FISCAL_YEAR_CLOSED") {
+      return errorResponse("FISCAL_YEAR_CLOSED", err.message || "Fiscal year is closed", 409);
+    }
+
+    console.error("POST /accounts/fiscal-years/:id/close/approve failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to approve fiscal year close", 500);
   }
 });
 

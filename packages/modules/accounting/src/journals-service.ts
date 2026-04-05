@@ -82,10 +82,15 @@ export class JournalsService {
 
   /**
    * Create a manual journal entry
+   * 
+   * @param data The journal entry data
+   * @param userId Optional user ID for audit logging
+   * @param trx Optional external transaction (if provided, uses this transaction instead of creating a new one)
    */
   async createManualEntry(
     data: ManualJournalEntryCreateRequest,
-    userId?: number
+    userId?: number,
+    trx?: KyselySchema
   ): Promise<JournalBatchResponse> {
     if (data.client_ref) {
       const existingId = await this.findManualEntryIdByClientRef(
@@ -120,69 +125,87 @@ export class JournalsService {
     // For manual entries, we use a unique doc_id based on timestamp
     const docId = Date.now();
 
-    const batchId = await this.db.transaction().execute(async (trx) => {
-      const batchResult = await sql`
-        INSERT INTO journal_batches (
-          company_id, outlet_id, doc_type, doc_id, client_ref, posted_at, created_at, updated_at
+    const batchId = await (trx 
+      ? this.executeManualEntryInsert(trx, data, docId, totalDebit, totalCredit, userId)
+      : this.db.transaction().execute(async (innerTrx) => 
+          this.executeManualEntryInsert(innerTrx, data, docId, totalDebit, totalCredit, userId)
+        )
+    );
+
+    // Return the created batch with lines
+    return this.getJournalBatch(batchId, data.company_id);
+  }
+
+  /**
+   * Execute the manual entry insert operation
+   * @internal
+   */
+  private async executeManualEntryInsert(
+    trx: KyselySchema,
+    data: ManualJournalEntryCreateRequest,
+    docId: number,
+    totalDebit: number,
+    totalCredit: number,
+    userId?: number
+  ): Promise<number> {
+    const batchResult = await sql`
+      INSERT INTO journal_batches (
+        company_id, outlet_id, doc_type, doc_id, client_ref, posted_at, created_at, updated_at
+      )
+      VALUES (
+        ${data.company_id},
+        ${data.outlet_id ?? null},
+        'MANUAL',
+        ${docId},
+        ${data.client_ref ?? null},
+        ${data.entry_date},
+        NOW(),
+        NOW()
+      )
+    `.execute(trx);
+
+    const newBatchId = Number(batchResult.insertId);
+
+    // Create journal lines
+    for (const line of data.lines) {
+      await sql`
+        INSERT INTO journal_lines (
+          journal_batch_id, company_id, outlet_id, account_id, 
+          line_date, debit, credit, description, created_at, updated_at
         )
         VALUES (
+          ${newBatchId},
           ${data.company_id},
           ${data.outlet_id ?? null},
-          'MANUAL',
-          ${docId},
-          ${data.client_ref ?? null},
+          ${line.account_id},
           ${data.entry_date},
+          ${line.debit},
+          ${line.credit},
+          ${line.description},
           NOW(),
           NOW()
         )
       `.execute(trx);
+    }
 
-      const newBatchId = Number(batchResult.insertId);
+    // Audit log (inside transaction)
+    if (this.auditService && userId) {
+      await this.auditService.logCreate(
+        { company_id: data.company_id, user_id: userId },
+        "journal_entry",
+        newBatchId,
+        {
+          doc_type: "MANUAL",
+          entry_date: data.entry_date,
+          description: data.description,
+          total_debit: totalDebit,
+          total_credit: totalCredit,
+          line_count: data.lines.length
+        }
+      );
+    }
 
-      // Create journal lines
-      for (const line of data.lines) {
-        await sql`
-          INSERT INTO journal_lines (
-            journal_batch_id, company_id, outlet_id, account_id, 
-            line_date, debit, credit, description, created_at, updated_at
-          )
-          VALUES (
-            ${newBatchId},
-            ${data.company_id},
-            ${data.outlet_id ?? null},
-            ${line.account_id},
-            ${data.entry_date},
-            ${line.debit},
-            ${line.credit},
-            ${line.description},
-            NOW(),
-            NOW()
-          )
-        `.execute(trx);
-      }
-
-      // Audit log (inside transaction)
-      if (this.auditService && userId) {
-        await this.auditService.logCreate(
-          { company_id: data.company_id, user_id: userId },
-          "journal_entry",
-          newBatchId,
-          {
-            doc_type: "MANUAL",
-            entry_date: data.entry_date,
-            description: data.description,
-            total_debit: totalDebit,
-            total_credit: totalCredit,
-            line_count: data.lines.length
-          }
-        );
-      }
-
-      return newBatchId;
-    });
-
-    // Return the created batch with lines
-    return this.getJournalBatch(batchId, data.company_id);
+    return newBatchId;
   }
 
   private async findManualEntryIdByClientRef(
