@@ -396,6 +396,25 @@ development_status:
   32-3-trial-balance-validation: done
   32-4-period-transition-audit-trail: done
   32-5-roll-forward-workspace: done  # PeriodCloseWorkspaceService, GET /admin/dashboards/period-close-workspace
+  epic-32-p2-fixes:
+    p2-001-net-income-calculation: done  # Fixed Math.abs() bug in fiscal-years.ts
+    p2-005-audit-trail-check: done  # Fixed chicken-and-egg logic in period-close-workspace.ts
+    p2-013-sql-injection-risk: done  # Removed dead code in dashboard-service.ts
+    p2-016-sql-injection-risk: done  # Fixed sql.raw() in trial-balance/service.ts
+    p2-003-retained-earnings-detection: done  # Added TODO comment for fragile pattern matching in fiscal-years.ts
+    p2-009-admin-dashboards-split: done  # Split 823-line file into directory structure
+    p2-010-gl-imbalance-check-timing: done  # Added explanation comment for post-posting check timing
+    p2-015-cash-subledger-duplication: done  # Refactored trial-balance to use CashSubledgerProvider
+    p2-002-unused-params: done  # Removed unused fiscalYearStartDate/fiscalYearEndDate from getPlAccountBalances
+    p2-004-date-parsing-helper: done  # Extracted formatDateOnlyFromUnknown to common-utils.ts
+    p2-006-type-cast-workaround: done  # Fixed PeriodTransitionAuditService type assertion in period-close-workspace.ts
+    p2-007-inline-interface: done  # Defined PreCloseCheckItem interface instead of inline type in period-close-workspace.ts
+    p2-008-enum-validation: done  # Added proper enum validation for account_types and statuses in admin-dashboards/reconciliation.ts
+    p2-011-nested-error-handling: done  # Simplified nested try-catch in accounts.ts close/approve endpoint
+    p2-012-dynamic-imports: done  # Moved dynamic imports to static imports in routes/audit.ts
+    p2-014-unused-variable: done  # Removed unused typePlaceholders in dashboard-service.ts
+    p2-017-as-any-cast: done  # Removed as any cast for logAction in period-transition.ts
+    p2-018-portable-json-extraction: done  # Replaced MySQL-specific ->> with portable JSON_EXTRACT() in period-transition.ts
 
   # Epic 36: Import/Export Infrastructure (deferred - moved from Epic 31-5)
   epic-36: deferred

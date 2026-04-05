@@ -425,7 +425,11 @@ export async function processSyncPushTransactionPhase2(
         acceptedContext.status === "COMPLETED" &&
         postingResult.journalBatchId !== null
       ) {
-        const imbalanceResult = await checkGlImbalanceByBatchId(db, postingResult.journalBatchId);
+        const imbalanceResult = await checkGlImbalanceByBatchId(
+          db,
+          postingResult.journalBatchId,
+          acceptedContext.companyId
+        );
         if (imbalanceResult !== null) {
           // GL imbalance detected - record metric with tenant isolation
           journalMetrics.recordGlImbalance(acceptedContext.companyId);

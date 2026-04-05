@@ -45,7 +45,7 @@ import { getDb } from "./lib/db.js";
 import { initializeDefaultMetrics, getMetricsOutput, getMetricsContentType } from "./lib/metrics/index.js";
 import { alertManager } from "./lib/alerts/alert-manager.js";
 import { alertEvaluationService } from "./lib/alerts/alert-evaluation.js";
-import { adminDashboardRoutes } from "./routes/admin-dashboards.js";
+import { adminDashboardRoutes } from "./routes/admin-dashboards/index.js";
 import { adminRunbookRoutes } from "./routes/admin-runbook.js";
 import { auditRoutes } from "./routes/audit.js";
 

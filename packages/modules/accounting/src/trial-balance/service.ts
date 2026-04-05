@@ -16,6 +16,8 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
+import { CashSubledgerProvider, type CashSubledgerDbClient } from "../reconciliation/subledger/cash-provider.js";
+import { fromSignedAmount } from "../reconciliation/subledger/provider.js";
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -271,11 +273,13 @@ export class TrialBalanceService {
   private readonly db: KyselySchema;
   private readonly varianceWarningThreshold: number;
   private readonly varianceCriticalThreshold: number;
+  private readonly cashSubledgerProvider: CashSubledgerProvider;
 
   constructor(db: KyselySchema, config?: TrialBalanceServiceConfig) {
     this.db = db;
     this.varianceWarningThreshold = config?.varianceWarningThreshold ?? DEFAULT_VARIANCE_WARNING_THRESHOLD;
     this.varianceCriticalThreshold = config?.varianceCriticalThreshold ?? DEFAULT_VARIANCE_CRITICAL_THRESHOLD;
+    this.cashSubledgerProvider = new CashSubledgerProvider({ db: this.db as CashSubledgerDbClient });
   }
 
   /**
@@ -730,53 +734,67 @@ export class TrialBalanceService {
     creditAmount: number;
     netBalance: number;
   }>> {
-    let typeFilter = "";
-    if (accountTypes && accountTypes.length > 0) {
-      const types = accountTypes.map((t) => sql`LOWER(COALESCE(at.name, a.type_name, '')) = ${sql.literal(t.toLowerCase())}`);
-      typeFilter = ` AND (${types.map((t) => sql`${t}`).join(" OR ")})`;
+    // Build base query using Kysely's query builder
+    let query = this.db
+      .selectFrom("accounts as a")
+      .leftJoin("account_types as at", "at.id", "a.account_type_id")
+      .leftJoin("journal_lines as jl", "jl.account_id", "a.id")
+      .leftJoin("journal_batches as jb", "jb.id", "jl.journal_batch_id")
+      .where("a.company_id", "=", companyId)
+      .where("a.is_active", "=", 1)
+      .where("jl.line_date", ">=", periodStart)
+      .where("jl.line_date", "<=", periodEnd)
+      .where("jl.company_id", "=", companyId)
+      .groupBy("a.id")
+      .groupBy("a.code")
+      .groupBy("a.name")
+      .groupBy("at.name")
+      .groupBy("a.type_name")
+      .orderBy("a.code");
+
+    // Add outlet filter if provided
+    if (outletId !== undefined) {
+      query = query.where("jl.outlet_id", "=", outletId);
     }
 
-    const query = sql<{
+    // Add account type filter using OR conditions
+    if (accountTypes && accountTypes.length > 0) {
+      query = query.where((eb) => eb.or(
+        accountTypes.map((t) =>
+          eb("at.name", "=", t)
+        )
+      ));
+    }
+
+    // Add having clause for non-zero balances if needed
+    // Note: We use raw SQL for HAVING since Kysely doesn't support aggregate filters easily
+    // The filter is applied post-query to avoid SQL injection (values are numeric comparisons only)
+    const result = await query
+      .select([
+        "a.id as account_id",
+        "a.code as account_code",
+        "a.name as account_name",
+        sql`COALESCE(at.name, a.type_name, '')`.as("account_type_name"),
+        sql`COALESCE(SUM(jl.debit), 0)`.as("debit_total"),
+        sql`COALESCE(SUM(jl.credit), 0)`.as("credit_total"),
+      ])
+      .execute();
+
+    let rows = result as Array<{
       account_id: number;
       account_code: string;
       account_name: string;
       account_type_name: string;
-      debit_total: string;
-      credit_total: string;
-    }>`
-      SELECT
-        a.id as account_id,
-        a.code as account_code,
-        a.name as account_name,
-        COALESCE(at.name, a.type_name, '') as account_type_name,
-        COALESCE(SUM(jl.debit), 0) AS debit_total,
-        COALESCE(SUM(jl.credit), 0) AS credit_total
-      FROM accounts a
-      LEFT JOIN account_types at ON at.id = a.account_type_id
-      LEFT JOIN journal_lines jl ON jl.account_id = a.id
-        AND jl.line_date >= ${periodStart}
-        AND jl.line_date <= ${periodEnd}
-        AND jl.company_id = ${companyId}
-      ${outletId ? sql`AND jl.outlet_id = ${outletId}` : sql``}
-      LEFT JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-      WHERE a.company_id = ${companyId}
-        AND a.is_active = 1
-        ${sql.raw(typeFilter)}
-      GROUP BY a.id, a.code, a.name, at.name, a.type_name
-      ${includeZeroBalances ? sql`` : sql`HAVING COALESCE(SUM(jl.debit), 0) <> 0 OR COALESCE(SUM(jl.credit), 0) <> 0`}
-      ORDER BY a.code ASC
-    `;
+      debit_total: number;
+      credit_total: number;
+    }>;
 
-    const result = await query.execute(this.db);
+    // Filter out zero-balance rows if needed (post-query filter is safe)
+    if (!includeZeroBalances) {
+      rows = rows.filter((row) => row.debit_total !== 0 || row.credit_total !== 0);
+    }
 
-    return (result.rows as Array<{
-      account_id: number;
-      account_code: string;
-      account_name: string;
-      account_type_name: string;
-      debit_total: string;
-      credit_total: string;
-    }>).map((row) => {
+    return rows.map((row) => {
       const debitAmount = Number(row.debit_total) || 0;
       const creditAmount = Number(row.credit_total) || 0;
       return {
@@ -841,7 +859,7 @@ export class TrialBalanceService {
 
     if (subledgerType === "CASH") {
       // Use the CashSubledgerProvider pattern
-      const cashBalances = await this.getCashSubledgerBalance(companyId, accountId, periodStart, periodEnd);
+      const cashBalances = await this.getCashSubledgerBalance(companyId, accountId, periodEnd);
       subledgerBalance = cashBalances;
       hasSubledgerData = Math.abs(cashBalances) > 0 || glBalance !== 0;
     }
@@ -890,49 +908,26 @@ export class TrialBalanceService {
   }
 
   /**
-   * Get cash subledger balance for a specific account
+   * Get cash subledger balance for a specific account.
+   * Uses CashSubledgerProvider for canonical subledger calculation.
+   * The provider calculates balance as of the period end date.
    */
   private async getCashSubledgerBalance(
     companyId: number,
     accountId: number,
-    periodStart: Date,
     periodEnd: Date
   ): Promise<number> {
-    // Get journal lines balance
-    const jlResult = await this.db
-      .selectFrom("journal_lines as jl")
-      .innerJoin("journal_batches as jb", "jb.id", "jl.journal_batch_id")
-      .where("jl.company_id", "=", companyId)
-      .where("jl.account_id", "=", accountId)
-      .where("jl.line_date", ">=", periodStart)
-      .where("jl.line_date", "<=", periodEnd)
-      .select([
-        sql<number>`COALESCE(SUM(jl.debit), 0)`.as("debit_total"),
-        sql<number>`COALESCE(SUM(jl.credit), 0)`.as("credit_total"),
-      ])
-      .executeTakeFirst();
+    // Use CashSubledgerProvider for canonical cash subledger balance
+    // asOfEpochMs represents the point-in-time balance (period end)
+    const balanceResult = await this.cashSubledgerProvider.getBalance({
+      companyId,
+      accountId,
+      asOfEpochMs: periodEnd.getTime(),
+    });
 
-    const jlBalance = (Number(jlResult?.debit_total) || 0) - (Number(jlResult?.credit_total) || 0);
-
-    // Get bank transactions balance (POSTED only, not yet in GL)
-    const bankResult = await this.db
-      .selectFrom("cash_bank_transactions")
-      .where("company_id", "=", companyId)
-      .where("status", "=", "POSTED")
-      .where("transaction_date", ">=", periodStart)
-      .where("transaction_date", "<=", periodEnd)
-      .where((eb) =>
-        eb.or([
-          eb("source_account_id", "=", accountId),
-          eb("destination_account_id", "=", accountId),
-        ])
-      )
-      .select([sql<number>`COALESCE(SUM(amount), 0)`.as("total")])
-      .executeTakeFirst();
-
-    const bankTotal = Number(bankResult?.total) || 0;
-
-    return jlBalance + bankTotal;
+    // CashSubledgerProvider returns signed balance (debit-positive)
+    // Convert to numeric for compatibility with GL balance comparison
+    return fromSignedAmount(balanceResult.signedBalance);
   }
 
   /**

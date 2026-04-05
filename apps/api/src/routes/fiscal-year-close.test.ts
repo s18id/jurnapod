@@ -511,7 +511,7 @@ describe("Fiscal Year Close Procedure", { concurrency: false }, () => {
         
         // Check for imbalance
         const { checkGlImbalanceByBatchId } = await import("@jurnapod/modules-accounting");
-        const imbalanceResult = await checkGlImbalanceByBatchId(db, batchId);
+        const imbalanceResult = await checkGlImbalanceByBatchId(db, batchId, testCompanyId);
         
         assert.ok(imbalanceResult, "Should detect imbalance");
         assert.ok(Math.abs(imbalanceResult.imbalance - 50.00) < 0.01, "Imbalance should be 50.00");

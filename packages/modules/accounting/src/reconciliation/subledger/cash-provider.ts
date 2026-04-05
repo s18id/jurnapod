@@ -121,6 +121,10 @@ export class CashSubledgerProvider implements SubledgerBalanceProvider {
   async getBalance(query: SubledgerBalanceQuery): Promise<SubledgerBalanceResult> {
     const { companyId, outletId, asOfEpochMs, fiscalYearId, periodId, accountId, includeDrilldown, drilldownLimit } = query;
 
+    if (outletId !== undefined) {
+      await this.assertOutletBelongsToCompany(companyId, outletId);
+    }
+
     // Get cash account IDs for this company
     const cashAccountIds = await this.getCashAccountIds(companyId);
 
@@ -201,6 +205,19 @@ export class CashSubledgerProvider implements SubledgerBalanceProvider {
       breakdown,
       drilldown,
     };
+  }
+
+  private async assertOutletBelongsToCompany(companyId: number, outletId: number): Promise<void> {
+    const outlet = await this.db
+      .selectFrom("outlets")
+      .select("id")
+      .where("id", "=", outletId)
+      .where("company_id", "=", companyId)
+      .executeTakeFirst();
+
+    if (!outlet) {
+      throw new Error(`OUTLET_SCOPE_INVALID:Outlet ${outletId} not found for company ${companyId}`);
+    }
   }
 
   /**

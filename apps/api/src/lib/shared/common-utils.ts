@@ -190,6 +190,28 @@ export function formatDateOnly(value: Date | string): string {
   return `${year}-${month}-${day}`;
 }
 
+/**
+ * Format an unknown date value (Date, string, or other) to YYYY-MM-DD format.
+ * Handles values from database rows where type may not be strictly typed.
+ */
+export function formatDateOnlyFromUnknown(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (value instanceof Date) {
+    return value.toISOString().split('T')[0];
+  }
+  if (typeof value === "string") {
+    return value.slice(0, 10);
+  }
+  if (typeof value === "number") {
+    // Assume Unix timestamp in milliseconds
+    return new Date(value).toISOString().split('T')[0];
+  }
+  // Fallback: convert to string and slice
+  return String(value).slice(0, 10);
+}
+
 // =============================================================================
 // Precision Validation Helpers
 // =============================================================================

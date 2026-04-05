@@ -17,7 +17,7 @@ import type { KyselySchema } from "@jurnapod/db";
 import { getDb } from "./db.js";
 import { getFiscalYearById, getFiscalYearStatus, type FiscalYearStatusResult } from "./fiscal-years.js";
 import { ReconciliationDashboardService } from "@jurnapod/modules-accounting/reconciliation";
-import { TrialBalanceService } from "@jurnapod/modules-accounting/trial-balance";
+import { TrialBalanceService, type PreCloseCheckItem } from "@jurnapod/modules-accounting/trial-balance";
 import { AuditService } from "@jurnapod/modules-platform";
 import { PeriodTransitionAuditService, PERIOD_TRANSITION_ACTION } from "@jurnapod/modules-platform/audit/period-transition";
 
@@ -64,7 +64,6 @@ export interface PeriodCloseWorkspace {
 export interface PeriodCloseWorkspaceQuery {
   companyId: number;
   fiscalYearId: number;
-  outletId?: number;
 }
 
 // =============================================================================
@@ -81,14 +80,9 @@ export class PeriodCloseWorkspaceService {
     this.db = db ?? getDb();
     this.reconciliationService = new ReconciliationDashboardService(this.db);
     this.trialBalanceService = new TrialBalanceService(this.db);
-    // AuditService is required by PeriodTransitionAuditService but we don't use it directly here
-    // Note: Due to module resolution (tsconfig paths vs package.json exports), PeriodTransitionAuditService
-    // is resolved from dist/ while AuditService is from src/. Cast to any to bridge the type mismatch.
+    // AuditService is required by PeriodTransitionAuditService
     const auditSvc = new AuditService(this.db);
-    this.auditService = new PeriodTransitionAuditService(
-      this.db,
-      auditSvc as unknown as InstanceType<typeof PeriodTransitionAuditService> extends { auditService: infer A } ? A : never
-    );
+    this.auditService = new PeriodTransitionAuditService(this.db, auditSvc);
   }
 
   /**
@@ -238,7 +232,7 @@ export class PeriodCloseWorkspaceService {
         fiscalYearId,
       });
 
-      const tbCheck = validation.checks.find((c: { id?: string }) => c.id === "trial_balance_balanced");
+      const tbCheck = validation.checks.find((c: PreCloseCheckItem) => c.id === "trial_balance_balanced");
       if (!tbCheck) {
         return {
           id: itemId,
@@ -294,7 +288,7 @@ export class PeriodCloseWorkspaceService {
         fiscalYearId,
       });
 
-      const glCheck = validation.checks.find((c: { id?: string }) => c.id === "no_gl_imbalances");
+      const glCheck = validation.checks.find((c: PreCloseCheckItem) => c.id === "no_gl_imbalances");
       if (!glCheck) {
         return {
           id: itemId,
@@ -350,7 +344,7 @@ export class PeriodCloseWorkspaceService {
         fiscalYearId,
       });
 
-      const varianceCheck = validation.checks.find((c: { id?: string }) => c.id === "variance_threshold");
+      const varianceCheck = validation.checks.find((c: PreCloseCheckItem) => c.id === "variance_threshold");
       if (!varianceCheck) {
         return {
           id: itemId,
@@ -390,8 +384,9 @@ export class PeriodCloseWorkspaceService {
 
   /**
    * Check period transition audit trail is recorded (Story 32.4)
-   * - PASS: Period transition audit exists for this fiscal year
-   * - FAIL: No audit trail found
+   * - PASS: Period transition audit exists for this fiscal year (already closed)
+   * - PASS: Close request is IN_PROGRESS (audit will be created during close)
+   * - FAIL: No audit trail and no active close request
    */
   private async checkAuditTrail(
     companyId: number,
@@ -401,33 +396,63 @@ export class PeriodCloseWorkspaceService {
     const detailUrl = `/audit/period-transitions?fiscal_year_id=${fiscalYearId}`;
 
     try {
-      // Query for any period transition audit records for this fiscal year
-      const auditResult = await this.auditService.queryAudits({
-        company_id: companyId,
-        fiscal_year_id: fiscalYearId,
-        limit: 1,
-      });
+      // First check if fiscal year is already closed
+      const fiscalYear = await getFiscalYearById(companyId, fiscalYearId);
+      const isAlreadyClosed = fiscalYear?.status?.toUpperCase() === "CLOSED";
 
-      // We expect a CLOSE action to be recorded for the fiscal year close
-      const closeAuditExists = auditResult.transitions.some(
-        (t) => t.action === PERIOD_TRANSITION_ACTION.CLOSE
-      );
+      if (isAlreadyClosed) {
+        // Fiscal year is already closed - check for CLOSE audit record
+        const auditResult = await this.auditService.queryAudits({
+          company_id: companyId,
+          fiscal_year_id: fiscalYearId,
+          limit: 1,
+        });
 
-      if (closeAuditExists) {
+        const closeAuditExists = auditResult.transitions.some(
+          (t) => t.action === PERIOD_TRANSITION_ACTION.CLOSE
+        );
+
+        if (closeAuditExists) {
+          return {
+            id: itemId,
+            label: "Period transition audit recorded",
+            status: "passed",
+            detail_url: detailUrl,
+          };
+        }
+
+        // Closed but no audit record - this is an error state
         return {
           id: itemId,
           label: "Period transition audit recorded",
-          status: "passed",
+          status: "failed",
+          detail_url: detailUrl,
+          error_message: "Fiscal year is closed but no period transition audit found",
+        };
+      }
+
+      // Not yet closed - check if close request is IN_PROGRESS
+      const fyStatus = await getFiscalYearStatus(companyId, fiscalYearId);
+      const hasInProgressCloseRequest = fyStatus.closeRequestStatus === "IN_PROGRESS";
+
+      if (hasInProgressCloseRequest) {
+        // Close is in progress - audit will be created at completion.
+        // Keep this item pending until an actual CLOSE audit record exists.
+        return {
+          id: itemId,
+          label: "Period transition audit recorded",
+          status: "pending",
           detail_url: detailUrl,
         };
       }
 
+      // No audit record and no active close request
       return {
         id: itemId,
         label: "Period transition audit recorded",
         status: "failed",
         detail_url: detailUrl,
-        error_message: "No period transition audit records found",
+        error_message: "No period transition audit records found and no close request in progress",
       };
     } catch (error) {
       return {

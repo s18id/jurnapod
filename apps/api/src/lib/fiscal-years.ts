@@ -16,6 +16,7 @@ import {
 import { getDb, type KyselySchema } from "./db";
 import { toRfc3339Required } from "@jurnapod/shared";
 import { KyselySettingsAdapter } from "@jurnapod/modules-platform/settings";
+import { formatDateOnlyFromUnknown } from "./shared/common-utils.js";
 
 export class FiscalYearNotFoundError extends Error {
   code = "FISCAL_YEAR_NOT_FOUND";
@@ -493,7 +494,7 @@ export async function closeFiscalYear(
 
   // If external transaction provided, use it for atomic operations
   if (trx) {
-    return await closeFiscalYearWithTransaction(trx, db, fiscalYearId, closeRequestId, context);
+    return await closeFiscalYearWithTransaction(trx, fiscalYearId, closeRequestId, context);
   }
 
   // Original behavior: insert PENDING record outside transaction, then execute close in transaction with retry
@@ -726,14 +727,12 @@ export async function closeFiscalYear(
  * All operations are atomic within the provided transaction.
  * 
  * @param trx Transaction to use for all operations
- * @param db Fallback db for read operations outside transaction (for idempotency check)
  * @param fiscalYearId The fiscal year ID to close
  * @param closeRequestId Unique idempotency key for this close operation
  * @param context Company and user context for the operation
  */
 async function closeFiscalYearWithTransaction(
   trx: KyselySchema,
-  db: KyselySchema,
   fiscalYearId: number,
   closeRequestId: string,
   context: CloseFiscalYearContext
@@ -741,59 +740,68 @@ async function closeFiscalYearWithTransaction(
   const { companyId, requestedByUserId, requestedAtEpochMs } = context;
   const now = requestedAtEpochMs;
 
-  // Step 1: Check for existing close request (idempotency) - read from db, not trx
-  // to ensure we see the latest state even if other transactions have committed
-  const existingRequest = await db
-    .selectFrom("fiscal_year_close_requests")
-    .where("company_id", "=", companyId)
-    .where("fiscal_year_id", "=", fiscalYearId)
-    .where("close_request_id", "=", closeRequestId)
-    .select([
-      "id",
-      "status",
-      "fiscal_year_status_before",
-      "fiscal_year_status_after",
-      "result_json",
-      "failure_code",
-      "failure_message"
-    ])
-    .executeTakeFirst();
+  // Step 1: Atomically claim idempotency key by insert.
+  // If duplicate key exists, return existing result for replay-safe behavior.
+  let closeRequestDbId: number;
+  try {
+    const insertResult = await trx
+      .insertInto("fiscal_year_close_requests")
+      .values({
+        company_id: companyId,
+        fiscal_year_id: fiscalYearId,
+        close_request_id: closeRequestId,
+        status: FISCAL_YEAR_CLOSE_STATUS.PENDING,
+        fiscal_year_status_before: "UNKNOWN",
+        fiscal_year_status_after: "CLOSED",
+        requested_by_user_id: requestedByUserId,
+        requested_at_ts: requestedAtEpochMs,
+        created_at_ts: now,
+        updated_at_ts: now
+      })
+      .executeTakeFirst();
 
-  if (existingRequest) {
-    // Return existing result for idempotent replay
-    return {
-      success: existingRequest.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED,
-      fiscalYearId,
-      closeRequestId,
-      status: existingRequest.status as FiscalYearCloseStatus,
-      previousStatus: existingRequest.fiscal_year_status_before,
-      newStatus: existingRequest.fiscal_year_status_after,
-      resultJson: existingRequest.result_json
-        ? JSON.parse(existingRequest.result_json)
-        : undefined,
-      failureCode: existingRequest.failure_code ?? undefined,
-      failureMessage: existingRequest.failure_message ?? undefined
-    };
+    closeRequestDbId = Number(insertResult.insertId);
+  } catch (dbError: unknown) {
+    if (
+      typeof dbError === "object" &&
+      dbError !== null &&
+      "code" in dbError &&
+      (dbError as { code: string }).code === "ER_DUP_ENTRY"
+    ) {
+      const existingRequest = await trx
+        .selectFrom("fiscal_year_close_requests")
+        .where("company_id", "=", companyId)
+        .where("fiscal_year_id", "=", fiscalYearId)
+        .where("close_request_id", "=", closeRequestId)
+        .select([
+          "status",
+          "fiscal_year_status_before",
+          "fiscal_year_status_after",
+          "result_json",
+          "failure_code",
+          "failure_message"
+        ])
+        .executeTakeFirst();
+
+      if (existingRequest) {
+        return {
+          success: existingRequest.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED,
+          fiscalYearId,
+          closeRequestId,
+          status: existingRequest.status as FiscalYearCloseStatus,
+          previousStatus: existingRequest.fiscal_year_status_before,
+          newStatus: existingRequest.fiscal_year_status_after,
+          resultJson: existingRequest.result_json
+            ? JSON.parse(existingRequest.result_json)
+            : undefined,
+          failureCode: existingRequest.failure_code ?? undefined,
+          failureMessage: existingRequest.failure_message ?? undefined
+        };
+      }
+    }
+
+    throw dbError;
   }
-
-  // Insert new close request within transaction
-  const insertResult = await trx
-    .insertInto("fiscal_year_close_requests")
-    .values({
-      company_id: companyId,
-      fiscal_year_id: fiscalYearId,
-      close_request_id: closeRequestId,
-      status: FISCAL_YEAR_CLOSE_STATUS.PENDING,
-      fiscal_year_status_before: "UNKNOWN",
-      fiscal_year_status_after: "CLOSED",
-      requested_by_user_id: requestedByUserId,
-      requested_at_ts: requestedAtEpochMs,
-      created_at_ts: now,
-      updated_at_ts: now
-    })
-    .executeTakeFirst();
-
-  const closeRequestDbId = Number(insertResult.insertId);
 
   // Lock fiscal_year row FIRST to prevent deadlocks
   const lockedFiscalYear = await trx
@@ -963,6 +971,10 @@ export interface FiscalYearStatusResult {
  * Find the Retained Earnings account for a company.
  * Looks for an equity account (type_name='EQUITY' or report_group='EQ') with 'retained' in the name.
  * If not found, looks for any equity account as fallback.
+ *
+ * TODO: Add is_retained_earnings flag to accounts table for robust detection.
+ * Current pattern matching is fragile and language-dependent (e.g., 'Retained', 'Laba' for Indonesian).
+ * A dedicated flag would eliminate false positives/negatives from name-based matching.
  */
 async function findRetainedEarningsAccountId(
   db: KyselySchema,
@@ -1023,9 +1035,7 @@ async function findRetainedEarningsAccountId(
  */
 async function getPlAccountBalances(
   db: KyselySchema,
-  companyId: number,
-  fiscalYearStartDate: Date,
-  fiscalYearEndDate: Date
+  companyId: number
 ): Promise<{
   incomeAccounts: Array<{ id: number; code: string; name: string; balance: number; normalBalance: string }>;
   expenseAccounts: Array<{ id: number; code: string; name: string; balance: number; normalBalance: string }>;
@@ -1198,25 +1208,14 @@ export async function getFiscalYearClosePreview(
   const retainedEarnings = await findRetainedEarningsAccountId(db, companyId);
 
   // Get PL account balances for the fiscal year
-  const startDate = fiscalYear.start_date instanceof Date 
-    ? fiscalYear.start_date 
-    : new Date(fiscalYear.start_date);
-  const endDate = fiscalYear.end_date instanceof Date 
-    ? fiscalYear.end_date 
-    : new Date(fiscalYear.end_date);
-
   const { incomeAccounts, expenseAccounts, totalIncome, totalExpenses } = 
-    await getPlAccountBalances(db, companyId, startDate, endDate);
+    await getPlAccountBalances(db, companyId);
 
-  // For closing entries, we need absolute amounts
-  const absTotalIncome = Math.abs(totalIncome);
-  const absTotalExpenses = Math.abs(totalExpenses);
-  const netIncome = absTotalIncome - absTotalExpenses;
+  // For closing entries, net income is income minus expenses (signs preserved)
+  const netIncome = totalIncome - totalExpenses;
 
   // Use the end date of fiscal year as entry date for closing entries
-  const entryDate = fiscalYear.end_date instanceof Date
-    ? fiscalYear.end_date.toISOString().split('T')[0]
-    : String(fiscalYear.end_date);
+  const entryDate = formatDateOnlyFromUnknown(fiscalYear.end_date);
 
   // Generate closing entries
   const closingEntries = generateClosingEntries(
@@ -1234,10 +1233,10 @@ export async function getFiscalYearClosePreview(
     fiscalYearId: Number(fiscalYear.id),
     fiscalYearCode: String(fiscalYear.code),
     fiscalYearName: String(fiscalYear.name),
-    startDate: startDate.toISOString().split('T')[0],
-    endDate: endDate.toISOString().split('T')[0],
-    totalIncome: absTotalIncome,
-    totalExpenses: absTotalExpenses,
+    startDate: formatDateOnlyFromUnknown(fiscalYear.start_date),
+    endDate: formatDateOnlyFromUnknown(fiscalYear.end_date),
+    totalIncome: totalIncome,
+    totalExpenses: totalExpenses,
     netIncome,
     retainedEarningsAccountId: retainedEarnings.id,
     retainedEarningsAccountCode: retainedEarnings.code,
@@ -1281,12 +1280,8 @@ export async function getFiscalYearStatus(
     ])
     .executeTakeFirst();
 
-  const startDate = fiscalYear.start_date instanceof Date
-    ? fiscalYear.start_date.toISOString().split('T')[0]
-    : String(fiscalYear.start_date).split('T')[0];
-  const endDate = fiscalYear.end_date instanceof Date
-    ? fiscalYear.end_date.toISOString().split('T')[0]
-    : String(fiscalYear.end_date).split('T')[0];
+  const startDate = formatDateOnlyFromUnknown(fiscalYear.start_date);
+  const endDate = formatDateOnlyFromUnknown(fiscalYear.end_date);
 
   // Determine if the fiscal year can be closed
   let canClose = fiscalYear.status === "OPEN";

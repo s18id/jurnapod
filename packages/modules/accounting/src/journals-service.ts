@@ -548,15 +548,16 @@ export class JournalsService {
  * 
  * @param db - Database client (KyselySchema or compatible)
  * @param batchId - Journal batch ID to check
+ * @param companyId - Tenant scope guard
  * @returns GlImbalanceResult if unbalanced, null if balanced
  * 
- * @note Tenant safety: journal_batches.id is AUTO_INCREMENT and globally unique.
- * A batch ID uniquely identifies a single company's batch, so filtering by batchId
- * alone provides proper tenant isolation. No companyId parameter is needed.
+ * @note Tenant safety: the query anchors on journal_batches.id and joins journal_lines
+ * with company consistency (`jl.company_id = jb.company_id`) to avoid cross-tenant drift.
  */
 export async function checkGlImbalanceByBatchId(
   db: KyselySchema,
-  batchId: number
+  batchId: number,
+  companyId: number
 ): Promise<GlImbalanceResult | null> {
   const result = await sql<{
     journal_batch_id: number;
@@ -564,13 +565,16 @@ export async function checkGlImbalanceByBatchId(
     total_credit: string;
   }>`
     SELECT 
-      journal_batch_id,
-      SUM(debit) as total_debit,
-      SUM(credit) as total_credit
-    FROM journal_lines
-    WHERE journal_batch_id = ${batchId}
-    GROUP BY journal_batch_id
-    HAVING SUM(debit) != SUM(credit)
+      jb.id as journal_batch_id,
+      SUM(jl.debit) as total_debit,
+      SUM(jl.credit) as total_credit
+    FROM journal_batches jb
+    INNER JOIN journal_lines jl ON jl.journal_batch_id = jb.id
+    WHERE jb.id = ${batchId}
+      AND jb.company_id = ${companyId}
+      AND jl.company_id = jb.company_id
+    GROUP BY jb.id
+    HAVING SUM(jl.debit) != SUM(jl.credit)
   `.execute(db);
 
   if (result.rows.length === 0) {

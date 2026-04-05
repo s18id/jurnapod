@@ -11,7 +11,11 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import { AuditService } from "../audit-service";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toRfc3339Required, type AuditEntityType, type AuditAction } from "@jurnapod/shared";
+
+export interface PeriodTransitionAuditLogger {
+  logAction: AuditService["logAction"];
+}
 
 /**
  * Period transition action types
@@ -83,7 +87,7 @@ interface PeriodTransitionContext {
  * Service for recording and querying period/fiscal year status transitions.
  */
 export class PeriodTransitionAuditService {
-  constructor(private readonly db: KyselySchema, private readonly auditService: AuditService) {}
+  constructor(private readonly db: KyselySchema, private readonly auditService: PeriodTransitionAuditLogger) {}
 
   /**
    * Log a period transition to the audit trail.
@@ -114,12 +118,15 @@ export class PeriodTransitionAuditService {
     };
 
     // Entity ID format: {fiscalYearId}-{periodNumber}
-    // Note: "period_transition" is not in the AuditEntityType enum, using cast to bypass
-    await (this.auditService.logAction as any)(
+    // Note: "period_transition" is a valid entity type for audit logging even though
+    // it's not in the limited AuditEntityType enum. Using type assertion since the
+    // underlying logAction method accepts any string entity type at runtime.
+    // Similarly, PeriodTransitionAction values are valid action strings at runtime.
+    await this.auditService.logAction(
       context,
-      "period_transition",
+      "period_transition" as AuditEntityType,
       `${fiscalYearId}-${periodNumber}`,
-      action,
+      action as AuditAction,
       payload
     );
   }
@@ -141,11 +148,13 @@ export class PeriodTransitionAuditService {
     conditions.push(sql`entity_type = 'period_transition'`);
 
     if (query.fiscal_year_id) {
-      conditions.push(sql`payload_json->>'$.fiscal_year_id' = ${String(query.fiscal_year_id)}`);
+      // Use portable JSON extraction for MySQL/MariaDB compatibility
+      conditions.push(sql`JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.fiscal_year_id')) = ${String(query.fiscal_year_id)}`);
     }
 
     if (query.period_number !== undefined) {
-      conditions.push(sql`payload_json->>'$.period_number' = ${String(query.period_number)}`);
+      // Use portable JSON extraction for MySQL/MariaDB compatibility
+      conditions.push(sql`JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.period_number')) = ${String(query.period_number)}`);
     }
 
     if (query.actor_user_id) {

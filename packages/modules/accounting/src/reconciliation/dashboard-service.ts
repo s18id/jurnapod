@@ -252,6 +252,12 @@ function determineStatus(variance: number, hasSubledgerData: boolean): Reconcili
 
 export class ReconciliationDashboardService {
   private readonly db: KyselySchema;
+  private static readonly ALLOWED_ACCOUNT_TYPES: readonly AccountTypeFilter[] = [
+    "CASH",
+    "INVENTORY",
+    "RECEIVABLES",
+    "PAYABLES",
+  ];
 
   constructor(db: KyselySchema) {
     this.db = db;
@@ -285,7 +291,7 @@ export class ReconciliationDashboardService {
     // Get key account types to reconcile
     const keyAccountTypes = this.getKeyAccountTypes();
     const filteredTypes = accountTypes?.length
-      ? accountTypes
+      ? this.sanitizeAccountTypes(accountTypes)
       : (Object.keys(keyAccountTypes) as AccountTypeFilter[]);
 
     // Get GL balances for key accounts
@@ -397,6 +403,21 @@ export class ReconciliationDashboardService {
       glImbalanceMetric,
       summary,
     };
+  }
+
+  /**
+   * Defense-in-depth validation at service layer.
+   * Routes already validate inputs, but this protects direct service callers too.
+   */
+  private sanitizeAccountTypes(accountTypes: readonly string[]): AccountTypeFilter[] {
+    const allowed = new Set<string>(ReconciliationDashboardService.ALLOWED_ACCOUNT_TYPES);
+    const sanitized = accountTypes
+      .map((value) => value.toUpperCase())
+      .filter((value): value is AccountTypeFilter => allowed.has(value));
+
+    return sanitized.length > 0
+      ? sanitized
+      : ["CASH", "INVENTORY", "RECEIVABLES", "PAYABLES"];
   }
 
   /**
@@ -623,8 +644,6 @@ export class ReconciliationDashboardService {
     if (allTypeNames.length === 0) {
       return [];
     }
-
-    const typePlaceholders = allTypeNames.map(() => "?").join(", ");
 
     let query = sql<AccountReconciliationRow>`
       SELECT

@@ -1243,45 +1243,45 @@ accountRoutes.post("/fiscal-years/:id/close/approve", async (c) => {
           description: entry.description
         }));
 
-        // Verify the entries balance
-        const totalDebit = lines.reduce((sum, l) => sum + l.debit, 0);
-        const totalCredit = lines.reduce((sum, l) => sum + l.credit, 0);
+        // Verify the entries balance using fixed-point precision (DECIMAL(19,4)).
+        // Avoid floating-point drift for monetary totals.
+        const MONEY_SCALE = 10_000;
+        const toScaled = (value: number): number => Math.round(value * MONEY_SCALE);
+        const totalDebitScaled = lines.reduce((sum, l) => sum + toScaled(l.debit), 0);
+        const totalCreditScaled = lines.reduce((sum, l) => sum + toScaled(l.credit), 0);
 
-        if (Math.abs(totalDebit - totalCredit) > 0.001) {
+        if (totalDebitScaled !== totalCreditScaled) {
+          const totalDebit = totalDebitScaled / MONEY_SCALE;
+          const totalCredit = totalCreditScaled / MONEY_SCALE;
           throw new Error(
             `ENTRIES_NOT_BALANCED:Closing entries are not balanced: debit=${totalDebit}, credit=${totalCredit}`
           );
         }
 
-        try {
-          // 2. Post journal entries within transaction
-          const journalResult = await journalsService.createManualEntry(
-            {
-              company_id: auth.companyId,
-              entry_date: preview.entryDate,
-              description: preview.description,
-              lines
-            },
-            auth.userId,
-            trx  // Pass transaction for atomicity
-          );
-          postedBatchIds.push(journalResult.id);
+        // 2. Post journal entries within transaction
+        const journalResult = await journalsService.createManualEntry(
+          {
+            company_id: auth.companyId,
+            entry_date: preview.entryDate,
+            description: preview.description,
+            lines
+          },
+          auth.userId,
+          trx  // Pass transaction for atomicity
+        );
+        postedBatchIds.push(journalResult.id);
 
-          // Check for GL imbalance within transaction
-          const imbalanceResult = await checkGlImbalanceByBatchId(trx, journalResult.id);
-          if (imbalanceResult) {
-            hasImbalance = true;
-            imbalanceDetails = {
-              batchId: imbalanceResult.journalBatchId,
-              imbalance: imbalanceResult.imbalance
-            };
-          }
-        } catch (journalError) {
-          const err = journalError as { code?: string; message?: string };
-          if (err.code === "FISCAL_YEAR_CLOSED") {
-            throw Object.assign(new Error("FISCAL_YEAR_CLOSED"), { code: "FISCAL_YEAR_CLOSED" });
-          }
-          throw journalError;
+        // Check for GL imbalance within transaction - happens AFTER posting but BEFORE commit.
+        // This check is for visibility/monitoring purposes: if imbalance detected, entries are
+        // committed but the imbalance is logged. Actual posting validation happens in createManualEntry
+        // which would have already rejected unbalanced entries. This late check catches any edge cases.
+        const imbalanceResult = await checkGlImbalanceByBatchId(trx, journalResult.id, auth.companyId);
+        if (imbalanceResult) {
+          hasImbalance = true;
+          imbalanceDetails = {
+            batchId: imbalanceResult.journalBatchId,
+            imbalance: imbalanceResult.imbalance
+          };
         }
       }
 
