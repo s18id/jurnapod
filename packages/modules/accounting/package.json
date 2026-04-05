@@ -25,6 +25,10 @@
     "./trial-balance": {
       "types": "./dist/trial-balance/index.d.ts",
       "default": "./dist/trial-balance/index.js"
+    },
+    "./fiscal-year": {
+      "types": "./dist/fiscal-year/index.d.ts",
+      "default": "./dist/fiscal-year/index.js"
     }
   },
   "files": ["dist", "README.md"],

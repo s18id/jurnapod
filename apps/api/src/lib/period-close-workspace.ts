@@ -5,7 +5,7 @@
  * Period Close Workspace Service
  *
  * Composition layer that aggregates status from all Epic 32 components:
- * - Story 32.1: Fiscal year close procedure (fiscal-years.ts)
+ * - Story 32.1: Fiscal year close procedure (FiscalYearService)
  * - Story 32.2: Reconciliation dashboard (ReconciliationDashboardService)
  * - Story 32.3: Trial balance validation (TrialBalanceService)
  * - Story 32.4: Period transition audit (PeriodTransitionAuditService)
@@ -15,11 +15,18 @@
 
 import type { KyselySchema } from "@jurnapod/db";
 import { getDb } from "./db.js";
-import { getFiscalYearById, getFiscalYearStatus, type FiscalYearStatusResult } from "./fiscal-years.js";
+import {
+  FiscalYearService,
+  type FiscalYearStatusResult,
+  type FiscalYearDbClient,
+  type FiscalYearSettingsPort,
+  type PeriodStatus
+} from "@jurnapod/modules-accounting/fiscal-year";
 import { ReconciliationDashboardService } from "@jurnapod/modules-accounting/reconciliation";
 import { TrialBalanceService, type PreCloseCheckItem } from "@jurnapod/modules-accounting/trial-balance";
 import { AuditService } from "@jurnapod/modules-platform";
 import { PeriodTransitionAuditService, PERIOD_TRANSITION_ACTION } from "@jurnapod/modules-platform/audit/period-transition";
+import { KyselySettingsAdapter } from "@jurnapod/modules-platform/settings";
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -72,17 +79,47 @@ export interface PeriodCloseWorkspaceQuery {
 
 export class PeriodCloseWorkspaceService {
   private readonly db: KyselySchema;
+  private readonly fiscalYearService: FiscalYearService;
   private readonly reconciliationService: ReconciliationDashboardService;
   private readonly trialBalanceService: TrialBalanceService;
   private readonly auditService: PeriodTransitionAuditService;
 
   constructor(db?: KyselySchema) {
     this.db = db ?? getDb();
+    
+    // Create settings port for fiscal year service
+    const settingsPort = this.createSettingsPort();
+    
+    // Create fiscal year service instance
+    this.fiscalYearService = new FiscalYearService(
+      this.db as FiscalYearDbClient,
+      settingsPort
+    );
+    
+    // Create other service instances
     this.reconciliationService = new ReconciliationDashboardService(this.db);
     this.trialBalanceService = new TrialBalanceService(this.db);
-    // AuditService is required by PeriodTransitionAuditService
     const auditSvc = new AuditService(this.db);
     this.auditService = new PeriodTransitionAuditService(this.db, auditSvc);
+  }
+
+  /**
+   * Create settings port implementation
+   */
+  private createSettingsPort(): FiscalYearSettingsPort {
+    const adapter = new KyselySettingsAdapter(this.db);
+    return {
+      async resolveBoolean(
+        companyId: number,
+        key: string,
+        options?: { outletId?: number }
+      ): Promise<boolean> {
+        const value = await adapter.resolve<boolean>(companyId, key as any, {
+          outletId: options?.outletId
+        });
+        return Boolean(value);
+      }
+    };
   }
 
   /**
@@ -92,8 +129,8 @@ export class PeriodCloseWorkspaceService {
   async getWorkspace(query: PeriodCloseWorkspaceQuery): Promise<PeriodCloseWorkspace> {
     const { companyId, fiscalYearId } = query;
 
-    // Get fiscal year info
-    const fiscalYear = await getFiscalYearById(companyId, fiscalYearId);
+    // Get fiscal year info using package service
+    const fiscalYear = await this.fiscalYearService.getFiscalYearById(companyId, fiscalYearId);
     if (!fiscalYear) {
       throw new Error(`Fiscal year ${fiscalYearId} not found for company ${companyId}`);
     }
@@ -147,7 +184,7 @@ export class PeriodCloseWorkspaceService {
     }
 
     // Check for close request status to determine IN_PROGRESS or PENDING_APPROVAL
-    const fyStatus: FiscalYearStatusResult = await getFiscalYearStatus(
+    const fyStatus: FiscalYearStatusResult = await this.fiscalYearService.getFiscalYearStatus(
       companyId,
       fiscalYearId
     );
@@ -397,7 +434,7 @@ export class PeriodCloseWorkspaceService {
 
     try {
       // First check if fiscal year is already closed
-      const fiscalYear = await getFiscalYearById(companyId, fiscalYearId);
+      const fiscalYear = await this.fiscalYearService.getFiscalYearById(companyId, fiscalYearId);
       const isAlreadyClosed = fiscalYear?.status?.toUpperCase() === "CLOSED";
 
       if (isAlreadyClosed) {
@@ -432,7 +469,7 @@ export class PeriodCloseWorkspaceService {
       }
 
       // Not yet closed - check if close request is IN_PROGRESS
-      const fyStatus = await getFiscalYearStatus(companyId, fiscalYearId);
+      const fyStatus = await this.fiscalYearService.getFiscalYearStatus(companyId, fiscalYearId);
       const hasInProgressCloseRequest = fyStatus.closeRequestStatus === "IN_PROGRESS";
 
       if (hasInProgressCloseRequest) {
@@ -478,7 +515,7 @@ export class PeriodCloseWorkspaceService {
     const detailUrl = `/fiscal-years/${fiscalYearId}/status`;
 
     try {
-      const fyStatus: FiscalYearStatusResult = await getFiscalYearStatus(
+      const fyStatus: FiscalYearStatusResult = await this.fiscalYearService.getFiscalYearStatus(
         companyId,
         fiscalYearId
       );
