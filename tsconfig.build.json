@@ -4,6 +4,10 @@
     { "path": "./packages/db" },
     { "path": "./packages/shared" },
     { "path": "./packages/auth" },
+    { "path": "./packages/modules/platform" },
+    { "path": "./packages/modules/accounting" },
+    { "path": "./packages/modules/inventory-costing" },
+    { "path": "./packages/modules/treasury" },
     { "path": "./packages/modules/inventory" }
   ]
 }
