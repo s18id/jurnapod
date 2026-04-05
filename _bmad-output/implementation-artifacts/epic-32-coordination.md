@@ -1,28 +1,37 @@
 # Epic 32 Story Coordination
 
-## Active Stories
+## Stories Status
 
-| Story | Owner | Files Owned |
-|-------|-------|-------------|
-| 32.1 | Dev 1 | `apps/api/src/routes/accounts.ts`, `apps/api/src/lib/fiscal-years.ts` |
-| 32.2 | Dev 2 | `apps/api/src/routes/admin-dashboards.ts`, `apps/api/src/lib/reconciliation-dashboard.ts` |
+| Story | Status | Owner |
+|-------|--------|-------|
+| 32.1 Fiscal Year Close | ✅ Done | Committed |
+| 32.2 Reconciliation Dashboard | ✅ Done | Committed |
+| 32.3 Trial Balance Validation | in_progress | |
+| 32.4 Period Transition Audit | ✅ Done | Committed |
+| 32.5 Roll Forward Workspace | backlog | depends on 32.3, 32.4 |
+
+## Phase 1: Stories 32.3 and 32.4 (Parallel)
+
+**Dev 1: Story 32.3**
+- Files: `apps/api/src/lib/trial-balance-service.ts`, `apps/api/src/routes/admin-dashboards.ts`
+- Also reads: `packages/modules/accounting/src/reconciliation/`, `packages/telemetry/`
+
+**Dev 2: Story 32.4**
+- Files: `apps/api/src/lib/period-transition-audit.ts`, `apps/api/src/routes/audit.ts`
+- Also reads: `packages/modules/platform/audit/`, `packages/modules/accounting/`
+
+## Phase 2: Story 32.5 (After 32.3, 32.4)
+
+**Dev 1 or 2: Story 32.5**
+- Depends on: 32.1, 32.2, 32.3, 32.4
+- Files: `apps/api/src/routes/admin-dashboards.ts`, `apps/api/src/lib/period-close-workspace.ts`
 
 ## Conflict Prevention
 
-**Dev 1 (32.1)** MUST NOT modify:
-- `apps/api/src/routes/admin-dashboards.ts`
-- `apps/api/src/lib/reconciliation-dashboard.ts`
-
-**Dev 2 (32.2)** MUST NOT modify:
-- `apps/api/src/routes/accounts.ts`
-- `apps/api/src/lib/fiscal-years.ts` (except adding new functions)
-
-## Shared Dependencies (read-only for both)
-
-- `packages/modules/accounting/src/reconciliation/subledger/` (both read)
-- `packages/modules/accounting/src/journals-service.ts` (both read)
-- `packages/modules/accounting/src/fixed-assets/interfaces/fixed-asset-ports.ts` (both read)
+- 32.3 and 32.4 must NOT modify each other's files
+- 32.5 reads from all prior stories' outputs
+- 32.5 must NOT modify fiscal-years.ts or reconciliation-dashboard.ts
 
 ## Sync Point
 
-After both stories complete, merge via standard git workflow.
+After 32.3 and 32.4 complete, sync before starting 32.5.

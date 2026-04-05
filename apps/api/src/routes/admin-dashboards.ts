@@ -13,6 +13,7 @@
  */
 
 import { Hono } from "hono";
+import { z } from "zod";
 import { authenticateRequest, requireAccess, type AuthContext } from "../lib/auth-guard.js";
 import { errorResponse } from "../lib/response.js";
 import { getOutboxMetricsSnapshot, getSyncHealthMetricsSnapshot, getJournalHealthMetricsSnapshot, type OutboxMetricsSnapshot, type SyncHealthMetricsSnapshot, type JournalHealthMetricsSnapshot } from "../lib/metrics/dashboard-metrics.js";
@@ -23,6 +24,10 @@ import {
   type AccountTypeFilter,
   type ReconciliationStatus,
 } from "../lib/reconciliation-dashboard.js";
+import {
+  TrialBalanceService,
+  type TrialBalanceQuery,
+} from "../lib/trial-balance-service.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -607,6 +612,120 @@ adminDashboardRoutes.get("/reconciliation", async (c) => {
   } catch (error) {
     console.error("GET /admin/dashboard/reconciliation failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to load reconciliation dashboard", 500);
+  }
+});
+
+// =============================================================================
+// Reconciliation Drilldown - GET /admin/dashboard/reconciliation/:accountId/drilldown
+// =============================================================================
+
+// =============================================================================
+// Trial Balance - GET /admin/dashboard/trial-balance
+// =============================================================================
+
+const trialBalanceQuerySchema = z.object({
+  fiscal_year_id: z.string().transform(Number).pipe(z.number().positive()),
+  period_id: z.string().transform(Number).pipe(z.number().positive()).optional(),
+  outlet_id: z.string().transform(Number).pipe(z.number().positive()).optional(),
+  as_of_epoch_ms: z.string().transform(Number).optional(),
+  include_zero_balances: z.string().optional(),
+});
+
+adminDashboardRoutes.get("/trial-balance", async (c) => {
+  try {
+    const auth = c.get("auth");
+    const companyId = auth.companyId;
+
+    // Parse and validate query parameters
+    const url = new URL(c.req.url);
+    const rawQuery = {
+      fiscal_year_id: url.searchParams.get("fiscal_year_id") ?? undefined,
+      period_id: url.searchParams.get("period_id") ?? undefined,
+      outlet_id: url.searchParams.get("outlet_id") ?? undefined,
+      as_of_epoch_ms: url.searchParams.get("as_of_epoch_ms") ?? undefined,
+      include_zero_balances: url.searchParams.get("include_zero_balances") ?? undefined,
+    };
+
+    const parseResult = trialBalanceQuerySchema.safeParse(rawQuery);
+    if (!parseResult.success) {
+      return errorResponse("BAD_REQUEST", `Invalid query parameters: ${parseResult.error.errors.map(e => e.message).join(", ")}`, 400);
+    }
+
+    const validated = parseResult.data;
+
+    // Build query
+    const query: TrialBalanceQuery = {
+      companyId,
+      outletId: validated.outlet_id,
+      fiscalYearId: validated.fiscal_year_id,
+      periodId: validated.period_id,
+      asOfEpochMs: validated.as_of_epoch_ms,
+      includeZeroBalances: validated.include_zero_balances === "true",
+    };
+
+    // Get trial balance data
+    const { getDb } = await import("../lib/db.js");
+    const trialBalanceService = new TrialBalanceService(getDb() as any);
+
+    const trialBalance = await trialBalanceService.getTrialBalance(query);
+
+    return c.json({
+      success: true,
+      data: trialBalance,
+    });
+  } catch (error) {
+    console.error("GET /admin/dashboard/trial-balance failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to load trial balance", 500);
+  }
+});
+
+// =============================================================================
+// Trial Balance Validate - GET /admin/dashboard/trial-balance/validate
+// =============================================================================
+
+adminDashboardRoutes.get("/trial-balance/validate", async (c) => {
+  try {
+    const auth = c.get("auth");
+    const companyId = auth.companyId;
+
+    // Parse and validate query parameters
+    const url = new URL(c.req.url);
+    const rawQuery = {
+      fiscal_year_id: url.searchParams.get("fiscal_year_id") ?? undefined,
+      period_id: url.searchParams.get("period_id") ?? undefined,
+      outlet_id: url.searchParams.get("outlet_id") ?? undefined,
+      as_of_epoch_ms: url.searchParams.get("as_of_epoch_ms") ?? undefined,
+    };
+
+    const parseResult = trialBalanceQuerySchema.safeParse(rawQuery);
+    if (!parseResult.success) {
+      return errorResponse("BAD_REQUEST", `Invalid query parameters: ${parseResult.error.errors.map(e => e.message).join(", ")}`, 400);
+    }
+
+    const validated = parseResult.data;
+
+    // Build query
+    const query: TrialBalanceQuery = {
+      companyId,
+      outletId: validated.outlet_id,
+      fiscalYearId: validated.fiscal_year_id,
+      periodId: validated.period_id,
+      asOfEpochMs: validated.as_of_epoch_ms,
+    };
+
+    // Run pre-close validation
+    const { getDb } = await import("../lib/db.js");
+    const trialBalanceService = new TrialBalanceService(getDb() as any);
+
+    const validationResult = await trialBalanceService.runPreCloseValidation(query);
+
+    return c.json({
+      success: true,
+      data: validationResult,
+    });
+  } catch (error) {
+    console.error("GET /admin/dashboard/trial-balance/validate failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to run pre-close validation", 500);
   }
 });
 

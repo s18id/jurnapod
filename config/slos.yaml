@@ -35,3 +35,10 @@ journal:
   
   # Enable GL balance check after posting
   gl_balance_check_enabled: true
+
+trial_balance:
+  # Variance thresholds for period-over-period comparison
+  variance_warning_threshold: 0.10   # 10% change vs prior period triggers warning
+  variance_critical_threshold: 0.25  # 25% change triggers critical alert
+  # Subledger variance threshold (in absolute currency units)
+  subledger_variance_threshold: 0.01  # 1 cent tolerance for reconciliation

@@ -47,6 +47,7 @@ import { alertManager } from "./lib/alerts/alert-manager.js";
 import { alertEvaluationService } from "./lib/alerts/alert-evaluation.js";
 import { adminDashboardRoutes } from "./routes/admin-dashboards.js";
 import { adminRunbookRoutes } from "./routes/admin-runbook.js";
+import { auditRoutes } from "./routes/audit.js";
 
 // Validate environment configuration before starting server
 assertAppEnvReady();
@@ -189,6 +190,9 @@ app.route("/api/pages", publicPagesRoutes);
 
 // Register outlets routes
 app.route("/api/outlets", outletsRoutes);
+
+// Register audit routes
+app.route("/api/audit", auditRoutes);
 
 // Register POS items routes (for variant listing)
 app.route("/api/pos/items", posItemVariantsRoutes);

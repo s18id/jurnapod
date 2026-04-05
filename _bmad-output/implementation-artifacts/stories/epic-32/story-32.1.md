@@ -6,11 +6,13 @@
 |-------|-------|
 | Story | story-32.1 |
 | Title | Fiscal Year Close Procedure |
-| Status | pending |
+| Status | done |
 | Type | Feature |
 | Sprint | 1 of 1 |
 | Priority | P1 |
 | Estimate | 4h |
+| Completed | 2026-04-05 |
+| Commit | f3990b8 |
 
 ---
 

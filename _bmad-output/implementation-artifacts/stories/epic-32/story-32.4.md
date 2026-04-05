@@ -6,7 +6,7 @@
 |-------|-------|
 | Story | story-32.4 |
 | Title | Period Transition Audit Trail |
-| Status | pending |
+| Status | done |
 | Type | Feature |
 | Sprint | 1 of 1 |
 | Priority | P2 |
