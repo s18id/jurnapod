@@ -1,6 +1,6 @@
 # Action Items Tracker
 
-**Last Updated:** 2026-04-04T16:00:00Z
+**Last Updated:** 2026-04-05T16:00:00Z
 **Review Cadence:** Monthly at sprint retrospective
 
 ---
@@ -10,10 +10,10 @@
 | Priority | Open | Done | Won't Fix | Total |
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
-| P1 | 0 | 6 | 0 | 6 |
-| P2 | 0 | 7 | 0 | 7 |
+| P1 | 2 | 6 | 0 | 8 |
+| P2 | 2 | 7 | 0 | 9 |
 | P3 | 0 | 2 | 3 | 5 |
-| **Total** | **0** | **19** | **3** | **22** |
+| **Total** | **4** | **19** | **3** | **26** |
 
 ---
 
@@ -25,13 +25,25 @@
 
 ## P1 - High (Do Next Sprint)
 
-*(empty — no open P1 items)*
+| ID | Action | From | Owner | Status |
+|----|--------|------|-------|--------|
+| E33-A1 | Add "blast radius check" to shared contract changes | Epic 33 | Charlie | Open |
+| E33-A4 | Add shared constant change verification to test checklist | Epic 33 | Dana | Open |
+
+---
 
 ---
 
 ## P2 - Medium (Do This Quarter)
 
-*(empty — no open P2 items)*
+| ID | Action | From | Owner | Status |
+|----|--------|------|-------|--------|
+| E33-A2 | Add dead code audit step to consolidation stories | Epic 33 | Bob | Open |
+| E33-A3 | Document permission bit canonical values in shared/README | Epic 33 | Elena | Open |
+| E31-A1 | Document canonical test fixture pattern | Epic 31 | Tech Writer | Done |
+| E31-A2 | Add adapter deletion checklist to extraction stories | Epic 31 | Tech Writer | Done |
+
+---
 
 ---
 
@@ -74,6 +86,8 @@
 | **E30-A2** | Document metric naming conventions (canonical patterns) | Epic 30 | Epic 30 | Updated `packages/telemetry/README.md` with Naming Rules + How to Add |
 | **E30-A3** | Create alert authoring guide (rate calculation, heartbeat) | Epic 30 | Epic 30 | Created `docs/alert-authoring-guide.md` |
 | **E30-A4** | Add "monitor the monitoring" section to runbook | Epic 30 | Epic 30 | Added section to `apps/api/src/routes/admin-runbook.ts` |
+| **E31-A1** | Document canonical test fixture pattern | Epic 31 | Epic 31 | Added Canonical Test Fixtures section to AGENTS.md |
+| **E31-A2** | Add adapter deletion checklist to extraction stories | Epic 31 | Epic 31 | Added Extraction Story Checklist section to AGENTS.md |
 
 ### P3
 
@@ -148,4 +162,4 @@ Examples:
 - `E8-A1` = Epic 8, Action 1
 - `E15-A2` = Epic 15, Action 2
 
-_Last Updated: 2026-04-04T15:00:00Z_
+_Last Updated: 2026-04-05T16:00:00Z_

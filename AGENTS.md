@@ -155,6 +155,71 @@ Flag code that filters `audit_logs` by `result` instead of `success`.
 
 ---
 
+## Canonical Test Fixtures
+
+When canonical data patterns are established (timestamps, status IDs, enum values, etc.), create canonical test fixtures to ensure consistency across the test suite.
+
+### When to Create Canonical Fixtures
+
+- When establishing new timestamp handling patterns (e.g., `reservation_start_ts` vs `reservation_at`)
+- When introducing new status ID conventions (e.g., `status_id` vs `status` fields)
+- When standardizing enum or constant values across packages
+- When extracting shared patterns from multiple tests into a single source of truth
+
+### Process
+
+1. **Establish the canonical fixture** in a shared location (e.g., `packages/db/test-fixtures.ts` or `packages/shared/test/fixtures.ts`)
+2. **Audit existing tests** against the new canonical pattern before marking the story complete
+3. **Update any tests** that deviate from the canonical pattern
+4. **Document the fixture** with clear examples of correct usage
+
+### Example: Timestamp Handling
+
+```typescript
+// Canonical: Use Unix milliseconds in BIGINT columns
+export const CANONICAL_TIMESTAMPS = {
+  reservationStart: 1712304000000,  // 2024-04-05 00:00:00 UTC
+  reservationEnd: 1712390400000,   // 2024-04-06 00:00:00 UTC
+  // NOT: new Date() or Date.now() — use fixed values for reproducibility
+} as const;
+```
+
+### Example: Status ID Conventions
+
+```typescript
+// Canonical: status_id for foreign key, status for display
+export const CANONICAL_STATUS = {
+  active: { id: 1, code: 'ACTIVE', label: 'Active' },
+  voided: { id: 2, code: 'VOID', label: 'Voided' },
+  refunded: { id: 3, code: 'REFUND', label: 'Refunded' },
+} as const;
+```
+
+---
+
+## Extraction Story Checklist
+
+When performing extraction or package migration stories (moving code from `apps/api/src/lib` to `packages/*`):
+
+### Pre-Extraction
+- [ ] Identify all consumers of the code being extracted
+- [ ] Establish canonical test fixtures for any new patterns introduced
+- [ ] Ensure shared contracts are defined in `packages/shared`
+
+### Route Flipping
+- [ ] Flip routes to use package imports
+- [ ] Verify all consumers updated to new import paths
+
+### Post-Extraction (MANDATORY)
+- [ ] **Immediately delete the adapter shim** in `apps/api/src/lib/{domain}/`
+  - Do NOT leave shims lingering — they accumulate consumers over time
+  - If the shim is still referenced somewhere, that indicates consumer debt that needs resolution
+- [ ] Audit existing tests against any new canonical patterns
+- [ ] Run full test suite to verify no regressions
+- [ ] Update any remaining tests that still use old patterns
+
+---
+
 ## Definition of Done (MANDATORY)
 
 Before marking ANY story as DONE:
