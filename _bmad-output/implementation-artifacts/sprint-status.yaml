@@ -1,4 +1,4 @@
-last_updated: 2026-04-05T01:00:00Z
+last_updated: 2026-04-05T01:30:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -366,7 +366,7 @@ development_status:
   31-2-extract-companies-provisioning: done
   31-3-consolidate-reservations-duplicate: done
   31-4-thin-routes-users-companies: done
-  31-5-import-export-platform: backlog
+  31-5-import-export-platform: deferred  # Moved to Epic 36 (scope too large for story)
   31-6-notifications-consolidation: backlog
   31-7-route-thinning-enforcement: backlog
   31-8a-adapter-migration-prep: backlog
@@ -386,3 +386,12 @@ development_status:
   32-3-trial-balance-validation: backlog
   32-4-period-transition-audit-trail: backlog
   32-5-roll-forward-workspace: backlog
+
+  # Epic 36: Import/Export Infrastructure (deferred - moved from Epic 31-5)
+  epic-36: deferred
+  36-1-db-decoupling-dependency-inversion: backlog
+  36-2-extract-import-core-infrastructure: backlog
+  36-3-extract-export-core-query-safety: backlog
+  36-4-lift-route-orchestration: backlog
+  36-5-convert-routes-to-thin-adapters: backlog
+  36-6-migration-hardening-rollout: backlog
