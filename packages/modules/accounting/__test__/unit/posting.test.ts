@@ -2,13 +2,13 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
+import { describe, test, it, expect } from "vitest";
 import {
   PostingService,
   PostingRepository,
   PostingMapper,
   UnbalancedJournalError
-} from "./posting";
+} from "../../src/posting";
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
 
 // Minimal request for testing

@@ -5,12 +5,12 @@
  * Unit tests for CashBankService.
  */
 
-import { test, describe, beforeEach } from "node:test";
+import { test, describe, beforeEach } from "vitest";
 import assert from "node:assert";
-import { CashBankService } from "./cash-bank-service.js";
-import type { TreasuryPorts, MutationActor, AccountInfo } from "./ports.js";
-import type { CashBankTransaction, CashBankStatus, CreateCashBankInput } from "./types.js";
-import { CashBankValidationError, CashBankStatusError, CashBankNotFoundError, CashBankForbiddenError } from "./errors.js";
+import { CashBankService } from "../../src/cash-bank-service.ts";
+import type { TreasuryPorts, MutationActor, AccountInfo } from "../../src/ports.ts";
+import type { CashBankTransaction, CashBankStatus, CreateCashBankInput } from "../../src/types.ts";
+import { CashBankValidationError, CashBankStatusError, CashBankNotFoundError, CashBankForbiddenError } from "../../src/errors.ts";
 
 // Mock implementations
 function createMockPorts(overrides: Partial<TreasuryPorts> = {}): TreasuryPorts {

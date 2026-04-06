@@ -5,10 +5,10 @@
  * Unit tests for journal builder.
  */
 
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert";
-import { buildCashBankJournalLines, type BuildJournalLinesInput } from "./journal-builder.js";
-import { CashBankValidationError } from "./errors.js";
+import { buildCashBankJournalLines, type BuildJournalLinesInput } from "../../src/journal-builder.ts";
+import { CashBankValidationError } from "../../src/errors.ts";
 
 const baseInput: BuildJournalLinesInput = {
   transactionType: "MUTATION",

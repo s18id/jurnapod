@@ -5,7 +5,7 @@
  * Unit tests for treasury helpers.
  */
 
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert";
 import { 
   toMinorUnits, 
@@ -13,8 +13,8 @@ import {
   isCashBankTypeName, 
   classifyCashBankAccount,
   validateDirectionByTransactionType
-} from "./helpers.js";
-import { CashBankValidationError } from "./errors.js";
+} from "../../src/helpers.ts";
+import { CashBankValidationError } from "../../src/errors.ts";
 
 test("toMinorUnits rounds correctly", () => {
   assert.strictEqual(toMinorUnits(10.005), 1001);

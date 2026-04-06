@@ -6,7 +6,7 @@
  * @module
  */
 
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert";
 
 import {
@@ -14,7 +14,7 @@ import {
   hasOverlap,
   findOverlappingRanges,
   isValidRange,
-} from "./overlap.js";
+} from "../../src/time/overlap.js";
 
 describe("reservationsOverlap", () => {
   it("returns true when ranges overlap (partial overlap at start)", () => {

@@ -6,10 +6,10 @@
  * @module
  */
 
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert";
 import { Temporal } from "@js-temporal/polyfill";
-import { toUnixMs } from "./timestamp.js";
+import { toUnixMs } from "../../src/time/timestamp.js";
 
 describe("toUnixMs timezone validation", () => {
   it("accepts RFC3339/ISO instant with Z suffix", () => {

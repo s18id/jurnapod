@@ -19,7 +19,7 @@ loadEnv({ path: path.resolve(process.cwd(), '.env') });
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { createKysely, type KyselySchema } from '@jurnapod/db';
 import { sql } from 'kysely';
-import { SyncAuditService, AuditDbClient, SyncAuditEvent } from './audit-service.js';
+import { SyncAuditService, AuditDbClient, SyncAuditEvent } from '../../src/sync/audit-service.ts';
 
 // ============================================================================
 // Test Configuration
@@ -232,7 +232,7 @@ describe('SyncAuditService Integration', () => {
       const eventId = await fixtures.auditService.startEvent({
         companyId: fixtures.testCompanyId,
         operationType: 'HEALTH_CHECK',
-        tierName: 'system',
+        tierName: 'MASTER',
         status: 'SUCCESS',
         startedAt: new Date(),
       });
@@ -324,7 +324,7 @@ describe('SyncAuditService Integration', () => {
       const eventId = await fixtures.auditService.startEvent({
         companyId: fixtures.testCompanyId,
         operationType: 'HEALTH_CHECK',
-        tierName: 'system',
+        tierName: 'MASTER',
         status: 'IN_PROGRESS',
         startedAt: new Date(),
       });
@@ -411,7 +411,7 @@ describe('SyncAuditService Integration', () => {
         {
           companyId: fixtures.testCompanyId,
           operationType: 'HEALTH_CHECK',
-          tierName: 'system',
+          tierName: 'MASTER',
           status: 'SUCCESS',
           startedAt: new Date('2024-01-15T13:00:00Z'),
           durationMs: 100,
@@ -716,7 +716,7 @@ describe('SyncAuditService Integration', () => {
       const recentEventId = await fixtures.auditService.startEvent({
         companyId: fixtures.testCompanyId,
         operationType: 'HEALTH_CHECK',
-        tierName: 'system',
+        tierName: 'MASTER',
         status: 'SUCCESS',
         startedAt: recentDate,
       });
