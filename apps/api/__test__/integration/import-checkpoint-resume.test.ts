@@ -13,13 +13,13 @@
  * - AC4: Partial failure handling with structured error response
  * - AC5: Integration tests for resume, hash mismatch, expired session
  * 
- * CRITICAL: Pool must be closed in after() to prevent test hang.
+ * CRITICAL: Pool must be closed in afterAll() to prevent test hang.
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after } from "node:test";
+import {test, describe, beforeAll, afterAll} from 'vitest';
 import { randomUUID } from "node:crypto";
-import { closeDbPool, getDb } from "../../lib/db.js";
+import { closeDbPool, getDb } from "../../src/lib/db.js";
 import { sql } from "kysely";
 import {
   createSession,
@@ -32,7 +32,7 @@ import {
   getCheckpoint,
   type CheckpointData,
   SESSION_TTL_MS,
-} from "./session-store.js";
+} from "../../src/lib/import/session-store.js";
 
 const COMPANY_ID = 1;
 const SAMPLE_PAYLOAD = {
@@ -49,12 +49,12 @@ const SAMPLE_PAYLOAD = {
 };
 
 describe("Import Checkpoint/Resume - Session Store", () => {
-  before(() => {
+  beforeAll(() => {
     // Warm up the db connection
     getDb();
   });
 
-  after(async () => {
+  afterAll(async () => {
     await closeDbPool();
   });
 
@@ -459,12 +459,12 @@ describe("Import Checkpoint/Resume - Session Store", () => {
 });
 
 describe("Import Checkpoint/Resume - Acceptance Criteria Integration", () => {
-  before(() => {
+  beforeAll(() => {
     // Warm up the db connection
     getDb();
   });
 
-  after(async () => {
+  afterAll(async () => {
     await closeDbPool();
   });
 

@@ -10,7 +10,7 @@
 
 /* eslint-disable jurnapod-test-rules/no-hardcoded-ids */
 
-import { test, describe } from 'node:test';
+import { test, describe } from 'vitest';
 import assert from 'node:assert';
 import {
   buildExportQuery,
@@ -19,7 +19,7 @@ import {
   type ExportableEntity,
   type ExportFilters,
   type ExportBuildOptions,
-} from './query-builder.js';
+} from '../../src/lib/export/query-builder.js';
 
 describe('Query Builder', () => {
   describe('buildExportQuery', () => {

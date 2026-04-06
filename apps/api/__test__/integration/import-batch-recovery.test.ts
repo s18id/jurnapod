@@ -7,13 +7,13 @@
  * Tests TD-027 (batch progress tracking), TD-028 (session expiry guard),
  * TD-029 (partial resume from checkpoint).
  *
- * CRITICAL: Pool must be closed in after() to prevent test hang.
+ * CRITICAL: Pool must be closed in afterAll() to prevent test hang.
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after } from "node:test";
+import {test, describe, beforeAll, afterAll} from 'vitest';
 import { randomUUID } from "node:crypto";
-import { closeDbPool, getDb } from "../../lib/db.js";
+import { closeDbPool, getDb } from "../../src/lib/db.js";
 import { sql } from "kysely";
 import {
   createSession,
@@ -21,7 +21,7 @@ import {
   updateSession,
   deleteSession,
   cleanupExpiredSessions,
-} from "./session-store.js";
+} from "../../src/lib/import/session-store.js";
 
 const COMPANY_A = 1;
 
@@ -35,12 +35,12 @@ const SAMPLE_PAYLOAD = {
 };
 
 describe("Batch Failure Recovery & Session Hardening", () => {
-  before(() => {
+  beforeAll(() => {
     // Warm up the db connection
     getDb();
   });
 
-  after(async () => {
+  afterAll(async () => {
     // Clean up any expired sessions created during testing
     await cleanupExpiredSessions();
     await closeDbPool();

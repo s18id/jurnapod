@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after } from "node:test";
+import {test, describe, beforeAll, afterAll} from 'vitest';
 import { sql } from "kysely";
 import {
   loadEnvIfPresent,
@@ -19,9 +19,9 @@ import {
   waitForHealthcheck,
   stopApiServerSafely,
   loginOwner,
-} from "../../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "../../lib/db";
-import { buildLoginThrottleKeys } from "../../lib/auth-throttle";
+} from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
+import { buildLoginThrottleKeys } from "../../src/lib/auth-throttle";
 
 loadEnvIfPresent();
 
@@ -30,7 +30,7 @@ const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 const TEST_OWNER_PASSWORD = readEnv("JP_OWNER_PASSWORD", null) ?? "password";
 
-describe("Sync Routes", { concurrency: false }, () => {
+describe("Sync Routes", { concurrent: false }, () => {
   let db: ReturnType<typeof getDb>;
   let testUserId = 0;
   let testCompanyId = 0;
@@ -55,7 +55,7 @@ describe("Sync Routes", { concurrency: false }, () => {
     return result as T | null;
   }
 
-  before(async () => {
+  beforeAll(async () => {
     db = getDb();
 
     // Find test user fixture - global owner has outlet_id = NULL in user_role_assignments
@@ -95,7 +95,7 @@ describe("Sync Routes", { concurrency: false }, () => {
     );
   });
 
-  after(async () => {
+  afterAll(async () => {
     if (apiServer) {
       await withTimeout(stopApiServerSafely(apiServer.childProcess), 12000, "stopApiServerSafely");
 
@@ -389,7 +389,7 @@ describe("Sync Routes", { concurrency: false }, () => {
     });
   });
 
-  describe("Sync Pull Route Integration", { concurrency: false }, () => {
+  describe("Sync Pull Route Integration", { concurrent: false }, () => {
     // Note: These tests verify the canonical runtime path for /api/sync/pull
     // They complement the module-level tests in pos-sync-module.integration.test.ts
 
@@ -553,7 +553,7 @@ describe("Sync Routes", { concurrency: false }, () => {
 
     test("GET /api/sync/pull returns created variants and variant_prices for requested outlet", async () => {
       // Use test fixtures library to create item + variant
-      const { createTestItem, createTestVariant } = await import("../../lib/test-fixtures.js");
+      const { createTestItem, createTestVariant } = await import("../../src/lib/test-fixtures.js");
 
       const testItem = await createTestItem(testCompanyId, {
         sku: `SYNC-TEST-${Date.now().toString(36)}`,
@@ -618,14 +618,14 @@ describe("Sync Routes", { concurrency: false }, () => {
       if (otherOutletRows.rows.length > 0) {
         otherOutletId = Number((otherOutletRows.rows[0] as { id: number }).id);
       } else {
-        const { createTestOutletMinimal } = await import("../../lib/test-fixtures.js");
+        const { createTestOutletMinimal } = await import("../../src/lib/test-fixtures.js");
         const createdOutlet = await createTestOutletMinimal(testCompanyId);
         otherOutletId = createdOutlet.id;
         createdOutletId = createdOutlet.id;
       }
 
       // Use test fixtures library to create item + variant for other outlet
-      const { createTestItem, createTestVariant } = await import("../../lib/test-fixtures.js");
+      const { createTestItem, createTestVariant } = await import("../../src/lib/test-fixtures.js");
 
       const testItem = await createTestItem(testCompanyId, {
         sku: `SYNC-OTHER-${Date.now().toString(36)}`,
@@ -876,7 +876,7 @@ describe("Sync Routes", { concurrency: false }, () => {
 
   describe("Sync Module Health Check", () => {
     test("checkSyncModuleHealth function exists and returns expected structure", async () => {
-      const { checkSyncModuleHealth } = await import("../../lib/sync-modules");
+      const { checkSyncModuleHealth } = await import("../../src/lib/sync-modules");
 
       const health = await checkSyncModuleHealth();
 
@@ -888,6 +888,6 @@ describe("Sync Routes", { concurrency: false }, () => {
 });
 
 // Standard DB pool cleanup - runs after all tests in this file
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

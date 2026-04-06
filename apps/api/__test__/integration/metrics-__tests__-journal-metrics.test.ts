@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { describe, it } from "node:test";
+import { describe, it } from 'vitest';
 import assert from "node:assert";
-import { journalMetrics, JOURNAL_DOMAINS, JOURNAL_FAILURE_REASONS } from "../journal-metrics";
+import { journalMetrics, JOURNAL_DOMAINS, JOURNAL_FAILURE_REASONS } from "../../src/lib/metrics/journal-metrics";
 
 describe("Journal Domains Constants", () => {
   it("should have all expected domains", () => {

@@ -8,7 +8,7 @@
  * Uses singleton instances to avoid re-registering metrics with global registry.
  */
 
-import { test, describe, beforeEach } from "node:test";
+import { test, describe, beforeEach } from 'vitest';
 import assert from "node:assert";
 import { register } from "prom-client";
 import { 

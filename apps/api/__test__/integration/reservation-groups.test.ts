@@ -2,17 +2,17 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import {test, afterAll} from 'vitest';
 import { sql } from "kysely";
-import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "./db";
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
 import {
   createReservationGroupWithTables,
   getReservationGroup,
   updateReservationGroup,
   deleteReservationGroupSafe
-} from "./reservation-groups";
-import { createOutletTable } from "./outlet-tables";
+} from "../../src/lib/reservation-groups";
+import { createOutletTable } from "../../src/lib/outlet-tables";
 import type { ReservationGroupDetail } from "@jurnapod/shared";
 
 loadEnvIfPresent();
@@ -134,8 +134,8 @@ async function cleanupGroup(groupId: number, tableIds: number[]): Promise<void> 
 }
 
 test(
-  "updateReservationGroup updates customer name only",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateReservationGroup updates customer name only",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const ctx = await resolveTestContext();
     const fixtures = await createTestGroup(ctx, 3, 6);
@@ -164,8 +164,8 @@ test(
 );
 
 test(
-  "updateReservationGroup updates customer phone and notes",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateReservationGroup updates customer phone and notes",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const ctx = await resolveTestContext();
     const fixtures = await createTestGroup(ctx, 3, 6);
@@ -198,8 +198,8 @@ test(
 );
 
 test(
-  "updateReservationGroup adds tables to group",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateReservationGroup adds tables to group",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const ctx = await resolveTestContext();
     const fixtures = await createTestGroup(ctx, 3, 6);
@@ -247,8 +247,8 @@ test(
 );
 
 test(
-  "updateReservationGroup removes tables from group",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateReservationGroup removes tables from group",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const ctx = await resolveTestContext();
     const fixtures = await createTestGroup(ctx, 4, 4); // 4 tables, 4 guests (exact capacity)
@@ -280,8 +280,8 @@ test(
 );
 
 test(
-  "updateReservationGroup changes time and duration",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateReservationGroup changes time and duration",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const ctx = await resolveTestContext();
     const fixtures = await createTestGroup(ctx, 3, 6);
@@ -313,8 +313,8 @@ test(
 );
 
 test(
-  "updateReservationGroup throws 404 for non-existent group",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateReservationGroup throws 404 for non-existent group",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const ctx = await resolveTestContext();
 
@@ -335,8 +335,8 @@ test(
 );
 
 test(
-  "updateReservationGroup throws error for group with started reservations",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateReservationGroup throws error for group with started reservations",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const ctx = await resolveTestContext();
     const fixtures = await createTestGroup(ctx, 3, 6);
@@ -367,8 +367,8 @@ test(
 );
 
 test(
-  "updateReservationGroup throws error for insufficient capacity",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateReservationGroup throws error for insufficient capacity",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const ctx = await resolveTestContext();
     // Create group with guest count of 10 (needs 3 tables of 4 capacity each = 12 seats)
@@ -397,8 +397,8 @@ test(
 );
 
 test(
-  "updateReservationGroup throws error on time conflict",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateReservationGroup throws error on time conflict",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const ctx = await resolveTestContext();
     const fixtures = await createTestGroup(ctx, 3, 6);
@@ -438,8 +438,8 @@ test(
 );
 
 test(
-  "updateReservationGroup throws error for empty group",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateReservationGroup throws error for empty group",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const ctx = await resolveTestContext();
     const fixtures = await createTestGroup(ctx, 3, 6);
@@ -475,8 +475,8 @@ test(
 );
 
 test(
-  "updateReservationGroup enforces tenant isolation - wrong company",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateReservationGroup enforces tenant isolation - wrong company",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const ctx = await resolveTestContext();
     const fixtures = await createTestGroup(ctx, 3, 6);
@@ -504,8 +504,8 @@ test(
 );
 
 test(
-  "updateReservationGroup enforces tenant isolation - wrong outlet",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateReservationGroup enforces tenant isolation - wrong outlet",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const ctx = await resolveTestContext();
     const fixtures = await createTestGroup(ctx, 3, 6);
@@ -533,8 +533,8 @@ test(
 );
 
 test(
-  "updateReservationGroup allows exact capacity match",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateReservationGroup allows exact capacity match",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const ctx = await resolveTestContext();
     const fixtures = await createTestGroup(ctx, 3, 6); // 3 tables x 4 capacity = 12 seats
@@ -564,8 +564,8 @@ test(
 );
 
 test(
-  "verifies transaction rollback on insufficient capacity",
-  { concurrency: false, timeout: 60000 },
+  "@slow verifies transaction rollback on insufficient capacity",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const ctx = await resolveTestContext();
     // Create group with 10 guests needing 3 tables (12 capacity total)
@@ -625,8 +625,8 @@ test(
 );
 
 test(
-  "verifies transaction rollback when reservation already started",
-  { concurrency: false, timeout: 60000 },
+  "@slow verifies transaction rollback when reservation already started",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const ctx = await resolveTestContext();
     const fixtures = await createTestGroup(ctx, 3, 6);
@@ -677,8 +677,8 @@ test(
 );
 
 test(
-  "getReservationGroup public contract omits internal _ts fields",
-  { concurrency: false, timeout: 30000 },
+  "@slow getReservationGroup public contract omits internal _ts fields",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const ctx = await resolveTestContext();
     const fixtures = await createTestGroup(ctx, 2, 4);
@@ -718,6 +718,6 @@ test(
 );
 
 // Standard DB pool cleanup - runs after all tests in this file
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

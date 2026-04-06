@@ -5,16 +5,16 @@
  * Import Validation Library Tests
  */
 
-import { test, describe } from "node:test";
+import {test, describe, afterAll} from 'vitest';
 import assert from "node:assert/strict";
-import { closeDbPool } from "../db.js";
+import { closeDbPool } from "../../src/lib/db.js";
 import {
   checkSkuExists,
   checkItemExistsBySku,
   batchCheckSkusExist,
-} from "./validation.js";
+} from "../../src/lib/import/validation.js";
 
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });
 

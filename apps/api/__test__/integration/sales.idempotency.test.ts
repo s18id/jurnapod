@@ -2,24 +2,24 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import {test, afterAll} from 'vitest';
 import {
   loadEnvIfPresent,
   readEnv
-} from "../../tests/integration/integration-harness.mjs";
-import { getDb, closeDbPool } from "./db";
-import { getComposedPaymentService } from "./modules-sales/payment-service-composition";
+} from "../../tests/integration/integration-harness.js";
+import { getDb, closeDbPool } from "../../src/lib/db";
+import { getComposedPaymentService } from "../../src/lib/modules-sales/payment-service-composition";
 import { PaymentAllocationError, DatabaseConflictError } from "@jurnapod/modules-sales";
-import { createAccount } from "./accounts.js";
-import { setupUserPermission } from "./test-fixtures.js";
+import { createAccount } from "../../src/lib/accounts.js";
+import { setupUserPermission } from "../../src/lib/test-fixtures.js";
 import { sql } from "kysely";
 import { randomUUID } from "node:crypto";
 
 loadEnvIfPresent();
 
 test(
-  "Payment idempotency behavior tests",
-  { concurrency: false, timeout: 60000 },
+  "@slow Payment idempotency behavior tests",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -281,8 +281,8 @@ test(
 );
 
 test(
-  "Service precision validation - non-split payments",
-  { concurrency: false, timeout: 60000 },
+  "@slow Service precision validation - non-split payments",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -427,6 +427,6 @@ test(
 );
 
 // Standard DB pool cleanup - runs after all tests in this file
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

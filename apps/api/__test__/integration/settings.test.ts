@@ -2,9 +2,9 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "./db";
+import {test, afterAll} from 'vitest';
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
 import {
   deleteSetting,
   getSetting,
@@ -14,14 +14,14 @@ import {
   SettingKeyInvalidError,
   SettingNotFoundError,
   SettingValidationError
-} from "./settings";
+} from "../../src/lib/settings";
 import { sql } from "kysely";
 
 loadEnvIfPresent();
 
 test(
-  "settings CRUD - set, list, get, delete",
-  { concurrency: false, timeout: 120000 },
+  "@slow settings CRUD - set, list, get, delete",
+  { concurrent: false, timeout: 120000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -88,8 +88,8 @@ test(
 );
 
 test(
-  "settings - number value validation",
-  { concurrency: false, timeout: 60000 },
+  "@slow settings - number value validation",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -145,8 +145,8 @@ test(
 );
 
 test(
-  "settings - boolean value validation",
-  { concurrency: false, timeout: 60000 },
+  "@slow settings - boolean value validation",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -202,8 +202,8 @@ test(
 );
 
 test(
-  "settings - tenant isolation",
-  { concurrency: false, timeout: 60000 },
+  "@slow settings - tenant isolation",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -255,8 +255,8 @@ test(
 );
 
 test(
-  "settings - cascade resolution (outlet → company)",
-  { concurrency: false, timeout: 60000 },
+  "@slow settings - cascade resolution (outlet → company)",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -334,6 +334,6 @@ test(
 );
 
 // Close database pool after all tests
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

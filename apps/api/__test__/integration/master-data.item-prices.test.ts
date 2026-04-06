@@ -2,14 +2,14 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { listEffectiveItemPricesForOutlet } from "./item-prices/index.js";
-import { createItem } from "./items/index.js";
-import { createItemPrice } from "./item-prices/index.js";
-import { closeDbPool, getDb } from "./db";
+import {test, afterAll} from 'vitest';
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { listEffectiveItemPricesForOutlet } from "../../src/lib/item-prices/index.js";
+import { createItem } from "../../src/lib/items/index.js";
+import { createItemPrice } from "../../src/lib/item-prices/index.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
 import { sql } from "kysely";
-import { DatabaseConflictError, DatabaseReferenceError } from "./master-data-errors.js";
+import { DatabaseConflictError, DatabaseReferenceError } from "../../src/lib/master-data-errors.js";
 
 loadEnvIfPresent();
 
@@ -28,8 +28,8 @@ type ItemPriceResult = {
 };
 
 test(
-  "listEffectiveItemPricesForOutlet - inactive override hides item from active prices",
-  { concurrency: false, timeout: 60000 },
+  "@slow listEffectiveItemPricesForOutlet - inactive override hides item from active prices",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -101,8 +101,8 @@ test(
 );
 
 test(
-  "listEffectiveItemPricesForOutlet - active override wins over default",
-  { concurrency: false, timeout: 60000 },
+  "@slow listEffectiveItemPricesForOutlet - active override wins over default",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -161,8 +161,8 @@ test(
 );
 
 test(
-  "listEffectiveItemPricesForOutlet - default fallback when no override exists",
-  { concurrency: false, timeout: 60000 },
+  "@slow listEffectiveItemPricesForOutlet - default fallback when no override exists",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -214,8 +214,8 @@ test(
 );
 
 test(
-  "createItemPrice successfully creates and retrieves price",
-  { concurrency: false, timeout: 60000 },
+  "@slow createItemPrice successfully creates and retrieves price",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -294,8 +294,8 @@ test(
 );
 
 test(
-  "createItemPrice throws DatabaseConflictError for duplicate (item_id, outlet_id, variant_id)",
-  { concurrency: false, timeout: 60000 },
+  "@slow createItemPrice throws DatabaseConflictError for duplicate (item_id, outlet_id, variant_id)",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -360,8 +360,8 @@ test(
 );
 
 test(
-  "createItemPrice throws DatabaseReferenceError for invalid item_id",
-  { concurrency: false, timeout: 60000 },
+  "@slow createItemPrice throws DatabaseReferenceError for invalid item_id",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -403,6 +403,6 @@ test(
   }
 );
 
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

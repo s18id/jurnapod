@@ -9,7 +9,6 @@ Platform foundation for Jurnapod ERP — organization management, outlets, audit
 - **Audit logging**: Queryable audit trails for compliance
 - **Feature flags**: Module and feature enablement per company/outlet
 - **Settings management**: Company and outlet configuration
-- **Sync audit**: Audit data synced for backoffice visibility
 
 **Boundaries:**
 - ✅ In: Organization CRUD, audit query, feature flags, settings management
@@ -89,7 +88,6 @@ await settings.updateSettings(1, {
 | AuditQuery | `audit/query.ts` | Audit log queries |
 | Settings | `settings/index.ts` | Settings management |
 | FeatureFlags | `feature-flags/index.ts` | Module/feature enablement |
-| SyncAudit | `sync/audit-service.ts` | Audit sync for backoffice |
 
 ### SettingsPort Architecture
 
@@ -157,12 +155,8 @@ packages/modules/platform/
 │   │   ├── cache.ts               # Cache layer (NEW)
 │   │   └── encryption.ts          # Encrypted settings
 │   │
-│   ├── feature-flags/
-│   │   └── index.ts               # Feature flag logic
-│   │
-│   └── sync/
-│       ├── index.ts                # Sync audit exports
-│       └── audit-service.ts        # Audit sync service
+│   └── feature-flags/
+│       └── index.ts               # Feature flag logic
 │
 ├── package.json
 ├── tsconfig.json
@@ -198,7 +192,6 @@ When modifying this package:
 - [ ] Settings properly encrypted for sensitive values
 - [ ] Kysely query builder used (not raw SQL)
 - [ ] Company/outlet/user scoping on all queries
-- [ ] Sync audit properly formats data for backoffice
 
 ---
 

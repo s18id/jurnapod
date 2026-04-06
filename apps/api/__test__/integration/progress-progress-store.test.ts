@@ -11,9 +11,9 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after, beforeEach } from "node:test";
+import {test, describe, beforeAll, afterAll, beforeEach} from 'vitest';
 import { randomUUID } from "node:crypto";
-import { closeDbPool, getDb } from "../db.js";
+import { closeDbPool, getDb } from "../../src/lib/db.js";
 import { sql } from "kysely";
 import {
   clearProgressTracking,
@@ -32,24 +32,24 @@ import {
   STALE_THRESHOLD_MS,
   MIN_UPDATE_INTERVAL_MS,
   type OperationType,
-} from "./progress-store.js";
+} from "../../src/lib/progress/progress-store.js";
 import {
   SSE_POLL_INTERVAL_MS,
   SSE_KEEPALIVE_INTERVAL_MS,
-} from "../../routes/progress.js";
+} from "../../src/routes/progress.js";
 
 const COMPANY_ID = 1;
 const OTHER_COMPANY_ID = 999;
 
-describe("Progress Store", { concurrency: false }, () => {
-  before(async () => {
+describe("Progress Store", { concurrent: false }, () => {
+  beforeAll(async () => {
     const db = getDb();
     clearProgressTracking();
     // Clean up any existing test data
     await sql`DELETE FROM operation_progress WHERE company_id IN (${sql.join([COMPANY_ID, OTHER_COMPANY_ID].map(id => sql`${id}`), sql`, `)})`.execute(db);
   });
 
-  after(async () => {
+  afterAll(async () => {
     const db = getDb();
     // Clean up test data
     try {
@@ -961,15 +961,15 @@ describe("Progress Store", { concurrency: false }, () => {
 // Integration Tests
 // ============================================================================
 
-describe("Progress Store - Integration Scenarios", { concurrency: false }, () => {
-  before(async () => {
+describe("Progress Store - Integration Scenarios", { concurrent: false }, () => {
+  beforeAll(async () => {
     const db = getDb();
     clearProgressTracking();
     // Clean up any existing test data
     await sql`DELETE FROM operation_progress WHERE company_id IN (${sql.join([COMPANY_ID, OTHER_COMPANY_ID].map(id => sql`${id}`), sql`, `)})`.execute(db);
   });
 
-  after(async () => {
+  afterAll(async () => {
     const db = getDb();
     try {
       clearProgressTracking();
@@ -1160,7 +1160,7 @@ describe("SSE Configuration Constants", () => {
     process.env = { ...originalEnv };
   });
 
-  after(() => {
+  afterAll(() => {
     // Restore original env after all tests
     process.env = originalEnv;
   });

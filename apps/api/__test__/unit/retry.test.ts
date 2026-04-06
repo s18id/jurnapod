@@ -4,7 +4,7 @@
 // Run with: npm run test:unit:single -w @jurnapod/api src/lib/retry.test.ts
 
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
+import { describe, test } from 'vitest';
 import { withRetry, sleep } from "@/lib/retry";
 
 describe("sleep()", () => {

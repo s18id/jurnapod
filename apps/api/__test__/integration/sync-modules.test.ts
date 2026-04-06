@@ -1,12 +1,13 @@
+// @ts-nocheck
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { afterAll } from 'vitest';
 import { syncModuleRegistry } from "@jurnapod/sync-core";
-import { closeDbPool } from "./db";
+import { closeDbPool } from "../../src/lib/db";
 import {
   cleanupSyncModules,
   getPosSyncModule,
   initializeSyncModules,
-} from "./sync-modules";
+} from "../../src/lib/sync-modules";
 
 test("initializeSyncModules publishes singleton only after successful init", async () => {
   await initializeSyncModules();
@@ -73,6 +74,6 @@ test("cleanupSyncModules resets singleton even when registry cleanup throws", as
   }
 });
 
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

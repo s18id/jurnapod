@@ -3,7 +3,7 @@
 // Description: Unit tests for pure cost tracking functions (no DB required)
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { describe, test } from 'vitest';
 import {
   getCostingStrategy,
   InsufficientInventoryError,
@@ -17,8 +17,8 @@ import {
 // Money Helper Tests - Pure Functions
 // ============================================================================
 
-test("Money Helpers", async (t) => {
-  await t.test("should convert to minor units correctly", () => {
+describe("Money Helpers", () => {
+  test("should convert to minor units correctly", () => {
     assert.strictEqual(toMinorUnits(10.5), 105000); // 10.5 * 10000
     assert.strictEqual(toMinorUnits(0.1234), 1234);
     assert.strictEqual(toMinorUnits(0.12345), 1235); // Rounds up
@@ -27,7 +27,7 @@ test("Money Helpers", async (t) => {
     assert.strictEqual(toMinorUnits(0.0001), 1);
   });
 
-  await t.test("should convert from minor units correctly", () => {
+  test("should convert from minor units correctly", () => {
     assert.strictEqual(fromMinorUnits(105000), 10.5);
     assert.strictEqual(fromMinorUnits(1234), 0.1234);
     assert.strictEqual(fromMinorUnits(0), 0);
@@ -35,7 +35,7 @@ test("Money Helpers", async (t) => {
     assert.strictEqual(fromMinorUnits(1), 0.0001);
   });
 
-  await t.test("should maintain precision round-trip", () => {
+  test("should maintain precision round-trip", () => {
     const testValues = [0.01, 0.99, 10.5, 99.99, 1000.0001, 0.0001];
     for (const original of testValues) {
       const minor = toMinorUnits(original);
@@ -44,11 +44,11 @@ test("Money Helpers", async (t) => {
     }
   });
 
-  await t.test("should handle edge cases", () => {
+  test("should handle edge cases", () => {
     // Very small numbers
     assert.strictEqual(toMinorUnits(0.00001), 0); // Below precision
     assert.strictEqual(toMinorUnits(0.00009), 1); // Rounds up
-    
+
     // Large numbers
     assert.strictEqual(toMinorUnits(999999.9999), 9999999999);
     assert.strictEqual(fromMinorUnits(9999999999), 999999.9999);
@@ -59,26 +59,26 @@ test("Money Helpers", async (t) => {
 // Strategy Factory Tests - Pure Functions
 // ============================================================================
 
-test("Costing Strategy Factory", async (t) => {
-  await t.test("should return AVG strategy", () => {
+describe("Costing Strategy Factory", () => {
+  test("should return AVG strategy", () => {
     const strategy = getCostingStrategy("AVG");
     assert.ok(strategy, "Strategy should exist");
     assert.strictEqual(typeof strategy.calculateCost, "function", "Should have calculateCost method");
   });
 
-  await t.test("should return FIFO strategy", () => {
+  test("should return FIFO strategy", () => {
     const strategy = getCostingStrategy("FIFO");
     assert.ok(strategy, "Strategy should exist");
     assert.strictEqual(typeof strategy.calculateCost, "function", "Should have calculateCost method");
   });
 
-  await t.test("should return LIFO strategy", () => {
+  test("should return LIFO strategy", () => {
     const strategy = getCostingStrategy("LIFO");
     assert.ok(strategy, "Strategy should exist");
     assert.strictEqual(typeof strategy.calculateCost, "function", "Should have calculateCost method");
   });
 
-  await t.test("should throw InvalidCostingMethodError for invalid method", () => {
+  test("should throw InvalidCostingMethodError for invalid method", () => {
     assert.throws(
       () => getCostingStrategy("INVALID" as any),
       InvalidCostingMethodError,
@@ -96,7 +96,7 @@ test("Costing Strategy Factory", async (t) => {
     );
   });
 
-  await t.test("should return different strategy instances", () => {
+  test("should return different strategy instances", () => {
     const avg1 = getCostingStrategy("AVG");
     const avg2 = getCostingStrategy("AVG");
     // Each call returns new instance
@@ -110,15 +110,15 @@ test("Costing Strategy Factory", async (t) => {
 // Error Class Tests - Pure Classes
 // ============================================================================
 
-test("Error Classes", async (t) => {
-  await t.test("CostTrackingError should have correct name and message", () => {
+describe("Error Classes", () => {
+  test("CostTrackingError should have correct name and message", () => {
     const error = new CostTrackingError("Test error");
     assert.strictEqual(error.name, "CostTrackingError");
     assert.strictEqual(error.message, "Test error");
     assert.ok(error instanceof Error);
   });
 
-  await t.test("InsufficientInventoryError should format message correctly", () => {
+  test("InsufficientInventoryError should format message correctly", () => {
     const error = new InsufficientInventoryError(100, 50);
     assert.strictEqual(error.name, "InsufficientInventoryError");
     assert.ok(error.message.includes("100"), "Should include needed quantity");
@@ -127,7 +127,7 @@ test("Error Classes", async (t) => {
     assert.ok(error instanceof Error);
   });
 
-  await t.test("InvalidCostingMethodError should include method name", () => {
+  test("InvalidCostingMethodError should include method name", () => {
     const error = new InvalidCostingMethodError("XYZ");
     assert.strictEqual(error.name, "InvalidCostingMethodError");
     assert.ok(error.message.includes("XYZ"), "Should include invalid method");
@@ -140,8 +140,8 @@ test("Error Classes", async (t) => {
 // Money Math Consistency Tests
 // ============================================================================
 
-test("Money Math Consistency", async (t) => {
-  await t.test("should handle typical accounting values", () => {
+describe("Money Math Consistency", () => {
+  test("should handle typical accounting values", () => {
     // Common price points
     const prices = [9.99, 19.99, 29.99, 49.99, 99.99];
     for (const price of prices) {
@@ -151,11 +151,11 @@ test("Money Math Consistency", async (t) => {
     }
   });
 
-  await t.test("should handle fractional quantities", () => {
+  test("should handle fractional quantities", () => {
     // Weight-based pricing
     const weights = [0.5, 1.5, 2.25, 3.75];
     const unitCost = 10.5;
-    
+
     for (const weight of weights) {
       const totalCost = weight * unitCost;
       const minor = toMinorUnits(totalCost);

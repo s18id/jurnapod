@@ -2,23 +2,23 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "./db";
+import {test, afterAll} from 'vitest';
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
 import {
   listCompanyModules,
   getModuleIdByCode,
   updateCompanyModule,
   isModuleEnabled,
   ModuleNotFoundError
-} from "./settings-modules";
+} from "../../src/lib/settings-modules";
 import { sql } from "kysely";
 
 loadEnvIfPresent();
 
 test(
-  "settings-modules - listCompanyModules returns modules for company",
-  { concurrency: false, timeout: 120000 },
+  "@slow settings-modules - listCompanyModules returns modules for company",
+  { concurrent: false, timeout: 120000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -69,8 +69,8 @@ test(
 );
 
 test(
-  "settings-modules - getModuleIdByCode returns correct ID or null",
-  { concurrency: false, timeout: 60000 },
+  "@slow settings-modules - getModuleIdByCode returns correct ID or null",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
 
@@ -89,8 +89,8 @@ test(
 );
 
 test(
-  "settings-modules - updateCompanyModule creates new record",
-  { concurrency: false, timeout: 60000 },
+  "@slow settings-modules - updateCompanyModule creates new record",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -155,8 +155,8 @@ test(
 );
 
 test(
-  "settings-modules - updateCompanyModule updates existing record",
-  { concurrency: false, timeout: 60000 },
+  "@slow settings-modules - updateCompanyModule updates existing record",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -249,8 +249,8 @@ test(
 );
 
 test(
-  "settings-modules - isModuleEnabled returns correct boolean",
-  { concurrency: false, timeout: 60000 },
+  "@slow settings-modules - isModuleEnabled returns correct boolean",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -337,7 +337,7 @@ test(
 
 test(
   "settings-modules - ModuleNotFoundError thrown when module doesn't exist",
-  { concurrency: false, timeout: 60000 },
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
 
@@ -384,6 +384,6 @@ test(
 );
 
 // Close database pool after all tests
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

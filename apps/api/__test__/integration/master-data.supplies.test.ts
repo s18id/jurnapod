@@ -2,9 +2,9 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { loadEnvIfPresent } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "./db";
+import {test, afterAll} from 'vitest';
+import { loadEnvIfPresent } from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
 
 loadEnvIfPresent();
 
@@ -15,7 +15,7 @@ const {
   listSupplies,
   updateSupply,
   DatabaseConflictError,
-} = await import("./supplies/index.js");
+} = await import("../../src/lib/supplies/index.js");
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -58,8 +58,8 @@ async function getOtherCompanyId(companyCode: string): Promise<number> {
 }
 
 test(
-  "listSupplies respects company scope and isActive filter",
-  { concurrency: false, timeout: 60000 },
+  "@slow listSupplies respects company scope and isActive filter",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -141,7 +141,7 @@ test(
 
 test(
   "createSupply defaults unit='unit' and is_active=true when omitted",
-  { concurrency: false, timeout: 60000 },
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -175,8 +175,8 @@ test(
 );
 
 test(
-  "createSupply duplicate sku throws DatabaseConflictError",
-  { concurrency: false, timeout: 60000 },
+  "@slow createSupply duplicate sku throws DatabaseConflictError",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -218,8 +218,8 @@ test(
 );
 
 test(
-  "findSupplyById is tenant-scoped",
-  { concurrency: false, timeout: 60000 },
+  "@slow findSupplyById is tenant-scoped",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -257,8 +257,8 @@ test(
 );
 
 test(
-  "updateSupply returns null for missing id",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateSupply returns null for missing id",
+  { concurrent: false, timeout: 60000 },
   async () => {
     let companyId = 0;
 
@@ -274,8 +274,8 @@ test(
 );
 
 test(
-  "deleteSupply returns false for missing id",
-  { concurrency: false, timeout: 60000 },
+  "@slow deleteSupply returns false for missing id",
+  { concurrent: false, timeout: 60000 },
   async () => {
     let companyId = 0;
 
@@ -288,7 +288,7 @@ test(
   }
 );
 
-test.after(async () => {
+afterAll(async () => {
   await withTimeout(closeDbPool(), 10000, "closeDbPool");
 
   // Final safety net: release lingering active handles that can keep node:test alive.

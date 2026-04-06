@@ -25,7 +25,7 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after } from "node:test";
+import {test, describe, beforeAll, afterAll} from 'vitest';
 import {
   loadEnvIfPresent,
   readEnv,
@@ -34,8 +34,8 @@ import {
   waitForHealthcheck,
   stopApiServer,
   loginOwner
-} from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "../lib/db";
+} from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
 import {
   listFixedAssetCategories,
   createFixedAssetCategory,
@@ -47,7 +47,7 @@ import {
   updateFixedAsset,
   deleteFixedAsset,
   findFixedAssetById
-} from "../lib/modules-accounting/index.js";
+} from "../../src/lib/modules-accounting/index.js";
 import {
   FixedAssetCategoryNotFoundError,
   FixedAssetCategoryNotEmptyError,
@@ -58,7 +58,7 @@ import {
   isDuplicateKeyError,
 } from "@jurnapod/modules-accounting";
 import { CompanyService } from "@jurnapod/modules-platform";
-import { createOutletBasic } from "../lib/outlets.js";
+import { createOutletBasic } from "../../src/lib/outlets.js";
 import { sql } from "kysely";
 
 loadEnvIfPresent();
@@ -68,7 +68,7 @@ const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 const TEST_OWNER_PASSWORD = readEnv("JP_OWNER_PASSWORD", null) ?? "password";
 
-describe("Fixed Assets Routes", { concurrency: false }, () => {
+describe("Fixed Assets Routes", { concurrent: false }, () => {
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
@@ -78,7 +78,7 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
   let accessToken = "";
   let apiServer: ReturnType<typeof startApiServer> | null = null;
 
-  before(async () => {
+  beforeAll(async () => {
     const db = getDb();
 
     // Find test user fixture using Kysely query builder
@@ -140,7 +140,7 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
     );
   });
 
-  after(async () => {
+  afterAll(async () => {
     const db = getDb();
     // Clean up second company and its outlet
     try {
@@ -799,7 +799,7 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
     let activeAssetId = 0;
     let inactiveAssetId = 0;
 
-    before(async () => {
+    beforeAll(async () => {
       categoryId = (await createFixedAssetCategory(testCompanyId, {
         code: `CAT-FLT-${runId}`.toUpperCase(),
         name: `Filter Category ${runId}`,
@@ -821,7 +821,7 @@ describe("Fixed Assets Routes", { concurrency: false }, () => {
       }, { userId: testUserId })).id;
     });
 
-    after(async () => {
+    afterAll(async () => {
       try {
         await deleteFixedAsset(testCompanyId, activeAssetId, { userId: testUserId });
         await deleteFixedAsset(testCompanyId, inactiveAssetId, { userId: testUserId });

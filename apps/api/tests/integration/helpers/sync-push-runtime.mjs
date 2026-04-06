@@ -172,16 +172,37 @@ export async function stopApiServer(childProcess) {
 
   await new Promise((resolve) => {
     const timeout = setTimeout(() => {
-      childProcess.kill("SIGKILL");
-    }, 5000);
+      try {
+        childProcess.kill("SIGKILL");
+      } catch {
+        // ignore forced kill errors
+      }
+    }, 8000);
 
     childProcess.once("exit", () => {
       clearTimeout(timeout);
       resolve();
     });
 
-    childProcess.kill("SIGTERM");
+    try {
+      childProcess.kill("SIGTERM");
+    } catch {
+      clearTimeout(timeout);
+      resolve();
+    }
   });
+
+  // Ensure stdio streams do not keep event loop alive.
+  try {
+    childProcess.stdout?.destroy();
+  } catch {
+    // ignore
+  }
+  try {
+    childProcess.stderr?.destroy();
+  } catch {
+    // ignore
+  }
 }
 
 export function buildSyncTransaction({ clientTxId, companyId, outletId, cashierUserId, trxAt }) {

@@ -2,8 +2,8 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
-import { parseFeatureGateValue } from "./shared/common-utils";
+import { describe, test } from 'vitest';
+import { parseFeatureGateValue } from "../../src/lib/shared/common-utils";
 
 describe("sales COGS feature gate", () => {
   test("parseFeatureGateValue handles int and boolean variants", () => {

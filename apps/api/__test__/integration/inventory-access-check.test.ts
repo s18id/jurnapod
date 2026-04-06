@@ -2,17 +2,17 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "../db";
-import { checkItemAccess } from "./access-check";
+import {test, afterAll} from 'vitest';
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
+import { checkItemAccess } from "../../src/lib/inventory/access-check";
 import { sql } from "kysely";
 
 loadEnvIfPresent();
 
 test(
-  "inventory/access-check - Access granted for item matching company",
-  { concurrency: false, timeout: 60000 },
+  "@slow inventory/access-check - Access granted for item matching company",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
 
@@ -59,8 +59,8 @@ test(
 );
 
 test(
-  "inventory/access-check - Access denied with not_found for non-existent item",
-  { concurrency: false, timeout: 60000 },
+  "@slow inventory/access-check - Access denied with not_found for non-existent item",
+  { concurrent: false, timeout: 60000 },
   async () => {
     // Use a very high non-existent ID
     const nonExistentItemId = 999999999;
@@ -75,8 +75,8 @@ test(
 );
 
 test(
-  "inventory/access-check - Access denied with not_found for item in different company",
-  { concurrency: false, timeout: 60000 },
+  "@slow inventory/access-check - Access denied with not_found for item in different company",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
 
@@ -125,6 +125,6 @@ test(
 );
 
 // Close database pool after all tests
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

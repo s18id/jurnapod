@@ -8,7 +8,7 @@
  * Uses singleton instances to avoid re-registering metrics with global registry.
  */
 
-import { test, describe } from "node:test";
+import { test, describe } from 'vitest';
 import assert from "node:assert";
 import { importMetrics } from "@/lib/metrics/import-metrics.js";
 import { exportMetrics } from "@/lib/metrics/export-metrics.js";

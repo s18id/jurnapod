@@ -7,12 +7,12 @@
  */
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import {test, afterAll} from 'vitest';
 import { sql } from "kysely";
-import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "./db";
-import { createCompanyBasic } from "./companies";
-import { createItem } from "./items/index.js";
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
+import { createCompanyBasic } from "../../src/lib/companies";
+import { createItem } from "../../src/lib/items/index.js";
 import {
   getSession,
   listSessions,
@@ -30,7 +30,7 @@ import {
   type UpdateSessionLineInput,
   type LockSessionInput,
   type CloseSessionInput,
-} from "./service-sessions";
+} from "../../src/lib/service-sessions";
 
 loadEnvIfPresent();
 
@@ -136,8 +136,8 @@ async function cleanupTestData(db: ReturnType<typeof getDb>, companyId: bigint, 
 // TEST 1: getSession - returns session with lines, 404 if not found
 // ============================================================================
 test(
-  "getSession - returns session with lines when found",
-  { concurrency: false, timeout: 30000 },
+  "@slow getSession - returns session with lines when found",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -194,8 +194,8 @@ test(
 );
 
 test(
-  "getSession - returns null when session not found",
-  { concurrency: false, timeout: 30000 },
+  "@slow getSession - returns null when session not found",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const { companyId, outletId } = await resolveFixtureContext();
     const nonExistentSessionId = BigInt(999999999);
@@ -210,8 +210,8 @@ test(
 // TEST 2: listSessions - filters by status, pagination works
 // ============================================================================
 test(
-  "listSessions - filters by status and pagination works",
-  { concurrency: false, timeout: 60000 },
+  "@slow listSessions - filters by status and pagination works",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -287,8 +287,8 @@ test(
 // TEST 3: addSessionLine - creates line, checks ACTIVE status, logs event
 // ============================================================================
 test(
-  "addSessionLine - creates line in ACTIVE session and logs event",
-  { concurrency: false, timeout: 30000 },
+  "@slow addSessionLine - creates line in ACTIVE session and logs event",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -360,8 +360,8 @@ test(
 // TEST 4: addSessionLine idempotency - same clientTxId returns existing line
 // ============================================================================
 test(
-  "addSessionLine - idempotent with same clientTxId",
-  { concurrency: false, timeout: 30000 },
+  "@slow addSessionLine - idempotent with same clientTxId",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -417,8 +417,8 @@ test(
 );
 
 test(
-  "addSessionLine - idempotent replay returns original line even after newer lines",
-  { concurrency: false, timeout: 30000 },
+  "@slow addSessionLine - idempotent replay returns original line even after newer lines",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -493,8 +493,8 @@ test(
 // TEST 5: updateSessionLine - updates quantity/price, recalculates total
 // ============================================================================
 test(
-  "updateSessionLine - updates line and recalculates total",
-  { concurrency: false, timeout: 30000 },
+  "@slow updateSessionLine - updates line and recalculates total",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -552,8 +552,8 @@ test(
 // TEST 6: removeSessionLine - deletes line, logs event
 // ============================================================================
 test(
-  "removeSessionLine - deletes line and logs event",
-  { concurrency: false, timeout: 30000 },
+  "@slow removeSessionLine - deletes line and logs event",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -615,8 +615,8 @@ test(
 // TEST 7: lockSessionForPayment - ACTIVE→LOCKED transition
 // ============================================================================
 test(
-  "lockSessionForPayment - transitions from ACTIVE to LOCKED_FOR_PAYMENT",
-  { concurrency: false, timeout: 30000 },
+  "@slow lockSessionForPayment - transitions from ACTIVE to LOCKED_FOR_PAYMENT",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -661,8 +661,8 @@ test(
 // TEST 8: lockSessionForPayment - rejects if not ACTIVE (409)
 // ============================================================================
 test(
-  "lockSessionForPayment - rejects if session is not ACTIVE",
-  { concurrency: false, timeout: 30000 },
+  "@slow lockSessionForPayment - rejects if session is not ACTIVE",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -706,8 +706,8 @@ test(
 // TEST 9: closeSession - LOCKED→CLOSED, finalizes order, releases occupancy
 // ============================================================================
 test(
-  "closeSession - transitions from LOCKED_FOR_PAYMENT to CLOSED and releases occupancy",
-  { concurrency: false, timeout: 30000 },
+  "@slow closeSession - transitions from LOCKED_FOR_PAYMENT to CLOSED and releases occupancy",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -781,8 +781,8 @@ test(
 // TEST 10: closeSession - ACTIVE→CLOSED with snapshot
 // ============================================================================
 test(
-  "closeSession - transitions from ACTIVE to CLOSED with snapshot",
-  { concurrency: false, timeout: 30000 },
+  "@slow closeSession - transitions from ACTIVE to CLOSED with snapshot",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -840,8 +840,8 @@ test(
 // - updated_at_ts: snapshot freshness derived from source line updated_at
 // ============================================================================
 test(
-  "closeSession - snapshot lines derive freshness from source lines (Story 17.3 / 18.2)",
-  { concurrency: false, timeout: 30000 },
+  "@slow closeSession - snapshot lines derive freshness from source lines (Story 17.3 / 18.2)",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -930,8 +930,8 @@ test(
 // TEST 11: closeSession - rejects if already closed
 // ============================================================================
 test(
-  "closeSession - rejects if session is already CLOSED",
-  { concurrency: false, timeout: 30000 },
+  "@slow closeSession - rejects if session is already CLOSED",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -978,8 +978,8 @@ test(
 // TEST 12: Tenant isolation - wrong company/outlet returns null/404
 // ============================================================================
 test(
-  "Tenant isolation - wrong company returns null for getSession",
-  { concurrency: false, timeout: 30000 },
+  "@slow Tenant isolation - wrong company returns null for getSession",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -1006,8 +1006,8 @@ test(
 );
 
 test(
-  "Tenant isolation - wrong outlet returns null for getSession",
-  { concurrency: false, timeout: 30000 },
+  "@slow Tenant isolation - wrong outlet returns null for getSession",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -1034,8 +1034,8 @@ test(
 );
 
 test(
-  "Tenant isolation - wrong company returns empty list for listSessions",
-  { concurrency: false, timeout: 30000 },
+  "@slow Tenant isolation - wrong company returns empty list for listSessions",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -1068,8 +1068,8 @@ test(
 );
 
 test(
-  "Tenant isolation - addSessionLine throws SessionNotFoundError for wrong company",
-  { concurrency: false, timeout: 30000 },
+  "@slow Tenant isolation - addSessionLine throws SessionNotFoundError for wrong company",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -1111,8 +1111,8 @@ test(
 );
 
 test(
-  "addSessionLine - throws InvalidSessionStatusError when session is not ACTIVE",
-  { concurrency: false, timeout: 30000 },
+  "@slow addSessionLine - throws InvalidSessionStatusError when session is not ACTIVE",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -1155,8 +1155,8 @@ test(
 // TEST 13: addSessionLine - validates product exists and belongs to company
 // ============================================================================
 test(
-  "addSessionLine - throws SessionValidationError for non-existent product",
-  { concurrency: false, timeout: 30000 },
+  "@slow addSessionLine - throws SessionValidationError for non-existent product",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -1199,8 +1199,8 @@ test(
 );
 
 test(
-  "addSessionLine - throws SessionValidationError for product from different company",
-  { concurrency: false, timeout: 30000 },
+  "@slow addSessionLine - throws SessionValidationError for product from different company",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -1263,8 +1263,8 @@ test(
 
 // Test: Idempotency replay is scoped by clientTxId per outlet (duplicate in other session is conflict)
 test(
-  "addSessionLine - duplicate clientTxId in different session throws conflict",
-  { concurrency: false, timeout: 30000 },
+  "@slow addSessionLine - duplicate clientTxId in different session throws conflict",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -1325,6 +1325,6 @@ test(
 );
 
 // Pool cleanup
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

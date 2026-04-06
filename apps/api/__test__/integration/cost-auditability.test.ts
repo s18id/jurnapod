@@ -1,21 +1,22 @@
+// @ts-nocheck
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 // Scope: Story 4.6 Task 5 - Unit tests for cost auditability endpoints (API layer)
 
 import assert from "node:assert/strict";
-import { test, before, after } from "node:test";
-import { getDb, closeDbPool, type KyselySchema } from "./db";
+import {test, beforeAll, afterAll} from 'vitest';
+import { getDb, closeDbPool, type KyselySchema } from "../../src/lib/db";
 import { sql } from "kysely";
 import {
   getItemCostLayersWithConsumption,
   getItemCostSummaryExtended,
   createCostLayer,
 } from "@jurnapod/modules-inventory-costing";
-import { createItem } from "./items/index.js";
-import { createCompanyBasic } from "./companies.js";
-import { createOutletBasic } from "./outlets.js";
+import { createItem } from "../../src/lib/items/index.js";
+import { createCompanyBasic } from "../../src/lib/companies.js";
+import { createOutletBasic } from "../../src/lib/outlets.js";
 
-// Dynamic IDs - created in before() hook
+// Dynamic IDs - created in beforeAll() hook
 let TEST_COMPANY_ID: number;
 let TEST_OUTLET_ID: number;
 const RUN_ID = Date.now().toString(36);
@@ -66,10 +67,11 @@ async function cleanupTestData(db: KyselySchema, companyId: number): Promise<voi
   await sql`DELETE FROM companies WHERE id = ${companyId}`.execute(db);
 }
 
-test("Cost Auditability API Layer Tests", async (t) => {
-  const db = getDb();
+describe("Cost Auditability API Layer Tests", () => {
+  let db: KyselySchema;
 
-  before(async () => {
+  beforeAll(async () => {
+    db = getDb();
     await cleanupTestData(db, 0);
 
     // Create company dynamically
@@ -88,12 +90,12 @@ test("Cost Auditability API Layer Tests", async (t) => {
     TEST_OUTLET_ID = outlet.id;
   });
 
-  after(async () => {
+  afterAll(async () => {
     await cleanupTestData(db, TEST_COMPANY_ID);
     await closeDbPool();
   });
 
-  await t.test("getItemCostLayersWithConsumption returns layers with consumption history", async () => {
+  test("getItemCostLayersWithConsumption returns layers with consumption history", async () => {
     // Setup
     await setCompanyCostingMethod(db, TEST_COMPANY_ID, "FIFO");
     const item = await createItem(TEST_COMPANY_ID, { name: "Layer Test", type: "PRODUCT" });
@@ -127,12 +129,12 @@ test("Cost Auditability API Layer Tests", async (t) => {
     assert.strictEqual(layers[0].consumedBy![0].transactionId, consumptionTxId);
   });
 
-  await t.test("getItemCostLayersWithConsumption returns empty array for non-existent item", async () => {
+  test("getItemCostLayersWithConsumption returns empty array for non-existent item", async () => {
     const layers = await getItemCostLayersWithConsumption(TEST_COMPANY_ID, 999999, db);
     assert.strictEqual(layers.length, 0);
   });
 
-  await t.test("getItemCostSummaryExtended returns method-specific data for AVG", async () => {
+  test("getItemCostSummaryExtended returns method-specific data for AVG", async () => {
     // Setup
     await setCompanyCostingMethod(db, TEST_COMPANY_ID, "AVG");
     const item = await createItem(TEST_COMPANY_ID, { name: "AVG Summary Test", type: "PRODUCT" });
@@ -166,7 +168,7 @@ test("Cost Auditability API Layer Tests", async (t) => {
     assert.strictEqual(summary!.methodSpecific!.avg!.weightedAverage, 11000);
   });
 
-  await t.test("getItemCostSummaryExtended returns method-specific data for FIFO", async () => {
+  test("getItemCostSummaryExtended returns method-specific data for FIFO", async () => {
     // Setup
     await setCompanyCostingMethod(db, TEST_COMPANY_ID, "FIFO");
     const item = await createItem(TEST_COMPANY_ID, { name: "FIFO Summary Test", type: "PRODUCT" });
@@ -200,7 +202,7 @@ test("Cost Auditability API Layer Tests", async (t) => {
     assert.strictEqual(summary!.methodSpecific!.fifo!.oldestLayerCost, 10000);
   });
 
-  await t.test("getItemCostSummaryExtended returns method-specific data for LIFO", async () => {
+  test("getItemCostSummaryExtended returns method-specific data for LIFO", async () => {
     // Setup
     await setCompanyCostingMethod(db, TEST_COMPANY_ID, "LIFO");
     const item = await createItem(TEST_COMPANY_ID, { name: "LIFO Summary Test", type: "PRODUCT" });
@@ -234,7 +236,7 @@ test("Cost Auditability API Layer Tests", async (t) => {
     assert.strictEqual(summary!.methodSpecific!.lifo!.newestLayerCost, 12000);
   });
 
-  await t.test("getItemCostSummaryExtended returns null when no cost data", async () => {
+  test("getItemCostSummaryExtended returns null when no cost data", async () => {
     const item = await createItem(TEST_COMPANY_ID, { name: "No Cost Test", type: "PRODUCT" });
     const itemId = item.id;
     const summary = await getItemCostSummaryExtended(TEST_COMPANY_ID, itemId, db);

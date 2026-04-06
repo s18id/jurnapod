@@ -9,8 +9,8 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after } from "node:test";
-import { getDb, closeDbPool } from "../../lib/db.js";
+import {test, describe, beforeAll, afterAll} from 'vitest';
+import { getDb, closeDbPool } from "../../src/lib/db.js";
 import { sql } from "kysely";
 import {
   checkVariantStockAvailability,
@@ -18,13 +18,13 @@ import {
   releaseVariantStock,
   deductVariantStock,
   getAggregatedItemStock
-} from "./variant-stock.js";
-import { createCompanyBasic } from "../companies.js";
-import { createOutletBasic } from "../outlets.js";
-import { createItem } from "../items/index.js";
+} from "../../src/lib/inventory/variant-stock.js";
+import { createCompanyBasic } from "../../src/lib/companies.js";
+import { createOutletBasic } from "../../src/lib/outlets.js";
+import { createItem } from "../../src/lib/items/index.js";
 
 describe("Variant Stock Operations", () => {
-  before(async () => {
+  beforeAll(async () => {
     const db = getDb();
     
     // Ensure variant_id column exists in inventory_stock
@@ -40,7 +40,7 @@ describe("Variant Stock Operations", () => {
     }
   });
 
-  after(async () => {
+  afterAll(async () => {
     await closeDbPool();
   });
 
@@ -622,7 +622,7 @@ describe("Variant Stock Operations", () => {
 
 // POS Cart Integration
 describe("POS Cart Variant Stock Integration", () => {
-  after(async () => {
+  afterAll(async () => {
     await closeDbPool();
   });
 
@@ -680,7 +680,7 @@ describe("POS Cart Variant Stock Integration", () => {
 
 // Concurrency Tests
 describe("Variant Stock Concurrency", () => {
-  after(async () => {
+  afterAll(async () => {
     await closeDbPool();
   });
 

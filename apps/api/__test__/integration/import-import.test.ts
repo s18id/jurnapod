@@ -8,8 +8,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { test, describe, before, after } from 'node:test';
-import { closeDbPool } from '../db.js';
+import {test, describe, afterAll, beforeAll} from 'vitest';
+import { closeDbPool } from '../../src/lib/db.js';
 
 // Import functions under test
 import {
@@ -40,8 +40,8 @@ import {
   type BatchProcessor,
   type BatchOptions,
   type FieldType,
-} from './index.js';
-import type { ValidationContext } from './index.js';
+} from '../../src/lib/import/index.js';
+import type { ValidationContext } from '../../src/lib/import/index.js';
 
 // ============================================================================
 // Test Helpers
@@ -1029,6 +1029,6 @@ describe('Performance', () => {
 // ============================================================================
 
 // Close database pool after all tests
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

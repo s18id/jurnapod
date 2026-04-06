@@ -1,7 +1,8 @@
+// @ts-nocheck
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { test, describe, mock } from "node:test";
+import {test, describe, afterAll, mock} from 'vitest';
 import assert from "node:assert";
 import {
   getDatasetSizeBucket,
@@ -12,7 +13,7 @@ import {
   withQueryTimeout,
   DATASET_SIZE_THRESHOLDS,
   REPORT_SLO_LATENCY_MS,
-} from "./report-telemetry";
+} from "../../src/lib/report-telemetry";
 
 describe("Report Telemetry", () => {
 
@@ -177,6 +178,6 @@ describe("Report Telemetry", () => {
 });
 
 // Note: This test file doesn't use database connections, but adding cleanup hook for consistency
-test.after(async () => {
+afterAll(async () => {
   // No database pool to close in this test file
 });

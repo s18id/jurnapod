@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
@@ -5,16 +6,16 @@
  * Alert Manager Tests
  */
 
-import { describe, it, beforeEach, mock } from "node:test";
+import { describe, it, beforeEach, mock } from 'vitest';
 import assert from "node:assert";
 import { register } from "prom-client";
 import {
   AlertManager,
   alertManager,
   type AlertEvaluationResult,
-} from "./alert-manager";
-import { resetAlertConfig } from "./alert-rules";
-import { journalMetrics } from "../metrics/journal-metrics.js";
+} from "../../src/lib/alerts/alert-manager";
+import { resetAlertConfig } from "../../src/lib/alerts/alert-rules";
+import { journalMetrics } from "../../src/lib/metrics/journal-metrics.js";
 
 // Mock the alert-rules module before importing AlertManager
 const mockGetAlertThresholds = mock.fn(() => [

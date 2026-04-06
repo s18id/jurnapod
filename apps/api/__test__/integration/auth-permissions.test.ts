@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { describe, test, before, after } from "node:test";
+import {test, describe, beforeAll, afterAll} from 'vitest';
 import assert from "node:assert/strict";
-import { canManageCompanyDefaults } from "./permissions";
+import { canManageCompanyDefaults } from "../../src/lib/auth/permissions";
 import {
   createTestCompanyMinimal,
   createTestUser,
@@ -15,16 +15,16 @@ import {
   setModulePermission,
   cleanupTestFixtures,
   resetFixtureRegistry,
-} from "../test-fixtures";
-import { closeDbPool } from "../db";
+} from "../../src/lib/test-fixtures";
+import { closeDbPool } from "../../src/lib/db";
 import { MODULE_PERMISSION_BITS, buildPermissionMask } from "@jurnapod/auth";
 
-describe("canManageCompanyDefaults", { concurrency: false }, () => {
-  before(async () => {
+describe("canManageCompanyDefaults", { concurrent: false }, () => {
+  beforeAll(async () => {
     resetFixtureRegistry();
   });
 
-  after(async () => {
+  afterAll(async () => {
     await cleanupTestFixtures();
     await closeDbPool();
   });

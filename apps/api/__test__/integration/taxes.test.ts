@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
-import { after, afterEach, before, describe, test } from "node:test";
-import { closeDbPool, getDb, type KyselySchema } from "./db";
-import { createTestCompanyMinimal } from "./test-fixtures";
-import { listCompanyDefaultTaxRates } from "./taxes";
+import {test, describe, beforeAll, afterAll, afterEach} from 'vitest';
+import { closeDbPool, getDb, type KyselySchema } from "../../src/lib/db";
+import { createTestCompanyMinimal } from "../../src/lib/test-fixtures";
+import { listCompanyDefaultTaxRatesKysely } from "../../src/lib/taxes-kysely";
 
-describe("listCompanyDefaultTaxRates company_id scoping", () => {
+describe("listCompanyDefaultTaxRatesKysely company_id scoping", () => {
   let db: KyselySchema;
   let companyAId: number;
   let companyBId: number;
 
-  before(async () => {
+  beforeAll(async () => {
     db = getDb();
     const companyA = await createTestCompanyMinimal({
       code: `TAXA-${Date.now().toString(36)}`,
@@ -29,7 +29,7 @@ describe("listCompanyDefaultTaxRates company_id scoping", () => {
     await db.deleteFrom("tax_rates").where("company_id", "in", [companyAId, companyBId]).execute();
   });
 
-  after(async () => {
+  afterAll(async () => {
     await db.deleteFrom("outlets").where("company_id", "in", [companyAId, companyBId]).execute();
     await db.deleteFrom("companies").where("id", "in", [companyAId, companyBId]).execute();
     await closeDbPool();
@@ -82,7 +82,7 @@ describe("listCompanyDefaultTaxRates company_id scoping", () => {
       })
       .execute();
 
-    const result = await listCompanyDefaultTaxRates(db, companyAId);
+    const result = await listCompanyDefaultTaxRatesKysely(companyAId);
 
     assert.equal(result.length, 1);
     assert.equal(result[0].company_id, companyAId);
@@ -113,7 +113,7 @@ describe("listCompanyDefaultTaxRates company_id scoping", () => {
       })
       .execute();
 
-    const result = await listCompanyDefaultTaxRates(db, companyAId);
+    const result = await listCompanyDefaultTaxRatesKysely(companyAId);
 
     assert.equal(result.length, 1);
     assert.equal(result[0].company_id, companyAId);
@@ -126,7 +126,7 @@ describe("listCompanyDefaultTaxRates company_id scoping", () => {
   });
 
   test("returns empty array when no defaults configured", async () => {
-    const result = await listCompanyDefaultTaxRates(db, companyAId);
+    const result = await listCompanyDefaultTaxRatesKysely(companyAId);
     assert.equal(result.length, 0);
   });
 
@@ -154,7 +154,7 @@ describe("listCompanyDefaultTaxRates company_id scoping", () => {
       })
       .execute();
 
-    const result = await listCompanyDefaultTaxRates(db, companyAId);
+    const result = await listCompanyDefaultTaxRatesKysely(companyAId);
     assert.equal(result.length, 0);
   });
 
@@ -182,7 +182,7 @@ describe("listCompanyDefaultTaxRates company_id scoping", () => {
       })
       .execute();
 
-    const result = await listCompanyDefaultTaxRates(db, companyAId);
+    const result = await listCompanyDefaultTaxRatesKysely(companyAId);
     assert.equal(result.length, 1);
     assert.equal(result[0].account_id, null);
   });

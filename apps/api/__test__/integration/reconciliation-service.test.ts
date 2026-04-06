@@ -5,7 +5,7 @@
 // Run with: node --test --import tsx src/lib/reconciliation-service.test.ts
 
 import assert from "node:assert/strict";
-import { describe, it, beforeEach } from "node:test";
+import { describe, it, beforeEach } from 'vitest';
 import type { RowDataPacket } from "mysql2/promise";
 
 // Test interface matching the service's internal structure for testing

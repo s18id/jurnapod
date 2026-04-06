@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { describe, it, test, before } from "node:test";
+import {test, describe, beforeAll, afterAll, it} from 'vitest';
 import assert from "node:assert";
 import { sql } from "kysely";
 import {
@@ -9,10 +9,10 @@ import {
   processImage,
   verifyItemOwnership,
   CrossTenantAccessError
-} from "./item-images";
-import { getDb, closeDbPool } from "./db";
-import { createCompanyBasic } from "./companies";
-import { createItem } from "./items/index.js";
+} from "../../src/lib/item-images";
+import { getDb, closeDbPool } from "../../src/lib/db";
+import { createCompanyBasic } from "../../src/lib/companies";
+import { createItem } from "../../src/lib/items/index.js";
 
 describe("Image Upload Validation", () => {
   describe("validateImageUpload", () => {
@@ -151,7 +151,7 @@ describe("Tenant Scoping Security", () => {
   let itemA: number;
 
   // Test companies and items
-  before(async () => {
+  beforeAll(async () => {
     // Get or create test companies
     const companyRows = await sql<{ id: number; name: string }>`
       SELECT id, name FROM companies WHERE name IN ('Test Company A', 'Test Company B') ORDER BY name
@@ -234,7 +234,7 @@ describe("Tenant Scoping Security", () => {
   });
 
   // Close database pool after all tests
-  test.after(async () => {
+  afterAll(async () => {
     await closeDbPool();
   });
 });

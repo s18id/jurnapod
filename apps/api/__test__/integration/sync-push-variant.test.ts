@@ -15,11 +15,11 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after } from "node:test";
+import {test, describe, beforeAll, afterAll} from 'vitest';
 import { sql } from "kysely";
-import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "../../lib/db";
-import { createItem } from "../../lib/items/index.js";
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
+import { createItem } from "../../src/lib/items/index.js";
 import { randomUUID } from "node:crypto";
 
 loadEnvIfPresent();
@@ -28,7 +28,7 @@ const TEST_COMPANY_CODE = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
-describe("Sync Push Variant Routes", { concurrency: false }, () => {
+describe("Sync Push Variant Routes", { concurrent: false }, () => {
   const testRunId = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
   let db: ReturnType<typeof getDb>;
   let testUserId = 0;
@@ -39,7 +39,7 @@ describe("Sync Push Variant Routes", { concurrency: false }, () => {
   let testVariantSku = "";
   let variantCreatedByTest = false;
 
-  before(async () => {
+  beforeAll(async () => {
     db = getDb();
 
     // Find test user fixture - global owner has outlet_id = NULL in user_role_assignments
@@ -109,7 +109,7 @@ describe("Sync Push Variant Routes", { concurrency: false }, () => {
     }
   });
 
-  after(async () => {
+  afterAll(async () => {
     // Cleanup test data
     if (testVariantId > 0) {
       await sql`DELETE FROM variant_sales WHERE variant_id = ${testVariantId}`.execute(db);

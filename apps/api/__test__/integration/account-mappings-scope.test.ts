@@ -5,7 +5,7 @@
 // Run with: node --test --import tsx src/lib/account-mappings-scope.test.ts
 
 import assert from "node:assert/strict";
-import { test, describe } from "node:test";
+import { test, describe } from 'vitest';
 
 describe("Query scope validation", () => {
   test("company scope accepts empty outlet_id", () => {

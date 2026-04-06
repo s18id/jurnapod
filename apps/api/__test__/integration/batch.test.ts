@@ -4,8 +4,8 @@
 // Run with: npm run test:unit:single -w @jurnapod/api src/lib/batch.test.ts
 
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
-import { withBatchProcessing, chunkArray } from "./batch";
+import { describe, test } from 'vitest';
+import { withBatchProcessing, chunkArray } from "../../src/lib/batch";
 
 describe("chunkArray()", () => {
   test("chunks array into equal-sized chunks", () => {

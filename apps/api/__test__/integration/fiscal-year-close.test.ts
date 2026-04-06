@@ -14,9 +14,9 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after } from "node:test";
-import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "../lib/db";
+import {test, describe, beforeAll, afterAll} from 'vitest';
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
 import { sql } from "kysely";
 
 loadEnvIfPresent();
@@ -25,7 +25,7 @@ const TEST_COMPANY_CODE = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
-describe("Fiscal Year Close Procedure", { concurrency: false }, () => {
+describe("Fiscal Year Close Procedure", { concurrent: false }, () => {
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
@@ -34,7 +34,7 @@ describe("Fiscal Year Close Procedure", { concurrency: false }, () => {
   let testIncomeAccountId = 0;
   let testExpenseAccountId = 0;
 
-  before(async () => {
+  beforeAll(async () => {
     const db = getDb();
 
     // Find test user fixture
@@ -201,7 +201,7 @@ describe("Fiscal Year Close Procedure", { concurrency: false }, () => {
     testFiscalYearId = Number(fyResult.insertId);
   });
 
-  after(async () => {
+  afterAll(async () => {
     // Cleanup: close the fiscal year if it was created
     if (testFiscalYearId > 0) {
       const db = getDb();
@@ -257,7 +257,7 @@ describe("Fiscal Year Close Procedure", { concurrency: false }, () => {
       const db = getDb();
       
       // Get the preview using the library function directly
-      const { getFiscalYearClosePreview } = await import("../lib/fiscal-years.js");
+      const { getFiscalYearClosePreview } = await import("../../src/lib/fiscal-years.js");
       
       const preview = await getFiscalYearClosePreview(testCompanyId, testFiscalYearId);
       
@@ -268,7 +268,7 @@ describe("Fiscal Year Close Procedure", { concurrency: false }, () => {
     });
 
     test("preview fails for CLOSED fiscal year", async () => {
-      const { getFiscalYearClosePreview, FiscalYearAlreadyClosedError } = await import("../lib/fiscal-years.js");
+      const { getFiscalYearClosePreview, FiscalYearAlreadyClosedError } = await import("../../src/lib/fiscal-years.js");
       
       // First close the fiscal year
       const db = getDb();
@@ -301,7 +301,7 @@ describe("Fiscal Year Close Procedure", { concurrency: false }, () => {
   describe("POST /fiscal-years/:id/close", () => {
     test("initiate close creates a close request record", async () => {
       const db = getDb();
-      const { closeFiscalYear } = await import("../lib/fiscal-years.js");
+      const { closeFiscalYear } = await import("../../src/lib/fiscal-years.js");
       
       const closeRequestId = `test-close-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
       
@@ -324,7 +324,7 @@ describe("Fiscal Year Close Procedure", { concurrency: false }, () => {
 
     test("initiate close is idempotent", async () => {
       const db = getDb();
-      const { closeFiscalYear } = await import("../lib/fiscal-years.js");
+      const { closeFiscalYear } = await import("../../src/lib/fiscal-years.js");
       
       const closeRequestId = `test-close-idempotent-${Date.now()}`;
       
@@ -388,7 +388,7 @@ describe("Fiscal Year Close Procedure", { concurrency: false }, () => {
       const approveTestFyId = Number(fyResult.insertId);
 
       try {
-        const { getFiscalYearClosePreview } = await import("../lib/fiscal-years.js");
+        const { getFiscalYearClosePreview } = await import("../../src/lib/fiscal-years.js");
         const preview = await getFiscalYearClosePreview(testCompanyId, approveTestFyId);
         
         // The approve flow requires:
@@ -416,7 +416,7 @@ describe("Fiscal Year Close Procedure", { concurrency: false }, () => {
     });
 
     test("closing entries must be balanced", async () => {
-      const { getFiscalYearClosePreview } = await import("../lib/fiscal-years.js");
+      const { getFiscalYearClosePreview } = await import("../../src/lib/fiscal-years.js");
       
       const preview = await getFiscalYearClosePreview(testCompanyId, testFiscalYearId);
       
@@ -568,7 +568,7 @@ describe("Fiscal Year Close Procedure", { concurrency: false }, () => {
         assert.equal(fy?.status, "OPEN", "Initial status should be OPEN");
 
         // Initiate close
-        const { closeFiscalYear } = await import("../lib/fiscal-years.js");
+        const { closeFiscalYear } = await import("../../src/lib/fiscal-years.js");
         await closeFiscalYear(
           db,
           transitionTestFyId,

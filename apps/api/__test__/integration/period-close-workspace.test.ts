@@ -11,9 +11,9 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after } from "node:test";
-import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "../lib/db";
+import {test, describe, beforeAll, afterAll} from 'vitest';
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
 import { sql } from "kysely";
 
 loadEnvIfPresent();
@@ -22,13 +22,13 @@ const TEST_COMPANY_CODE = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
-describe("Period Close Workspace", { concurrency: false }, () => {
+describe("Period Close Workspace", { concurrent: false }, () => {
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
   let testFiscalYearId = 0;
 
-  before(async () => {
+  beforeAll(async () => {
     const db = getDb();
 
     // Find test user fixture
@@ -101,7 +101,7 @@ describe("Period Close Workspace", { concurrency: false }, () => {
     }
   });
 
-  after(async () => {
+  afterAll(async () => {
     // Cleanup test fiscal year if we created one
     if (testFiscalYearId > 0) {
       const db = getDb();
@@ -120,7 +120,7 @@ describe("Period Close Workspace", { concurrency: false }, () => {
   });
 
   test("getPeriodCloseWorkspace returns workspace data structure", async () => {
-    const { getPeriodCloseWorkspace } = await import("../lib/period-close-workspace.js");
+    const { getPeriodCloseWorkspace } = await import("../../src/lib/period-close-workspace.js");
 
     const workspace = await getPeriodCloseWorkspace({
       companyId: testCompanyId,
@@ -141,7 +141,7 @@ describe("Period Close Workspace", { concurrency: false }, () => {
   });
 
   test("workspace has correct checklist items", async () => {
-    const { getPeriodCloseWorkspace } = await import("../lib/period-close-workspace.js");
+    const { getPeriodCloseWorkspace } = await import("../../src/lib/period-close-workspace.js");
 
     const workspace = await getPeriodCloseWorkspace({
       companyId: testCompanyId,
@@ -167,7 +167,7 @@ describe("Period Close Workspace", { concurrency: false }, () => {
   });
 
   test("checklist items have required fields", async () => {
-    const { getPeriodCloseWorkspace } = await import("../lib/period-close-workspace.js");
+    const { getPeriodCloseWorkspace } = await import("../../src/lib/period-close-workspace.js");
 
     const workspace = await getPeriodCloseWorkspace({
       companyId: testCompanyId,
@@ -187,7 +187,7 @@ describe("Period Close Workspace", { concurrency: false }, () => {
   });
 
   test("checklist items have correct detail URLs", async () => {
-    const { getPeriodCloseWorkspace } = await import("../lib/period-close-workspace.js");
+    const { getPeriodCloseWorkspace } = await import("../../src/lib/period-close-workspace.js");
 
     const workspace = await getPeriodCloseWorkspace({
       companyId: testCompanyId,
@@ -222,7 +222,7 @@ describe("Period Close Workspace", { concurrency: false }, () => {
   });
 
   test("fiscal_year_close checklist reflects actual fiscal year status", async () => {
-    const { getPeriodCloseWorkspace } = await import("../lib/period-close-workspace.js");
+    const { getPeriodCloseWorkspace } = await import("../../src/lib/period-close-workspace.js");
 
     const workspace = await getPeriodCloseWorkspace({
       companyId: testCompanyId,
@@ -240,7 +240,7 @@ describe("Period Close Workspace", { concurrency: false }, () => {
   });
 
   test("workspace completed_steps matches checklist passed/skipped count", async () => {
-    const { getPeriodCloseWorkspace } = await import("../lib/period-close-workspace.js");
+    const { getPeriodCloseWorkspace } = await import("../../src/lib/period-close-workspace.js");
 
     const workspace = await getPeriodCloseWorkspace({
       companyId: testCompanyId,
@@ -258,7 +258,7 @@ describe("Period Close Workspace", { concurrency: false }, () => {
   });
 
   test("workspace throws error for non-existent fiscal year", async () => {
-    const { getPeriodCloseWorkspace } = await import("../lib/period-close-workspace.js");
+    const { getPeriodCloseWorkspace } = await import("../../src/lib/period-close-workspace.js");
 
     await assert.rejects(
       async () => {
@@ -274,7 +274,7 @@ describe("Period Close Workspace", { concurrency: false }, () => {
   });
 
   test("workspace throws error for wrong company", async () => {
-    const { getPeriodCloseWorkspace } = await import("../lib/period-close-workspace.js");
+    const { getPeriodCloseWorkspace } = await import("../../src/lib/period-close-workspace.js");
 
     // Use a different company ID (non-existent)
     await assert.rejects(

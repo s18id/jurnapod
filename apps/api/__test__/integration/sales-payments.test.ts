@@ -14,10 +14,10 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after } from "node:test";
-import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "../../lib/db";
-import { getComposedPaymentService } from "../../lib/modules-sales/payment-service-composition";
+import {test, describe, beforeAll, afterAll} from 'vitest';
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
+import { getComposedPaymentService } from "../../src/lib/modules-sales/payment-service-composition";
 import type { SalesPayment } from "@jurnapod/modules-sales";
 import { sql } from "kysely";
 
@@ -27,12 +27,12 @@ const TEST_COMPANY_CODE = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
-describe("Sales Payment Routes", { concurrency: false }, () => {
+describe("Sales Payment Routes", { concurrent: false }, () => {
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
 
-  before(async () => {
+  beforeAll(async () => {
     const db = getDb();
 
     // Find test user fixture - global owner has outlet_id = NULL in user_role_assignments
@@ -63,7 +63,7 @@ describe("Sales Payment Routes", { concurrency: false }, () => {
     testOutletId = Number(outletRows.rows[0].id);
   });
 
-  after(async () => {
+  afterAll(async () => {
     await closeDbPool();
   });
 

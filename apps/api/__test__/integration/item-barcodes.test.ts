@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { describe, it, test } from "node:test";
+import { describe, it, test } from 'vitest';
 import assert from "node:assert";
 import {
   validateBarcode,
@@ -9,7 +9,7 @@ import {
   validateUPCA,
   validateCode128,
   detectBarcodeType,
-} from "./item-barcodes";
+} from "../../src/lib/item-barcodes";
 
 describe("Barcode Validation", () => {
   describe("EAN-13 Validation", () => {

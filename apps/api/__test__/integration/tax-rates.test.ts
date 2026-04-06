@@ -13,11 +13,11 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after } from "node:test";
-import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "../lib/db";
+import {test, describe, beforeAll, afterAll} from 'vitest';
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
 import { sql } from "kysely";
-import type { KyselySchema } from "../lib/db";
+import type { KyselySchema } from "../../src/lib/db";
 
 loadEnvIfPresent();
 
@@ -25,13 +25,13 @@ const TEST_COMPANY_CODE = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
-describe("Tax Rates & Roles Routes", { concurrency: false }, () => {
+describe("Tax Rates & Roles Routes", { concurrent: false }, () => {
   let db: KyselySchema;
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
 
-  before(async () => {
+  beforeAll(async () => {
     db = getDb();
 
     // Find test user fixture - global owner has outlet_id = NULL in user_role_assignments
@@ -63,7 +63,7 @@ describe("Tax Rates & Roles Routes", { concurrency: false }, () => {
     testOutletId = Number(outletResult.rows[0].id);
   });
 
-  after(async () => {
+  afterAll(async () => {
     await closeDbPool();
   });
 

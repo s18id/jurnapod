@@ -5,15 +5,15 @@
 // Tests for SCHEDULED_EXPORT and FORECAST_GENERATION job handlers
 // NOTE: INSIGHTS_CALCULATION was removed in Epic 20 (analytics_insights table dropped)
 
-import { test } from "node:test";
+import {test, afterAll} from 'vitest';
 import assert from "node:assert/strict";
-import { loadEnvIfPresent } from "../../tests/integration/integration-harness.mjs";
-import { getDb, closeDbPool } from "./db";
+import { loadEnvIfPresent } from "../../tests/integration/integration-harness.js";
+import { getDb, closeDbPool } from "../../src/lib/db";
 import { sql } from "kysely";
 
 loadEnvIfPresent();
 
-test("Phase3: scheduled_exports table exists with required columns", { timeout: 30000 }, async () => {
+test("@slow Phase3: scheduled_exports table exists with required columns", { timeout: 30000 }, async () => {
   const db = getDb();
   
   const columns = await sql`
@@ -33,7 +33,7 @@ test("Phase3: scheduled_exports table exists with required columns", { timeout: 
   }
 });
 
-test("Phase3: export_files table exists with required columns", { timeout: 30000 }, async () => {
+test("@slow Phase3: export_files table exists with required columns", { timeout: 30000 }, async () => {
   const db = getDb();
   
   const columns = await sql`
@@ -53,7 +53,7 @@ test("Phase3: export_files table exists with required columns", { timeout: 30000
   }
 });
 
-test("Phase3: sales_forecasts table exists with required columns", { timeout: 30000 }, async () => {
+test("@slow Phase3: sales_forecasts table exists with required columns", { timeout: 30000 }, async () => {
   const db = getDb();
   
   const columns = await sql`
@@ -73,7 +73,7 @@ test("Phase3: sales_forecasts table exists with required columns", { timeout: 30
   }
 });
 
-test("Phase3: Can create and retrieve a scheduled export", { timeout: 60000 }, async () => {
+test("@slow Phase3: Can create and retrieve a scheduled export", { timeout: 60000 }, async () => {
   // NOTE: This test requires migration 0108 to add new job types to document_type enum
   // For now, we just verify the scheduled_exports table works
   const db = getDb();
@@ -129,7 +129,7 @@ test("Phase3: Can create and retrieve a scheduled export", { timeout: 60000 }, a
   }
 });
 
-test("Phase3: email_outbox has attachment_path for export delivery", { timeout: 30000 }, async () => {
+test("@slow Phase3: email_outbox has attachment_path for export delivery", { timeout: 30000 }, async () => {
   const db = getDb();
   
   const columns = await sql`
@@ -143,7 +143,7 @@ test("Phase3: email_outbox has attachment_path for export delivery", { timeout: 
   assert.ok(columns.rows.length > 0, "email_outbox should have attachment_path column");
 });
 
-test("Phase3: Can queue FORECAST_GENERATION job", { timeout: 60000 }, async () => {
+test("@slow Phase3: Can queue FORECAST_GENERATION job", { timeout: 60000 }, async () => {
   // NOTE: This test requires migration 0108 to add new job types to document_type enum
   // For now, we verify the sales_forecasts table exists and has correct structure
   const db = getDb();
@@ -162,6 +162,6 @@ test("Phase3: Can queue FORECAST_GENERATION job", { timeout: 60000 }, async () =
   console.log("Phase 3 job types require migration 0108 to be applied");
 });
 
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

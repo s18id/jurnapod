@@ -2,10 +2,10 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import {test, afterAll} from 'vitest';
 import { sql } from "kysely";
-import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "./db";
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
 import {
   ReservationValidationError,
   ReservationConflictError,
@@ -21,9 +21,9 @@ import {
   ReservationStatusV2,
   type CreateReservationInput,
   type ListReservationsParams
-} from "./reservations";
-import { createOutletTable } from "./outlet-tables";
-import { toDateTimeRangeWithTimezone } from "./date-helpers";
+} from "../../src/lib/reservations";
+import { createOutletTable } from "../../src/lib/outlet-tables";
+import { toDateTimeRangeWithTimezone } from "../../src/lib/date-helpers";
 
 loadEnvIfPresent();
 
@@ -79,8 +79,8 @@ async function readTableStatus(
 }
 
 test(
-  "reservations enforce finalized immutability and table status transitions",
-  { concurrency: false, timeout: 60000 },
+  "@slow reservations enforce finalized immutability and table status transitions",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -258,8 +258,8 @@ const nowTs = Date.now();
 );
 
 test(
-  "reservations reject missing table assignment on create and update",
-  { concurrency: false, timeout: 60000 },
+  "@slow reservations reject missing table assignment on create and update",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -321,8 +321,8 @@ test(
 );
 
 test(
-  "reservations allow adjacent windows when first end equals second start",
-  { concurrency: false, timeout: 60000 },
+  "@slow reservations allow adjacent windows when first end equals second start",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -414,8 +414,8 @@ test(
 );
 
 test(
-  "reservations overlap detection handles mixed canonical and legacy interval rows",
-  { concurrency: false, timeout: 60000 },
+  "@slow reservations overlap detection handles mixed canonical and legacy interval rows",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -546,8 +546,8 @@ test(
 // ============================================================================
 
 test(
-  "Story 12.4: createReservationV2 creates reservation with generated code",
-  { concurrency: false, timeout: 60000 },
+  "@slow Story 12.4: createReservationV2 creates reservation with generated code",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -594,8 +594,8 @@ test(
 );
 
 test(
-  "Story 12.4: createReservationV2 generates unique codes across multiple reservations",
-  { concurrency: false, timeout: 60000 },
+  "@slow Story 12.4: createReservationV2 generates unique codes across multiple reservations",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -641,8 +641,8 @@ test(
 );
 
 test(
-  "Story 12.4: createReservationV2 handles minimal input",
-  { concurrency: false, timeout: 60000 },
+  "@slow Story 12.4: createReservationV2 handles minimal input",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -681,8 +681,8 @@ test(
 );
 
 test(
-  "Story 12.4: listReservationsV2 filters and paginates correctly",
-  { concurrency: false, timeout: 60000 },
+  "@slow Story 12.4: listReservationsV2 filters and paginates correctly",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -775,8 +775,8 @@ test(
 );
 
 test(
-  "Story 12.4: updateReservationStatus validates transitions and handles side effects",
-  { concurrency: false, timeout: 60000 },
+  "@slow Story 12.4: updateReservationStatus validates transitions and handles side effects",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -907,8 +907,8 @@ test(
 );
 
 test(
-  "Story 12.4: generateReservationCode produces unique codes with fallback",
-  { concurrency: false, timeout: 60000 },
+  "@slow Story 12.4: generateReservationCode produces unique codes with fallback",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const { companyId, outletId, userId } = await resolveFixtureContext();
@@ -939,8 +939,8 @@ test(
 );
 
 test(
-  "Story 12.4: VALID_TRANSITIONS defines correct state machine",
-  { concurrency: false, timeout: 10000 },
+  "@slow Story 12.4: VALID_TRANSITIONS defines correct state machine",
+  { concurrent: false, timeout: 10000 },
   async () => {
     // Verify PENDING transitions
     assert.ok(VALID_TRANSITIONS[ReservationStatusV2.PENDING].includes(ReservationStatusV2.CONFIRMED), "PENDING can transition to CONFIRMED");
@@ -965,8 +965,8 @@ test(
 );
 
 test(
-  "Story 12.4: updateReservationStatus with cancellation reason and notes",
-  { concurrency: false, timeout: 60000 },
+  "@slow Story 12.4: updateReservationStatus with cancellation reason and notes",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -1028,8 +1028,8 @@ test(
 // ============================================================================
 
 test(
-  "Story 17.4: listReservationsV2 uses canonical timestamps for date filtering",
-  { concurrency: false, timeout: 60000 },
+  "@slow Story 17.4: listReservationsV2 uses canonical timestamps for date filtering",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -1137,8 +1137,8 @@ test(
 );
 
 test(
-  "Story 17.4: listReservationsV2 calendar mode (useOverlapFilter) shows day-spanning reservations",
-  { concurrency: false, timeout: 60000 },
+  "@slow Story 17.4: listReservationsV2 calendar mode (useOverlapFilter) shows day-spanning reservations",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -1230,8 +1230,8 @@ test(
 );
 
 test(
-  "Story 17.4: verify overlap rule preserves adjacency non-overlap semantics",
-  { concurrency: false, timeout: 60000 },
+  "@slow Story 17.4: verify overlap rule preserves adjacency non-overlap semantics",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -1381,8 +1381,8 @@ test(
 );
 
 test(
-  "Story 17.4: timezone-prepared date boundaries preserve local-day classification",
-  { concurrency: false, timeout: 60000 },
+  "@slow Story 17.4: timezone-prepared date boundaries preserve local-day classification",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -1457,6 +1457,6 @@ test(
 );
 
 // Standard DB pool cleanup - runs after all tests in this file
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

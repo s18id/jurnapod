@@ -9,11 +9,11 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after } from "node:test";
-import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "../lib/db";
+import {test, describe, beforeAll, afterAll} from 'vitest';
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
 import { MODULE_PERMISSION_BITS } from "@jurnapod/auth";
-import { checkUserAccess } from "../lib/auth";
+import { checkUserAccess } from "../../src/lib/auth";
 import { sql } from "kysely";
 
 loadEnvIfPresent();
@@ -21,11 +21,11 @@ loadEnvIfPresent();
 const TEST_COMPANY_CODE = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
-describe("Permission System", { concurrency: false }, () => {
+describe("Permission System", { concurrent: false }, () => {
   let testUserId = 0;
   let testCompanyId = 0;
 
-  before(async () => {
+  beforeAll(async () => {
     const db = getDb();
 
     // Find test user fixture using Kysely query builder
@@ -48,7 +48,7 @@ describe("Permission System", { concurrency: false }, () => {
     testCompanyId = userRow.company_id;
   });
 
-  after(async () => {
+  afterAll(async () => {
     await closeDbPool();
   });
 

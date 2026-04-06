@@ -3,9 +3,9 @@
 // Note: 14 test cases covering variant CRUD, stock management, and pricing
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import {test, afterAll} from 'vitest';
 import { sql } from "kysely";
-import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
 import {
   createVariantAttribute,
   updateVariantAttribute,
@@ -22,9 +22,9 @@ import {
   VariantNotFoundError,
   AttributeNotFoundError,
   ItemNotFoundError
-} from "./item-variants";
-import { closeDbPool, getDb } from "./db";
-import { createTestItem, createTestCompanyMinimal, cleanupTestFixtures } from "./test-fixtures";
+} from "../../src/lib/item-variants";
+import { closeDbPool, getDb } from "../../src/lib/db";
+import { createTestItem, createTestCompanyMinimal, cleanupTestFixtures } from "../../src/lib/test-fixtures";
 
 loadEnvIfPresent();
 
@@ -43,8 +43,8 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
 }
 
 test(
-  "createVariantAttribute - creates attribute and generates variants",
-  { concurrency: false, timeout: 60000 },
+  "@slow createVariantAttribute - creates attribute and generates variants",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -104,8 +104,8 @@ test(
 );
 
 test(
-  "createVariantAttribute - with multiple attributes generates cartesian product",
-  { concurrency: false, timeout: 60000 },
+  "@slow createVariantAttribute - with multiple attributes generates cartesian product",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -165,8 +165,8 @@ test(
 );
 
 test(
-  "createVariantAttribute - throws ItemNotFoundError for invalid item",
-  { concurrency: false, timeout: 60000 },
+  "@slow createVariantAttribute - throws ItemNotFoundError for invalid item",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
@@ -189,8 +189,8 @@ test(
 );
 
 test(
-  "updateVariantAttribute - updates values and regenerates variants",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateVariantAttribute - updates values and regenerates variants",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -254,8 +254,8 @@ test(
 );
 
 test(
-  "deleteVariantAttribute - archives variants and deletes attribute",
-  { concurrency: false, timeout: 60000 },
+  "@slow deleteVariantAttribute - archives variants and deletes attribute",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -311,8 +311,8 @@ test(
 );
 
 test(
-  "updateVariant - updates SKU, price, and status",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateVariant - updates SKU, price, and status",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -367,8 +367,8 @@ test(
 );
 
 test(
-  "updateVariant - throws DuplicateSkuError for duplicate SKU",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateVariant - throws DuplicateSkuError for duplicate SKU",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -421,8 +421,8 @@ test(
 );
 
 test(
-  "adjustVariantStock - adjusts stock quantity",
-  { concurrency: false, timeout: 60000 },
+  "@slow adjustVariantStock - adjusts stock quantity",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -477,8 +477,8 @@ test(
 );
 
 test(
-  "adjustVariantStock - prevents negative stock",
-  { concurrency: false, timeout: 60000 },
+  "@slow adjustVariantStock - prevents negative stock",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -524,8 +524,8 @@ test(
 );
 
 test(
-  "validateVariantSku - checks SKU uniqueness",
-  { concurrency: false, timeout: 60000 },
+  "@slow validateVariantSku - checks SKU uniqueness",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -580,8 +580,8 @@ test(
 );
 
 test(
-  "getVariantEffectivePrice - returns override or parent price",
-  { concurrency: false, timeout: 60000 },
+  "@slow getVariantEffectivePrice - returns override or parent price",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -651,8 +651,8 @@ test(
 );
 
 test(
-  "getVariantById - returns null for non-existent variant",
-  { concurrency: false, timeout: 60000 },
+  "@slow getVariantById - returns null for non-existent variant",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
@@ -668,8 +668,8 @@ test(
 );
 
 test(
-  "updateVariant - throws VariantNotFoundError for invalid variant",
-  { concurrency: false, timeout: 60000 },
+  "@slow updateVariant - throws VariantNotFoundError for invalid variant",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
@@ -689,8 +689,8 @@ test(
 );
 
 test(
-  "deleteVariantAttribute - throws AttributeNotFoundError for invalid attribute",
-  { concurrency: false, timeout: 60000 },
+  "@slow deleteVariantAttribute - throws AttributeNotFoundError for invalid attribute",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const companyCode = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 
@@ -710,8 +710,8 @@ test(
 );
 
 test(
-  "getVariantsForSync - returns active variants with attributes and effective prices",
-  { concurrency: false, timeout: 60000 },
+  "@slow getVariantsForSync - returns active variants with attributes and effective prices",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -782,8 +782,8 @@ test(
 );
 
 test(
-  "getVariantsForSync - excludes inactive and archived variants",
-  { concurrency: false, timeout: 60000 },
+  "@slow getVariantsForSync - excludes inactive and archived variants",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -836,7 +836,7 @@ test(
   }
 );
 
-test.after(async () => {
+afterAll(async () => {
   await withTimeout(cleanupTestFixtures(), 10000, "cleanupTestFixtures");
   await withTimeout(closeDbPool(), 10000, "closeDbPool");
 

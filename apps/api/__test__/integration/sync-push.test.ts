@@ -14,12 +14,12 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after } from "node:test";
+import {test, describe, beforeAll, afterAll} from 'vitest';
 import { sql } from "kysely";
-import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "../../lib/db";
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
 import { createHash, randomUUID } from "node:crypto";
-import { toEpochMs, toMysqlDateTime, toUtcInstant } from "../../lib/date-helpers";
+import { toEpochMs, toMysqlDateTime, toUtcInstant } from "../../src/lib/date-helpers";
 import { SyncPushRequestSchema } from "@jurnapod/shared";
 
 function computePayloadSha256(canonicalPayload: string): string {
@@ -32,13 +32,13 @@ const TEST_COMPANY_CODE = readEnv("JP_COMPANY_CODE", null) ?? "JP";
 const TEST_OUTLET_CODE = readEnv("JP_OUTLET_CODE", null) ?? "MAIN";
 const TEST_OWNER_EMAIL = readEnv("JP_OWNER_EMAIL", null) ?? "owner@example.com";
 
-describe("Sync Push Routes", { concurrency: false }, () => {
+describe("Sync Push Routes", { concurrent: false }, () => {
   let db: ReturnType<typeof getDb>;
   let testUserId = 0;
   let testCompanyId = 0;
   let testOutletId = 0;
 
-  before(async () => {
+  beforeAll(async () => {
     db = getDb();
 
     // Find test user fixture - global owner has outlet_id = NULL in user_role_assignments
@@ -69,7 +69,7 @@ describe("Sync Push Routes", { concurrency: false }, () => {
     testOutletId = Number(outletRows.rows[0].id);
   });
 
-  after(async () => {
+  afterAll(async () => {
     await closeDbPool();
   });
 

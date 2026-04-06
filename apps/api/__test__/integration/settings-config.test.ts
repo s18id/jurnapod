@@ -10,9 +10,9 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, test, after } from "node:test";
+import {test, describe, afterAll} from 'vitest';
 import { z } from "zod";
-import { closeDbPool, getDb } from "../lib/db.js";
+import { closeDbPool, getDb } from "../../src/lib/db.js";
 import {
   SETTINGS_REGISTRY,
   SETTINGS_KEYS,
@@ -20,7 +20,7 @@ import {
   NumericIdSchema
 } from "@jurnapod/shared";
 import { sql } from "kysely";
-import { GetConfigSchema, UpdateConfigSchema } from "./settings-config.js";
+import { GetConfigSchema, UpdateConfigSchema } from "../../src/routes/settings-config.js";
 
 // =============================================================================
 // Settings Config Routes - Schema Validation Tests
@@ -601,6 +601,6 @@ describe("Settings Config Routes - Authorization", () => {
 });
 
 // Standard DB pool cleanup - runs after all tests in this file
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

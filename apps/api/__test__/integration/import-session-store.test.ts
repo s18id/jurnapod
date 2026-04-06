@@ -10,19 +10,19 @@
  * - TTL expiry returns null correctly
  * - Cleanup removes only expired sessions
  *
- * CRITICAL: Pool must be closed in after() to prevent test hang.
+ * CRITICAL: Pool must be closed in afterAll() to prevent test hang.
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after } from "node:test";
+import {test, describe, beforeAll, afterAll} from 'vitest';
 import { randomUUID } from "node:crypto";
-import { closeDbPool, getDb } from "../../lib/db.js";
+import { closeDbPool, getDb } from "../../src/lib/db.js";
 import {
   createSession,
   getSession,
   deleteSession,
   cleanupExpiredSessions,
-} from "./session-store.js";
+} from "../../src/lib/import/session-store.js";
 
 const COMPANY_A = 1;
 const COMPANY_B = 2;
@@ -37,12 +37,12 @@ const SAMPLE_PAYLOAD = {
 };
 
 describe("Import Session Store", () => {
-  before(() => {
+  beforeAll(() => {
     // Warm up the db connection
     getDb();
   });
 
-  after(async () => {
+  afterAll(async () => {
     await closeDbPool();
   });
 

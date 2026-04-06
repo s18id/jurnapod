@@ -16,9 +16,9 @@
  */
 
 import assert from 'node:assert/strict';
-import { after, test, describe } from 'node:test';
-import type { FkLookupRequest } from './types.js';
-import { closeDbPool } from '../db.js';
+import {test, describe, afterAll} from 'vitest';
+import type { FkLookupRequest } from '../../src/lib/import/types.js';
+import { closeDbPool } from '../../src/lib/db.js';
 
 // ============================================================================
 // batchValidateForeignKeys Tests
@@ -31,7 +31,7 @@ import { closeDbPool } from '../db.js';
 describe('batchValidateForeignKeys (TD-012)', () => {
   test('function is callable and returns Map structure', async () => {
     // Dynamic import to avoid circular dependency issues in test setup
-    const { batchValidateForeignKeys } = await import('./validator.js');
+    const { batchValidateForeignKeys } = await import('../../src/lib/import/validator.js');
     
     const requests: FkLookupRequest[] = [
       { table: 'item_groups', ids: new Set([1, 2, 3]), companyId: 1 },
@@ -45,7 +45,7 @@ describe('batchValidateForeignKeys (TD-012)', () => {
   });
 
   test('handles empty ID set correctly', async () => {
-    const { batchValidateForeignKeys } = await import('./validator.js');
+    const { batchValidateForeignKeys } = await import('../../src/lib/import/validator.js');
     
     const requests: FkLookupRequest[] = [
       { table: 'item_groups', ids: new Set<number>(), companyId: 1 },
@@ -59,7 +59,7 @@ describe('batchValidateForeignKeys (TD-012)', () => {
   });
 
   test('returns Map structure for O(1) lookup', async () => {
-    const { batchValidateForeignKeys } = await import('./validator.js');
+    const { batchValidateForeignKeys } = await import('../../src/lib/import/validator.js');
     
     const requests: FkLookupRequest[] = [
       { table: 'item_groups', ids: new Set([1, 2, 3]), companyId: 1 },
@@ -77,7 +77,7 @@ describe('batchValidateForeignKeys (TD-012)', () => {
   });
 
   test('deduplicates IDs within single request', async () => {
-    const { batchValidateForeignKeys } = await import('./validator.js');
+    const { batchValidateForeignKeys } = await import('../../src/lib/import/validator.js');
     
     // Pass duplicate IDs - function should deduplicate
     const requests: FkLookupRequest[] = [
@@ -97,7 +97,7 @@ describe('batchValidateForeignKeys (TD-012)', () => {
 
 describe('N+1 Anti-Pattern Documentation', () => {
   test('batchValidateForeignKeys returns Map as documented', async () => {
-    const { batchValidateForeignKeys } = await import('./validator.js');
+    const { batchValidateForeignKeys } = await import('../../src/lib/import/validator.js');
     
     const requests: FkLookupRequest[] = [
       { table: 'item_groups', ids: new Set([1, 2, 3]), companyId: 1 },
@@ -109,7 +109,7 @@ describe('N+1 Anti-Pattern Documentation', () => {
   });
 
   test('rejects unknown FK table names with explicit error', async () => {
-    const { batchValidateForeignKeys } = await import('./validator.js');
+    const { batchValidateForeignKeys } = await import('../../src/lib/import/validator.js');
 
     await assert.rejects(
       batchValidateForeignKeys([
@@ -120,6 +120,6 @@ describe('N+1 Anti-Pattern Documentation', () => {
   });
 });
 
-after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

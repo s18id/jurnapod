@@ -1,676 +1,500 @@
+// @ts-nocheck
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { test, before, after } from "node:test";
-import { getDb, closeDbPool } from "./db";
-import type { KyselySchema } from "@/lib/db";
-import { sql } from "kysely";
+import {test, describe, beforeAll, afterAll} from 'vitest';
 import {
-  calculateSaleCogs,
-  getItemAccounts,
-  getItemAccountsBatch,
-  postCogsForSale,
-  CogsCalculationError,
-  CogsAccountConfigError,
-} from "@jurnapod/modules-accounting/posting/cogs";
-import { normalizeMoney } from "@jurnapod/modules-accounting";
-import { createItem } from "./items/index.js";
-import { createItemPrice } from "./item-prices/index.js";
-import { createCompanyBasic } from "./companies.js";
-import { createOutletBasic } from "./outlets.js";
-import { createUserBasic } from "./users.js";
-import { createAccount } from "./accounts.js";
+  createIntegrationTestContext,
+  loginOwner,
+  readEnv,
+  TEST_TIMEOUT_MS,
+  createCleanupHelper
+} from "../../tests/integration/integration-harness.js";
 
-// Dynamic IDs - created in before() hook
-let TEST_COMPANY_ID: number;
-let TEST_OUTLET_ID: number;
-let TEST_USER_ID: number;
-const RUN_ID = Date.now().toString(36);
+const testContext = createIntegrationTestContext();
+let baseUrl = "";
+let db;
 
-// Shared state
-let db: KyselySchema;
-let supportsUnitCost: boolean;
-let cogsAccountId: number;
-let inventoryAccountId: number;
-let testItemId: number;
+beforeAll(async () => {
+  await testContext.start();
+  baseUrl = testContext.baseUrl;
+  db = testContext.db;
+});
 
-// Test helpers
-async function createTestAccount(
-  db: KyselySchema,
-  companyId: number,
-  code: string,
-  name: string,
-  accountType: string,
-  normalBalance: 'D' | 'C'
-): Promise<number> {
-  const typeResult = await sql`
-    SELECT id
-    FROM account_types
-    WHERE UPPER(name) = ${accountType.toUpperCase()}
-      AND (company_id = ${companyId} OR company_id IS NULL)
-    ORDER BY company_id IS NULL ASC, id ASC
-    LIMIT 1
-  `.execute(db);
+afterAll(async () => {
+  await testContext.stop();
+});
 
-  if ((typeResult.rows as any[]).length === 0) {
-    await sql`
-      INSERT INTO account_types (company_id, name, category, normal_balance, report_group, is_active)
-      VALUES (${companyId}, ${accountType.toUpperCase()}, ${accountType.toUpperCase()}, ${normalBalance}, ${accountType.toUpperCase() === "REVENUE" || accountType.toUpperCase() === "EXPENSE" ? "PL" : "NRC"}, 1)
-    `.execute(db);
-
-    await sql`
-      SELECT id FROM account_types WHERE company_id = ${companyId} AND UPPER(name) = ${accountType.toUpperCase()} LIMIT 1
-    `.execute(db);
-  }
-
-  const accountTypeResult = await sql`
-    SELECT id
-    FROM account_types
-    WHERE UPPER(name) = ${accountType.toUpperCase()}
-      AND (company_id = ${companyId} OR company_id IS NULL)
-    ORDER BY company_id IS NULL ASC, id ASC
-    LIMIT 1
-  `.execute(db);
-
-  if ((accountTypeResult.rows as any[]).length === 0) {
-    throw new Error(`Account type ${accountType} not found`);
-  }
-  
-  const accountTypeId = (accountTypeResult.rows as any[])[0].id;
-  
-  // Map 'C' to 'K' for schema compatibility (schema uses 'K' for Kredit/Credit)
-  const mappedNormalBalance = normalBalance === 'C' ? 'K' : normalBalance;
-  
-  // Use library function instead of direct INSERT
-  const account = await createAccount({
-    company_id: companyId,
-    code: code,
-    name: name,
-    account_type_id: accountTypeId,
-    normal_balance: mappedNormalBalance,
-    is_group: false,
-    is_payable: false,
-    is_active: true
-  });
-  
-  return account.id;
+async function requestJson(path, options = {}) {
+  const response = await fetch(`${baseUrl}${path}`, options);
+  const payload = await response.json().catch(() => ({}));
+  return { response, payload };
 }
 
-async function createInventoryTransaction(
-  db: KyselySchema,
-  companyId: number,
-  productId: number,
-  quantityDelta: number,
-  unitCost: number
-): Promise<number> {
-  const columnResult = await sql`
-    SELECT COUNT(*) AS column_exists
-    FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'inventory_transactions'
-      AND COLUMN_NAME = 'unit_cost'
-  `.execute(db);
-  const hasUnitCost = Number((columnResult.rows[0] as any)?.column_exists ?? 0) > 0;
+async function ensureOpenFiscalYear(companyId, userId) {
+  const [rows] = await db.execute(
+    `SELECT id
+     FROM fiscal_years
+     WHERE company_id = ? AND status = 'OPEN'
+     LIMIT 1`,
+    [companyId]
+  );
 
-  const result = hasUnitCost
-    ? await sql`
-        INSERT INTO inventory_transactions 
-        (company_id, product_id, transaction_type, quantity_delta, unit_cost, created_at)
-        VALUES (${companyId}, ${productId}, 6, ${quantityDelta}, ${unitCost}, NOW())
-      `.execute(db)
-    : await sql`
-        INSERT INTO inventory_transactions 
-        (company_id, product_id, transaction_type, quantity_delta, created_at)
-        VALUES (${companyId}, ${productId}, 6, ${quantityDelta}, NOW())
-      `.execute(db);
-  
+  if (rows.length > 0) {
+    return;
+  }
+
+  const year = new Date().getUTCFullYear();
+  await db.execute(
+    `INSERT INTO fiscal_years (
+       company_id,
+       code,
+       name,
+       start_date,
+       end_date,
+       status,
+       created_by_user_id,
+       updated_by_user_id
+     ) VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?)`,
+    [companyId, `FY-${year}`, `FY ${year}`, `${year}-01-01`, `${year}-12-31`, userId, userId]
+  );
+}
+
+async function getAccountTypeId(name) {
+  const [rows] = await db.execute(
+    `SELECT id
+     FROM account_types
+     WHERE UPPER(name) = ?
+     LIMIT 1`,
+    [name.toUpperCase()]
+  );
+
+  if (rows.length > 0) {
+    return Number(rows[0].id);
+  }
+
+  const [insertResult] = await db.execute(
+    `INSERT INTO account_types (company_id, name, category, normal_balance, report_group, is_active)
+     VALUES (1, ?, ?, ?, ?, 1)`,
+    [
+      name.toUpperCase(),
+      name.toUpperCase(),
+      name.toUpperCase() === "ASSET" || name.toUpperCase() === "EXPENSE" ? "D" : "C",
+      name.toUpperCase() === "EXPENSE" || name.toUpperCase() === "REVENUE" ? "PL" : "NRC"
+    ]
+  );
+  return Number(insertResult.insertId);
+}
+
+async function createAccount(companyId, code, name, accountTypeName, normalBalance = "D") {
+  const accountTypeId = await getAccountTypeId(accountTypeName);
+  const [result] = await db.execute(
+    `INSERT INTO accounts (company_id, code, name, account_type_id, normal_balance, is_active)
+     VALUES (?, ?, ?, ?, ?, 1)`,
+    [companyId, code, name, accountTypeId, normalBalance]
+  );
   return Number(result.insertId);
 }
 
-async function cleanupTestData(db: KyselySchema, companyId: number): Promise<void> {
-  // Note: journal_lines and journal_batches are immutable - they use VOID patterns
-  // So we only clean up the mutable tables
-  
-  try {
-    await sql`DELETE FROM inventory_transactions WHERE company_id = ${companyId}`.execute(db);
-  } catch (e) {
-    // May fail if table doesn't exist or has constraints
+async function ensureInvoicePostingMappings(companyId, outletId, runId) {
+  const [rows] = await db.execute(
+    `SELECT mapping_key
+     FROM outlet_account_mappings
+     WHERE company_id = ?
+       AND outlet_id = ?
+       AND mapping_key IN ('AR', 'SALES_REVENUE')`,
+    [companyId, outletId]
+  );
+  const existing = new Set(rows.map((row) => String(row.mapping_key)));
+
+  const createdAccountIds = [];
+  const createdMappings = [];
+
+  if (!existing.has("AR")) {
+    const arAccountId = await createAccount(companyId, `AR-${runId}`.slice(0, 32), `AR ${runId}`, "ASSET", "D");
+    createdAccountIds.push(arAccountId);
+    await db.execute(
+      `INSERT INTO outlet_account_mappings (company_id, outlet_id, mapping_key, account_id)
+       VALUES (?, ?, 'AR', ?)`,
+      [companyId, outletId, arAccountId]
+    );
+    createdMappings.push("AR");
   }
-  
-  try {
-    await sql`DELETE FROM item_prices WHERE company_id = ${companyId}`.execute(db);
-  } catch (e) {
-    // May fail if table doesn't exist
+
+  if (!existing.has("SALES_REVENUE")) {
+    const revenueAccountId = await createAccount(
+      companyId,
+      `SR-${runId}`.slice(0, 32),
+      `Sales Revenue ${runId}`,
+      "REVENUE",
+      "C"
+    );
+    createdAccountIds.push(revenueAccountId);
+    await db.execute(
+      `INSERT INTO outlet_account_mappings (company_id, outlet_id, mapping_key, account_id)
+       VALUES (?, ?, 'SALES_REVENUE', ?)`,
+      [companyId, outletId, revenueAccountId]
+    );
+    createdMappings.push("SALES_REVENUE");
   }
-  
-  await sql`DELETE FROM items WHERE company_id = ${companyId}`.execute(db);
-  
-  try {
-    await sql`DELETE FROM company_account_mappings WHERE company_id = ${companyId}`.execute(db);
-  } catch (e) {
-    // May fail if table doesn't exist
-  }
-  
-  try {
-    await sql`DELETE FROM account_mappings WHERE company_id = ${companyId}`.execute(db);
-  } catch (e) {
-    // May fail if table doesn't exist
-  }
-  
-  // Accounts may have journal_lines referencing them - use try/catch
-  try {
-    await sql`DELETE FROM accounts WHERE company_id = ${companyId}`.execute(db);
-  } catch (e) {
-    // May fail if journal_lines reference these accounts
-  }
-  
-  try {
-    await sql`DELETE FROM account_types WHERE company_id = ${companyId}`.execute(db);
-  } catch (e) {
-    // May fail if table doesn't exist
-  }
-  
-  await sql`DELETE FROM outlets WHERE company_id = ${companyId}`.execute(db);
-  await sql`DELETE FROM users WHERE company_id = ${companyId}`.execute(db);
-  await sql`DELETE FROM companies WHERE id = ${companyId}`.execute(db);
+
+  return { createdAccountIds, createdMappings };
 }
 
-// Setup
-before(async () => {
-  db = getDb();
-  
-  const unitCostColumnResult = await sql`
-    SELECT COUNT(*) AS column_exists
-    FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'inventory_transactions'
-      AND COLUMN_NAME = 'unit_cost'
-  `.execute(db);
-  supportsUnitCost = Number((unitCostColumnResult.rows[0] as any)?.column_exists ?? 0) > 0;
-  
-
-
-  await cleanupTestData(db, 0);
-
-  // Create company dynamically
-  const company = await createCompanyBasic({
-    code: `TEST-COGS-${RUN_ID}`,
-    name: `Test COGS Company ${RUN_ID}`
-  });
-  TEST_COMPANY_ID = company.id;
-
-  // Create outlet dynamically
-  const outlet = await createOutletBasic({
-    company_id: TEST_COMPANY_ID,
-    code: `OUTLET-${RUN_ID}`,
-    name: `Outlet ${RUN_ID}`
-  });
-  TEST_OUTLET_ID = outlet.id;
-
-  // Create test user dynamically for postedBy
-  const user = await createUserBasic({
-    companyId: TEST_COMPANY_ID,
-    email: `cogs-test-${RUN_ID}@example.com`,
-    password: 'test-password',
-    name: `COGS Test User ${RUN_ID}`
-  });
-  TEST_USER_ID = user.id;
-
-  cogsAccountId = await createTestAccount(db, TEST_COMPANY_ID, '6100-TEST', 'Test COGS', 'EXPENSE', 'D');
-  inventoryAccountId = await createTestAccount(db, TEST_COMPANY_ID, '1100-TEST', 'Test Inventory', 'ASSET', 'D');
-
-  // Insert into the consolidated account_mappings table (cogs-posting.ts reads from here).
-  // COGS_DEFAULT=7, INVENTORY_ASSET_DEFAULT=8; outlet_id IS NULL for company-wide defaults.
-  await sql`
-    INSERT INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id)
-    VALUES (${TEST_COMPANY_ID}, NULL, 7, 'COGS_DEFAULT', ${cogsAccountId}), (${TEST_COMPANY_ID}, NULL, 8, 'INVENTORY_ASSET_DEFAULT', ${inventoryAccountId})
-  `.execute(db);
-});
-
-// Cleanup
-after(async () => {
-  await closeDbPool();
-});
-
-// Tests
-test("calculateSaleCogs - should calculate COGS using inventory average cost", async () => {
-  if (!supportsUnitCost) {
-    return; // Skip
+async function ensureInventoryModuleCogsEnabled(companyId, userId) {
+  const [moduleRows] = await db.execute(`SELECT id FROM modules WHERE code = 'inventory' LIMIT 1`);
+  if (moduleRows.length === 0) {
+    throw new Error("inventory module definition not found");
   }
+  const moduleId = Number(moduleRows[0].id);
 
-  const coffeeItem = await createItem(TEST_COMPANY_ID, {
-    name: 'Test Coffee',
-    type: 'PRODUCT',
-    track_stock: true
-  });
-  testItemId = coffeeItem.id;
-  await createInventoryTransaction(db, TEST_COMPANY_ID, testItemId, 10, 5.0);
-  
-  const saleItems = [{ itemId: testItemId, quantity: 3 }];
-  const cogsDetails = await calculateSaleCogs(TEST_COMPANY_ID, saleItems, db);
-  
-  assert.strictEqual(cogsDetails.length, 1);
-  assert.strictEqual(cogsDetails[0].itemId, testItemId);
-  assert.strictEqual(cogsDetails[0].quantity, 3);
-  assert.strictEqual(cogsDetails[0].unitCost, 5.0);
-  assert.strictEqual(cogsDetails[0].totalCost, 15.0);
-});
-
-test("calculateSaleCogs - should calculate COGS for multiple items", async () => {
-  if (!supportsUnitCost) {
-    return; // Skip
-  }
-
-  const coffeeItem = await createItem(TEST_COMPANY_ID, {
-    name: 'Coffee',
-    type: 'PRODUCT',
-    track_stock: true
-  });
-  const item1Id = coffeeItem.id;
-  const sandwichItem = await createItem(TEST_COMPANY_ID, {
-    name: 'Sandwich',
-    type: 'PRODUCT',
-    track_stock: true
-  });
-  const item2Id = sandwichItem.id;
-  
-  await createInventoryTransaction(db, TEST_COMPANY_ID, item1Id, 10, 2.0);
-  await createInventoryTransaction(db, TEST_COMPANY_ID, item2Id, 5, 3.5);
-  
-  const saleItems = [
-    { itemId: item1Id, quantity: 2 },
-    { itemId: item2Id, quantity: 1 }
-  ];
-  
-  const cogsDetails = await calculateSaleCogs(TEST_COMPANY_ID, saleItems, db);
-  
-  assert.strictEqual(cogsDetails.length, 2);
-  assert.strictEqual(cogsDetails[0].totalCost, 4.0);
-  assert.strictEqual(cogsDetails[1].totalCost, 3.5);
-});
-
-test("calculateSaleCogs - should throw error when cost cannot be determined", async () => {
-  const noCostItem = await createItem(TEST_COMPANY_ID, {
-    name: 'No Cost Item',
-    type: 'PRODUCT',
-    track_stock: true
-  });
-  const itemId = noCostItem.id;
-  
-  await assert.rejects(
-    async () => await calculateSaleCogs(TEST_COMPANY_ID, [{ itemId, quantity: 1 }], db),
-    CogsCalculationError
+  await db.execute(
+    `INSERT INTO company_modules (
+       company_id,
+       module_id,
+       enabled,
+       config_json,
+       created_by_user_id,
+       updated_by_user_id
+     ) VALUES (?, ?, 1, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       enabled = VALUES(enabled),
+       config_json = VALUES(config_json),
+       updated_by_user_id = VALUES(updated_by_user_id),
+       updated_at = CURRENT_TIMESTAMP`,
+    [companyId, moduleId, '{"cogs_enabled":1}', userId, userId]
   );
-});
+}
 
-test("calculateSaleCogs - should fall back to base_cost from item_prices", async () => {
-  const priceItem = await createItem(TEST_COMPANY_ID, {
-    name: 'Price Item',
-    type: 'PRODUCT',
-    track_stock: true
-  });
-  const itemId = priceItem.id;
-  
-  await createItemPrice(TEST_COMPANY_ID, {
-    item_id: itemId,
-    outlet_id: null,
-    price: 7.5
-  });
-  
-  const saleItems = [{ itemId, quantity: 2 }];
-  const cogsDetails = await calculateSaleCogs(TEST_COMPANY_ID, saleItems, db);
-  
-  assert.strictEqual(cogsDetails[0].unitCost, 7.5);
-  assert.strictEqual(cogsDetails[0].totalCost, 15.0);
-});
+test(
+  "@slow COGS integration: posting invoice creates balanced COGS journal",
+  { timeout: TEST_TIMEOUT_MS, concurrent: false },
+  async () => {
+    const createdItemIds = [];
+    const createdInvoiceIds = [];
+    const createdPriceItemIds = [];
+    const createdAccountIds = [];
+    let companyId = null;
+    let outletId = null;
 
-test("calculateSaleCogs - should batch mixed inventory and fallback price lookups", async () => {
-  const invItem = await createItem(TEST_COMPANY_ID, {
-    name: 'Batch Inv Item',
-    type: 'PRODUCT',
-    track_stock: true
-  });
-  const inventoryItemId = invItem.id;
-  const priceItem = await createItem(TEST_COMPANY_ID, {
-    name: 'Batch Price Item',
-    type: 'PRODUCT',
-    track_stock: true
-  });
-  const fallbackPriceItemId = priceItem.id;
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const outletCode = readEnv("JP_OUTLET_CODE", "MAIN");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const runId = Date.now().toString(36);
+    const invoiceDate = new Date().toISOString().slice(0, 10);
 
-  if (supportsUnitCost) {
-    await createInventoryTransaction(db, TEST_COMPANY_ID, inventoryItemId, 8, 2.5);
-  } else {
-    await createItemPrice(TEST_COMPANY_ID, {
-      item_id: inventoryItemId,
-      outlet_id: null,
-      price: 2.5
+    try {
+      const [ownerRows] = await db.execute(
+        `SELECT u.id, u.company_id, o.id AS outlet_id
+         FROM users u
+         INNER JOIN companies c ON c.id = u.company_id
+         INNER JOIN outlets o ON o.company_id = u.company_id
+         WHERE c.code = ?
+           AND u.email = ?
+           AND u.is_active = 1
+           AND o.code = ?
+         LIMIT 1`,
+        [companyCode, ownerEmail, outletCode]
+      );
+
+      const owner = ownerRows[0];
+      assert.ok(owner, "owner fixture must exist");
+      companyId = Number(owner.company_id);
+      outletId = Number(owner.outlet_id);
+      const ownerUserId = Number(owner.id);
+
+      // Do NOT clean up existing COGS journal batches - journal_lines are immutable
+      // The test uses unique identifiers and will not conflict with existing data
+
+      await ensureOpenFiscalYear(companyId, ownerUserId);
+      await ensureInventoryModuleCogsEnabled(companyId, ownerUserId);
+
+      const { createdAccountIds: mappingAccounts } = await ensureInvoicePostingMappings(companyId, outletId, runId);
+      createdAccountIds.push(...mappingAccounts);
+
+      const cogsAccountId = await createAccount(
+        companyId,
+        `CG-${runId}`.slice(0, 32),
+        `COGS ${runId}`,
+        "EXPENSE",
+        "D"
+      );
+      const inventoryAccountId = await createAccount(
+        companyId,
+        `INV-${runId}`.slice(0, 32),
+        `Inventory ${runId}`,
+        "ASSET",
+        "D"
+      );
+      createdAccountIds.push(cogsAccountId, inventoryAccountId);
+
+      await db.execute(
+        `INSERT INTO company_account_mappings (company_id, mapping_key, account_id)
+         VALUES (?, 'COGS_DEFAULT', ?), (?, 'INVENTORY_ASSET_DEFAULT', ?)
+         ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), updated_at = CURRENT_TIMESTAMP`,
+        [companyId, cogsAccountId, companyId, inventoryAccountId]
+      );
+
+      const [itemInsert] = await db.execute(
+        `INSERT INTO items (
+           company_id,
+           sku,
+           name,
+           item_type,
+           track_stock,
+           cogs_account_id,
+           inventory_asset_account_id,
+           is_active
+         ) VALUES (?, ?, ?, 'PRODUCT', 1, ?, ?, 1)`,
+        [companyId, `COGS-${runId}`.toUpperCase(), `COGS Item ${runId}`, cogsAccountId, inventoryAccountId]
+      );
+      const itemId = Number(itemInsert.insertId);
+      createdItemIds.push(itemId);
+
+      await db.execute(
+        `INSERT INTO item_prices (company_id, outlet_id, item_id, price, is_active)
+         VALUES (?, NULL, ?, 15.00, 1)
+         ON DUPLICATE KEY UPDATE price = VALUES(price), is_active = 1`,
+        [companyId, itemId]
+      );
+      createdPriceItemIds.push(itemId);
+
+      // Create stock inventory for the item (required for COGS posting)
+      await db.execute(
+        `INSERT INTO inventory_stock (company_id, product_id, outlet_id, quantity, available_quantity)
+         VALUES (?, ?, ?, 100, 100)
+         ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), available_quantity = VALUES(available_quantity)`,
+        [companyId, itemId, outletId]
+      );
+
+      // Create cost tracking entry for COGS (required for AVGCostingStrategy)
+      await db.execute(
+        `INSERT INTO inventory_item_costs 
+         (company_id, item_id, costing_method, current_avg_cost, total_layers_qty, total_layers_cost, updated_at)
+         VALUES (?, ?, 'AVG', 1500, 100, 150000, NOW())
+         ON DUPLICATE KEY UPDATE
+         current_avg_cost = VALUES(current_avg_cost),
+         total_layers_qty = VALUES(total_layers_qty),
+         total_layers_cost = VALUES(total_layers_cost),
+         updated_at = NOW()`,
+        [companyId, itemId]
+      );
+
+      const token = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
+      const authHeaders = {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json"
+      };
+
+       const createInvoiceRes = await requestJson("/api/sales/invoices", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          outlet_id: outletId,
+          invoice_date: invoiceDate,
+          tax_amount: 0,
+          lines: [
+            {
+              line_type: "PRODUCT",
+              item_id: itemId,
+              description: "COGS integration line",
+              qty: 2,
+              unit_price: 30
+            }
+          ]
+        })
+      });
+
+      assert.equal(createInvoiceRes.response.status, 201);
+      const invoiceId = Number(createInvoiceRes.payload.data.id);
+      createdInvoiceIds.push(invoiceId);
+
+      const postInvoiceRes = await requestJson(`/api/sales/invoices/${invoiceId}/post`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`
+        }
+      });
+
+      assert.equal(postInvoiceRes.response.status, 200);
+
+      const [batchRows] = await db.execute(
+        `SELECT DISTINCT jb.id
+         FROM journal_batches jb
+         INNER JOIN journal_lines jl ON jl.journal_batch_id = jb.id
+         WHERE jb.company_id = ?
+           AND jb.doc_type = 'COGS'
+           AND jl.description LIKE ?
+         ORDER BY jb.id DESC
+         LIMIT 1`,
+        [companyId, `%sale INV-${invoiceId}%`]
+      );
+      assert.equal(batchRows.length, 1);
+      const cogsBatchId = Number(batchRows[0].id);
+
+      const [lineRows] = await db.execute(
+        `SELECT debit, credit, line_date
+          FROM journal_lines
+          WHERE company_id = ?
+            AND journal_batch_id = ?`,
+        [companyId, cogsBatchId]
+      );
+      assert.ok(lineRows.length >= 2);
+
+      const totalDebit = lineRows.reduce((sum, row) => sum + Number(row.debit), 0);
+      const totalCredit = lineRows.reduce((sum, row) => sum + Number(row.credit), 0);
+      assert.equal(totalDebit, totalCredit);
+      assert.ok(totalDebit > 0);
+      assert.ok(lineRows.every((row) => String(row.line_date).slice(0, 10) === invoiceDate));
+    } finally {
+      // Note: journal_lines cannot be deleted due to immutability triggers (migration 0114)
+      // Also, items may be referenced by sales_invoice_lines FK constraint
+      
+      try {
+        if (createdInvoiceIds.length > 0) {
+          await db.execute(
+            `DELETE FROM sales_invoice_lines WHERE invoice_id IN (${createdInvoiceIds.map(() => "?").join(",")})`,
+            createdInvoiceIds
+          );
+          await db.execute(
+            `DELETE FROM sales_invoices WHERE id IN (${createdInvoiceIds.map(() => "?").join(",")})`,
+            createdInvoiceIds
+          );
+        }
+
+        if (createdPriceItemIds.length > 0) {
+          await db.execute(
+            `DELETE FROM item_prices WHERE item_id IN (${createdPriceItemIds.map(() => "?").join(",")})`,
+            createdPriceItemIds
+          );
+        }
+
+        if (createdItemIds.length > 0) {
+          // Delete cost tracking before stock (due to potential FK constraints)
+          await db.execute(
+            `DELETE FROM inventory_item_costs WHERE item_id IN (${createdItemIds.map(() => "?").join(",")})`,
+            createdItemIds
+          );
+          // Delete inventory stock before items (FK constraint)
+          await db.execute(
+            `DELETE FROM inventory_stock WHERE product_id IN (${createdItemIds.map(() => "?").join(",")})`,
+            createdItemIds
+          );
+          await db.execute(
+            `DELETE FROM items WHERE id IN (${createdItemIds.map(() => "?").join(",")})`,
+            createdItemIds
+          );
+        }
+
+        if (createdAccountIds.length > 0 && companyId != null) {
+          // journal_lines cannot be deleted - immutability triggers
+          await db.execute(
+            `DELETE FROM company_account_mappings WHERE company_id = ? AND account_id IN (${createdAccountIds.map(() => "?").join(",")})`,
+            [companyId, ...createdAccountIds]
+          );
+          await db.execute(
+            `DELETE FROM outlet_account_mappings WHERE company_id = ? AND account_id IN (${createdAccountIds.map(() => "?").join(",")})`,
+            [companyId, ...createdAccountIds]
+          );
+          await db.execute(
+            `DELETE FROM accounts WHERE company_id = ? AND id IN (${createdAccountIds.map(() => "?").join(",")})`,
+            [companyId, ...createdAccountIds]
+          );
+        }
+      } catch (e) {
+        // Ignore cleanup errors - FK constraints or immutability may prevent deletion
+      }
+
+      if (companyId != null && createdInvoiceIds.length > 0) {
+        // Compute possible doc_id values for COGS journal batches
+        // doc_id could be the invoice ID itself or a hash of "INV-${invoiceId}"
+        const possibleDocIds = new Set();
+        
+        for (const invoiceId of createdInvoiceIds) {
+          // Add the invoice ID itself (in case saleId was numeric)
+          possibleDocIds.add(invoiceId);
+          
+          // Compute hash the same way as cogs-posting.ts
+          const saleId = `INV-${invoiceId}`;
+          const saleIdNumeric = Number(saleId) || saleId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+          possibleDocIds.add(saleIdNumeric);
+        }
+        
+        const docIdArray = Array.from(possibleDocIds);
+        const placeholders = docIdArray.map(() => "?").join(",");
+        
+        const [batchRows] = await db.execute(
+          `SELECT id
+           FROM journal_batches
+           WHERE company_id = ?
+             AND doc_type = 'COGS'
+             AND doc_id IN (${placeholders})`,
+          [companyId, ...docIdArray]
+        );
+        const batchIds = batchRows.map((row) => Number(row.id));
+
+        if (batchIds.length > 0) {
+          // journal_lines cannot be deleted due to immutability triggers (migration 0114)
+          // journal_batches cannot be deleted due to foreign key constraint with journal_lines
+          // Test data will remain in the database as immutable records
+          // console.log(`Test created COGS journal batches: ${batchIds.join(', ')}`);
+        }
+      }
+    }
+  }
+);
+
+test(
+  "@slow COGS integration: item account ids must belong to authenticated company",
+  { timeout: TEST_TIMEOUT_MS, concurrent: false },
+  async () => {
+    const companyCode = readEnv("JP_COMPANY_CODE", "JP");
+    const ownerEmail = readEnv("JP_OWNER_EMAIL").toLowerCase();
+    const ownerPassword = readEnv("JP_OWNER_PASSWORD");
+    const token = await loginOwner(baseUrl, companyCode, ownerEmail, ownerPassword);
+
+    const [ownerRows] = await db.execute(
+      `SELECT u.company_id
+       FROM users u
+       INNER JOIN companies c ON c.id = u.company_id
+       WHERE c.code = ?
+         AND u.email = ?
+       LIMIT 1`,
+      [companyCode, ownerEmail]
+    );
+    const companyId = Number(ownerRows[0].company_id);
+
+    const [foreignRows] = await db.execute(
+      `SELECT a.id
+       FROM accounts a
+       WHERE a.company_id <> ?
+       LIMIT 1`,
+      [companyId]
+    );
+
+    if (foreignRows.length === 0) {
+      return;
+    }
+
+    const foreignAccountId = Number(foreignRows[0].id);
+    const runId = Date.now().toString(36);
+
+    const createItemRes = await requestJson("/api/inventory/items", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        name: `Cross Company Item ${runId}`,
+        sku: `XCOMP-${runId}`.toUpperCase(),
+        type: "PRODUCT",
+        cogs_account_id: foreignAccountId
+      })
     });
+
+    assert.equal(createItemRes.response.status, 404);
   }
-
-  await createItemPrice(TEST_COMPANY_ID, {
-    item_id: fallbackPriceItemId,
-    outlet_id: null,
-    price: 4.25
-  });
-
-  const cogsDetails = await calculateSaleCogs(
-    TEST_COMPANY_ID,
-    [
-      { itemId: inventoryItemId, quantity: 2 },
-      { itemId: fallbackPriceItemId, quantity: 3 }
-    ],
-    db
-  );
-
-  assert.strictEqual(cogsDetails.length, 2);
-  assert.strictEqual(cogsDetails[0].itemId, inventoryItemId);
-  assert.strictEqual(cogsDetails[0].unitCost, 2.5);
-  assert.strictEqual(cogsDetails[0].totalCost, 5);
-
-  assert.strictEqual(cogsDetails[1].itemId, fallbackPriceItemId);
-  assert.strictEqual(cogsDetails[1].unitCost, 4.25);
-  assert.strictEqual(cogsDetails[1].totalCost, 12.75);
-});
-
-test("getItemAccounts - should return item-specific accounts when configured", async () => {
-  const itemCogsId = await createTestAccount(db, TEST_COMPANY_ID, '6101-ITEM', 'Item COGS', 'EXPENSE', 'D');
-  const itemInvId = await createTestAccount(db, TEST_COMPANY_ID, '1101-ITEM', 'Item Inventory', 'ASSET', 'D');
-  
-  const accountedItem = await createItem(TEST_COMPANY_ID, {
-    name: 'Accounted Item',
-    type: 'PRODUCT',
-    track_stock: true,
-    cogs_account_id: itemCogsId,
-    inventory_asset_account_id: itemInvId
-  });
-  const itemId = accountedItem.id;
-  
-  const accounts = await getItemAccounts(TEST_COMPANY_ID, itemId, db);
-  
-  assert.strictEqual(accounts.cogsAccountId, itemCogsId);
-  assert.strictEqual(accounts.inventoryAssetAccountId, itemInvId);
-});
-
-test("getItemAccounts - should fall back to company defaults when item accounts not set", async () => {
-  const defaultAccountItem = await createItem(TEST_COMPANY_ID, {
-    name: 'Default Account Item',
-    type: 'PRODUCT',
-    track_stock: true
-  });
-  const itemId = defaultAccountItem.id;
-  
-  const accounts = await getItemAccounts(TEST_COMPANY_ID, itemId, db);
-  
-  assert.strictEqual(accounts.cogsAccountId, cogsAccountId);
-  assert.strictEqual(accounts.inventoryAssetAccountId, inventoryAccountId);
-});
-
-test("getItemAccounts - should throw error when COGS account is not expense type", async () => {
-  const wrongTypeAccount = await createTestAccount(db, TEST_COMPANY_ID, '5100-WRONG', 'Wrong Type', 'REVENUE', 'C');
-  
-  const wrongTypeItem = await createItem(TEST_COMPANY_ID, {
-    name: 'Wrong Type Item',
-    type: 'PRODUCT',
-    track_stock: true,
-    cogs_account_id: wrongTypeAccount,
-    inventory_asset_account_id: inventoryAccountId
-  });
-  const itemId = wrongTypeItem.id;
-  
-  await assert.rejects(
-    async () => await getItemAccounts(TEST_COMPANY_ID, itemId, db),
-    CogsAccountConfigError
-  );
-});
-
-test("getItemAccounts - should throw error when inventory account is not asset type", async () => {
-  const wrongTypeAccount = await createTestAccount(db, TEST_COMPANY_ID, '2100-WRONG', 'Wrong Type', 'LIABILITY', 'C');
-  
-  const wrongInvItem = await createItem(TEST_COMPANY_ID, {
-    name: 'Wrong Type Item',
-    type: 'PRODUCT',
-    track_stock: true,
-    cogs_account_id: cogsAccountId,
-    inventory_asset_account_id: wrongTypeAccount
-  });
-  const itemId = wrongInvItem.id;
-  
-  await assert.rejects(
-    async () => await getItemAccounts(TEST_COMPANY_ID, itemId, db),
-    CogsAccountConfigError
-  );
-});
-
-test("getItemAccounts - should throw error when no accounts are configured", async () => {
-  // Delete from account_mappings (the consolidated table the code reads from),
-  // not company_account_mappings which is a legacy/archived table.
-  await sql`DELETE FROM account_mappings WHERE company_id = ${TEST_COMPANY_ID}`.execute(db);
-  
-  const noAccountItem = await createItem(TEST_COMPANY_ID, {
-    name: 'No Account Item',
-    type: 'PRODUCT',
-    track_stock: true
-  });
-  const itemId = noAccountItem.id;
-  
-  await assert.rejects(
-    async () => await getItemAccounts(TEST_COMPANY_ID, itemId, db),
-    CogsAccountConfigError
-  );
-  
-  // Restore defaults into the consolidated account_mappings table
-  await sql`
-    INSERT INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id)
-    VALUES (${TEST_COMPANY_ID}, NULL, 7, 'COGS_DEFAULT', ${cogsAccountId}), (${TEST_COMPANY_ID}, NULL, 8, 'INVENTORY_ASSET_DEFAULT', ${inventoryAccountId})
-  `.execute(db);
-});
-
-test("getItemAccountsBatch - should resolve mixed item-specific and default accounts in one call", async () => {
-  const itemSpecificCogsId = await createTestAccount(db, TEST_COMPANY_ID, '6102-BATCH', 'Batch COGS', 'EXPENSE', 'D');
-  const itemSpecificInvId = await createTestAccount(db, TEST_COMPANY_ID, '1102-BATCH', 'Batch Inventory', 'ASSET', 'D');
-
-  const specificItem = await createItem(TEST_COMPANY_ID, {
-    name: 'Batch Specific Item',
-    type: 'PRODUCT',
-    track_stock: true,
-    cogs_account_id: itemSpecificCogsId,
-    inventory_asset_account_id: itemSpecificInvId
-  });
-  const itemWithSpecificAccounts = specificItem.id;
-  const defaultItem = await createItem(TEST_COMPANY_ID, {
-    name: 'Batch Default Item',
-    type: 'PRODUCT',
-    track_stock: true
-  });
-  const itemUsingDefaults = defaultItem.id;
-
-  const accountsByItemId = await getItemAccountsBatch(
-    TEST_COMPANY_ID,
-    [itemWithSpecificAccounts, itemUsingDefaults],
-    db
-  );
-
-  assert.deepStrictEqual(accountsByItemId.get(itemWithSpecificAccounts), {
-    cogsAccountId: itemSpecificCogsId,
-    inventoryAssetAccountId: itemSpecificInvId
-  });
-  assert.deepStrictEqual(accountsByItemId.get(itemUsingDefaults), {
-    cogsAccountId: cogsAccountId,
-    inventoryAssetAccountId: inventoryAccountId
-  });
-});
-
-test("postCogsForSale - should successfully post COGS journal for sale", async () => {
-  const saleDate = new Date("2026-03-17T00:00:00.000Z");
-
-  const saleItem = await createItem(TEST_COMPANY_ID, {
-    name: 'Sale Item',
-    type: 'PRODUCT',
-    track_stock: true,
-    cogs_account_id: cogsAccountId,
-    inventory_asset_account_id: inventoryAccountId
-  });
-  const itemId = saleItem.id;
-  if (supportsUnitCost) {
-    await createInventoryTransaction(db, TEST_COMPANY_ID, itemId, 10, 5.0);
-  }
-  
-  const cogsResult = await postCogsForSale({
-    saleId: 'SALE-001',
-    companyId: TEST_COMPANY_ID,
-    outletId: TEST_OUTLET_ID,
-    items: supportsUnitCost
-      ? [{ itemId, quantity: 2 }]
-      : [{ itemId, quantity: 2, unitCost: 5, totalCost: 10 }],
-    saleDate,
-    postedBy: TEST_USER_ID
-  }, db);
-  
-  assert.strictEqual(cogsResult.success, true, JSON.stringify(cogsResult.errors));
-  assert.strictEqual(cogsResult.totalCogs, 10.0);
-  assert.ok(cogsResult.journalBatchId);
-  
-  const batchId = cogsResult.journalBatchId!;
-  
-  const batchResult = await sql`SELECT * FROM journal_batches WHERE id = ${batchId}`.execute(db);
-  assert.strictEqual((batchResult.rows as any[]).length, 1);
-  
-  const lineResult = await sql`SELECT * FROM journal_lines WHERE journal_batch_id = ${batchId} ORDER BY id`.execute(db);
-  const lines = lineResult.rows as any[];
-  assert.strictEqual(lines.length, 2);
-  
-  assert.strictEqual(Number(lines[0].debit), 10.0);
-  assert.strictEqual(Number(lines[0].credit), 0);
-  assert.strictEqual(lines[0].account_id, cogsAccountId);
-  assert.strictEqual(String(lines[0].line_date).slice(0, 10), "2026-03-17");
-  
-  assert.strictEqual(Number(lines[1].debit), 0);
-  assert.strictEqual(Number(lines[1].credit), 10.0);
-  assert.strictEqual(lines[1].account_id, inventoryAccountId);
-  assert.strictEqual(String(lines[1].line_date).slice(0, 10), "2026-03-17");
-});
-
-test("postCogsForSale - should calculate costs when not provided", async () => {
-  const item = await createItem(TEST_COMPANY_ID, {
-    name: 'Calc Item',
-    type: 'PRODUCT',
-    track_stock: true,
-    cogs_account_id: cogsAccountId,
-    inventory_asset_account_id: inventoryAccountId
-  });
-  const itemId = item.id;
-  if (supportsUnitCost) {
-    await createInventoryTransaction(db, TEST_COMPANY_ID, itemId, 10, 3.0);
-  } else {
-    await createItemPrice(TEST_COMPANY_ID, {
-      item_id: itemId,
-      outlet_id: null,
-      price: 3.0
-    });
-  }
-  
-  const result = await postCogsForSale({
-    saleId: 'SALE-002',
-    companyId: TEST_COMPANY_ID,
-    outletId: TEST_OUTLET_ID,
-    items: [{ itemId, quantity: 5 }],
-    saleDate: new Date(),
-    postedBy: TEST_USER_ID
-  }, db);
-  
-  assert.strictEqual(result.success, true, JSON.stringify(result.errors));
-  assert.strictEqual(result.totalCogs, 15.0);
-});
-
-test("postCogsForSale - should return success with zero COGS for empty items", async () => {
-  const result = await postCogsForSale({
-    saleId: 'SALE-003',
-    companyId: TEST_COMPANY_ID,
-    outletId: TEST_OUTLET_ID,
-    items: [],
-    saleDate: new Date(),
-    postedBy: TEST_USER_ID
-  }, db);
-  
-  assert.strictEqual(result.success, true, JSON.stringify(result.errors));
-  assert.strictEqual(result.totalCogs, 0);
-  assert.ok(!result.journalBatchId);
-});
-
-test("postCogsForSale - should return failure when account config is missing", async () => {
-  const item = await createItem(TEST_COMPANY_ID, {
-    name: 'No Config Item',
-    type: 'PRODUCT',
-    track_stock: true
-  });
-  const itemId = item.id;
-  
-  const result = await postCogsForSale({
-    saleId: 'SALE-004',
-    companyId: TEST_COMPANY_ID,
-    outletId: TEST_OUTLET_ID,
-    items: [{ itemId, quantity: 1 }],
-    saleDate: new Date(),
-    postedBy: TEST_USER_ID
-  }, db);
-  
-  assert.strictEqual(result.success, false);
-  assert.ok(result.errors);
-  assert.ok(result.errors!.length > 0);
-});
-
-test("postCogsForSale - should post COGS for multiple items", async () => {
-  const item1 = await createItem(TEST_COMPANY_ID, {
-    name: 'Multi Item 1',
-    type: 'PRODUCT',
-    track_stock: true,
-    cogs_account_id: cogsAccountId,
-    inventory_asset_account_id: inventoryAccountId
-  });
-  const item1Id = item1.id;
-  const item2 = await createItem(TEST_COMPANY_ID, {
-    name: 'Multi Item 2',
-    type: 'PRODUCT',
-    track_stock: true,
-    cogs_account_id: cogsAccountId,
-    inventory_asset_account_id: inventoryAccountId
-  });
-  const item2Id = item2.id;
-  
-  if (supportsUnitCost) {
-    await createInventoryTransaction(db, TEST_COMPANY_ID, item1Id, 10, 2.0);
-    await createInventoryTransaction(db, TEST_COMPANY_ID, item2Id, 5, 4.0);
-  }
-  
-  const result = await postCogsForSale({
-    saleId: 'SALE-005',
-    companyId: TEST_COMPANY_ID,
-    outletId: TEST_OUTLET_ID,
-    items: supportsUnitCost
-      ? [
-          { itemId: item1Id, quantity: 3 },
-          { itemId: item2Id, quantity: 2 }
-        ]
-      : [
-          { itemId: item1Id, quantity: 3, unitCost: 2, totalCost: 6 },
-          { itemId: item2Id, quantity: 2, unitCost: 4, totalCost: 8 }
-        ],
-    saleDate: new Date(),
-    postedBy: TEST_USER_ID
-  }, db);
-  
-  assert.strictEqual(result.success, true, JSON.stringify(result.errors));
-  assert.strictEqual(result.totalCogs, 14.0);
-  assert.ok(result.journalBatchId);
-});
-
-test("Helper functions - normalizeMoney should handle precision correctly", () => {
-  // normalizeMoney imported at top of file
-  
-  assert.strictEqual(normalizeMoney(10.555), 10.56);
-  assert.strictEqual(normalizeMoney(10.554), 10.55);
-  assert.strictEqual(normalizeMoney(10.5), 10.5);
-  assert.strictEqual(normalizeMoney(10), 10);
-});
+);

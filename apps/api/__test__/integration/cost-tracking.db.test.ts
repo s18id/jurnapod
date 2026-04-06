@@ -1,9 +1,10 @@
+// @ts-nocheck
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { test, before, after } from "node:test";
-import { getDb, closeDbPool } from "./db";
+import {test, beforeAll, afterAll} from 'vitest';
+import { getDb, closeDbPool } from "../../src/lib/db";
 import type { KyselySchema } from "@/lib/db";
 import { sql } from "kysely";
 import {
@@ -16,14 +17,14 @@ import {
   InvalidCostingMethodError,
   CostTrackingError,
 } from "@jurnapod/modules-inventory-costing";
-import { createItem } from "./items/index.js";
-import { createCompanyBasic } from "./companies.js";
-import { createOutletBasic } from "./outlets.js";
+import { createItem } from "../../src/lib/items/index.js";
+import { createCompanyBasic } from "../../src/lib/companies.js";
+import { createOutletBasic } from "../../src/lib/outlets.js";
 
 // Test data - use unique IDs per run to avoid conflicts
 const RUN_ID = Date.now().toString(36);
 
-// Dynamic IDs - created in before() hook
+// Dynamic IDs - created in beforeAll() hook
 let TEST_COMPANY_ID: number;
 let TEST_OUTLET_ID: number;
 
@@ -102,10 +103,11 @@ async function countConsumptionRows(
 }
 
 // Test suite
-test("Cost Tracking Database Tests", async (t) => {
-  const db = getDb();
+describe("Cost Tracking Database Tests", () => {
+  let db: KyselySchema;
 
-  before(async () => {
+  beforeAll(async () => {
+    db = getDb();
     // Clean up any existing test data (pass dummy ID for cleanup before company is created)
     await cleanupTestData(db, 0);
 
@@ -125,12 +127,12 @@ test("Cost Tracking Database Tests", async (t) => {
     TEST_OUTLET_ID = outlet.id;
   });
 
-  after(async () => {
+  afterAll(async () => {
     await cleanupTestData(db, TEST_COMPANY_ID);
     await closeDbPool();
   });
 
-  await t.test("FIFO: consumes oldest layers first", async () => {
+  test("FIFO: consumes oldest layers first", async () => {
     // Create a unique item for this test
     const item = await createItem(TEST_COMPANY_ID, { name: `FIFO Test ${RUN_ID}`, type: "PRODUCT" });
     const testItemId = item.id;
@@ -191,7 +193,7 @@ test("Cost Tracking Database Tests", async (t) => {
     assert.strictEqual(l2?.remaining_qty, 40);
   });
 
-  await t.test("LIFO: consumes newest layers first", async () => {
+  test("LIFO: consumes newest layers first", async () => {
     // Create a unique item for this test
     const item = await createItem(TEST_COMPANY_ID, { name: `LIFO Test ${RUN_ID}`, type: "PRODUCT" });
     const testItemId = item.id;
@@ -248,7 +250,7 @@ test("Cost Tracking Database Tests", async (t) => {
     assert.strictEqual(totalRemaining, 40); // 100 - 60 consumed
   });
 
-  await t.test("AVG: weighted average cost is correct", async () => {
+  test("AVG: weighted average cost is correct", async () => {
     // Create a unique item for this test
     const item = await createItem(TEST_COMPANY_ID, { name: `AVG Test ${RUN_ID}`, type: "PRODUCT" });
     const testItemId = item.id;
@@ -307,7 +309,7 @@ test("Cost Tracking Database Tests", async (t) => {
     assert.ok(Math.abs(summaryAfter!.currentAvgCost! - expectedAvg) <= 0.01); // avg remains same
   });
 
-  await t.test("AVG: state depletes correctly on multiple consumes", async () => {
+  test("AVG: state depletes correctly on multiple consumes", async () => {
     // Create a unique item for this test
     const item = await createItem(TEST_COMPANY_ID, { name: `AVG Depletion Test ${RUN_ID}`, type: "PRODUCT" });
     const testItemId = item.id;
@@ -389,7 +391,7 @@ test("Cost Tracking Database Tests", async (t) => {
     assert.strictEqual(summary3!.currentAvgCost!, 0); // avg 0 when qty 0
   });
 
-  await t.test("AVG: insufficient inventory after depletion", async () => {
+  test("AVG: insufficient inventory after depletion", async () => {
     // Create a unique item for this test
     const item = await createItem(TEST_COMPANY_ID, { name: `AVG Insufficient Test ${RUN_ID}`, type: "PRODUCT" });
     const testItemId = item.id;
@@ -444,7 +446,7 @@ test("Cost Tracking Database Tests", async (t) => {
     assert.strictEqual(summary!.totalLayersCost, 200);
   });
 
-  await t.test("FIFO insufficient: no partial writes", async () => {
+  test("FIFO insufficient: no partial writes", async () => {
     // Create a unique item for this test
     const item = await createItem(TEST_COMPANY_ID, { name: `FIFO Insufficient Test ${RUN_ID}`, type: "PRODUCT" });
     const testItemId = item.id;
@@ -509,7 +511,7 @@ test("Cost Tracking Database Tests", async (t) => {
     assert.strictEqual(afterConsumptionCount, 0);
   });
 
-  await t.test("LIFO insufficient: no partial writes", async () => {
+  test("LIFO insufficient: no partial writes", async () => {
     // Create a unique item for this test
     const item = await createItem(TEST_COMPANY_ID, { name: `LIFO Insufficient Test ${RUN_ID}`, type: "PRODUCT" });
     const testItemId = item.id;
@@ -574,7 +576,7 @@ test("Cost Tracking Database Tests", async (t) => {
     assert.strictEqual(afterConsumptionCount, 0);
   });
 
-  await t.test("Rejects non-positive quantity", async () => {
+  test("Rejects non-positive quantity", async () => {
     // Create a unique item for this test
     const item = await createItem(TEST_COMPANY_ID, { name: `Non-positive Test ${RUN_ID}`, type: "PRODUCT" });
     const testItemId = item.id;
@@ -609,7 +611,7 @@ test("Cost Tracking Database Tests", async (t) => {
     );
   });
 
-  await t.test("Method routing: AVG/FIFO/LIFO", async () => {
+  test("Method routing: AVG/FIFO/LIFO", async () => {
     // Create a unique item for this test
     const item = await createItem(TEST_COMPANY_ID, { name: `Routing Test ${RUN_ID}`, type: "PRODUCT" });
     const testItemId = item.id;
@@ -743,7 +745,7 @@ test("Cost Tracking Database Tests", async (t) => {
     assert.strictEqual(lifo.totalCost, 700.0);
   });
 
-  await t.test("Invalid method setting throws", async () => {
+  test("Invalid method setting throws", async () => {
     // Create a unique item for this test and add inventory
     const item = await createItem(TEST_COMPANY_ID, { name: `Invalid Method Test ${RUN_ID}`, type: "PRODUCT" });
     const testItemId = item.id;
@@ -786,7 +788,7 @@ test("Cost Tracking Database Tests", async (t) => {
     );
   });
 
-  await t.test("Settings key priority: canonical key is preferred", async () => {
+  test("Settings key priority: canonical key is preferred", async () => {
     // Create a unique item for this test
     const item = await createItem(TEST_COMPANY_ID, { name: `Canonical Key Priority Test ${RUN_ID}`, type: "PRODUCT" });
     const testItemId = item.id;
@@ -826,7 +828,7 @@ test("Cost Tracking Database Tests", async (t) => {
     assert.strictEqual(methodFallback, "FIFO");
   });
 
-  await t.test("Default method when not configured is AVG", async () => {
+  test("Default method when not configured is AVG", async () => {
     // Create a unique item for this test
     const item = await createItem(TEST_COMPANY_ID, { name: `Default Method Test ${RUN_ID}`, type: "PRODUCT" });
     const testItemId = item.id;

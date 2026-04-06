@@ -2,11 +2,11 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import {test, afterAll} from 'vitest';
 import { sql } from "kysely";
-import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { getDb, closeDbPool } from "./db";
-import { createOutletTablesBulk, deleteOutletTable, OutletTableBulkConflictError } from "./outlet-tables";
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { getDb, closeDbPool } from "../../src/lib/db";
+import { createOutletTablesBulk, deleteOutletTable, OutletTableBulkConflictError } from "../../src/lib/outlet-tables";
 import { OutletTableBulkCreateRequestSchema } from "@jurnapod/shared";
 
 loadEnvIfPresent();
@@ -76,8 +76,8 @@ function buildValidBulkPayload(overrides: Record<string, unknown> = {}) {
 }
 
 test(
-  "deleteOutletTable rejects tables with active dine-in orders",
-  { concurrency: false, timeout: 60000 },
+  "@slow deleteOutletTable rejects tables with active dine-in orders",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -151,8 +151,8 @@ test(
 );
 
 test(
-  "deleteOutletTable rejects tables with reservation history",
-  { concurrency: false, timeout: 60000 },
+  "@slow deleteOutletTable rejects tables with reservation history",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -218,8 +218,8 @@ test(
 );
 
 test(
-  "bulk create rejects derived statuses at validation boundary",
-  { concurrency: false, timeout: 30000 },
+  "@slow bulk create rejects derived statuses at validation boundary",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const payloadReserved = buildValidBulkPayload({ status: "RESERVED" });
     const result = OutletTableBulkCreateRequestSchema.safeParse(payloadReserved);
@@ -240,8 +240,8 @@ test(
 );
 
 test(
-  "bulk create duplicate generated codes returns 409",
-  { concurrency: false, timeout: 60000 },
+  "@slow bulk create duplicate generated codes returns 409",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -292,8 +292,8 @@ test(
 );
 
 test(
-  "bulk create succeeds with operational status only",
-  { concurrency: false, timeout: 60000 },
+  "@slow bulk create succeeds with operational status only",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -335,6 +335,6 @@ test(
   }
 );
 
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

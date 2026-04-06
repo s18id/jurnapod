@@ -2,20 +2,20 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import {test, afterAll} from 'vitest';
 import { sql } from "kysely";
-import { loadEnvIfPresent, readEnv } from "../../../tests/integration/integration-harness.mjs";
-import { resolvePrice, resolvePricesBatch, clearPriceCache, getCacheSize } from "./variant-price-resolver.js";
-import { createItemPrice, deleteItemPrice } from "../item-prices/index.js";
-import { closeDbPool, getDb } from "../db.js";
-import { createCompanyBasic } from "../companies.js";
-import { createItem } from "../items/index.js";
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { resolvePrice, resolvePricesBatch, clearPriceCache, getCacheSize } from "../../src/lib/pricing/variant-price-resolver.js";
+import { createItemPrice, deleteItemPrice } from "../../src/lib/item-prices/index.js";
+import { closeDbPool, getDb } from "../../src/lib/db.js";
+import { createCompanyBasic } from "../../src/lib/companies.js";
+import { createItem } from "../../src/lib/items/index.js";
 
 loadEnvIfPresent();
 
 test(
-  "resolvePrice - variant price overrides item price",
-  { concurrency: false, timeout: 60000 },
+  "@slow resolvePrice - variant price overrides item price",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -107,8 +107,8 @@ test(
 );
 
 test(
-  "resolvePrice - missing variant price falls back to item price",
-  { concurrency: false, timeout: 60000 },
+  "@slow resolvePrice - missing variant price falls back to item price",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -181,7 +181,7 @@ test(
 
 test(
   "resolvePrice - company isolation - variant prices don't leak",
-  { concurrency: false, timeout: 60000 },
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -316,8 +316,8 @@ test(
 );
 
 test(
-  "resolvePrice - variant default price (no outlet)",
-  { concurrency: false, timeout: 60000 },
+  "@slow resolvePrice - variant default price (no outlet)",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -380,8 +380,8 @@ test(
 );
 
 test(
-  "resolvePricesBatch - multiple items resolved efficiently",
-  { concurrency: false, timeout: 60000 },
+  "@slow resolvePricesBatch - multiple items resolved efficiently",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -497,8 +497,8 @@ test(
 );
 
 test(
-  "resolvePrice - cache TTL works correctly",
-  { concurrency: false, timeout: 60000 },
+  "@slow resolvePrice - cache TTL works correctly",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -556,8 +556,8 @@ test(
 );
 
 test(
-  "resolvePrice - no price returns global default (0)",
-  { concurrency: false, timeout: 60000 },
+  "@slow resolvePrice - no price returns global default (0)",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -603,8 +603,8 @@ test(
 //            3) Re-add the skipped tests
 
 test(
-  "resolvePrice - cache is invalidated when price is updated",
-  { concurrency: false, timeout: 60000 },
+  "@slow resolvePrice - cache is invalidated when price is updated",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -666,6 +666,6 @@ test(
   }
 );
 
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

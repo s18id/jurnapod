@@ -5,7 +5,7 @@
 // Run with: node --test --import tsx apps/api/src/lib/phase4.contracts.test.ts
 
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
+import { describe, test } from 'vitest';
 import {
   TaxRateSchema,
   TaxRateCreateRequestSchema,

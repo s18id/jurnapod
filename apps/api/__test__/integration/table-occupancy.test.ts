@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
-import { after, afterEach, before, beforeEach, test } from "node:test";
-import { closeDbPool, getDb, type KyselySchema } from "./db";
+import {test, beforeAll, afterAll, beforeEach, afterEach} from 'vitest';
+import { closeDbPool, getDb, type KyselySchema } from "../../src/lib/db";
 import { TableOccupancyStatus } from "@jurnapod/shared";
-import { createTestCompanyMinimal, createTestOutletMinimal } from "./test-fixtures";
+import { createTestCompanyMinimal, createTestOutletMinimal } from "../../src/lib/test-fixtures";
 import {
   TableOccupancyConflictError,
   getTableBoard,
   holdTable,
   seatTable,
-} from "./table-occupancy";
+} from "../../src/lib/table-occupancy";
 
 let db: KyselySchema;
 let companyId: number;
@@ -31,7 +31,7 @@ async function ensureTableOccupancy(): Promise<void> {
     .execute();
 }
 
-before(async () => {
+beforeAll(async () => {
   db = getDb();
   const company = await createTestCompanyMinimal({
     code: `TOCC-${Date.now().toString(36)}`,
@@ -75,7 +75,7 @@ afterEach(async () => {
   await db.deleteFrom("table_service_sessions").where("company_id", "=", companyId).where("outlet_id", "=", outletId).execute();
 });
 
-after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });
 

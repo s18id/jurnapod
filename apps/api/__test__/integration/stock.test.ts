@@ -9,8 +9,8 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, test, before, after, afterEach } from "node:test";
-import { getDb, closeDbPool } from "../lib/db.js";
+import {test, describe, beforeAll, afterAll, afterEach} from 'vitest';
+import { getDb, closeDbPool } from "../../src/lib/db.js";
 import type { KyselySchema } from "@/lib/db";
 import { sql } from "kysely";
 import {
@@ -27,10 +27,10 @@ import {
   getLowStockAlerts,
   getProductStock,
   type StockItem
-} from "./stock.js";
-import { createTestCompanyMinimal, createTestOutletMinimal, createTestItem } from "./test-fixtures";
+} from "../../src/lib/stock.js";
+import { createTestCompanyMinimal, createTestOutletMinimal, createTestItem } from "../../src/lib/test-fixtures";
 
-describe("Stock Service", { concurrency: false }, () => {
+describe("Stock Service", { concurrent: false }, () => {
   let db: KyselySchema;
   let TEST_COMPANY_ID: number;
   let TEST_OUTLET_ID: number;
@@ -112,12 +112,12 @@ describe("Stock Service", { concurrency: false }, () => {
     await sql`DELETE FROM companies WHERE id = ${TEST_COMPANY_ID}`.execute(db);
   }
 
-  before(async () => {
+  beforeAll(async () => {
     db = getDb();
     await setupTestData(db);
   });
 
-  after(async () => {
+  afterAll(async () => {
     await cleanupTestData(db);
     await closeDbPool();
   });
@@ -347,7 +347,7 @@ describe("Stock Service", { concurrency: false }, () => {
       );
 
       // Import the function
-      const { deductStockWithCost } = await import("./stock.js");
+      const { deductStockWithCost } = await import("../../src/lib/stock.js");
       const result = await deductStockWithCost(TEST_COMPANY_ID, TEST_OUTLET_ID, items, referenceId, 1, db);
 
       assert.equal(result.length, 1);
@@ -389,7 +389,7 @@ describe("Stock Service", { concurrency: false }, () => {
       ];
       const referenceId = `test-deduct-cost-fail-${Date.now()}`;
 
-      const { deductStockWithCost } = await import("./stock.js");
+      const { deductStockWithCost } = await import("../../src/lib/stock.js");
 
       await assert.rejects(
         async () => {
@@ -412,7 +412,7 @@ describe("Stock Service", { concurrency: false }, () => {
       ];
       const referenceId = `test-deduct-cost-notfound-${Date.now()}`;
 
-      const { deductStockWithCost } = await import("./stock.js");
+      const { deductStockWithCost } = await import("../../src/lib/stock.js");
 
       await assert.rejects(
         async () => {

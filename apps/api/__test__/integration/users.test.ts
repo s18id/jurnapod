@@ -2,9 +2,9 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.mjs";
-import { closeDbPool, getDb } from "./db";
+import {test, afterAll} from 'vitest';
+import { loadEnvIfPresent, readEnv } from "../../tests/integration/integration-harness.js";
+import { closeDbPool, getDb } from "../../src/lib/db";
 import { sql } from "kysely";
 import {
   createUser,
@@ -20,14 +20,14 @@ import {
   RoleLevelViolationError,
   SuperAdminProtectionError,
   CrossCompanyAccessError
-} from "./users";
-import { createTestOutletMinimal, cleanupTestFixtures } from "./test-fixtures";
+} from "../../src/lib/users";
+import { createTestOutletMinimal, cleanupTestFixtures } from "../../src/lib/test-fixtures";
 
 loadEnvIfPresent();
 
 test(
-  "users CRUD - create, list, update, deactivate",
-  { concurrency: false, timeout: 120000 },
+  "@slow users CRUD - create, list, update, deactivate",
+  { concurrent: false, timeout: 120000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -134,8 +134,8 @@ test(
 );
 
 test(
-  "users - tenant isolation",
-  { concurrency: false, timeout: 60000 },
+  "@slow users - tenant isolation",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -188,8 +188,8 @@ test(
 );
 
 test(
-  "users - role level enforcement",
-  { concurrency: false, timeout: 60000 },
+  "@slow users - role level enforcement",
+  { concurrent: false, timeout: 60000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -274,8 +274,8 @@ test(
 );
 
 test(
-  "userHasOutletAccess - global roles get access to all outlets",
-  { concurrency: false, timeout: 30000 },
+  "@slow userHasOutletAccess - global roles get access to all outlets",
+  { concurrent: false, timeout: 30000 },
   async () => {
     const db = getDb();
     const runId = Date.now().toString(36);
@@ -312,7 +312,7 @@ test(
       testOutletId = outlet.id;
 
       // Test that owner has access to the new outlet using role-based logic
-      const { userHasOutletAccess } = await import("./auth.js");
+      const { userHasOutletAccess } = await import("../../src/lib/auth.js");
       const hasAccess = await userHasOutletAccess(ownerUserId, companyId, testOutletId);
 
       assert.equal(hasAccess, true, "Owner should have access to newly created outlet via global role");
@@ -340,6 +340,6 @@ test(
 );
 
 // Close database pool after all tests
-test.after(async () => {
+afterAll(async () => {
   await closeDbPool();
 });

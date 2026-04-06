@@ -11,7 +11,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { test, describe } from 'node:test';
+import { test, describe } from 'vitest';
 import * as XLSX from 'xlsx';
 
 import {
@@ -19,8 +19,8 @@ import {
   parseCSVSync,
   parseExcel,
   parseExcelSync,
-} from './parsers.js';
-import type { ImportRow } from './types.js';
+} from '../../src/lib/import/parsers.js';
+import type { ImportRow } from '../../src/lib/import/types.js';
 
 // ============================================================================
 // Helpers

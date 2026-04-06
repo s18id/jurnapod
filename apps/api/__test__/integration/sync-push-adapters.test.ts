@@ -9,13 +9,13 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
-import type { SyncPushTransactionPayload } from "./types";
+import { describe, test } from 'vitest';
+import type { SyncPushTransactionPayload } from "../../src/lib/sync/push/types";
 import {
   toTransactionPush,
   toActiveOrderPush,
   buildTxByClientTxIdMap
-} from "./adapters";
+} from "../../src/lib/sync/push/adapters";
 
 describe("Sync Push Adapters", () => {
   // ===========================================================================

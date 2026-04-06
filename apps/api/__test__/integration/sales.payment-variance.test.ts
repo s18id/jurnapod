@@ -5,15 +5,15 @@
 // Run with: node --test --import tsx apps/api/src/lib/sales.payment-variance.test.ts
 
 import assert from "node:assert/strict";
-import { after, describe, test } from "node:test";
+import {test, describe, afterAll} from 'vitest';
 import { ACCOUNT_MAPPING_TYPE_ID_BY_CODE } from "@jurnapod/shared";
 import {
   __salesPostingTestables,
   PAYMENT_VARIANCE_GAIN_MISSING_MESSAGE,
   PAYMENT_VARIANCE_LOSS_MISSING_MESSAGE
-} from "./sales-posting";
-import { closeDbPool, getDb } from "./db";
-import { createCompanyBasic } from "./companies";
+} from "../../src/lib/sales-posting";
+import { closeDbPool, getDb } from "../../src/lib/db";
+import { createCompanyBasic } from "../../src/lib/companies";
 
 const { readCompanyPaymentVarianceAccounts, PaymentVarianceConfigError } = __salesPostingTestables;
 const createdCompanyIds: number[] = [];
@@ -73,7 +73,7 @@ async function setupVarianceFixture(options: {
   return { companyId: company.id };
 }
 
-after(async () => {
+afterAll(async () => {
   const db = getDb();
   for (const companyId of createdCompanyIds) {
     await db.deleteFrom("account_mappings").where("company_id", "=", companyId).execute();
