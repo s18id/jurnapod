@@ -4,14 +4,11 @@
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { createServer } from "node:net";
 import path from "node:path";
 import {test, describe, beforeAll, afterAll, beforeEach, afterEach} from 'vitest';
 import { fileURLToPath } from "node:url";
-import mysql from "mysql2/promise";
-import { setupIntegrationTests } from "../../tests/integration/integration-harness.js";
+import { setupIntegrationTests, readEnv, delay, TEST_TIMEOUT_MS, loadEnvIfPresent } from "../../tests/integration/integration-harness.js";
 
 const __filename = fileURLToPath(import.meta.url);
 
@@ -23,10 +20,7 @@ async function runSubtest(name: string, optsOrFn: any, maybeFn?: any) {
 const __dirname = path.dirname(__filename);
 const apiRoot = path.resolve(__dirname, "../..");
 const repoRoot = path.resolve(apiRoot, "../..");
-const serverScriptPath = path.resolve(apiRoot, "src/server.ts");
-const loadEnvFile = process.loadEnvFile;
 const ENV_PATH = path.resolve(repoRoot, ".env");
-const TEST_TIMEOUT_MS = 180000;
 
 const testContext = setupIntegrationTests();
 
@@ -41,38 +35,6 @@ if (!sharedJournalsDist.includes("client_ref")) {
   throw new Error(
     "ManualJournalEntryCreateRequestSchema missing client_ref; rebuild @jurnapod/shared dist"
   );
-}
-
-function readEnv(name, fallback = null) {
-  const value = process.env[name];
-  if (value == null || value.length === 0) {
-    if (fallback != null) {
-      return fallback;
-    }
-
-    throw new Error(`${name} is required for integration test`);
-  }
-
-  return value;
-}
-
-function dbConfigFromEnv() {
-  const port = Number(process.env.DB_PORT ?? "3306");
-  if (!Number.isInteger(port) || port <= 0) {
-    throw new Error("DB_PORT must be a positive integer for integration test");
-  }
-
-  return {
-    host: process.env.DB_HOST ?? "127.0.0.1",
-    port,
-    user: process.env.DB_USER ?? "root",
-    password: process.env.DB_PASSWORD ?? "",
-    database: process.env.DB_NAME ?? "jurnapod"
-  };
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function normalizeDateValue(value) {
@@ -104,73 +66,6 @@ async function resolveOpenFiscalDate(db, companyId) {
   }
 
   return new Date().toISOString().split("T")[0];
-}
-
-async function getFreePort() {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        reject(new Error("failed to allocate free port"));
-        return;
-      }
-
-      const port = address.port;
-      server.close((closeError) => {
-        if (closeError) {
-          reject(closeError);
-          return;
-        }
-
-        resolve(port);
-      });
-    });
-  });
-}
-
-function startApiServer(port) {
-  const childEnv = {
-    ...process.env,
-    NODE_ENV: "test"
-  };
-
-  const serverLogs = [];
-  const childProcess = spawn(process.execPath, ["--import", "tsx", serverScriptPath], {
-    cwd: apiRoot,
-    env: { ...childEnv, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-
-  childProcess.stdout.on("data", (chunk) => {
-    serverLogs.push(chunk.toString());
-    if (serverLogs.length > 200) {
-      serverLogs.shift();
-    }
-  });
-
-  childProcess.stderr.on("data", (chunk) => {
-    serverLogs.push(chunk.toString());
-    if (serverLogs.length > 200) {
-      serverLogs.shift();
-    }
-  });
-
-  childProcess.on("error", (err) => {
-    console.error("Server process error:", err);
-  });
-
-  childProcess.on("exit", (code, signal) => {
-    if (code !== 0 && code !== null) {
-      console.error(`Server process exited with code ${code} signal ${signal}`);
-    }
-  });
-
-  return {
-    childProcess,
-    serverLogs
-  };
 }
 
 async function waitForServerReady(baseUrl, serverLogs, timeout = 60000) {
@@ -685,13 +580,7 @@ describe("Sales Integration Tests", () => {
   afterAll(async () => { await testContext.stop(); });
 
   test("@slow Sales Integration Tests", { timeout: TEST_TIMEOUT_MS }, async () => {
-  if (typeof loadEnvFile === "function") {
-    try {
-      loadEnvFile(ENV_PATH);
-    } catch {
-      // Ignore if .env doesn't exist
-    }
-  }
+  loadEnvIfPresent();
 
   const baseUrl = testContext.baseUrl;
   const serverLogs = [];

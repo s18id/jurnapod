@@ -6,7 +6,10 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { test, describe, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { fileURLToPath } from "node:url";
-import { setupIntegrationTests } from "../../tests/integration/integration-harness.js";
+import {
+  setupIntegrationTests,
+  readEnv,
+} from "../../tests/integration/integration-harness.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,17 +19,6 @@ const ENV_PATH = path.resolve(repoRoot, ".env");
 const TEST_TIMEOUT_MS = 180000;
 
 const testContext = setupIntegrationTests();
-
-function readEnv(name, fallback = null) {
-  const value = process.env[name];
-  if (value == null || value.length === 0) {
-    if (fallback != null) {
-      return fallback;
-    }
-    throw new Error(`${name} is required for integration test`);
-  }
-  return value;
-}
 
 // =============================================================================
 // Test 1: Valid FKs pass validation
