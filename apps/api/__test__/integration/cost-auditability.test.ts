@@ -42,15 +42,27 @@ async function setCompanyCostingMethod(
   companyId: number,
   method: "AVG" | "FIFO" | "LIFO"
 ): Promise<void> {
+  // Delete from both legacy and typed tables to ensure clean state
   await sql`
     DELETE FROM company_settings
     WHERE company_id = ${companyId} AND \`key\` IN (${"inventory.costing_method"}, ${"inventory_costing_method"}) AND outlet_id IS NULL
   `.execute(db);
 
+  // Also delete from typed settings tables
+  await sql`
+    DELETE FROM settings_strings
+    WHERE company_id = ${companyId} AND setting_key = ${"inventory.costing_method"} AND outlet_id IS NULL
+  `.execute(db);
+
+  // Insert into legacy table - will be lazily migrated on first read
   await sql`
     INSERT INTO company_settings (company_id, \`key\`, value_json, value_type, outlet_id)
     VALUES (${companyId}, ${"inventory.costing_method"}, ${JSON.stringify(method)}, 'string', NULL)
   `.execute(db);
+
+  // Clear settings cache to ensure the new value is read
+  const { settingsCache } = await import("@jurnapod/modules-platform/settings");
+  settingsCache.invalidate(companyId, undefined, "inventory.costing_method");
 }
 
 // Helper to cleanup
