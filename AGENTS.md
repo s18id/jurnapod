@@ -186,9 +186,34 @@ e2e tests remain in their own location (separate category):
 - `apps/backoffice/e2e/`
 - `apps/pos/e2e/`
 
-### Migration Note
+### Test Runner Standard
 
-Tests that exist outside `__test__/` are being migrated as part of Epic 34. Do not create new tests outside this structure.
+All packages and apps use **vitest** as the test runner with `globals: true`:
+
+```typescript
+// vitest.config.ts
+export default defineConfig({
+  resolve: {
+    extensions: ['.js', '.ts', '.tsx'],
+  },
+  test: {
+    globals: true,
+    environment: 'node',
+    include: ['__test__/**/*.test.ts'],
+    testTimeout: 30000,
+    hookTimeout: 30000,
+    teardownTimeout: 10000,
+  },
+});
+```
+
+### Test Scripts
+
+All packages support these standardized scripts:
+- `npm test` - Run all tests
+- `npm run test:unit` - Run unit tests only
+- `npm run test:integration` - Run integration tests only
+- `npm run test:single -- <file>` - Run specific test file
 
 ---
 

@@ -138,19 +138,51 @@ __test__/
 
 ### Running Tests
 
+All packages and apps support these standardized test scripts:
+
 ```bash
 # Run all tests (unit + integration)
-npm run test -ws --if-present
+npm test -ws --if-present
 
 # Run unit tests only
-npm run test:unit -w @jurnapod/api
+npm run test:unit -w @jurnapod/{package}
 
 # Run integration tests only
-npm run test:integration -w @jurnapod/api
+npm run test:integration -w @jurnapod/{package}
 
+# Run specific test file
+npm run test:single -w @jurnapod/{package} -- __test__/unit/hash.test.ts
+```
+
+#### Packages
+
+```bash
 # Run tests for specific package
-npm run test -w @jurnapod/sync-core
-npm run test -w @jurnapod/pos-sync
+npm test -w @jurnapod/sync-core
+npm test -w @jurnapod/pos-sync
+npm test -w @jurnapod/auth
+npm test -w @jurnapod/db
+```
+
+#### Apps
+
+```bash
+# API tests (unit + integration)
+npm test -w @jurnapod/api
+
+# Backoffice unit tests
+npm test -w @jurnapod/backoffice
+```
+
+#### e2e Tests
+
+```bash
+# Backoffice e2e
+npm run qa:e2e -w @jurnapod/backoffice
+npm run qa:e2e:headed -w @jurnapod/backoffice
+
+# POS e2e
+npm run qa:e2e -w @jurnapod/pos
 ```
 
 ### Test Environment Resolution

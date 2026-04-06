@@ -106,13 +106,32 @@ __test__/
 
 **e2e tests** remain in `apps/{app}/e2e/` - separate category.
 
-### Unit Tests (Node test runner + tsx)
-- **CRITICAL**: Tests using `getDbPool()` must close pool in `test.after()`
-  ```typescript
-  test.after(async () => { await closeDbPool(); });
-  ```
-- Without this, tests hang indefinitely
-- Use `test-fixtures.ts` library functions for test data setup
+### Test Runner
+
+All packages and apps use **vitest** with `globals: true`:
+
+```typescript
+// vitest.config.ts
+export default defineConfig({
+  resolve: { extensions: ['.js', '.ts', '.tsx'] },
+  test: {
+    globals: true,
+    environment: 'node',
+    include: ['__test__/**/*.test.ts'],
+    testTimeout: 30000,
+    hookTimeout: 30000,
+    teardownTimeout: 10000,
+  },
+});
+```
+
+### Test Scripts
+
+All packages support:
+- `npm test` - Run all tests
+- `npm run test:unit` - Unit tests only
+- `npm run test:integration` - Integration tests only
+- `npm run test:single -- <file>` - Specific test file
 
 ### test-fixtures.ts Library
 **Location**: `apps/api/src/lib/test-fixtures.ts`
