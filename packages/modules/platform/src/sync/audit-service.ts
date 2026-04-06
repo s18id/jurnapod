@@ -52,15 +52,10 @@ export interface AuditDbClient {
     sql: string,
     params?: unknown[]
   ): Promise<{ affectedRows: number; insertId?: number }>;
-  getConnection?(): Promise<{
-    beginTransaction(): Promise<void>;
+  transaction(): Promise<{
+    execute(sql: string, params?: unknown[]): Promise<{ affectedRows: number; insertId?: number }>;
     commit(): Promise<void>;
     rollback(): Promise<void>;
-    execute(
-      sql: string,
-      params?: unknown[]
-    ): Promise<{ affectedRows: number; insertId?: number }>;
-    release(): void;
   }>;
 }
 
@@ -393,17 +388,9 @@ export class SyncAuditService {
   }
 
   async archiveEvents(olderThanDays: number): Promise<number> {
-    if (!this.db.getConnection) {
-      throw new Error(
-        "Database client does not support transactions. Cannot archive events."
-      );
-    }
-
-    const connection = await this.db.getConnection();
+    const trx = await this.db.transaction();
 
     try {
-      await connection.beginTransaction();
-
       const insertSql = `
         INSERT INTO sync_audit_events_archive (
           id, company_id, outlet_id, operation_type, tier_name, status,
@@ -422,7 +409,7 @@ export class SyncAuditService {
         WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)
       `;
 
-      const insertResult = await connection.execute(insertSql, [olderThanDays]);
+      const insertResult = await trx.execute(insertSql, [olderThanDays]);
       const archivedCount = insertResult.affectedRows;
 
       if (archivedCount > 0) {
@@ -430,16 +417,14 @@ export class SyncAuditService {
           DELETE FROM sync_audit_events
           WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)
         `;
-        await connection.execute(deleteSql, [olderThanDays]);
+        await trx.execute(deleteSql, [olderThanDays]);
       }
 
-      await connection.commit();
+      await trx.commit();
       return archivedCount;
     } catch (error) {
-      await connection.rollback();
+      await trx.rollback();
       throw error;
-    } finally {
-      connection.release();
     }
   }
 }

@@ -18,6 +18,7 @@ loadEnv({ path: path.resolve(process.cwd(), '.env') });
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { createKysely, type KyselySchema } from '@jurnapod/db';
+import type { Kysely } from 'kysely';
 import { sql } from 'kysely';
 import { SyncAuditService, AuditDbClient, SyncAuditEvent } from '../../src/sync/audit-service.ts';
 
@@ -78,7 +79,7 @@ function toRawQuery(sqlText: string, params: unknown[] = []) {
 /**
  * Create AuditDbClient implementation backed by Kysely
  */
-function createAuditDbClient(db: KyselySchema): AuditDbClient {
+function createAuditDbClient(db: Kysely<any>): AuditDbClient {
   return {
     query: async <T = unknown>(queryText: string, params?: unknown[]): Promise<T[]> => {
       const result = await toRawQuery(queryText, params ?? []).execute(db);
@@ -99,20 +100,22 @@ function createAuditDbClient(db: KyselySchema): AuditDbClient {
 
       return { affectedRows, insertId };
     },
-    getConnection: async () => {
-      const conn = await (db as any).pool().getConnection();
+    transaction: async () => {
+      // Kysely's startTransaction returns Transaction which has execute(), commit(), rollback()
+      // @ts-ignore - Kysely types don't expose this clearly
+      const trx = await db.startTransaction().execute();
       return {
-        beginTransaction: () => conn.beginTransaction(),
-        commit: () => conn.commit(),
-        rollback: () => conn.rollback(),
         execute: async (sqlText: string, params?: unknown[]) => {
-          const [result] = await conn.execute(sqlText, params as (string | number | Date | null)[]);
+          // Use toRawQuery to convert SQL with ? placeholders to Kysely sql template
+          const query = toRawQuery(sqlText, params ?? []);
+          const result = await query.execute(trx) as any;
           return {
-            affectedRows: (result as { affectedRows: number }).affectedRows,
-            insertId: (result as { insertId?: number }).insertId,
+            affectedRows: Number(result.numAffectedRows ?? 0),
+            insertId: result.insertId ? Number(result.insertId) : undefined,
           };
         },
-        release: () => conn.release(),
+        commit: () => trx.commit().execute(),
+        rollback: () => trx.rollback().execute(),
       };
     },
   };
@@ -206,7 +209,7 @@ describe('SyncAuditService Integration', () => {
         companyId: fixtures.testCompanyId,
         outletId: fixtures.testOutletId,
         operationType: 'PUSH',
-        tierName: 'orders',
+        tierName: 'MASTER',
         status: 'SUCCESS',
         startedAt: new Date('2024-01-01T10:00:00Z'),
         itemsCount: 100,
@@ -256,7 +259,7 @@ describe('SyncAuditService Integration', () => {
         companyId: fixtures.testCompanyId,
         outletId: fixtures.testOutletId,
         operationType: 'PULL',
-        tierName: 'products',
+        tierName: 'MASTER',
         status: 'IN_PROGRESS',
         startedAt: new Date(),
       });
@@ -296,7 +299,7 @@ describe('SyncAuditService Integration', () => {
       const eventId = await fixtures.auditService.startEvent({
         companyId: fixtures.testCompanyId,
         operationType: 'PUSH',
-        tierName: 'orders',
+        tierName: 'MASTER',
         status: 'IN_PROGRESS',
         startedAt: new Date(),
       });
@@ -344,7 +347,7 @@ describe('SyncAuditService Integration', () => {
         companyId: fixtures.testCompanyId,
         outletId: fixtures.testOutletId,
         operationType: 'VERSION_BUMP',
-        tierName: 'invoices',
+        tierName: 'MASTER',
         status: 'SUCCESS',
         startedAt: new Date('2024-01-01T10:00:00Z'),
         completedAt: new Date('2024-01-01T10:00:05Z'),
@@ -384,7 +387,7 @@ describe('SyncAuditService Integration', () => {
           companyId: fixtures.testCompanyId,
           outletId: fixtures.testOutletId,
           operationType: 'PUSH',
-          tierName: 'orders',
+          tierName: 'MASTER',
           status: 'SUCCESS',
           startedAt: new Date('2024-01-15T10:00:00Z'),
           durationMs: 1000,
@@ -393,7 +396,7 @@ describe('SyncAuditService Integration', () => {
           companyId: fixtures.testCompanyId,
           outletId: fixtures.testOutletId,
           operationType: 'PULL',
-          tierName: 'products',
+          tierName: 'MASTER',
           status: 'SUCCESS',
           startedAt: new Date('2024-01-15T11:00:00Z'),
           durationMs: 2000,
@@ -402,7 +405,7 @@ describe('SyncAuditService Integration', () => {
           companyId: fixtures.testCompanyId,
           outletId: fixtures.testOutletId,
           operationType: 'PUSH',
-          tierName: 'orders',
+          tierName: 'MASTER',
           status: 'FAILED',
           startedAt: new Date('2024-01-15T12:00:00Z'),
           durationMs: 500,
@@ -453,7 +456,7 @@ describe('SyncAuditService Integration', () => {
 
     test('should query by tierName', async () => {
       const result = await fixtures.auditService.queryEvents({
-        tierName: 'orders',
+        tierName: 'MASTER',
       });
 
       expect(result.total).toBeGreaterThanOrEqual(2);
@@ -515,7 +518,7 @@ describe('SyncAuditService Integration', () => {
         companyId: fixtures.testCompanyId,
         outletId: fixtures.testOutletId,
         operationType: 'PUSH',
-        tierName: 'orders',
+        tierName: 'MASTER',
       });
 
       expect(result.total).toBeGreaterThanOrEqual(2);
@@ -550,7 +553,7 @@ describe('SyncAuditService Integration', () => {
         {
           companyId: fixtures.testCompanyId,
           operationType: 'PUSH',
-          tierName: 'orders',
+          tierName: 'MASTER',
           status: 'SUCCESS',
           startedAt: new Date('2024-01-20T10:00:00Z'),
           completedAt: new Date('2024-01-20T10:01:00Z'),
@@ -559,7 +562,7 @@ describe('SyncAuditService Integration', () => {
         {
           companyId: fixtures.testCompanyId,
           operationType: 'PUSH',
-          tierName: 'orders',
+          tierName: 'MASTER',
           status: 'SUCCESS',
           startedAt: new Date('2024-01-20T11:00:00Z'),
           completedAt: new Date('2024-01-20T11:00:30Z'),
@@ -568,7 +571,7 @@ describe('SyncAuditService Integration', () => {
         {
           companyId: fixtures.testCompanyId,
           operationType: 'PULL',
-          tierName: 'products',
+          tierName: 'MASTER',
           status: 'SUCCESS',
           startedAt: new Date('2024-01-20T12:00:00Z'),
           completedAt: new Date('2024-01-20T12:00:45Z'),
@@ -577,7 +580,7 @@ describe('SyncAuditService Integration', () => {
         {
           companyId: fixtures.testCompanyId,
           operationType: 'PUSH',
-          tierName: 'orders',
+          tierName: 'MASTER',
           status: 'FAILED',
           startedAt: new Date('2024-01-20T13:00:00Z'),
           completedAt: new Date('2024-01-20T13:00:05Z'),
@@ -681,7 +684,7 @@ describe('SyncAuditService Integration', () => {
       const oldEventId = await fixtures.auditService.startEvent({
         companyId: fixtures.testCompanyId,
         operationType: 'PUSH',
-        tierName: 'orders',
+        tierName: 'MASTER',
         status: 'IN_PROGRESS',
         startedAt: oldDate,
       });
