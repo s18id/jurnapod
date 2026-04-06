@@ -16,7 +16,8 @@
     "instrumentation.ts",
     "app/**/*.ts",
     "app/**/*.tsx",
-    "src"
+    "src",
+    "__test__"
   ],
   "exclude": [
     "node_modules"

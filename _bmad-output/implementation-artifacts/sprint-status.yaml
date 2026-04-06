@@ -385,7 +385,17 @@ development_status:
   epic-33-retrospective: done
   33-5-permission-bit-test-fix: done  # Post-epic test fix - corrected test expectations
 
-  # Epic 32: Financial Period Close & Reconciliation Workspace
+  # Epic 34: Test Reorganization & Assessment
+  epic-34: done
+  34-1-audit-all-test-files: done
+  34-2-define-canonical-structure: done
+  34-3-api-test-classification-reorganization: done
+  34-4-api-selective-deduplication: done
+  34-5-package-test-reorganization: done
+  34-6-validate-update-scripts: done
+  34-7-full-validation-gate: done
+
+  # Epic 35: Financial Period Close & Reconciliation Workspace
   epic-32: done
   epic-32-preparation:
     settings-port: done  # SettingsPort in modules-platform

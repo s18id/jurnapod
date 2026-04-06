@@ -35,7 +35,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import ../../../scripts/test/load-root-env.mjs --test --import tsx src/posting.test.ts",
+    "test": "vitest run",
+    "test:unit": "vitest run __test__/unit",
+    "test:integration": "vitest run __test__/integration",
     "lint": "eslint src --config eslint.config.mjs"
   },
   "dependencies": {
@@ -43,6 +45,7 @@
     "@jurnapod/shared": "0.1.0"
   },
   "devDependencies": {
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.0"
   }
 }

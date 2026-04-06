@@ -90,6 +90,22 @@ _Critical rules and patterns. Read before implementing. Follow ALL rules exactly
 
 ## Testing Rules
 
+### Canonical Test Directory Structure
+
+All tests MUST use the `__test__/unit` and `__test__/integration` directory structure:
+
+```
+__test__/
+├── unit/           # True unit tests (no real DB, mocked dependencies)
+└── integration/    # Tests with real DB, HTTP calls, or external services
+```
+
+**Classification:**
+- **Unit** (`__test__/unit/`): No DB, mocked deps, pure logic
+- **Integration** (`__test__/integration/`): Real DB, HTTP, external services
+
+**e2e tests** remain in `apps/{app}/e2e/` - separate category.
+
 ### Unit Tests (Node test runner + tsx)
 - **CRITICAL**: Tests using `getDbPool()` must close pool in `test.after()`
   ```typescript
@@ -153,7 +169,7 @@ await pool.execute(`INSERT INTO user_role_assignments...`);
 ### File Organization
 - API: `routes/` (HTTP), `services/`, `lib/` (DB/logic)
 - React: `components/`, `hooks/`, `pages/`
-- Co-locate tests next to source files
+- Tests: `__test__/unit/` or `__test__/integration/` (canonical structure)
 
 ### API Response Patterns
 - Standardized envelope (ADR-0006)
@@ -309,4 +325,4 @@ _bmad-output/
 
 ---
 
-_Last Updated: 2026-03-28_
+_Last Updated: 2026-04-06_

@@ -141,7 +141,7 @@ Follow Prometheus naming conventions:
 ### Unit Tests
 
 ```typescript
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import { calculateSLOCompliance } from '@jurnapod/telemetry/slo';
 
 describe('SLO Compliance', () => {

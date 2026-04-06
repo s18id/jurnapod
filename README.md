@@ -118,7 +118,42 @@ npm run deploy:backoffice # Deploy Backoffice
 
 ---
 
-## 🧪 Test Environment Resolution
+## 🧪 Testing
+
+### Test Directory Structure
+
+Tests are organized using the canonical `__test__/unit` and `__test__/integration` structure:
+
+```
+__test__/
+├── unit/           # True unit tests (no DB, mocked)
+└── integration/    # Tests with real DB, HTTP, or external services
+```
+
+**Unit tests**: Pure logic with no database access, all dependencies mocked.
+
+**Integration tests**: Real database access, HTTP server calls, file system, or external services.
+
+**e2e tests** (Playwright/Cypress) remain in `apps/{app}/e2e/` - separate category.
+
+### Running Tests
+
+```bash
+# Run all tests (unit + integration)
+npm run test -ws --if-present
+
+# Run unit tests only
+npm run test:unit -w @jurnapod/api
+
+# Run integration tests only
+npm run test:integration -w @jurnapod/api
+
+# Run tests for specific package
+npm run test -w @jurnapod/sync-core
+npm run test -w @jurnapod/pos-sync
+```
+
+### Test Environment Resolution
 
 Workspace test runs support monorepo-level defaults with workspace overrides:
 

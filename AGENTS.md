@@ -155,6 +155,43 @@ Flag code that filters `audit_logs` by `result` instead of `success`.
 
 ---
 
+## Canonical Test Directory Structure
+
+All tests MUST use the `__test__/unit` and `__test__/integration` directory structure:
+
+```
+__test__/
+├── unit/           # True unit tests (no real DB, mocked dependencies)
+└── integration/    # Tests with real DB, HTTP calls, or external services
+```
+
+### Classification Criteria
+
+**Unit Test** (`__test__/unit/`):
+- No real database access
+- All dependencies mocked or stubbed
+- Tests pure function logic
+- Examples: date helpers, retry logic, validation utilities, permission logic
+
+**Integration Test** (`__test__/integration/`):
+- Real database access (Kysely, mysql2)
+- HTTP server calls (full route testing)
+- File system operations
+- External service calls
+- Examples: route handlers with DB, service/repository tests
+
+### e2e Tests
+
+e2e tests remain in their own location (separate category):
+- `apps/backoffice/e2e/`
+- `apps/pos/e2e/`
+
+### Migration Note
+
+Tests that exist outside `__test__/` are being migrated as part of Epic 34. Do not create new tests outside this structure.
+
+---
+
 ## Canonical Test Fixtures
 
 When canonical data patterns are established (timestamps, status IDs, enum values, etc.), create canonical test fixtures to ensure consistency across the test suite.
@@ -229,8 +266,8 @@ Before marking ANY story as DONE:
 - [ ] No breaking changes without cross-package alignment
 
 ### Testing
-- [ ] Unit tests written and passing
-- [ ] Integration tests for API boundaries
+- [ ] Unit tests written and passing (in `__test__/unit/`)
+- [ ] Integration tests for API boundaries (in `__test__/integration/`)
 - [ ] Database pool cleanup hooks present
 
 ### Quality

@@ -2,9 +2,15 @@ import { defineConfig } from 'vitest/config';
 import '../../scripts/test/load-root-env.mjs';
 
 export default defineConfig({
+  resolve: {
+    extensions: ['.js', '.ts', '.tsx'],
+  },
   test: {
-    globals: false,
+    globals: true,
     environment: 'node',
-    include: ['tests/**/*.test.ts'],
+    include: ['__test__/**/*.test.ts'],
+    testTimeout: 30000,
+    hookTimeout: 30000,
+    teardownTimeout: 10000,
   },
 });

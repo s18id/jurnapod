@@ -29,23 +29,24 @@
 | Epic 23 | API Detachment | done | — |
 | Epic 24 | Inventory Costing Boundary | done | epic-24-sprint-plan |
 | Epic 25 | Cash-Bank Domain Extraction | done | epic-25-sprint-plan |
-
-## Active Epics
-
-| Epic | Title | Status | Sprint Plan |
-|------|-------|--------|-------------|
+| Epic 26 | Extend modules-inventory with Cost-Dependent Stock Operations | done | epic-26-sprint-plan |
 | Epic 27 | POS Sync Push Boundary Completion | done | epic-27-sprint-plan |
 | Epic 28 | Sales Payments Extraction | done | epic-28-sprint-plan |
 | Epic 29 | Fixed Assets / Depreciation | done | epic-29-sprint-plan |
 | Epic 30 | Sync & Financial Observability | done | epic-30-sprint-plan |
+| Epic 31 | API Detachment Completion | done | epic-31-sprint-plan |
+| Epic 32 | Financial Period Close & Reconciliation Workspace | done | epic-32-sprint-plan |
+| Epic 33 | Permission System Consolidation | done | epic-33-retrospective |
+| Epic 34 | Test Reorganization & Assessment | done | epic-34-sprint-plan |
 
 ## Backlog
-
+ 
 | Epic | Title | Status | Sprint Plan |
 |------|-------|--------|-------------|
-| Epic 31 | API Detachment Completion | backlog | epic-31-sprint-plan |
-| Epic 32 | Financial Period Close & Reconciliation Workspace | backlog | epic-32-sprint-plan |
+| Epic 35 | Shared Actor Type Unification | backlog | — |
+| Epic 36 | Import/Export Infrastructure | backlog | — |
+| Epic 37 | Email Outbox Infrastructure | backlog | — |
 
 ---
 
-_Last Updated: 2026-04-03_
+_Last Updated: 2026-04-06_

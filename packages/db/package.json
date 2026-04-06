@@ -19,9 +19,10 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src --config eslint.config.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import ../../scripts/test/load-root-env.mjs --test --import tsx --test-force-exit 'src/**/*.test.ts'",
-    "test:unit": "node --import ../../scripts/test/load-root-env.mjs --test --import tsx --test-force-exit 'src/**/*.test.ts'",
-    "test:unit:single": "node --import ../../scripts/test/load-root-env.mjs --test --import tsx --test-force-exit",
+    "test": "vitest run",
+    "test:unit": "vitest run __test__/unit",
+    "test:integration": "vitest run __test__/integration",
+    "test:watch": "vitest",
     "db:migrate": "node ./scripts/migrate.mjs",
     "db:seed": "node ./scripts/seed.mjs",
     "db:script": "node ./scripts/run-sql-script.mjs",
@@ -50,6 +51,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "kysely-codegen": "^0.12.0",
-    "tsx": "^4.19.0"
+    "tsx": "^4.19.0",
+    "vitest": "^3.0.0"
   }
 }

@@ -485,10 +485,20 @@ async function filterNewTransactions(
 
   const newTransactions: TransactionPush[] = [];
   const duplicateResults: SyncPushResultItem[] = [];
+  const seenClientTxIds = new Set<string>();
 
   for (const tx of transactions) {
+    // Check for duplicate within current batch first
+    if (seenClientTxIds.has(tx.client_tx_id)) {
+      duplicateResults.push({ client_tx_id: tx.client_tx_id, result: "DUPLICATE" });
+      continue; // Skip - don't add to newTransactions
+    }
+
     const existing = existingRecords.get(tx.client_tx_id);
     if (!existing) {
+      // Mark as seen BEFORE adding to newTransactions
+      // This ensures the second occurrence is detected as duplicate within the batch
+      seenClientTxIds.add(tx.client_tx_id);
       newTransactions.push(tx);
     } else {
       // Check if it's a true duplicate or a conflict
@@ -1099,7 +1109,7 @@ export async function persistPushBatch(
   // Combine duplicate results (already processed) with new transaction results
   // Results are returned in original transaction order
   const allResults: SyncPushResultItem[] = [];
-  
+
   // Build a map of results by client_tx_id for efficient lookup
   const resultMap = new Map<string, SyncPushResultItem>();
   for (const result of duplicateResults) {
@@ -1108,12 +1118,23 @@ export async function persistPushBatch(
   for (const result of newTransactionResults) {
     resultMap.set(result.client_tx_id, result);
   }
-  
+
+  // Track which client_tx_id values we've already returned a result for
+  // First occurrence uses the result from resultMap, subsequent occurrences get DUPLICATE
+  const returnedClientTxIds = new Set<string>();
+
   // Return results in same order as input transactions
   for (const tx of transactions) {
     const result = resultMap.get(tx.client_tx_id);
     if (result) {
-      allResults.push(result);
+      if (returnedClientTxIds.has(tx.client_tx_id)) {
+        // This is a subsequent occurrence - return DUPLICATE
+        allResults.push({ client_tx_id: tx.client_tx_id, result: "DUPLICATE" });
+      } else {
+        // First occurrence - return the actual result
+        allResults.push(result);
+        returnedClientTxIds.add(tx.client_tx_id);
+      }
     }
     // Note: transactions not matching company_id/outlet_id are not included in results
     // (they are filtered out before processing)
