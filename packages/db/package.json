@@ -22,6 +22,7 @@
     "test": "vitest run",
     "test:unit": "vitest run __test__/unit",
     "test:integration": "vitest run __test__/integration",
+    "test:single": "vitest run",
     "test:watch": "vitest",
     "db:migrate": "node ./scripts/migrate.mjs",
     "db:seed": "node ./scripts/seed.mjs",

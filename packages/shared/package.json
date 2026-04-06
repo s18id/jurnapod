@@ -15,10 +15,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --config eslint.config.mjs",
     "test": "vitest run",
     "test:unit": "vitest run __test__/unit",
     "test:integration": "vitest run __test__/integration",
-    "lint": "eslint src --config eslint.config.mjs"
+    "test:single": "vitest run"
   },
   "dependencies": {
     "@js-temporal/polyfill": "^0.5.1",

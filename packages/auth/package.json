@@ -43,9 +43,7 @@
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "vitest run __test__/unit",
     "test:integration": "vitest run __test__/integration",
-    "test:unit:watch": "vitest __test__/unit",
-    "test:integration:watch": "vitest __test__/integration",
-    "test:single": "vitest"
+    "test:single": "vitest run"
   },
   "dependencies": {
     "@jurnapod/db": "0.1.0",

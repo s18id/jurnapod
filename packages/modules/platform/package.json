@@ -33,7 +33,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src --config eslint.config.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:unit": "vitest run __test__/unit",
+    "test:integration": "vitest run __test__/integration",
+    "test:single": "vitest run"
   },
   "dependencies": {
     "@jurnapod/db": "0.1.0",

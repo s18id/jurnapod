@@ -16,8 +16,10 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src --config eslint.config.mjs",
-    "test": "vitest",
-    "test:run": "vitest run"
+    "test": "vitest run",
+    "test:unit": "vitest run __test__/unit",
+    "test:integration": "vitest run __test__/integration",
+    "test:single": "vitest run"
   },
   "dependencies": {
     "@jurnapod/db": "0.1.0",
