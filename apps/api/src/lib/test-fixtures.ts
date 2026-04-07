@@ -695,3 +695,39 @@ export async function setupUserPermission(params: {
   
   await setModulePermission(params.companyId, roleId, params.module, mask);
 }
+
+// ============================================================================
+// Authentication Helpers
+// ============================================================================
+
+/**
+ * Get an access token for testing.
+ * Uses the default test credentials from environment variables.
+ * 
+ * @param baseUrl - The base URL of the test server (must be running)
+ * @returns Access token string
+ * @throws Error if login fails
+ */
+export async function getTestAccessToken(baseUrl: string): Promise<string> {
+  const companyCode = process.env.JP_COMPANY_CODE;
+  const email = process.env.JP_OWNER_EMAIL;
+  const password = process.env.JP_OWNER_PASSWORD;
+
+  if (!companyCode || !email || !password) {
+    throw new Error("Test credentials not configured: JP_COMPANY_CODE, JP_OWNER_EMAIL, JP_OWNER_PASSWORD must be set");
+  }
+  
+  const res = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ companyCode, email, password })
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Failed to get test access token: ${res.status} ${body}`);
+  }
+
+  const body = await res.json();
+  return body.data.access_token;
+}

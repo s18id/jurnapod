@@ -47,6 +47,7 @@ export {
   assignUserOutletRole,
   setModulePermission,
   setupUserPermission,
+  getTestAccessToken,
   type CompanyFixture,
   type OutletFixture,
   type UserFixture,

@@ -58,7 +58,62 @@ describe('auth.login', { timeout: 300000 }, () => {
     expect(result!.code).toBe('TESTAUTH');
   });
 
-  it('login endpoint rejects request without company code', async () => {
+  it('login with valid credentials returns access token', async () => {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        companyCode: process.env.JP_COMPANY_CODE,
+        email: process.env.JP_OWNER_EMAIL,
+        password: process.env.JP_OWNER_PASSWORD
+      })
+    });
+
+    // Should succeed with 200 and access token
+    expect(res.status).toBe(200);
+    
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data.access_token).toBeDefined();
+    expect(body.data.token_type).toBe('Bearer');
+    expect(typeof body.data.expires_in).toBe('number');
+  });
+
+  it('login with invalid credentials returns 401', async () => {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        companyCode: process.env.JP_COMPANY_CODE,
+        email: process.env.JP_OWNER_EMAIL,
+        password: 'wrongpassword'
+      })
+    });
+
+    // Should fail with 401
+    expect(res.status).toBe(401);
+    
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('INVALID_CREDENTIALS');
+  });
+
+  it('login with non-existent company returns 401', async () => {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        companyCode: 'NONEXISTENT',
+        email: 'test@test.com',
+        password: 'password'
+      })
+    });
+
+    // Should fail with 401 (invalid credentials for non-existent company)
+    expect(res.status).toBe(401);
+  });
+
+  it('login rejects request without company code', async () => {
     // Test that login endpoint exists and handles validation errors
     const res = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',
@@ -68,7 +123,7 @@ describe('auth.login', { timeout: 300000 }, () => {
         password: 'password'
       })
     });
-    
+
     // Should return 400 or 500 (validation error or audit failure)
     // Not 404 (endpoint exists)
     expect(res.status).not.toBe(404);
