@@ -9,23 +9,22 @@
 //  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
+import { getTestBaseUrl } from '../../helpers/env';
 import { getTestDb, closeTestDb } from '../../helpers/db';
 import { createTestCompany, createTestItem, cleanupTestFixtures, getTestAccessToken } from '../../fixtures';
 
 let baseUrl: string;
 let accessToken: string;
 
-describe('items.crud', { timeout: 300000 }, () => {
+describe('items.crud', { timeout: 30000 }, () => {
   beforeAll(async () => {
-    baseUrl = await acquireReadLock();
+    baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
   });
 
   afterAll(async () => {
     await cleanupTestFixtures();
     await closeTestDb();
-    await releaseReadLock();
   });
 
   it('healthcheck returns ok', async () => {

@@ -27,9 +27,9 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['__test__/**/*.test.ts'],
-    testTimeout: 120000,
-    hookTimeout: 60000,
-    teardownTimeout: 30000,
+    testTimeout: 30000,
+    hookTimeout: 30000,
+    teardownTimeout: 10000,
     // Output JSON results to file for CI/CD
     outputFile: {
       json: path.resolve(logsDir, 'test-results.json'),
