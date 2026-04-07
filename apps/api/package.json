@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon --watch src --watch app --ext ts --exec 'node --import tsx src/server.ts'",
-    "test-server": "NODE_ENV=test node --import ../../scripts/test/load-root-env.mjs --import tsx src/server.ts",
+    "test-server": "NODE_ENV=test node --import ../../scripts/test/load-root-env.mjs --import tsx ../../scripts/test/test-server.ts",
     "build": "tsc --noEmit",
     "start": "NODE_ENV=production node --import tsx src/server.ts",
     "lint": "eslint . --max-warnings=0",
