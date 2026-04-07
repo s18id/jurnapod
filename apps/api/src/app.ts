@@ -48,18 +48,6 @@ import { adminRunbookRoutes } from './routes/admin-runbook.js';
 import { auditRoutes } from './routes/audit.js';
 
 const HTTP_LOG_ENABLED = process.env.JP_HTTP_LOG === "1";
-const HTTP_LOG_HEALTH = process.env.JP_HTTP_LOG_HEALTH === "1";
-
-const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
-
-type HttpMethod = (typeof HTTP_METHODS)[number];
-type RouteModule = Partial<Record<HttpMethod, (request: Request) => Promise<Response> | Response>>;
-
-function shouldLog(path: string): boolean {
-  if (!HTTP_LOG_ENABLED) return false;
-  if (!HTTP_LOG_HEALTH && path === "/api/health") return false;
-  return true;
-}
 
 function getAllowedOrigins(): string[] {
   const isDevelopment = process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
@@ -100,7 +88,7 @@ export function createApp(): Hono {
     app.use("/api/*", honoLogger());
   }
 
-  app.use("/api/*", async (c: any, next: () => Promise<void>) => {
+  app.use("/api/*", async (c: Context, next: () => Promise<void>) => {
     const origin = c.req.header("origin") ?? null;
 
     if (c.req.method === "OPTIONS") {

@@ -129,7 +129,7 @@ export async function createTestCompanyMinimal(
     
     createdFixtures.companies.push(company);
     return company;
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error instanceof CompanyCodeExistsError) {
       // Company with this code already exists - fetch it instead
       const result = await sql`SELECT id, code, name FROM companies WHERE code = ${code} LIMIT 1`.execute(db);
@@ -205,7 +205,7 @@ export async function createTestOutletMinimal(
     
     createdFixtures.outlets.push(outlet);
     return outlet;
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error instanceof OutletCodeExistsError) {
       // Outlet with this code already exists for this company - fetch it instead
       const result = await sql`SELECT id, company_id, code, name FROM outlets WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
@@ -293,7 +293,7 @@ export async function createTestUser(
     
     createdFixtures.users.push(fullUser);
     return fullUser;
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error instanceof UserEmailExistsError) {
       // User with this email already exists - fetch it instead
       const result = await sql`SELECT id, company_id, email, password_hash FROM users WHERE company_id = ${companyId} AND email = ${email.toLowerCase()} LIMIT 1`.execute(db);
@@ -351,7 +351,7 @@ export async function createTestItem(
     
     createdFixtures.items.push(item);
     return item;
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error instanceof DatabaseConflictError) {
       // Item with this SKU already exists - fetch it instead
       const result = await sql`SELECT id, company_id, sku, name, item_type FROM items WHERE company_id = ${companyId} AND sku = ${sku} LIMIT 1`.execute(db);
