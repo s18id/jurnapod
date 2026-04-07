@@ -265,16 +265,25 @@ export function getAppEnv(): AppEnv {
       DEFAULT_REFRESH_TOKEN_TTL_SECONDS,
       "AUTH_REFRESH_TTL_SECONDS"
     );
-    const loginThrottleBaseMs = parsePositiveInt(
-      process.env.AUTH_LOGIN_THROTTLE_BASE_MS,
-      DEFAULT_LOGIN_THROTTLE_BASE_MS,
-      "AUTH_LOGIN_THROTTLE_BASE_MS"
-    );
-    const loginThrottleMaxMs = parsePositiveInt(
-      process.env.AUTH_LOGIN_THROTTLE_MAX_MS,
-      DEFAULT_LOGIN_THROTTLE_MAX_MS,
-      "AUTH_LOGIN_THROTTLE_MAX_MS"
-    );
+    // Allow 0 for throttle settings (means disabled)
+    const loginThrottleBaseMs = (() => {
+      const val = process.env.AUTH_LOGIN_THROTTLE_BASE_MS;
+      if (val == null || val.length === 0) return DEFAULT_LOGIN_THROTTLE_BASE_MS;
+      const parsed = Number(val);
+      if (!Number.isInteger(parsed) || parsed < 0) {
+        throw new Error("AUTH_LOGIN_THROTTLE_BASE_MS must be a non-negative integer (0 to disable)");
+      }
+      return parsed;
+    })();
+    const loginThrottleMaxMs = (() => {
+      const val = process.env.AUTH_LOGIN_THROTTLE_MAX_MS;
+      if (val == null || val.length === 0) return DEFAULT_LOGIN_THROTTLE_MAX_MS;
+      const parsed = Number(val);
+      if (!Number.isInteger(parsed) || parsed < 0) {
+        throw new Error("AUTH_LOGIN_THROTTLE_MAX_MS must be a non-negative integer (0 to disable)");
+      }
+      return parsed;
+    })();
     const refreshCookieCrossSite = parseBooleanString(
       process.env.AUTH_REFRESH_COOKIE_CROSS_SITE,
       DEFAULT_REFRESH_COOKIE_CROSS_SITE,
