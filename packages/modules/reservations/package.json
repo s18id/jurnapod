@@ -1,6 +1,6 @@
 {
   "name": "@jurnapod/modules-reservations",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -22,8 +22,8 @@
     "lint": "eslint src --config eslint.config.mjs"
   },
   "dependencies": {
-    "@jurnapod/db": "0.1.0",
-    "@jurnapod/shared": "0.1.0",
+    "@jurnapod/db": "0.3.0",
+    "@jurnapod/shared": "0.3.0",
     "@js-temporal/polyfill": "^0.5.1"
   },
   "devDependencies": {

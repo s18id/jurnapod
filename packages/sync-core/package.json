@@ -1,6 +1,6 @@
 {
   "name": "@jurnapod/sync-core",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -22,8 +22,8 @@
     "test:single": "vitest run"
   },
   "dependencies": {
-    "@jurnapod/db": "0.1.0",
-    "@jurnapod/shared": "0.1.0",
+    "@jurnapod/db": "0.3.0",
+    "@jurnapod/shared": "0.3.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

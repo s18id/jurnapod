@@ -250,12 +250,17 @@ export async function recordLoginAudit(record: LoginAuditRecord): Promise<void> 
   const normalizedResult = success ? "SUCCESS" : "FAIL";
   const status = success ? 1 : 0; // Using status codes: 1=SUCCESS, 0=FAIL
   
+  // For failed logins without valid company, use null to avoid FK constraint violation
+  // Audit logs are immutable and must be writeable even for invalid company attempts
+  const companyId = record.companyId ?? null;
+  const userId = record.userId ?? null;
+  
   await db
     .insertInto("audit_logs")
     .values({
-      company_id: record.companyId ?? 0,
+      company_id: companyId,
       outlet_id: null,
-      user_id: record.userId ?? 0,
+      user_id: userId,
       action: "AUTH_LOGIN",
       result: normalizedResult,
       success: success ? 1 : 0, // Legacy success field for backward compatibility

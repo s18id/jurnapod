@@ -1,7 +1,7 @@
 {
   "name": "jurnapod",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.3.0",
   "engines": {
     "node": ">=22"
   },
@@ -81,6 +81,7 @@
     "eslint": "^9.39.3",
     "eslint-plugin-boundaries": "^6.0.2",
     "nodemon": "^3.1.14",
+    "proper-lockfile": "^4.1.2",
     "rimraf": "^5.0.10",
     "wait-on": "^8.0.1"
   },
