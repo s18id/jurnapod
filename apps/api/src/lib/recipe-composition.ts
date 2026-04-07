@@ -8,8 +8,6 @@
  * Maintains backward compatibility for API consumers.
  */
 
-import { getDb, type KyselySchema } from "@/lib/db";
-
 // Re-export types from modules-inventory
 export type {
   RecipeIngredient,

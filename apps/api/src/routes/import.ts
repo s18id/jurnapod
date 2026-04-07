@@ -20,7 +20,6 @@ import {
   type AuthContext
 } from "../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../lib/response.js";
-import { getDb } from "../lib/db.js";
 import {
   parseCSVSync,
   parseExcelSync,
@@ -48,14 +47,12 @@ import {
 import {
   createSession,
   getSession,
-  updateSession,
   deleteSession,
   cleanupExpiredSessions,
   updateCheckpoint,
   clearCheckpoint,
   updateFileHash,
   computeFileHash,
-  getCheckpoint,
   type CheckpointData,
   SESSION_TTL_MS,
 } from "../lib/import/session-store.js";
@@ -279,7 +276,8 @@ import type { FkLookupResults } from "../lib/import/index.js";
  * Collects FK IDs from item rows for batch validation.
  * Used to prefetch all FK references before row-level validation.
  */
-function collectItemRowFkIds(
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _collectItemRowFkIds(
   rows: Array<{ rowNumber: number; mappedData: Record<string, unknown> }>
 ): Map<number, number> {
   // Map rowNumber -> item_group_id for FK validation
@@ -301,7 +299,8 @@ function collectItemRowFkIds(
  * Collects FK IDs from price rows for batch validation.
  * Used to prefetch all FK references before row-level validation.
  */
-function collectPriceRowFkIds(
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _collectPriceRowFkIds(
   rows: Array<{ rowNumber: number; mappedData: Record<string, unknown> }>
 ): Map<number, number> {
   // Map rowNumber -> outlet_id for FK validation

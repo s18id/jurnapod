@@ -199,7 +199,7 @@ export class WebSocketManager {
         companyId: 1,
         message: "Authenticated (test mode)" 
       });
-    } catch (error) {
+    } catch {
       this.send(ws, { type: "auth_error", message: "Authentication failed" });
     }
   }

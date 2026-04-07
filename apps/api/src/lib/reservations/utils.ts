@@ -22,7 +22,6 @@ import { getSetting } from "../settings";
 // Import types from local types module
 import type {
   ReservationDbRow,
-  OccupancySnapshotRow,
   Reservation,
 } from "./types";
 import {

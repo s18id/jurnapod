@@ -82,14 +82,6 @@ export const UNSUPPORTED_PAYMENT_METHOD_MESSAGE = "UNSUPPORTED_PAYMENT_METHOD";
 // Sales Posting Executor Implementation
 // =============================================================================
 
-function normalizePaymentMethodCode(method: string): string {
-  const normalized = method.trim().toUpperCase();
-  if (!normalized) {
-    throw new Error(UNSUPPORTED_PAYMENT_METHOD_MESSAGE);
-  }
-  return normalized;
-}
-
 function resolveMappingCode(
   row: { mapping_type_id?: number | null; mapping_key?: string | null }
 ): AccountMappingCode | undefined {

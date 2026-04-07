@@ -257,7 +257,7 @@ paymentRoutes.post("/:id/post", async (c) => {
               };
             }
           }
-        } catch (e) {
+        } catch {
           // JSON parse error - invalid JSON body
           return errorResponse("INVALID_REQUEST", "Invalid JSON body", 400);
         }

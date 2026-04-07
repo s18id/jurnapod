@@ -20,7 +20,6 @@ import { authenticateRequest, type AuthContext } from "../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../lib/response.js";
 import { resolvePrice } from "../lib/pricing/variant-price-resolver.js";
 import { getVariantById } from "../lib/item-variants.js";
-import { getItemVariants } from "../lib/item-variants.js";
 import { checkVariantStockAvailability, type VariantStockCheckResult } from "../lib/inventory/variant-stock.js";
 
 declare module "hono" {
@@ -37,7 +36,8 @@ const addCartLineSchema = z.object({
   discount_amount: z.number().finite().min(0).optional()
 });
 
-const updateCartLineSchema = z.object({
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _updateCartLineSchema = z.object({
   qty: z.number().int().nonnegative().optional(),
   discount_amount: z.number().finite().min(0).optional()
 });

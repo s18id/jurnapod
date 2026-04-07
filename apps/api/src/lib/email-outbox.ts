@@ -3,7 +3,7 @@
 
 import { getDb } from "./db";
 import { getAppEnv } from "./env";
-import { getMailer, MailerError } from "./mailer";
+import { getMailer } from "./mailer";
 
 export type EmailOutboxStatus = "PENDING" | "SENDING" | "SENT" | "FAILED";
 

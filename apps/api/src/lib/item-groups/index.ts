@@ -11,7 +11,6 @@ import {
   recordMasterDataAuditLog,
   withTransaction
 } from "../shared/master-data-utils.js";
-import { type Transaction } from "@jurnapod/db";
 
 type MutationAuditActor = {
   userId: number;

@@ -3,7 +3,6 @@
 
 import { getDb } from "./db";
 import type { KyselySchema } from "@jurnapod/db";
-import type { InsertResult } from "kysely";
 import { AuditService } from "@jurnapod/modules-platform";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 import { sql } from "kysely";

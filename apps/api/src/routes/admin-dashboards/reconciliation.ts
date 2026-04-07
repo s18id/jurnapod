@@ -13,8 +13,6 @@ import { errorResponse } from "../../lib/response.js";
 import {
   ReconciliationDashboardService,
   type ReconciliationDashboardQuery,
-  type AccountTypeFilter,
-  type ReconciliationStatus,
 } from "@jurnapod/modules-accounting/reconciliation";
 
 // Enum schemas for query parameter validation
@@ -62,7 +60,8 @@ reconciliationRoutes.use("/*", async (c, next) => {
 // Reconciliation Dashboard - GET /admin/dashboard/reconciliation
 // =============================================================================
 
-const reconciliationQuerySchema = z.object({
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _reconciliationQuerySchema = z.object({
   fiscal_year_id: z.string().transform(Number).pipe(z.number().positive()).optional(),
   period_id: z.string().transform(Number).pipe(z.number().positive()).optional(),
   outlet_id: z.string().transform(Number).pipe(z.number().positive()).optional(),

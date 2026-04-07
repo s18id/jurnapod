@@ -22,14 +22,6 @@ import {
 } from "@jurnapod/modules-reservations";
 
 /**
- * Convert ISO 8601 datetime string to Unix milliseconds
- * @deprecated Use @js-temporal/polyfill Temporal.Instant instead
- */
-function toUnixMs(isoString: string): number {
-  return new Date(isoString).getTime();
-}
-
-/**
  * @deprecated Use @jurnapod/modules-reservations reservation-groups service directly.
  * Kept for one release cycle for compatibility.
  */

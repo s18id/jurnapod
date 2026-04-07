@@ -398,8 +398,6 @@ export async function listReservationsV2(
   // Store date values to avoid TypeScript narrowing issues inside expression builder
   const fromDate = params.fromDate;
   const toDate = params.toDate;
-  const fromDateDb = fromDate ? toDbDateTime(fromDate) : undefined;
-  const toDateDb = toDate ? toDbDateTime(toDate) : undefined;
   const fromDateMs = fromDate ? toUnixMs(fromDate) : undefined;
   const toDateMs = toDate ? toUnixMs(toDate) : undefined;
 

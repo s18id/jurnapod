@@ -9,11 +9,7 @@
 
 import { getDb } from "./db";
 import {
-  TableOccupancyStatus,
   type OutletTableStatusIdType,
-  outletTableStatusFromId,
-  outletTableStatusToId,
-  toRfc3339Required
 } from "@jurnapod/shared";
 import type {
   OutletTableFullResponse as PackageOutletTableFullResponse,

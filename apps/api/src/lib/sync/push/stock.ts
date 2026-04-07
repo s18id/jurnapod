@@ -16,8 +16,7 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@/lib/db";
 import type { SyncPushTransactionPayload } from "./types.js";
-import { deductStockWithCost } from "../../stock.js";
-import type { StockDeductResult, StockItem } from "../../stock.js";
+import type { StockDeductResult } from "../../stock.js";
 import { getStockService } from "@jurnapod/modules-inventory";
 
 interface StockRow {
@@ -27,10 +26,6 @@ interface StockRow {
 
 interface VariantRow {
   stock_quantity: string;
-}
-
-interface ItemRow {
-  id: number;
 }
 
 /**

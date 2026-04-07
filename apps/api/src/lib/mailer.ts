@@ -23,7 +23,6 @@
  });
 */
 
-import type { MailerDriver } from "./env";
 import { ensurePlatformSettingsSeeded, getPlatformSetting } from "./platform-settings";
 import { getAppEnv } from "./env";
 import {
@@ -56,7 +55,6 @@ const DEFAULT_MAILER_SMTP_TLS_REJECT_UNAUTHORIZED = true;
 async function createEmailService(): Promise<EmailService> {
   await ensurePlatformSettingsSeeded();
 
-  const driver = (await getPlatformSetting("mailer.driver")) as MailerDriver | null;
   const fromName = await getPlatformSetting("mailer.from_name");
   const fromEmail = await getPlatformSetting("mailer.from_email");
   const smtpHost = await getPlatformSetting("mailer.smtp.host");

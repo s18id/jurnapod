@@ -53,7 +53,8 @@ const numberingTemplateConflictMessage =
 const companyService = new CompanyService(getDb());
 
 // Helper to parse outlet_id from request body for auth guard
-async function parseOutletIdFromBody(request: Request): Promise<number | null> {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function _parseOutletIdFromBody(request: Request): Promise<number | null> {
   try {
     const payload = await request.clone().json();
     if (payload && typeof payload.outlet_id === "number") {

@@ -18,7 +18,7 @@ import {
   QUERY_TIMEOUT_MS,
   type ReportType,
 } from "@/lib/report-telemetry";
-import { resolveDefaultFiscalYearDateRange, FiscalYearSelectionError } from "@/lib/fiscal-years";
+import { FiscalYearSelectionError } from "@/lib/fiscal-years";
 import { errorResponse } from "@/lib/response";
 
 /**
@@ -28,7 +28,7 @@ export async function executeReport<T>(
   reportType: ReportType,
   companyId: number,
   queryFn: () => Promise<T>,
-  options: { startTime: number; rowCount?: (result: T) => number } = { startTime: Date.now() }
+  _options: { startTime: number; rowCount?: (result: T) => number } = { startTime: Date.now() }
 ): Promise<T> {
   const result = await withQueryTimeout(queryFn(), QUERY_TIMEOUT_MS);
   return result;

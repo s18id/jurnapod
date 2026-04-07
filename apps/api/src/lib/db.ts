@@ -8,7 +8,7 @@
  * Uses Kysely from @jurnapod/db for type-safe queries.
  */
 
-import { createKysely, getKysely, type KyselySchema } from '@jurnapod/db';
+import { createKysely, type KyselySchema } from '@jurnapod/db';
 
 export type { KyselySchema };
 import { getAppEnv } from './env';

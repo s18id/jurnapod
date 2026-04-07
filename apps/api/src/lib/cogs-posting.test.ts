@@ -134,13 +134,13 @@ async function cleanupTestData(db: KyselySchema, companyId: number): Promise<voi
   
   try {
     await sql`DELETE FROM inventory_transactions WHERE company_id = ${companyId}`.execute(db);
-  } catch (e) {
+  } catch {
     // May fail if table doesn't exist or has constraints
   }
   
   try {
     await sql`DELETE FROM item_prices WHERE company_id = ${companyId}`.execute(db);
-  } catch (e) {
+  } catch {
     // May fail if table doesn't exist
   }
   
@@ -148,26 +148,26 @@ async function cleanupTestData(db: KyselySchema, companyId: number): Promise<voi
   
   try {
     await sql`DELETE FROM company_account_mappings WHERE company_id = ${companyId}`.execute(db);
-  } catch (e) {
+  } catch {
     // May fail if table doesn't exist
   }
   
   try {
     await sql`DELETE FROM account_mappings WHERE company_id = ${companyId}`.execute(db);
-  } catch (e) {
+  } catch {
     // May fail if table doesn't exist
   }
   
   // Accounts may have journal_lines referencing them - use try/catch
   try {
     await sql`DELETE FROM accounts WHERE company_id = ${companyId}`.execute(db);
-  } catch (e) {
+  } catch {
     // May fail if journal_lines reference these accounts
   }
   
   try {
     await sql`DELETE FROM account_types WHERE company_id = ${companyId}`.execute(db);
-  } catch (e) {
+  } catch {
     // May fail if table doesn't exist
   }
   

@@ -7,7 +7,6 @@ import { sql } from "kysely";
 import {
   TableOccupancyStatus,
   TableEventType,
-  type TableOccupancyStatusType
 } from "@jurnapod/shared";
 
 // ============================================================================

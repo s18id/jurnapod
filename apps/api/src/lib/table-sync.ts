@@ -12,7 +12,6 @@ import { getDb } from '@/lib/db';
 import { getSetting } from '@/lib/settings';
 import type {
   TableSyncPushRequest,
-  TableSyncConflictPayload,
 } from '@jurnapod/shared';
 
 // Re-export types from the reservations module
@@ -37,7 +36,6 @@ export {
 import {
   pushTableEvents as pushTableEventsModule,
   pullTableState as pullTableStateModule,
-  resolveReservationDefaultDurationMinutes,
   type ISettingsResolver,
 } from '@jurnapod/modules-reservations';
 

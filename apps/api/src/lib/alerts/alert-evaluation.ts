@@ -8,14 +8,9 @@
 // The package runtime is the single source of truth for alert evaluation.
 // =============================================================================
 
-import { register } from "prom-client";
-
 import {
-  AlertManager as PackageAlertManager,
   AlertEvaluationService as PackageAlertEvaluationService,
   getAlertThresholds,
-  getAlertCooldownMs,
-  getWebhookConfig,
   type AlertEvaluationConfig as PackageAlertEvaluationConfig,
 } from "@jurnapod/telemetry/runtime";
 

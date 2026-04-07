@@ -17,7 +17,6 @@ import { z } from "zod";
 import {
   AccountCreateRequestSchema,
   AccountUpdateRequestSchema,
-  AccountListQuerySchema,
   NumericIdSchema,
   FixedAssetCategoryCreateRequestSchema,
   FixedAssetCategoryUpdateRequestSchema,
@@ -59,7 +58,6 @@ import {
   FiscalYearDateRangeError,
   FiscalYearOverlapError,
   FiscalYearOpenConflictError,
-  FiscalYearNotOpenError,
   getFiscalYearClosePreview,
   getFiscalYearStatus,
   FiscalYearAlreadyClosedError,
@@ -67,8 +65,6 @@ import {
   RetainedEarningsAccountNotFoundError,
   closeFiscalYear,
   FISCAL_YEAR_CLOSE_STATUS,
-  type ClosePreviewResult,
-  type FiscalYearStatusResult
 } from "../lib/fiscal-years.js";
 import {
   getComposedCategoryService,

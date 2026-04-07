@@ -22,7 +22,7 @@ import {
   JournalNotFoundError,
   InvalidJournalLineError
 } from "@/lib/journals";
-import { ManualJournalEntryCreateRequestSchema, JournalListQuerySchema, NumericIdSchema } from "@jurnapod/shared";
+import { ManualJournalEntryCreateRequestSchema, NumericIdSchema } from "@jurnapod/shared";
 import type { AuthContext } from "@/lib/auth-guard";
 
 const journalRoutes = new Hono();

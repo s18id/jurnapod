@@ -14,14 +14,6 @@
  */
 
 import { itemVariantService } from "@jurnapod/modules-inventory";
-import type {
-  CreateVariantAttributeRequest,
-  UpdateVariantAttributeRequest,
-  UpdateVariantRequest,
-  ItemVariantResponse,
-  VariantAttribute,
-  SyncPullVariant
-} from "@jurnapod/shared";
 
 // Re-export error classes for backward compatibility
 export { DuplicateSkuError, VariantNotFoundError, AttributeNotFoundError, ItemNotFoundError } from "@jurnapod/modules-inventory";

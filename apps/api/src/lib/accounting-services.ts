@@ -21,37 +21,6 @@ import { getDb } from "./db";
 import { getAuditService } from "./audit";
 
 /**
- * Audit service interface (matches accounting module expectations)
- */
-interface PlatformAuditServiceInterface {
-  logCreate(
-    context: { company_id: number; user_id: number; outlet_id?: number | null; ip_address?: string | null },
-    entityType: string,
-    entityId: string | number,
-    payload: Record<string, any>
-  ): Promise<void>;
-  logUpdate(
-    context: { company_id: number; user_id: number; outlet_id?: number | null; ip_address?: string | null },
-    entityType: string,
-    entityId: string | number,
-    before: Record<string, any>,
-    after: Record<string, any>
-  ): Promise<void>;
-  logDeactivate(
-    context: { company_id: number; user_id: number; outlet_id?: number | null; ip_address?: string | null },
-    entityType: string,
-    entityId: string | number,
-    payload?: Record<string, any>
-  ): Promise<void>;
-  logReactivate(
-    context: { company_id: number; user_id: number; outlet_id?: number | null; ip_address?: string | null },
-    entityType: string,
-    entityId: string | number,
-    payload?: Record<string, any>
-  ): Promise<void>;
-}
-
-/**
  * Adapter to make platform AuditService compatible with accounting module AuditServiceInterface
  */
 class AuditServiceAdapter implements AuditServiceInterface {

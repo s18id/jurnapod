@@ -11,9 +11,6 @@ import {
 import type { SyncPushPostingContext, SyncPushPostingExecutor } from "@jurnapod/modules-accounting";
 import { normalizeMoney } from "@jurnapod/modules-accounting";
 
-const OUTLET_ACCOUNT_MAPPING_KEYS = ["SALES_REVENUE", "AR", "SALES_RETURNS", "SALES_DISCOUNTS"] as const;
-type OutletAccountMappingKey = (typeof OUTLET_ACCOUNT_MAPPING_KEYS)[number];
-
 function resolveMappingCode(row: { mapping_type_id?: number | null; mapping_key?: string | null }): AccountMappingCode | undefined {
   const fromId = accountMappingIdToCode(row.mapping_type_id);
   if (fromId) {

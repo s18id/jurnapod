@@ -23,8 +23,6 @@ import {
   createTaxRate,
   updateTaxRate,
   deleteTaxRate,
-  findTaxRateById,
-  listTaxRates,
   TaxRateNotFoundError,
   TaxRateConflictError,
   TaxRateValidationError,

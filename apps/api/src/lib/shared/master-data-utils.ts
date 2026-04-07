@@ -2,8 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { sql } from "kysely";
-import { getDb, type KyselySchema } from "../db.js";
-import { DatabaseForbiddenError } from "../master-data-errors.js";
+import { type KyselySchema } from "../db.js";
 import { ensureUserHasOutletAccess as commonUtilsEnsureUserHasOutletAccess } from "./common-utils.js";
 // Re-export withTransaction from @jurnapod/db for backward compatibility
 // Modules still using mysql2-style transactions import from here

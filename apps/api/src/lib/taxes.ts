@@ -83,21 +83,6 @@ function normalizeRate(value: unknown): number {
   return parsed;
 }
 
-type TaxRateRow = {
-  id: number;
-  company_id: number;
-  code: string;
-  name: string;
-  rate_percent: number | string;
-  account_id: number | null;
-  is_inclusive: number;
-  is_active: number;
-  created_by_user_id?: number | null;
-  updated_by_user_id?: number | null;
-  created_at?: string | Date;
-  updated_at?: string | Date;
-};
-
 type TaxRateRowFull = {
   id: number;
   company_id: number;
@@ -134,7 +119,7 @@ async function findTaxRateByIdWithExecutor(
   db: KyselySchema,
   companyId: number,
   taxRateId: number,
-  options: { forUpdate?: boolean } = {}
+  _options: { forUpdate?: boolean } = {}
 ): Promise<TaxRate | null> {
   // Note: FOR UPDATE is handled by transaction, no need for explicit clause
   const row = await db
@@ -345,7 +330,7 @@ export async function updateTaxRate(
 export async function deleteTaxRate(
   companyId: number,
   taxRateId: number,
-  actor?: MutationActor
+  _actor?: MutationActor
 ): Promise<void> {
   return withTransaction(async (db) => {
     // Check if tax rate exists

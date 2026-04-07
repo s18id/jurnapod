@@ -103,7 +103,7 @@ class AlertManagerAdapter {
   /**
    * Create alert event from evaluation result
    */
-  createAlertEvent(result: PackageAlertEvaluationResult, message: string, labels?: Record<string, string>): PackageAlertEvent {
+  createAlertEvent(result: PackageAlertEvaluationResult, message: string, _labels?: Record<string, string>): PackageAlertEvent {
     return this.inner.createAlertEvent(result, message);
   }
 

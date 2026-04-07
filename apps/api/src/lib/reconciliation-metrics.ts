@@ -128,7 +128,7 @@ export class ReconciliationMetricsCollector {
    * Record a reconciliation run result
    */
   recordReconciliation(result: ReconciliationResultForMetrics, latencyMs: number): void {
-    const { counts, status } = result;
+    const { counts } = result;
 
     // Update global metrics
     this.metrics.total_runs++;

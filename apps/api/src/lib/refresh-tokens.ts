@@ -6,7 +6,6 @@ import { getAppEnv } from "./env";
 
 export const REFRESH_TOKEN_COOKIE_NAME = "jp_refresh_token";
 const COOKIE_PATH = "/";
-const COOKIE_USER_AGENT_MAX_LENGTH = 255;
 
 export type RefreshTokenIssueContext = {
   userId: number;

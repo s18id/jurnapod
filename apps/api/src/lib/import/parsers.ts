@@ -60,7 +60,6 @@ const XlsxStreamReaderModule = await import('xlsx-stream-reader') as {
 // Constants
 // ============================================================================
 
-const DEFAULT_BATCH_SIZE = 1000;
 const MAX_FILE_SIZE_MB = 50;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
@@ -319,7 +318,6 @@ export async function* parseExcel(
   // Track sheet information for validation
   let targetSheetFound = false;
   let targetSheetName = sheetName || 'first';
-  let sheetRowCount = 0;
   let sheetHasData = false; // Track if sheet had any rows
 
   // Handle workbook errors
@@ -381,7 +379,6 @@ export async function* parseExcel(
 
     // Handle worksheet completion
     workSheetReader.on('end', () => {
-      sheetRowCount = workSheetReader.rowCount;
       sheetHasData = receivedRowCount > 0;
       parseDone = true;
       if (wakeup) {
@@ -669,7 +666,7 @@ function createRow(
   rawData: string[],
   headerMap: Map<string, { index: number; mapping?: ColumnMapping }>,
   headers: string[],
-  errorCode?: ImportErrorCode
+  _errorCode?: ImportErrorCode
 ): ImportRow {
   const data: Record<string, unknown> = {};
 

@@ -21,7 +21,6 @@ export { InventoryConflictError as DatabaseConflictError } from "@jurnapod/modul
 
 // Import service singleton from modules-inventory
 import { suppliesService } from "@jurnapod/modules-inventory";
-import type { Supply, CreateSupplyInput, UpdateSupplyInput, ListSuppliesFilters } from "@jurnapod/modules-inventory";
 
 /**
  * List all supplies for a company.

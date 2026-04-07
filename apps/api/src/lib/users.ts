@@ -7,8 +7,7 @@ import { AuditService } from "@jurnapod/modules-platform";
 import { NumericIdSchema, RoleSchema } from "@jurnapod/shared";
 import { hashPassword, type PasswordHashPolicy } from "./password-hash";
 import { getAppEnv } from "./env";
-import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
-import { sql } from "kysely";
+import { toRfc3339Required } from "@jurnapod/shared";
 
 export class UserNotFoundError extends Error {}
 export class UserEmailExistsError extends Error {}
@@ -64,32 +63,6 @@ type RoleSnapshot = {
   id: number;
   role_level: number;
   is_global: number;
-};
-
-type RoleJoinRow = {
-  user_id: number;
-  code: string;
-};
-
-type OutletRow = {
-  id: number;
-  code: string;
-  name: string;
-};
-
-type OutletJoinRow = {
-  user_id: number;
-  outlet_id: number;
-  code: string;
-  name: string;
-};
-
-type OutletRoleJoinRow = {
-  user_id: number;
-  outlet_id: number;
-  outlet_code: string;
-  outlet_name: string;
-  role_code: string;
 };
 
 function buildAuditContext(companyId: number, actor: UserActor) {
@@ -217,26 +190,6 @@ async function userHasSuperAdminRole(
     .innerJoin('roles as r', 'r.id', 'ura.role_id')
     .where('ura.user_id', '=', userId)
     .where('r.code', '=', 'SUPER_ADMIN')
-    .where('ura.outlet_id', 'is', null)
-    .select(['ura.id'])
-    .executeTakeFirst();
-
-  return row !== undefined;
-}
-
-async function userHasRoleCode(
-  db: KyselySchema,
-  companyId: number,
-  userId: number,
-  roleCode: string
-): Promise<boolean> {
-  const row = await db
-    .selectFrom('user_role_assignments as ura')
-    .innerJoin('roles as r', 'r.id', 'ura.role_id')
-    .innerJoin('users as u', 'u.id', 'ura.user_id')
-    .where('u.id', '=', userId)
-    .where('u.company_id', '=', companyId)
-    .where('r.code', '=', roleCode)
     .where('ura.outlet_id', 'is', null)
     .select(['ura.id'])
     .executeTakeFirst();
@@ -1345,16 +1298,6 @@ export async function listOutlets(
     name: row.name
   }));
 }
-
-type ModuleRoleRow = {
-  id: number;
-  role_id: number;
-  role_code: string;
-  module: string;
-  permission_mask: number;
-  created_at: Date;
-  updated_at: Date;
-};
 
 export type ModuleRoleResponse = {
   id: number;

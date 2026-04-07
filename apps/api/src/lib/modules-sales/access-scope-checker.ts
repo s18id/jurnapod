@@ -18,7 +18,6 @@ import type { AccessScopeChecker } from "@jurnapod/modules-sales";
 import { SalesAuthorizationError } from "@jurnapod/modules-sales";
 import { userHasOutletAccess, type ModulePermission } from "@/lib/auth.js";
 import { authClient } from "@/lib/auth-client.js";
-import { MODULE_PERMISSION_BITS } from "@jurnapod/auth";
 
 /**
  * Map sales permissions to auth module permissions.

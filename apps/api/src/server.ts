@@ -1,9 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { serve } from "@hono/node-server";
 import { createServer } from "node:http";
 import { assertAppEnvReady } from "./lib/env.js";
 import { initializeSyncModules, cleanupSyncModules } from "./lib/sync-modules.js";
@@ -15,9 +12,6 @@ import { app } from "./app.js";
 
 // Validate environment configuration before starting server
 assertAppEnvReady();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? "3001");
 const HOST = process.env.HOST ?? "0.0.0.0";

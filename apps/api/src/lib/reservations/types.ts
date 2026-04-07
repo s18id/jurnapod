@@ -10,8 +10,6 @@
 
 import {
   ReservationStatusV2,
-  type ReservationStatusV2Type,
-  type ReservationRow,
 } from "@jurnapod/shared";
 
 // Re-export ReservationStatusV2 for backward compatibility

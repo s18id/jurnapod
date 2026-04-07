@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, it, beforeEach, mock } from "node:test";
+import { describe, it } from "node:test";
 import {
   generateCorrelationId,
   extractCorrelationId,

@@ -22,13 +22,13 @@ declare module 'xlsx-stream-reader' {
     skip(): void;
   }
 
-  export interface XlsxStreamReader {
+  export interface XlsxStreamReaderInstance {
     on(event: 'error', handler: (err: Error) => void): this;
     on(event: 'worksheet', handler: (worksheet: XlsxStreamReaderWorksheet) => void): this;
     on(event: 'sharedStrings', handler: () => void): this;
     on(event: 'styles', handler: () => void): this;
     on(event: 'end', handler: () => void): this;
-    pipe<T extends NodeJS.WritableStream>(dest: T): XlsxStreamReader;
+    pipe<T extends NodeJS.WritableStream>(dest: T): XlsxStreamReaderInstance;
     unpipe(dest?: NodeJS.WritableStream): this;
   }
 

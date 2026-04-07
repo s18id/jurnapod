@@ -42,8 +42,6 @@ import {
   reportPaginationSchema,
   buildReportContext,
   parseReportQuery,
-  parseReportPaginationQuery,
-  type ReportContext,
 } from "@/lib/report-context";
 import {
   executeReport,
@@ -577,7 +575,7 @@ reportRoutes.get("/receivables-ageing", async (c) => {
     // Outlet scope resolution
     let outletIds: number[];
     if (parsed.outlet_id) {
-      const { userHasOutletAccess, listUserOutletIds } = await import("@/lib/auth");
+      const { userHasOutletAccess } = await import("@/lib/auth");
       const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
       if (!hasAccess) {
         return Response.json({ success: false, error: { code: "FORBIDDEN", message: "Forbidden" } }, { status: 403 });

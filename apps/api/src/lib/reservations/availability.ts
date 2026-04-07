@@ -12,9 +12,7 @@ import { sql } from "kysely";
 import type { KyselySchema } from "../db";
 import {
   OutletTableStatusId,
-  type ReservationStatus
 } from "@jurnapod/shared";
-import { toUtcInstant, toEpochMs, fromEpochMs } from "../date-helpers";
 
 // Import types from local types module
 import type {
@@ -24,8 +22,6 @@ import type {
   OutletTableStatus,
 } from "./types";
 import {
-  RESERVATION_DEFAULT_DURATION_KEY,
-  RESERVATION_DEFAULT_DURATION_FALLBACK,
   ReservationValidationError,
 } from "./types";
 

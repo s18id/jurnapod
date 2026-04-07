@@ -20,7 +20,7 @@ import type {
 } from "@jurnapod/shared";
 import { getDb } from "./db.js";
 import { KyselySettingsAdapter } from "@jurnapod/modules-platform/settings";
-import { formatDateOnlyFromUnknown } from "./shared/common-utils.js";
+
 
 import {
   FiscalYearService,
@@ -30,23 +30,6 @@ import {
   type CloseFiscalYearResult,
   type ClosePreviewResult,
   type FiscalYearStatusResult,
-  FISCAL_YEAR_CLOSE_STATUS,
-  type FiscalYearCloseStatus,
-  type ClosingEntryLine,
-  type PeriodStatus,
-  // Re-export errors from package
-  FiscalYearNotFoundError,
-  FiscalYearCodeExistsError,
-  FiscalYearDateRangeError,
-  FiscalYearOverlapError,
-  FiscalYearOpenConflictError,
-  FiscalYearNotOpenError,
-  FiscalYearSelectionError,
-  FiscalYearAlreadyClosedError,
-  FiscalYearCloseConflictError,
-  FiscalYearClosePreconditionError,
-  FiscalYearClosePreviewError,
-  RetainedEarningsAccountNotFoundError
 } from "@jurnapod/modules-accounting/fiscal-year";
 
 // Re-export types from package

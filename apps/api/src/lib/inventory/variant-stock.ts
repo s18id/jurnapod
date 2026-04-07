@@ -30,10 +30,6 @@ interface StockRow {
   available_quantity: number;
 }
 
-interface ColumnCheckRow {
-  COLUMN_NAME: string;
-}
-
 /**
  * Get available stock for a variant at an outlet
  */
@@ -174,7 +170,7 @@ export async function reserveVariantStock(
         // No existing inventory_stock row or insufficient available
         // Need to handle the case where row doesn't exist yet
         // Lock the item_variants row to serialize concurrent first-time reservations
-        const lockedVariantResult = await sql`SELECT item_id, stock_quantity FROM item_variants 
+        await sql`SELECT item_id, stock_quantity FROM item_variants 
          WHERE id = ${item.variant_id} AND company_id = ${companyId} AND is_active = TRUE
          FOR UPDATE`.execute(trx);
 

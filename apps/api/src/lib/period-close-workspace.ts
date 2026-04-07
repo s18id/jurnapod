@@ -20,7 +20,6 @@ import {
   type FiscalYearStatusResult,
   type FiscalYearDbClient,
   type FiscalYearSettingsPort,
-  type PeriodStatus
 } from "@jurnapod/modules-accounting/fiscal-year";
 import { ReconciliationDashboardService } from "@jurnapod/modules-accounting/reconciliation";
 import { TrialBalanceService, type PreCloseCheckItem } from "@jurnapod/modules-accounting/trial-balance";

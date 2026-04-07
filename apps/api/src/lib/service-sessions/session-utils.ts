@@ -8,8 +8,6 @@
  * and provides API-specific entry points that inject the db connection.
  */
 
-import { getDb } from "@/lib/db";
-
 // Re-export all utilities from the reservations module
 export {
   mapDbRowToServiceSession,

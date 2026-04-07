@@ -38,10 +38,8 @@ export {
 } from "@jurnapod/modules-reporting";
 
 import { 
-  getDatasetSizeBucket, 
   REPORT_SLO_LATENCY_MS,
   type ReportType,
-  type DatasetSizeBucket,
   type ReportTelemetryData,
 } from "@jurnapod/modules-reporting";
 
@@ -104,8 +102,6 @@ export function emitReportMetrics(
  */
 export function withReportTelemetry(reportType: ReportType) {
   return async (c: Context, next: () => Promise<void>): Promise<void> => {
-    const startTime = Date.now();
-
     // Store report type in context for later use
     const ctx = c.get("telemetry");
     if (ctx) {

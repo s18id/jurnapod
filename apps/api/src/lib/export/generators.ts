@@ -20,7 +20,6 @@ import type {
 import {
   extractColumnValue,
   buildColumnMap,
-  mergeFormatOptions,
   toExportString,
   formatValue,
 } from './formatter.js';
@@ -60,7 +59,6 @@ export function generateCSV<T>(
 
   const {
     includeHeaders = true,
-    format: _format,
   } = options;
 
   // Build column map with ordering and selection

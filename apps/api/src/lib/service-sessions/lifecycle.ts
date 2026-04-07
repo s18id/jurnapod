@@ -8,7 +8,7 @@
  */
 
 import { getDb } from "@/lib/db";
-import { ServiceSessionStatus, type ServiceSessionStatusType } from "@jurnapod/shared";
+import { type ServiceSessionStatusType } from "@jurnapod/shared";
 
 // Re-export types from the reservations module for API compatibility
 export type {

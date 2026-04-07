@@ -14,7 +14,6 @@ import { getDb, type KyselySchema } from "@/lib/db";
 import {
   ReservationStatusV2,
   TableOccupancyStatus,
-  type ReservationStatus,
 } from "@jurnapod/shared";
 import {
   holdTableWithKysely,
@@ -26,7 +25,6 @@ import {
 // Import types from local types module
 import type {
   Reservation,
-  ReservationDbRow,
   UpdateStatusInput,
   OccupancySnapshotRow,
 } from "./types";
@@ -36,7 +34,6 @@ import {
   ReservationConflictError,
   InvalidStatusTransitionError,
   VALID_TRANSITIONS,
-  finalStatuses,
 } from "./types";
 
 // Import helpers from utils (single source of truth)
@@ -44,7 +41,6 @@ import {
   isFinalStatus,
   canTransition,
   columnExists,
-  generateReservationCodeWithConnection as generateCodeWithConn,
   MAX_CODE_GENERATION_RETRIES,
 } from "./utils";
 

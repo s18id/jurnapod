@@ -17,7 +17,7 @@
  * - Stale operation cleanup on restart
  */
 
-import { getDb, type KyselySchema } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { sql } from "kysely";
 
 // ============================================================================
@@ -486,7 +486,7 @@ export async function listProgress(
 function shouldPersistUpdate(
   operationId: string,
   newPercentage: number,
-  totalUnits: number
+  _totalUnits: number
 ): boolean {
   const now = Date.now();
   const lastUpdate = lastUpdateTimes.get(operationId) ?? 0;

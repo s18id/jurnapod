@@ -17,7 +17,6 @@ import { errorResponse, successResponse } from "../../lib/response.js";
 import { SyncIdempotencyMetricsCollector } from "@jurnapod/sync-core";
 import { getSyncPushDbPool } from "../../lib/sync/push/db.js";
 import type { SyncPushTransactionPayload } from "../../lib/sync/push/types.js";
-import { shouldUseNewPushSync, getPushSyncModeDescription } from "../../lib/feature-flags.js";
 import { getPosSyncModule } from "../../lib/sync-modules.js";
 import { toTransactionPush, toActiveOrderPush } from "../../lib/sync/push/adapters.js";
 import type {

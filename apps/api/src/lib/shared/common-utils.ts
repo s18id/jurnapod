@@ -11,7 +11,6 @@
 
 import type { KyselySchema } from "@/lib/db";
 import { getDb } from "@/lib/db";
-import type { Sql } from "kysely";
 import {
   getNextDocumentNumber,
   NumberingConflictError,

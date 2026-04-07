@@ -15,7 +15,6 @@ import { errorResponse } from "@/lib/response.js";
 import { getDb } from "@/lib/db.js";
 import {
   PeriodTransitionAuditService,
-  PERIOD_TRANSITION_ACTION,
   type PeriodTransitionAuditQuery
 } from "@jurnapod/modules-platform/audit/period-transition";
 import { AuditService } from "@jurnapod/modules-platform";

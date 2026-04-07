@@ -61,7 +61,7 @@ adminRunbookRoutes.use("/*", async (c, next) => {
 
 adminRunbookRoutes.get("/runbook.md", async (c) => {
   try {
-    const auth = c.get("auth");
+    void c.get("auth"); // Validate auth is set
 
     const markdown = `# Jurnapod Operations Runbook
 

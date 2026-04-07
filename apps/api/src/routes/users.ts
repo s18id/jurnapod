@@ -35,7 +35,6 @@ import {
   setUserPassword,
   setUserActiveState,
   UserNotFoundError,
-  UserEmailExistsError,
   RoleNotFoundError,
   RoleLevelViolationError,
   RoleScopeViolationError,

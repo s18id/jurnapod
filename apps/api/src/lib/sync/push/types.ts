@@ -12,8 +12,6 @@
  */
 
 import type { TaxRateRecord } from "../../../lib/taxes.js";
-import type { StockDeductResult } from "../../stock.js";
-import type { CogsPostingResult } from "@jurnapod/modules-accounting/posting/cogs";
 import type { Kysely } from "kysely";
 import type { SyncIdempotencyMetricsCollector } from "@jurnapod/sync-core";
 

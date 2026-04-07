@@ -916,7 +916,7 @@ inventoryRoutes.get("/items/:id/variants/:variantId/prices", async (c) => {
   }
 
   try {
-    const itemId = NumericIdSchema.parse(c.req.param("id"));
+    // item ID validated via param schema
     const variantId = NumericIdSchema.parse(c.req.param("variantId"));
 
     const url = new URL(c.req.raw.url);

@@ -19,24 +19,17 @@ import type {
   ExportProgress,
   ExportProgressCallback,
   ExportResult,
-  StreamingExport,
   ExportError,
   ExportErrorCode,
 } from './types.js';
-import { buildColumnMap, extractColumnValue, mergeFormatOptions } from './formatter.js';
-import { generateCSVStream, generateExcel, generateExcelChunked, generateCSVBuffer } from './generators.js';
+import { buildColumnMap, extractColumnValue } from './formatter.js';
+import { generateCSVStream, generateExcel, generateExcelChunked } from './generators.js';
 
 // ============================================================================
 // Constants
 // ============================================================================
 
 const DEFAULT_CHUNK_SIZE = 1000;
-const DEFAULT_STREAM_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-
-/**
- * Maximum rows to buffer before yielding in streaming mode
- */
-const BUFFER_SIZE = 500;
 
 // ============================================================================
 // Backpressure Handling Constants
@@ -65,6 +58,7 @@ const THROTTLE_ROWS_PER_SECOND = 1000;
 /**
  * Minimum delay between rows when throttled (1ms = 1000 rows/sec)
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const THROTTLE_MIN_DELAY_MS = 1;
 
 // ============================================================================
@@ -185,7 +179,7 @@ export interface BackpressureStreamOptions extends BackpressureOptions {
  * This function returns a write handler that monitors the writable.write()
  * return value and pauses/resumes data generation based on backpressure.
  */
-export function createBackpressureWriter<T>(
+export function createBackpressureWriter(
   options: BackpressureStreamOptions
 ): {
   write: (chunk: Buffer) => Promise<boolean>;
@@ -430,7 +424,7 @@ export async function* createBackpressureStream<T>(
   readable: Readable,
   options: BackpressureStreamOptions
 ): AsyncGenerator<T> {
-  const writer = createBackpressureWriter<T>(options);
+  const writer = createBackpressureWriter(options);
   let bufferSize = 0;
 
   const iterator = readable[Symbol.asyncIterator]
@@ -491,7 +485,7 @@ export async function streamToResponse<T>(
   options: BackpressureStreamOptions,
   onProgress?: ExportProgressCallback
 ): Promise<{ metrics: BackpressureMetrics; rowsWritten: number }> {
-  const writer = createBackpressureWriter<T>(options);
+  const writer = createBackpressureWriter(options);
   let rowsWritten = 0;
   let bytesWritten = 0;
   const startTime = new Date();
@@ -553,7 +547,7 @@ export async function streamToResponse<T>(
  * 
  * Uses node:stream/promises pipeline() for proper cleanup on errors
  */
-export async function pipelineExport<T>(
+export async function pipelineExport(
   source: Readable,
   destination: Writable,
   options: BackpressureStreamOptions
@@ -566,24 +560,12 @@ export async function pipelineExport<T>(
     peakMemoryBytes: 0,
   };
 
-  const writer = createBackpressureWriter<T>({
+  const writer = createBackpressureWriter({
     ...options,
     onMetrics: (m) => { metrics = m; },
   });
 
-  // Track bytes written through the pipeline
-  let bytesWritten = 0;
   let rowsStreamed = 0;
-
-  // Wrap source to track rows and handle backpressure
-  const trackingSource = new Readable({
-    objectMode: true,
-    highWaterMark: options.highWaterMark ?? 16,
-    async read() {
-      // This is called when the source needs more data
-      // The actual data flow is handled by the pipeline
-    },
-  });
 
   try {
     await pipeline(source, async function* (readable) {
@@ -597,7 +579,6 @@ export async function pipelineExport<T>(
 
         const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
         bufferSize += data.length;
-        bytesWritten += data.length;
         rowsStreamed++;
 
         // Check backpressure before yielding
@@ -632,10 +613,7 @@ export async function* streamExport<T>(
   onProgress?: ExportProgressCallback
 ): AsyncGenerator<Buffer> {
   const startTime = new Date();
-  const columnMap = buildColumnMap(columns, options);
-  let processedRows = 0;
   let totalBytesWritten = 0;
-  let lastYieldTime = Date.now();
 
   // Report initial progress
   reportProgress(onProgress, {
@@ -717,7 +695,8 @@ export async function* streamExport<T>(
 /**
  * Generate CSV stream with progress tracking
  */
-async function* generateCSVStreamWithProgress<T>(
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function* _generateCSVStreamWithProgress<T>(
   dataSource: AsyncIterable<T>,
   columns: ExportColumn<T>[],
   options: ExportOptions = {},

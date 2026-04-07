@@ -31,8 +31,6 @@ import { setModuleRolePermission } from "../lib/users.js";
 import { readClientIp } from "../lib/request-meta.js";
 import {
   ExtendedCompanyModulesUpdateSchema,
-  ExtendedCompanyModulesResponseSchema,
-  ModuleCodeSchema
 } from "@jurnapod/shared";
 
 declare module "hono" {

@@ -61,7 +61,7 @@ export class LocalStorageProvider implements StorageProvider {
     this.baseUrl = config.baseUrl;
   }
 
-  async store(key: string, buffer: Buffer, mimeType: string): Promise<string> {
+  async store(key: string, buffer: Buffer, _mimeType: string): Promise<string> {
     const fullPath = path.join(this.basePath, key);
     const dir = path.dirname(fullPath);
     
@@ -123,12 +123,12 @@ export class S3StorageProvider implements StorageProvider {
     throw new Error("S3 storage provider not yet implemented. Use LocalStorageProvider for now.");
   }
 
-  async store(key: string, buffer: Buffer, mimeType: string): Promise<string> {
+  async store(_key: string, _buffer: Buffer, _mimeType: string): Promise<string> {
     // TODO: Implement S3 upload
     throw new Error("S3 storage not implemented");
   }
 
-  async delete(key: string): Promise<void> {
+  async delete(_key: string): Promise<void> {
     // TODO: Implement S3 delete
     throw new Error("S3 storage not implemented");
   }
@@ -137,7 +137,7 @@ export class S3StorageProvider implements StorageProvider {
     return `${this.baseUrl}/${key}`;
   }
 
-  async exists(key: string): Promise<boolean> {
+  async exists(_key: string): Promise<boolean> {
     // TODO: Implement S3 head request
     throw new Error("S3 storage not implemented");
   }

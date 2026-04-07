@@ -2,7 +2,6 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { authClient } from "./auth-client.js";
-import { getAppEnv } from "./env";
 
 function requireGoogleOAuthProvider() {
   if (!authClient.oauth?.google) {

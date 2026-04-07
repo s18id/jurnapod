@@ -26,7 +26,6 @@ import {
   createRefreshTokenClearCookie,
   createRefreshTokenCookie,
   issueRefreshToken,
-  readRefreshTokenFromRequest,
   revokeRefreshToken,
   rotateRefreshToken
 } from "@/lib/refresh-tokens";

@@ -394,7 +394,6 @@ export function createProgressTracker(
   } = options;
 
   let lastReportTime = 0; // Initialize to 0 so first call always reports
-  let lastProgress: ProgressInfo | undefined;
   let isFirstCall = true;
 
   return (progress: ProgressInfo) => {
@@ -405,7 +404,6 @@ export function createProgressTracker(
       isFirstCall = false;
       onProgress?.(progress);
       lastReportTime = now;
-      lastProgress = progress;
       return;
     }
     
@@ -417,8 +415,6 @@ export function createProgressTracker(
       onProgress?.(progress);
       lastReportTime = now;
     }
-
-    lastProgress = progress;
   };
 }
 

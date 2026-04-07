@@ -333,7 +333,7 @@ export abstract class BaseImportValidator<T> implements ImportValidator<T> {
     defaultValue?: unknown;
   }>;
 
-  validate(row: ImportRow, context: ValidationContext): ValidationResult<T> {
+  validate(row: ImportRow, _context: ValidationContext): ValidationResult<T> {
     const errors: ImportError[] = [];
     const warnings: ImportError[] = [];
 
@@ -421,9 +421,9 @@ export function composeValidators<T>(
   }>
 ): ImportValidator<T> {
   return {
-    validate(row: ImportRow, context: ValidationContext): ValidationResult<T> {
+  validate(row: ImportRow, _context: ValidationContext): ValidationResult<T> {
       // First run base validation
-      const baseResult = baseValidator.validate(row, context);
+      const baseResult = baseValidator.validate(row, _context);
       
       if (!baseResult.valid || !baseResult.data) {
         return baseResult;

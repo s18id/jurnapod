@@ -5,7 +5,7 @@ import sharp from "sharp";
 import { sql } from "kysely";
 import { getDb } from "./db";
 import type { UploadImageResponse, ItemImagesResponse } from "@jurnapod/shared";
-import { createStorageProvider, generateFileKey, type StorageProvider } from "./image-storage";
+import { createStorageProvider, generateFileKey } from "./image-storage";
 
 /**
  * Custom error for cross-tenant access attempts

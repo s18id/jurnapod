@@ -25,7 +25,7 @@ import {
 import { authenticateRequest, requireAccess, type AuthContext } from "../lib/auth-guard.js";
 import { type RoleCode } from "../lib/auth.js";
 import { successResponse, errorResponse } from "../lib/response.js";
-import { telemetryMiddleware, type TelemetryContext } from "../middleware/telemetry.js";
+import { telemetryMiddleware } from "../middleware/telemetry.js";
 import { NumericIdSchema } from "@jurnapod/shared";
 
 // Zod schemas for request validation
@@ -127,7 +127,7 @@ stockRoutes.use(authMiddleware);
  * Validates that the outlet exists and belongs to the company
  */
 async function requireOutletAccess(c: Context, next: () => Promise<void>): Promise<void | Response> {
-  const auth = c.get("auth");
+  void c.get("auth"); // Validate auth is set
   const outletId = c.req.param("outletId");
   
   if (!outletId) {

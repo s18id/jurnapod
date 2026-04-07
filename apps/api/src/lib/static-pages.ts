@@ -4,7 +4,6 @@
 import { marked } from "marked";
 import sanitizeHtml, { type IOptions } from "sanitize-html";
 import { getDb } from "./db";
-import { sql } from "kysely";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
