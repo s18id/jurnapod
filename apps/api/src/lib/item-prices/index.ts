@@ -13,9 +13,9 @@ import {
   isMysqlError,
   mysqlDuplicateErrorCode,
   mysqlForeignKeyErrorCode,
-  recordMasterDataAuditLog,
-  withTransaction
+  recordMasterDataAuditLog
 } from "../shared/master-data-utils.js";
+import { withTransactionRetry } from "@jurnapod/db";
 import { ensureUserHasOutletAccess } from "../shared/common-utils.js";
 
 type MutationAuditActor = {
@@ -135,7 +135,7 @@ async function findItemPriceByIdWithExecutor(
 
 export async function listItemPrices(
   companyId: number,
-  filters?: { outletId?: number; outletIds?: readonly number[]; isActive?: boolean; includeDefaults?: boolean; variantId?: number | null }
+  filters?: { outletId?: number; outletIds?: readonly number[]; isActive?: boolean; includeDefaults?: boolean; variantId?: number | null; itemId?: number }
 ) {
   const db = getDb();
 
@@ -184,6 +184,11 @@ export async function listItemPrices(
 
   if (typeof filters?.isActive === "boolean") {
     query = query.where("ip.is_active", "=", filters.isActive ? 1 : 0);
+  }
+
+  // Filter by item_id
+  if (typeof filters?.itemId === "number") {
+    query = query.where("ip.item_id", "=", filters.itemId);
   }
 
   // Filter by variant_id
@@ -284,100 +289,6 @@ export async function findItemPriceById(companyId: number, itemPriceId: number) 
   return findItemPriceByIdWithExecutor(db, companyId, itemPriceId);
 }
 
-export async function createItemPrice(
-  companyId: number,
-  input: {
-    item_id: number;
-    outlet_id: number | null;
-    variant_id?: number | null;
-    price: number;
-    is_active?: boolean;
-  },
-  actor?: MutationAuditActor
-) {
-  const db = getDb();
-  return withTransaction(db, async (trx) => {
-    if (input.outlet_id === null && actor && actor.canManageCompanyDefaults !== true) {
-      throw new DatabaseForbiddenError("Company defaults require OWNER or COMPANY_ADMIN role");
-    }
-
-    await ensureCompanyItemExists(trx, companyId, input.item_id);
-
-    if (input.outlet_id !== null) {
-      await ensureCompanyOutletExists(trx, companyId, input.outlet_id);
-    }
-
-    // If variant_id is provided, validate it belongs to the item
-    if (input.variant_id != null) {
-      const variantRow = await trx
-        .selectFrom("item_variants")
-        .where("id", "=", input.variant_id)
-        .where("item_id", "=", input.item_id)
-        .where("company_id", "=", companyId)
-        .select(["id"])
-        .executeTakeFirst();
-      if (!variantRow) {
-        throw new DatabaseReferenceError("Variant not found for item");
-      }
-    }
-
-    try {
-      // Use native Kysely insert to get insertId via executeTakeFirst
-      const insertResult = await trx
-        .insertInto("item_prices")
-        .values({
-          company_id: companyId,
-          outlet_id: input.outlet_id,
-          item_id: input.item_id,
-          variant_id: input.variant_id ?? null,
-          price: input.price,
-          is_active: input.is_active === false ? 0 : 1
-        })
-        .executeTakeFirst();
-
-      const rawInsertId = insertResult.insertId;
-      if (rawInsertId === undefined || rawInsertId === null) {
-        throw new Error("Created item price did not return an ID");
-      }
-      const numericId = typeof rawInsertId === 'bigint' ? Number(rawInsertId) : Number(rawInsertId);
-      if (Number.isNaN(numericId)) {
-        throw new Error("Created item price returned an invalid ID");
-      }
-      const itemPrice = await findItemPriceByIdWithExecutor(trx, companyId, numericId);
-      if (!itemPrice) {
-        throw new Error("Created item price not found");
-      }
-
-      await recordItemPriceAuditLog(trx, {
-        companyId,
-        outletId: itemPrice.outlet_id,
-        actor,
-        action: itemPriceAuditActions.create,
-        payload: {
-          item_price_id: itemPrice.id,
-          after: itemPrice
-        }
-      });
-
-      // Clear price cache when new price created
-      const { clearPriceCache } = await import("../pricing/variant-price-resolver.js");
-      clearPriceCache();
-
-      return itemPrice;
-    } catch (error) {
-      if (isMysqlError(error) && error.errno === mysqlDuplicateErrorCode) {
-        throw new DatabaseConflictError("Duplicate item price");
-      }
-
-      if (isMysqlError(error) && error.errno === mysqlForeignKeyErrorCode) {
-        throw new DatabaseReferenceError("Invalid company references");
-      }
-
-      throw error;
-    }
-  });
-}
-
 export async function updateItemPrice(
   companyId: number,
   itemPriceId: number,
@@ -401,7 +312,8 @@ export async function updateItemPrice(
     fields.push({ field: "is_active", value: input.is_active ? 1 : 0 });
   }
 
-  return withTransaction(db, async (trx) => {
+  // Retry on deadlock since parallel test fixtures can contend on item_prices table
+  return withTransactionRetry(db, async (trx) => {
     const before = await findItemPriceByIdWithExecutor(trx, companyId, itemPriceId, {
       forUpdate: true
     });
@@ -506,7 +418,8 @@ export async function deleteItemPrice(
   actor?: MutationAuditActor
 ): Promise<boolean> {
   const db = getDb();
-  return withTransaction(db, async (trx) => {
+  // Retry on deadlock since parallel test fixtures can contend on item_prices table
+  return withTransactionRetry(db, async (trx) => {
     const before = await findItemPriceByIdWithExecutor(trx, companyId, itemPriceId, {
       forUpdate: true
     });

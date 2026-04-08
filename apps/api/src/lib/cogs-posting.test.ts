@@ -16,7 +16,7 @@ import {
 } from "@jurnapod/modules-accounting/posting/cogs";
 import { normalizeMoney } from "@jurnapod/modules-accounting";
 import { createItem } from "./items/index.js";
-import { createItemPrice } from "./item-prices/index.js";
+import { itemPricesAdapter } from "./item-prices/adapter.js";
 import { createCompanyBasic } from "./companies.js";
 import { createOutletBasic } from "./outlets.js";
 import { createUserBasic } from "./users.js";
@@ -312,7 +312,7 @@ test("calculateSaleCogs - should fall back to base_cost from item_prices", async
   });
   const itemId = priceItem.id;
   
-  await createItemPrice(TEST_COMPANY_ID, {
+  await itemPricesAdapter.createItemPrice(TEST_COMPANY_ID, {
     item_id: itemId,
     outlet_id: null,
     price: 7.5
@@ -342,14 +342,14 @@ test("calculateSaleCogs - should batch mixed inventory and fallback price lookup
   if (supportsUnitCost) {
     await createInventoryTransaction(db, TEST_COMPANY_ID, inventoryItemId, 8, 2.5);
   } else {
-    await createItemPrice(TEST_COMPANY_ID, {
+    await itemPricesAdapter.createItemPrice(TEST_COMPANY_ID, {
       item_id: inventoryItemId,
       outlet_id: null,
       price: 2.5
     });
   }
 
-  await createItemPrice(TEST_COMPANY_ID, {
+  await itemPricesAdapter.createItemPrice(TEST_COMPANY_ID, {
     item_id: fallbackPriceItemId,
     outlet_id: null,
     price: 4.25
@@ -564,7 +564,7 @@ test("postCogsForSale - should calculate costs when not provided", async () => {
   if (supportsUnitCost) {
     await createInventoryTransaction(db, TEST_COMPANY_ID, itemId, 10, 3.0);
   } else {
-    await createItemPrice(TEST_COMPANY_ID, {
+    await itemPricesAdapter.createItemPrice(TEST_COMPANY_ID, {
       item_id: itemId,
       outlet_id: null,
       price: 3.0

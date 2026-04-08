@@ -8,6 +8,8 @@
  */
 
 import { getDb } from "@/lib/db";
+import { itemPricesAdapter } from "@/lib/item-prices/adapter.js";
+import { withTransactionRetry } from "@jurnapod/db";
 
 // ============================================================================
 // Types
@@ -256,6 +258,13 @@ export async function batchUpdatePrices(
 /**
  * Insert prices in batch.
  *
+ * Uses createItemPrice for each price to get deadlock retry protection
+ * and proper audit logging.
+ * 
+ * Note: Each createItemPrice call has its own withTransactionRetry internally,
+ * so we don't wrap the entire batch in a transaction. This avoids nested
+ * transaction issues that can cause deadlocks.
+ *
  * @param companyId - Company ID for the prices
  * @param prices - Array of prices to insert
  * @returns Array of inserted price IDs
@@ -264,25 +273,29 @@ export async function batchInsertPrices(
   companyId: number,
   prices: BatchPriceInsert[]
 ): Promise<number[]> {
+  if (prices.length === 0) {
+    return [];
+  }
+
+  /**
+   * Bypass actor for batch import operations.
+   * Import runs with system privileges so no permission checks needed.
+   * userId: 0 indicates system-level operation for audit logging.
+   */
+  const importActor = { userId: 0, canManageCompanyDefaults: true };
+
   const ids: number[] = [];
 
-  const db = getDb();
-
   for (const price of prices) {
-    const result = await db
-      .insertInto("item_prices")
-      .values({
-        item_id: price.item_id,
-        company_id: companyId,
-        outlet_id: price.outlet_id ?? null,
-        price: price.price,
-        is_active: price.is_active ? 1 : 0,
-        effective_from: 0, // 0 = always effective from beginning
-        effective_to: 0 // 0 = no expiration
-      })
-      .executeTakeFirst();
+    const createdPrice = await itemPricesAdapter.createItemPrice(companyId, {
+      item_id: price.item_id,
+      outlet_id: price.outlet_id ?? null,
+      variant_id: null,
+      price: price.price,
+      is_active: price.is_active,
+    }, importActor);
 
-    ids.push(Number(result.insertId));
+    ids.push(createdPrice.id);
   }
 
   return ids;
