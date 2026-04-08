@@ -13,7 +13,7 @@
  */
 
 import { sql } from "kysely";
-import type { KyselySchema } from "@jurnapod/db";
+import { withTransactionRetry, type KyselySchema } from "@jurnapod/db";
 import { getInventoryDb } from "../db.js";
 import { createCostLayer, deductWithCost } from "@jurnapod/modules-inventory-costing";
 import type { DeductionResult, ItemCostResult } from "@jurnapod/modules-inventory-costing";
@@ -83,7 +83,7 @@ interface LowStockAlertRow {
   low_stock_threshold: string | null;
 }
 
-// Transaction helper
+// Transaction helper with deadlock retry
 async function withExecutorTransaction<T>(
   db: KyselySchema,
   callback: (executor: KyselySchema) => Promise<T>
@@ -91,7 +91,7 @@ async function withExecutorTransaction<T>(
   if (db.isTransaction) {
     return callback(db);
   }
-  return db.transaction().execute(async (trx) => callback(trx as unknown as KyselySchema));
+  return withTransactionRetry(db, async (trx) => callback(trx as unknown as KyselySchema));
 }
 
 // Cost summary row type for resolveInboundUnitCost

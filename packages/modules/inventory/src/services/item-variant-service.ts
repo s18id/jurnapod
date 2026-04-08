@@ -8,7 +8,7 @@
  */
 
 import { getKysely } from "@jurnapod/db";
-import { withTransaction } from "@jurnapod/db";
+import { withTransactionRetry } from "@jurnapod/db";
 import type { KyselySchema } from "@jurnapod/db";
 import type {
   CreateVariantAttributeRequest,
@@ -150,7 +150,7 @@ export class ItemVariantServiceImpl implements ItemVariantService {
     input: CreateVariantAttributeRequest
   ): Promise<VariantAttribute> {
     const db = getInventoryDb();
-    return withTransaction(db, async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       // Verify item exists
       const itemRow = await trx
         .selectFrom("items")
@@ -323,7 +323,7 @@ export class ItemVariantServiceImpl implements ItemVariantService {
     input: UpdateVariantAttributeRequest
   ): Promise<VariantAttribute> {
     const db = getInventoryDb();
-    return withTransaction(db, async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       // Get current attribute info
       const attrRows = await trx
         .selectFrom("item_variant_attributes")
@@ -545,7 +545,7 @@ export class ItemVariantServiceImpl implements ItemVariantService {
 
   async deleteVariantAttribute(companyId: number, attributeId: number): Promise<void> {
     const db = getInventoryDb();
-    return withTransaction(db, async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       // Archive variants using this attribute
       await trx
         .updateTable("item_variants")
@@ -666,7 +666,7 @@ export class ItemVariantServiceImpl implements ItemVariantService {
     input: UpdateVariantRequest
   ): Promise<ItemVariantResponse> {
     const db = getInventoryDb();
-    return withTransaction(db, async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       // Verify variant exists
       const variantRows = await trx
         .selectFrom("item_variants")
@@ -835,7 +835,7 @@ export class ItemVariantServiceImpl implements ItemVariantService {
     reason: string
   ): Promise<number> {
     const db = getInventoryDb();
-    return withTransaction(db, async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       // Get current stock
       const variantRows = await trx
         .selectFrom("item_variants")

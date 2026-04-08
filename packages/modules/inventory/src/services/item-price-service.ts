@@ -9,7 +9,7 @@
 
 import { sql } from "kysely";
 import { toRfc3339Required } from "@jurnapod/shared";
-import { withTransaction } from "@jurnapod/db";
+import { withTransactionRetry } from "@jurnapod/db";
 import type { KyselySchema } from "@jurnapod/db";
 import type { ItemPriceService } from "../interfaces/item-price-service.js";
 import type { ItemPrice, MutationAuditActor } from "../interfaces/index.js";
@@ -323,7 +323,7 @@ export class ItemPriceServiceImpl implements ItemPriceService {
     actor?: MutationAuditActor
   ): Promise<ItemPrice> {
     const db = getInventoryDb();
-    return withTransaction(db, async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       if (input.outlet_id === null && actor && actor.canManageCompanyDefaults !== true) {
         throw new InventoryForbiddenError("Company defaults require OWNER or COMPANY_ADMIN role");
       }
@@ -424,7 +424,7 @@ export class ItemPriceServiceImpl implements ItemPriceService {
       fields.push({ field: "is_active", value: input.is_active ? 1 : 0 });
     }
 
-    return withTransaction(db, async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       const before = await findItemPriceByIdWithExecutor(trx, companyId, itemPriceId, {
         forUpdate: true
       });
@@ -510,7 +510,7 @@ export class ItemPriceServiceImpl implements ItemPriceService {
 
   async deleteItemPrice(companyId: number, itemPriceId: number, actor?: MutationAuditActor): Promise<boolean> {
     const db = getInventoryDb();
-    return withTransaction(db, async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       const before = await findItemPriceByIdWithExecutor(trx, companyId, itemPriceId, {
         forUpdate: true
       });

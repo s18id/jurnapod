@@ -9,7 +9,7 @@
  */
 
 import { toRfc3339Required } from "@jurnapod/shared";
-import { withTransaction } from "@jurnapod/db";
+import { withTransactionRetry } from "@jurnapod/db";
 import type { KyselySchema } from "@jurnapod/db";
 import { getInventoryDb } from "../db.js";
 import type {
@@ -146,7 +146,7 @@ export class SuppliesServiceImpl implements SuppliesService {
     input: CreateSupplyInput,
     actor?: { userId: number }
   ): Promise<Supply> {
-    return withTransaction(this.db, async (trx) => {
+    return withTransactionRetry(this.db, async (trx) => {
       try {
         const result = await trx
           .insertInto("supplies")
@@ -197,7 +197,7 @@ export class SuppliesServiceImpl implements SuppliesService {
     input: UpdateSupplyInput,
     actor?: { userId: number }
   ): Promise<Supply | null> {
-    return withTransaction(this.db, async (trx) => {
+    return withTransactionRetry(this.db, async (trx) => {
       const before = await findSupplyByIdWithExecutor(trx, companyId, supplyId, {
         forUpdate: true
       });
@@ -272,7 +272,7 @@ export class SuppliesServiceImpl implements SuppliesService {
     supplyId: number,
     actor?: { userId: number }
   ): Promise<boolean> {
-    return withTransaction(this.db, async (trx) => {
+    return withTransactionRetry(this.db, async (trx) => {
       const before = await findSupplyByIdWithExecutor(trx, companyId, supplyId, {
         forUpdate: true
       });

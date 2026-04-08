@@ -10,7 +10,7 @@
 
 import { sql } from "kysely";
 import { toRfc3339Required } from "@jurnapod/shared";
-import { withTransaction } from "@jurnapod/db";
+import { withTransactionRetry } from "@jurnapod/db";
 import type { KyselySchema } from "@jurnapod/db";
 import { getInventoryDb } from "../db.js";
 import type {
@@ -324,7 +324,7 @@ export class RecipeServiceImpl implements RecipeService {
     input: CreateRecipeIngredientInput,
     actor?: { userId: number }
   ): Promise<RecipeIngredientWithDetails> {
-    return withTransaction(this.db, async (trx) => {
+    return withTransactionRetry(this.db, async (trx) => {
       // Validate recipe exists
       const recipeItem = await ensureCompanyItemExists(
         trx,
@@ -491,7 +491,7 @@ export class RecipeServiceImpl implements RecipeService {
     updates: UpdateRecipeIngredientInput,
     actor?: { userId: number }
   ): Promise<RecipeIngredientWithDetails> {
-    return withTransaction(this.db, async (trx) => {
+    return withTransactionRetry(this.db, async (trx) => {
       // Check ingredient exists
       const existing = await findRecipeIngredientById(
         trx,
@@ -573,7 +573,7 @@ export class RecipeServiceImpl implements RecipeService {
     ingredientId: number,
     actor?: { userId: number }
   ): Promise<void> {
-    return withTransaction(this.db, async (trx) => {
+    return withTransactionRetry(this.db, async (trx) => {
       // Check ingredient exists
       const existing = await findRecipeIngredientById(
         trx,

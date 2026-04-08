@@ -9,7 +9,7 @@
 
 import { sql } from "kysely";
 import { toRfc3339Required } from "@jurnapod/shared";
-import { withTransaction, type Transaction } from "@jurnapod/db";
+import { withTransactionRetry, type Transaction } from "@jurnapod/db";
 import type { KyselySchema } from "@jurnapod/db";
 import { ItemGroupBulkConflictError, type ItemGroupService } from "../interfaces/item-group-service.js";
 import type { ItemGroup, MutationAuditActor } from "../interfaces/index.js";
@@ -201,7 +201,7 @@ export class ItemGroupServiceImpl implements ItemGroupService {
     actor?: MutationAuditActor
   ): Promise<ItemGroup> {
     const db = getInventoryDb();
-    return withTransaction(db, async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       try {
         if (typeof input.parent_id === "number") {
           await ensureCompanyItemGroupExists(trx, companyId, input.parent_id);
@@ -216,14 +216,13 @@ export class ItemGroupServiceImpl implements ItemGroupService {
             name: input.name,
             is_active: input.is_active === false ? 0 : 1
           })
-          .returningAll()
           .executeTakeFirst();
 
-        if (!result) {
+        if (!result || !result.insertId) {
           throw new Error("Created item group not found");
         }
 
-        const itemGroup = await findItemGroupByIdWithExecutor(trx, companyId, Number(result.id));
+        const itemGroup = await findItemGroupByIdWithExecutor(trx, companyId, Number(result.insertId));
         if (!itemGroup) {
           throw new Error("Created item group not found");
         }
@@ -259,7 +258,7 @@ export class ItemGroupServiceImpl implements ItemGroupService {
     actor?: MutationAuditActor
   ): Promise<{ created_count: number; groups: ItemGroup[] }> {
     const db = getInventoryDb();
-    return withTransaction(db, async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       const normalizedRows = rows.map((r) => ({
         code: r.code?.trim() ?? null,
         name: r.name.trim(),
@@ -389,10 +388,13 @@ export class ItemGroupServiceImpl implements ItemGroupService {
             name: row.name,
             is_active: row.is_active ? 1 : 0
           })
-          .returningAll()
           .executeTakeFirst();
 
-        const newId = Number(result!.id);
+        if (!result || !result.insertId) {
+          throw new Error("Created item group not found");
+        }
+
+        const newId = Number(result.insertId);
 
         if (row.code) {
           codeToIdMap.set(row.code.toLowerCase(), newId);
@@ -432,7 +434,7 @@ export class ItemGroupServiceImpl implements ItemGroupService {
     actor?: MutationAuditActor
   ): Promise<ItemGroup | null> {
     const db = getInventoryDb();
-    return withTransaction(db, async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       const before = await findItemGroupByIdWithExecutor(trx, companyId, groupId, {
         forUpdate: true
       });
@@ -522,7 +524,7 @@ export class ItemGroupServiceImpl implements ItemGroupService {
 
   async deleteItemGroup(companyId: number, groupId: number, actor?: MutationAuditActor): Promise<boolean> {
     const db = getInventoryDb();
-    return withTransaction(db, async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       const before = await findItemGroupByIdWithExecutor(trx, companyId, groupId, {
         forUpdate: true
       });

@@ -9,7 +9,7 @@
 
 import { sql } from "kysely";
 import { toRfc3339Required } from "@jurnapod/shared";
-import { withTransaction, type Transaction } from "@jurnapod/db";
+import { withTransactionRetry, type Transaction } from "@jurnapod/db";
 import type { KyselySchema } from "@jurnapod/db";
 import type { ItemService } from "../interfaces/item-service.js";
 import type { Item, ItemVariantStats, MutationAuditActor, ItemType } from "../interfaces/index.js";
@@ -246,7 +246,7 @@ export class ItemServiceImpl implements ItemService {
   ): Promise<Item> {
     const db = getInventoryDb();
 
-    return withTransaction(db, async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       try {
         if (typeof input.item_group_id === "number") {
           await ensureCompanyItemGroupExists(trx, companyId, input.item_group_id);
@@ -316,7 +316,7 @@ export class ItemServiceImpl implements ItemService {
   ): Promise<Item> {
     const db = getInventoryDb();
 
-    return withTransaction(db, async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       try {
         if (typeof input.item_group_id === "number") {
           await ensureCompanyItemGroupExists(trx, companyId, input.item_group_id);
@@ -414,7 +414,7 @@ export class ItemServiceImpl implements ItemService {
   async deleteItem(companyId: number, itemId: number, actor?: MutationAuditActor): Promise<boolean> {
     const db = getInventoryDb();
 
-    return withTransaction(db, async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       const before = await findItemByIdWithTransaction(trx, companyId, itemId, {
         forUpdate: true
       });
