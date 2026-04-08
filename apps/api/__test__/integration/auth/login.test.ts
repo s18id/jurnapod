@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { getTestDb, closeTestDb } from '../../helpers/db';
-import { createTestCompany, cleanupTestFixtures } from '../../fixtures';
+import { createTestCompany, resetFixtureRegistry } from '../../fixtures';
 
 let baseUrl: string;
 
@@ -18,7 +18,7 @@ describe('auth.login', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    await cleanupTestFixtures();
+    resetFixtureRegistry();
     await closeTestDb();
   });
 
