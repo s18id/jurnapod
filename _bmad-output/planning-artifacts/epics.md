@@ -39,14 +39,12 @@
 | Epic 33 | Permission System Consolidation | done | epic-33-retrospective |
 | Epic 34 | Test Reorganization & Assessment | done | epic-34-sprint-plan |
 
-## Backlog
- 
+## In Progress
+
 | Epic | Title | Status | Sprint Plan |
 |------|-------|--------|-------------|
-| Epic 35 | Shared Actor Type Unification | backlog | — |
-| Epic 36 | Import/Export Infrastructure | backlog | — |
-| Epic 37 | Email Outbox Infrastructure | backlog | — |
+| Epic 35 | Route Library Extraction + Kysely Compliance | in-progress | epic-35-sprint-plan |
 
 ---
 
-_Last Updated: 2026-04-06_
+_Last Updated: 2026-04-08_

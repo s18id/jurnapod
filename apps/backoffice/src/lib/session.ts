@@ -4,9 +4,6 @@
 import { apiRequest } from "./api-client";
 import { getApiBaseUrl } from "./api-base-url";
 import {
-  clearAccessToken,
-  getStoredAccessToken,
-  getStoredCompanyTimezone,
   storeAccessToken,
   storeCompanyTimezone
 } from "./auth-storage";

@@ -18,7 +18,6 @@ import {
   ActionIcon,
   Paper,
   ScrollArea,
-  Tooltip,
 } from "@mantine/core";
 import { DatePickerInput } from "@mantine/dates";
 import {

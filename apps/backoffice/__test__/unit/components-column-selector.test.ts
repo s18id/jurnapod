@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { describe, it, beforeEach, mock } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert";
 
 // Since this is a UI component that requires React rendering,
@@ -13,7 +13,6 @@ import {
   DEFAULT_ITEM_COLUMNS,
   DEFAULT_PRICE_COLUMNS,
   COLUMN_GROUPS,
-  type ExportColumn,
 } from "../hooks/use-export";
 
 describe("Export Column Definitions", () => {

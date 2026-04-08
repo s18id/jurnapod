@@ -165,6 +165,9 @@ describe("Telemetry Middleware", () => {
 
   describe("createStructuredLog()", () => {
     it("should create log entry with all correlation IDs", () => {
+      // Use dynamic IDs for unit test (no DB interaction)
+      const testCompanyId = Math.floor(Math.random() * 10000) + 1000;
+      const testOutletId = testCompanyId + 1;
       const context: TelemetryContext = {
         correlationIds: {
           requestId: "123e4567-e89b-12d3-a456-426614174000",
@@ -172,8 +175,8 @@ describe("Telemetry Middleware", () => {
           journalBatchId: "323e4567-e89b-12d3-a456-426614174000",
           traceId: "423e4567-e89b-12d3-a456-426614174000",
         },
-        companyId: 1,
-        outletId: 2,
+        companyId: testCompanyId,
+        outletId: testOutletId,
         flowName: "payment_capture",
         startTime: Date.now(),
       };
@@ -186,8 +189,8 @@ describe("Telemetry Middleware", () => {
       assert.strictEqual(entry.client_tx_id, context.correlationIds.clientTxId);
       assert.strictEqual(entry.journal_batch_id, context.correlationIds.journalBatchId);
       assert.strictEqual(entry.trace_id, context.correlationIds.traceId);
-      assert.strictEqual(entry.company_id, context.companyId);
-      assert.strictEqual(entry.outlet_id, context.outletId);
+      assert.strictEqual(entry.company_id, testCompanyId);
+      assert.strictEqual(entry.outlet_id, testOutletId);
       assert.strictEqual(entry.flow_name, context.flowName);
       assert.ok(entry.timestamp);
     });
