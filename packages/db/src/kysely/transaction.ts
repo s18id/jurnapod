@@ -51,7 +51,13 @@ const ER_LOCK_DEADLOCK = 'ER_LOCK_DEADLOCK';
 /**
  * Default maximum retry attempts for deadlock handling.
  */
-const DEFAULT_MAX_ATTEMPTS = 3;
+const DEFAULT_MAX_ATTEMPTS = 5;
+
+/**
+ * Default initial delay in milliseconds for deadlock retry backoff.
+ * Higher values help reduce contention under heavy parallel load.
+ */
+const DEFAULT_INITIAL_DELAY_MS = 100;
 
 /**
  * Execute a callback within a transaction, retrying on MySQL deadlocks.
@@ -82,7 +88,7 @@ export async function withTransactionRetry<T>(
   options?: { maxAttempts?: number; initialDelayMs?: number }
 ): Promise<T> {
   const maxAttempts = options?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
-  const initialDelayMs = options?.initialDelayMs ?? 50;
+  const initialDelayMs = options?.initialDelayMs ?? DEFAULT_INITIAL_DELAY_MS;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
