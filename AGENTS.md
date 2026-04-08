@@ -58,6 +58,7 @@
 4. **Tenant isolation** — All data scoped to `company_id` and `outlet_id`
 5. **Finalized records are immutable** — Use `VOID` and `REFUND`, not silent mutation
 6. **Shared contracts** — Stay aligned across apps and packages
+7. **Build packages before apps** — When modifying `packages/` code, always `npm run build -w @jurnapod/<package>` before building or testing dependent `apps/`
 
 ---
 

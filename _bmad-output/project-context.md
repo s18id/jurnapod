@@ -133,6 +133,28 @@ All packages support:
 - `npm run test:integration` - Integration tests only
 - `npm run test:single -- <file>` - Specific test file
 
+### Test Log Rule (MANDATORY)
+
+**Always run tests in the background with PID file tracking.** This ensures tests keep running even if the AI agent times out.
+
+```bash
+# CORRECT: Background test with PID file
+nohup npm test -w @jurnapod/api > logs/test-results.log 2>&1 & echo $! > logs/test.pid
+# Wait for completion
+while kill -0 $(cat logs/test.pid) 2>/dev/null; do sleep 5; done
+# Read results from log:
+cat logs/test-results.log | grep -E "^(FAIL|Test Files|Tests)" | head -40
+
+# WRONG: Foreground test (times out on long runs)
+npm test -w @jurnapod/api
+```
+
+**Workflow:**
+1. Run `nohup ... > logfile.log 2>&1 & echo $! > logs/test.pid` — capture PID
+2. Poll `kill -0 $(cat logs/test.pid)` while tests run
+3. When done, inspect log file with grep/cat — never rely on terminal output
+4. Keep log files out of git (they're in `.gitignore`)
+
 ### test-fixtures.ts Library
 **Location**: `apps/api/src/lib/test-fixtures.ts`
 
