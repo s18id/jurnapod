@@ -193,6 +193,104 @@ These are Playwright/Cypress tests and are a separate category from unit/integra
 4. **Alias workspace packages in vitest** - Add explicit aliases for workspace dependencies
 
 ### Action Items
-- [ ] Consider migrating API tests from `node --test` to vitest for full consistency
-- [ ] Document vitest workspace alias pattern for future reference
-- [ ] Add `__test__/` path to tsconfig `include` in all packages
+- [x] ~~Consider migrating API tests from `node --test` to vitest for full consistency~~ — Resolved: API uses vitest in Epic 34
+- [x] ~~Document vitest workspace alias pattern for future reference~~ — Addressed: alias pattern documented in story 34.6 completion notes
+- [x] ~~Add `__test__/` path to tsconfig `include` in all packages~~ — Resolved in Epic 34
+
+---
+
+## Post-Epic Fixes (2026-04-08)
+
+### Session Summary
+
+Fixed 25 failing API integration tests and hardened the `no-route-business-logic` lint rule.
+
+### Root Cause Analysis
+
+**Primary root cause:** `userId: 0` sentinel in `createTestPrice` and `batchInsertPrices`
+
+- Both used `{ userId: 0, canManageCompanyDefaults: true }` as a bypass actor
+- `audit_logs.user_id` has FK to `users(id)` — user ID `0` does not exist
+- Threw MySQL errno 1452 → caught as `InventoryReferenceError("Invalid company references")`
+- Affected 14 tests across `pos/cart-line`, `pos/cart-validate`, `pos/item-variants`, `import/apply`
+
+**Secondary root causes:**
+1. Missing error catches in `inventory.ts` routes — `InventoryReferenceError`, `InventoryConflictError`, `InventoryForbiddenError` from modules-inventory not caught, causing 500 instead of 404/409
+2. `DELETE /inventory/item-prices/:id` returned 200 even when price not found (didn't check `deleteItemPrice` return value)
+3. `item-groups/update` test used `.slice(0, 20)` on timestamp-based code, causing collisions
+
+### Fixes Applied
+
+#### 1. Enforce authenticated `userId` in audit actor (`commit ed6839c`)
+
+| File | Change |
+|------|--------|
+| `packages/modules/inventory/src/interfaces/shared.ts` | `MutationAuditActor.userId` is required `number` (not nullable) |
+| `apps/api/src/lib/test-fixtures.ts` | `createTestPrice(userId)` now requires real user ID |
+| `apps/api/src/lib/import/batch-operations.ts` | `batchInsertPrices(actor)` requires actor with real `userId` |
+| `apps/api/src/routes/import.ts` | Route passes `auth.userId` → `applyPriceImport` → `batchInsertPrices` |
+| `apps/api/__test__/integration/pos/*.test.ts` | All 17 `createTestPrice` calls updated to pass `ctx.cashierUserId` |
+| `apps/api/__test__/integration/import/apply.test.ts` | Updated to store and pass `ctx.cashierUserId` |
+
+#### 2. Error handling in inventory routes (`commit ed6839c`)
+
+Added `InventoryReferenceError`, `InventoryConflictError`, `InventoryForbiddenError` catches in:
+- `POST /inventory/items`, `PATCH /inventory/items/:id`
+- `POST /inventory/item-groups`, `PATCH /inventory/item-groups/:id`
+- `GET/POST/PATCH/DELETE /inventory/item-prices`
+- `GET /inventory/items/:id/variants/:variantId/prices`
+- `GET /inventory/items/:id/prices`
+- `GET /inventory/item-prices/active`
+
+Fixed `DELETE /inventory/item-prices/:id` to return 404 when `deleteItemPrice` returns `false`.
+
+#### 3. Remove unused imports causing lint errors (`commit bb297e7`)
+
+| File | Removed |
+|------|---------|
+| `batch-operations.ts` | unused `withTransactionRetry` import |
+| `item-prices/index.ts` | unused `DatabaseConflictError`, `isMysqlError`, `mysqlDuplicateErrorCode`, `mysqlForeignKeyErrorCode` |
+| `items/index.ts` | unused `withTransaction` import |
+
+#### 4. Fix lint false positives (`commit b0fcf39`)
+
+**Problem:** `no-route-business-logic` rule used crude substring matching (`'update ' in text`) that fired on error messages like `"Item update failed"` (contains `"update "`) or `"from batch"` (contains `" from "`).
+
+**Fix:** Replaced with SQL-shape regex that only flags actual statement patterns:
+- `SELECT ... FROM / WHERE`
+- `INSERT INTO ...`
+- `UPDATE ... SET ...`
+- `DELETE FROM ...`
+
+Also added `undefined/null` guard to `isRawSqlLiteral`.
+
+**Added:** 14 unit tests (`eslint-plugin-jurnapod-test-rules.test.mjs`) covering true positives and true negatives.
+
+### Results
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Failing API tests | 25 | 0 |
+| Lint errors | 83 | 27 (all genuine) |
+| Lint false positives | ~56 | 0 |
+| Total tests passing | — | 858 |
+
+### Remaining Lint Issues (27 errors, all genuine)
+
+| Category | Count | Files |
+|----------|-------|-------|
+| `getDb()` direct access in routes | ~18 | `accounts.ts`, `audit.ts`, `companies.ts`, `outlets.ts`, etc. |
+| Service instantiation in routes | ~6 | `cash-bank-transactions.ts`, `sales/invoices.ts`, `sales/orders.ts` |
+| Raw SQL in routes | 2 | `outlets.ts`, `admin-runbook.ts` |
+| Hardcoded IDs in tests | 1 | `telemetry.test.ts` |
+| `no-explicit-any` warnings | 69 | Across lib files |
+
+These are pre-existing architectural violations (business logic in routes instead of lib/) and type debt. Not introduced by Epic 34.
+
+### Commits
+
+| SHA | Message |
+|-----|---------|
+| `ed6839c` | `fix(api): enforce authenticated userId in audit actor for all mutations` |
+| `bb297e7` | `fix(api): remove unused imports causing lint errors` |
+| `b0fcf39` | `fix(lint): harden no-route-business-logic SQL detection regex` |

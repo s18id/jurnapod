@@ -1,4 +1,4 @@
-last_updated: 2026-04-05T16:00:00Z
+last_updated: 2026-04-08T12:00:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -102,7 +102,7 @@ development_status:
   8-7-variant-stock-tracking: done
   8-8-variant-sync-push: done
   8-9-performance-monitoring: done
-  8-10-load-testing-framework: deferred
+  8-10-load-testing-framework: backlog
   epic-8-retrospective: done
 
   # Epic 9: Use Library Functions in Tests
@@ -146,7 +146,7 @@ development_status:
   12-7-epic-12-documentation: done
   epic-12-retrospective: done
 
-  # Epic 13: Complete Library Migration for Deferred Routes
+  # Epic 13: Complete Library Migration for backlog Routes
   epic-13: done
   13-1-create-import-batch-library: done
   13-2-create-import-validation-library: done
@@ -220,7 +220,7 @@ development_status:
   19-10-migrate-api-lib-cost-recipe: done
   19-11-migrate-api-lib-reports: done
   19-12-migrate-api-routes: done
-  19-13-final-verification: deferred (300+ type errors - TD-037)
+  19-13-final-verification: backlog (300+ type errors - TD-037)
   epic-19-retrospective: done
 
   # Epic 20: Schema Consolidation & JSON Normalization
@@ -366,15 +366,28 @@ development_status:
   31-2-extract-companies-provisioning: done
   31-3-consolidate-reservations-duplicate: done
   31-4-thin-routes-users-companies: done
-  31-5-import-export-platform: deferred  # Moved to Epic 36 (scope too large for story)
+  31-5-import-export-platform: backlog  # Moved to Epic 36 (scope too large for story)
   31-6-notifications-consolidation: done
   31-7a-inventory-route-thinning: done
   31-7b-reports-route-thinning: done
   31-7c-accounts-route-thinning: done  # no refactoring needed, ADR-0016 created
   31-8a-adapter-migration-prep: done  # Boundaries verified, lint fixes applied
-  31-8b-deletion-verification: done  # PARTIAL - deferred remaining deletion to Epic 36 (TD: 20+ imports still exist)
+  31-8b-deletion-verification: done  # PARTIAL - backlog remaining deletion to Epic 36 (TD: 20+ imports still exist)
   31-post-epic-test-fixes: done  # Date handling, Temporal timezone, status_id fixtures
   epic-31-retrospective: done
+
+  # Epic 32: Financial Period Close & Reconciliation Workspace
+  epic-32: done
+  32-0-preparation: done
+  32-1-fiscal-year-close: done  # Close procedure with 3-step entries, transaction, idempotency
+  32-2-multi-period-reconciliation-dashboard: done  # ReconciliationDashboardService, drilldown endpoint
+  32-3-trial-balance-validation: done
+  32-4-period-transition-audit-trail: done
+  32-5-roll-forward-workspace: done  # PeriodCloseWorkspaceService, GET /admin/dashboards/period-close-workspace
+  32-6-fixes: done
+  32-7-post-review-fixes: done
+  32-8-adr-0014-extraction: done
+  epic-32-retrospective: done  # 2026-04-05 - 5 action items generated
 
   # Epic 33: Permission System Consolidation
   epic-33: done
@@ -382,8 +395,8 @@ development_status:
   33-2-migrate-auth-to-shared: done
   33-3-migrate-platform-to-shared: done
   33-4-fix-superadmin-login-bypass: done
+  33-5-permission-bit-test-fix: done  # Post-epic test fix - corrected test 
   epic-33-retrospective: done
-  33-5-permission-bit-test-fix: done  # Post-epic test fix - corrected test expectations
 
   # Epic 34: Test Reorganization & Assessment
   epic-34: done
@@ -394,57 +407,10 @@ development_status:
   34-5-package-test-reorganization: done
   34-6-validate-update-scripts: done
   34-7-full-validation-gate: done
-
-  # Epic 35: Financial Period Close & Reconciliation Workspace
-  epic-32: done
-  epic-32-preparation:
-    settings-port: done  # SettingsPort in modules-platform
-    fiscal-year-close-prep: done  # Idempotency table, close procedure, FiscalYearGuard
-    subledger-provider-prep: done  # SubledgerBalanceProvider interface, CASH impl
-  32-1-fiscal-year-close: done  # Close procedure with 3-step entries, transaction, idempotency
-  32-2-multi-period-reconciliation-dashboard: done  # ReconciliationDashboardService, drilldown endpoint
-  32-3-trial-balance-validation: done
-  32-4-period-transition-audit-trail: done
-  32-5-roll-forward-workspace: done  # PeriodCloseWorkspaceService, GET /admin/dashboards/period-close-workspace
-  epic-32-p2-fixes:
-    p2-001-net-income-calculation: done  # Fixed Math.abs() bug in fiscal-years.ts
-    p2-005-audit-trail-check: done  # Fixed chicken-and-egg logic in period-close-workspace.ts
-    p2-013-sql-injection-risk: done  # Removed dead code in dashboard-service.ts
-    p2-016-sql-injection-risk: done  # Fixed sql.raw() in trial-balance/service.ts
-    p2-003-retained-earnings-detection: done  # Added TODO comment for fragile pattern matching in fiscal-years.ts
-    p2-009-admin-dashboards-split: done  # Split 823-line file into directory structure
-    p2-010-gl-imbalance-check-timing: done  # Added explanation comment for post-posting check timing
-    p2-015-cash-subledger-duplication: done  # Refactored trial-balance to use CashSubledgerProvider
-    p2-002-unused-params: done  # Removed unused fiscalYearStartDate/fiscalYearEndDate from getPlAccountBalances
-    p2-004-date-parsing-helper: done  # Extracted formatDateOnlyFromUnknown to common-utils.ts
-    p2-006-type-cast-workaround: done  # Fixed PeriodTransitionAuditService type assertion in period-close-workspace.ts
-    p2-007-inline-interface: done  # Defined PreCloseCheckItem interface instead of inline type in period-close-workspace.ts
-    p2-008-enum-validation: done  # Added proper enum validation for account_types and statuses in admin-dashboards/reconciliation.ts
-    p2-011-nested-error-handling: done  # Simplified nested try-catch in accounts.ts close/approve endpoint
-    p2-012-dynamic-imports: done  # Moved dynamic imports to static imports in routes/audit.ts
-    p2-014-unused-variable: done  # Removed unused typePlaceholders in dashboard-service.ts
-    p2-017-as-any-cast: done  # Removed as any cast for logAction in period-transition.ts
-    p2-018-portable-json-extraction: done  # Replaced MySQL-specific ->> with portable JSON_EXTRACT() in period-transition.ts
-  epic-32-post-review-fixes:
-    p0-001-close-request-id: done  # executeCloseWithLocking returned wrong closeRequestId - broke idempotency
-    p1-001-error-codes: done  # Added machine-readable code to 6 fiscal-year error classes
-    p1-002-adapter-singleton: done  # Replaced lazy singleton with per-call factory in API adapter
-  epic-32-adr-0014-extraction:
-    fiscal-year-domain-extraction: done  # Moved 1317-line fiscal-years.ts to modules-accounting/fiscal-year
-    period-close-workspace-refactor: done  # Refactored to consume package APIs only
-  epic-32-retrospective: done  # 2026-04-05 - 5 action items generated
-
-  # Epic 36: Import/Export Infrastructure (deferred - moved from Epic 31-5)
-  epic-36: deferred
-  36-1-db-decoupling-dependency-inversion: backlog
-  36-2-extract-import-core-infrastructure: backlog
-  36-3-extract-export-core-query-safety: backlog
-  36-4-lift-route-orchestration: backlog
-  36-5-convert-routes-to-thin-adapters: backlog
-  36-6-migration-hardening-rollout: backlog
+  epic-34-retrospective: done
 
   # Epic 35: Shared Actor Type Unification
-  epic-35: deferred
+  epic-35: backlog
   35-1-add-actor-to-shared: backlog
   35-2-migrate-modules-reservations: backlog
   35-3-migrate-modules-platform: backlog
@@ -453,16 +419,9 @@ development_status:
   35-6-update-api-wrappers-cleanup: backlog
 
   # Epic 37: Email Outbox Infrastructure
-  epic-37: deferred
+  epic-37: backlog
   37-1-define-outbox-domain-model: backlog
   37-2-extract-outbox-domain-service: backlog
   37-3-api-integration-thin-adapter: backlog
   37-4-parity-hardening-concurrency: backlog
-
-  # Post-Epic Test Fixes (discovered after Epic 31 completion)
-  # These fixes address test failures found during validation
-  post-epic-31-fixes:
-    auth-permission-bit-test: done  # Epic 33 - fixed permission constant test expectations
-    reservations-date-handling: done  # Epic 31 - fixed toIsoString for Date/string types
-    reservations-temporal-timezone: done  # Epic 31 - fixed RFC3339 timezone requirement
-    reservations-status-id-fixture: done  # Epic 31 - fixed test fixtures to update both status and status_id
+  
