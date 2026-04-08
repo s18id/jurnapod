@@ -36,7 +36,7 @@ import {
   DatabaseForbiddenError
 } from "../lib/master-data-errors.js";
 import { itemGroupsAdapter } from "../lib/item-groups/adapter.js";
-import { ItemGroupBulkConflictError } from "@jurnapod/modules-inventory";
+import { ItemGroupBulkConflictError, InventoryReferenceError, InventoryForbiddenError, InventoryConflictError } from "@jurnapod/modules-inventory";
 import { checkUserAccess } from "../lib/auth.js";
 import { canManageCompanyDefaults } from "../lib/auth/permissions.js";
 import type { ModulePermission } from "@jurnapod/auth";
@@ -261,6 +261,10 @@ inventoryRoutes.post("/items", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
+    if (error instanceof InventoryConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
     if (error instanceof DatabaseConflictError) {
       return errorResponse("CONFLICT", "Item conflict", 409);
     }
@@ -306,6 +310,10 @@ inventoryRoutes.patch("/items/:id", async (c) => {
 
     if (error instanceof Error && error.message === "No fields to update") {
       return errorResponse("INVALID_REQUEST", "No fields to update", 400);
+    }
+
+    if (error instanceof InventoryConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
     }
 
     if (error instanceof DatabaseConflictError) {
@@ -444,6 +452,14 @@ inventoryRoutes.post("/item-groups", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
+    if (error instanceof InventoryReferenceError) {
+      return errorResponse("NOT_FOUND", "Parent item group not found", 404);
+    }
+
+    if (error instanceof InventoryConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
     if (error instanceof DatabaseConflictError) {
       return errorResponse("CONFLICT", error.message, 409);
     }
@@ -547,6 +563,14 @@ inventoryRoutes.patch("/item-groups/:id", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
+    if (error instanceof InventoryReferenceError) {
+      return errorResponse("NOT_FOUND", "Parent item group not found", 404);
+    }
+
+    if (error instanceof InventoryConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
     if (error instanceof DatabaseConflictError) {
       return errorResponse("CONFLICT", error.message, 409);
     }
@@ -640,6 +664,18 @@ inventoryRoutes.get("/item-prices/active", async (c) => {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
     }
+    
+    if (error instanceof InventoryReferenceError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
+    
+    if (error instanceof InventoryForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+    
+    if (error instanceof InventoryConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
 
     console.error("GET /inventory/item-prices/active failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Prices request failed", 500);
@@ -690,6 +726,19 @@ inventoryRoutes.post("/item-prices", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
+    if (error instanceof InventoryReferenceError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
+
+    if (error instanceof InventoryConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof InventoryForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+
+    // Keep legacy error types for backwards compatibility
     if (error instanceof DatabaseConflictError) {
       return errorResponse("CONFLICT", "Item price conflict", 409);
     }
@@ -741,6 +790,18 @@ inventoryRoutes.get("/item-prices", async (c) => {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
     }
+    
+    if (error instanceof InventoryReferenceError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
+    
+    if (error instanceof InventoryForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+    
+    if (error instanceof InventoryConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
 
     console.error("GET /inventory/item-prices failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Item prices request failed", 500);
@@ -784,6 +845,10 @@ inventoryRoutes.get("/item-prices/:id", async (c) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid price ID", 400);
+    }
+
+    if (error instanceof InventoryReferenceError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
     }
 
     if (error instanceof DatabaseReferenceError) {
@@ -845,6 +910,19 @@ inventoryRoutes.patch("/item-prices/:id", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid request", 400);
     }
 
+    if (error instanceof InventoryReferenceError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
+
+    if (error instanceof InventoryConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof InventoryForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+
+    // Keep legacy error types for backwards compatibility
     if (error instanceof DatabaseReferenceError) {
       return errorResponse("NOT_FOUND", "Item price not found", 404);
     }
@@ -878,10 +956,14 @@ inventoryRoutes.delete("/item-prices/:id", async (c) => {
     // Check if user has global role (for company defaults) before calling delete
     const canManageDefaults = await canAccessCompanyDefaults(auth.userId, auth.companyId);
 
-    await itemPricesAdapter.deleteItemPrice(auth.companyId, priceId, {
+    const deleted = await itemPricesAdapter.deleteItemPrice(auth.companyId, priceId, {
       userId: auth.userId,
       canManageCompanyDefaults: canManageDefaults
     });
+
+    if (!deleted) {
+      return errorResponse("NOT_FOUND", "Item price not found", 404);
+    }
 
     return successResponse({
       id: priceId,
@@ -892,6 +974,15 @@ inventoryRoutes.delete("/item-prices/:id", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid price ID", 400);
     }
 
+    if (error instanceof InventoryReferenceError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
+
+    if (error instanceof InventoryForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+
+    // Keep legacy error types for backwards compatibility
     if (error instanceof DatabaseReferenceError) {
       return errorResponse("NOT_FOUND", "Item price not found", 404);
     }
@@ -943,9 +1034,20 @@ inventoryRoutes.get("/items/:id/variants/:variantId/prices", async (c) => {
 
     return successResponse(variantPrices);
   } catch (error) {
-    console.log("ABOUT TO CHECK ZOD ERROR");
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
+    }
+    
+    if (error instanceof InventoryReferenceError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
+    
+    if (error instanceof InventoryForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+    
+    if (error instanceof InventoryConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
     }
 
     console.error("GET /inventory/items/:id/variants/:variantId/prices failed", error);
@@ -992,6 +1094,18 @@ inventoryRoutes.get("/items/:id/prices", async (c) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
+    }
+    
+    if (error instanceof InventoryReferenceError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
+    
+    if (error instanceof InventoryForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+    
+    if (error instanceof InventoryConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
     }
 
     console.error("GET /inventory/items/:id/prices failed", error);

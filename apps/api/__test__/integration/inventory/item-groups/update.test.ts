@@ -79,7 +79,7 @@ describe('inventory.item-groups.update', { timeout: 30000 }, () => {
     const created = await createRes.json();
     registerFixtureCleanup(`group-${created.data.id}`, async () => {});
 
-    const newCode = `UPDATED-CODE-${timestamp}`.slice(0, 20);
+    const newCode = `UPDATED-CODE-${timestamp}`;
     const res = await fetch(`${baseUrl}/api/inventory/item-groups/${created.data.id}`, {
       method: 'PATCH',
       headers: {

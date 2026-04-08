@@ -263,22 +263,17 @@ export async function batchUpdatePrices(
  *
  * @param companyId - Company ID for the prices
  * @param prices - Array of prices to insert
+ * @param actor - Actor for audit logging. Must have a valid userId.
  * @returns Array of inserted price IDs
  */
 export async function batchInsertPrices(
   companyId: number,
-  prices: BatchPriceInsert[]
+  prices: BatchPriceInsert[],
+  actor: { userId: number; canManageCompanyDefaults?: boolean }
 ): Promise<number[]> {
   if (prices.length === 0) {
     return [];
   }
-
-  /**
-   * Bypass actor for batch import operations.
-   * Import runs with system privileges so no permission checks needed.
-   * userId: 0 indicates system-level operation for audit logging.
-   */
-  const importActor = { userId: 0, canManageCompanyDefaults: true };
 
   // Use batchCreateItemPrices for single transaction + retry
   const createdPrices = await itemPricesAdapter.batchCreateItemPrices(
@@ -289,7 +284,7 @@ export async function batchInsertPrices(
       price: p.price,
       is_active: p.is_active,
     })),
-    importActor
+    actor
   );
 
   return createdPrices.map(p => p.id);

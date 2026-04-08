@@ -26,6 +26,7 @@ import { getSeedSyncContext } from '../../fixtures';
 let baseUrl: string;
 let ownerToken: string;
 let companyId: number;
+let cashierUserId: number;
 
 describe('import.apply', { timeout: 30000 }, () => {
   beforeAll(async () => {
@@ -34,6 +35,7 @@ describe('import.apply', { timeout: 30000 }, () => {
     
     const ctx = await getSeedSyncContext();
     companyId = ctx.companyId;
+    cashierUserId = ctx.cashierUserId;
   });
 
   afterAll(async () => {
@@ -228,7 +230,7 @@ describe('import.apply', { timeout: 30000 }, () => {
       type: 'PRODUCT'
     });
 
-    await createTestPrice(companyId, item.id, {
+    await createTestPrice(companyId, item.id, cashierUserId, {
       price: 10000,
       isActive: true
     });

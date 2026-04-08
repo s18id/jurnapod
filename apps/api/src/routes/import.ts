@@ -474,6 +474,8 @@ interface ApplyOptions {
   startBatch?: number;
   /** Called after each batch commits — use to persist checkpoint */
   onBatchCommit?: (batchNumber: number, rowsCommitted: number) => Promise<void>;
+  /** Authenticated user ID for audit logging. Required for API-triggered imports. */
+  userId?: number;
 }
 
 async function applyItemImport(
@@ -595,7 +597,12 @@ async function applyPriceImport(
   companyId: number,
   options: ApplyOptions = {}
 ): Promise<ApplyResult> {
-  const { startBatch = 0, onBatchCommit } = options;
+  const { startBatch = 0, onBatchCommit, userId } = options;
+  // Actor for audit logging — authenticated user is always required for API-triggered imports
+  if (userId === undefined) {
+    throw new Error("userId is required for price import");
+  }
+  const actor = { userId, canManageCompanyDefaults: true };
   const result: ApplyResult = {
     created: 0,
     updated: 0,
@@ -679,7 +686,7 @@ async function applyPriceImport(
         await batchUpdatePrices(updates);
       }
       if (inserts.length > 0) {
-        await batchInsertPrices(companyId, inserts);
+        await batchInsertPrices(companyId, inserts, actor);
       }
 
       result.batchesCompleted++;
@@ -1077,6 +1084,7 @@ importRoutes.post("/:entityType/apply", async (c) => {
     const applyFn = entityType === "items" ? applyItemImport : applyPriceImport;
     const result = await applyFn(mappedRows, auth.companyId, {
       startBatch,
+      userId: auth.userId,
       onBatchCommit: async (batchIndex: number, rowsCommitted: number) => {
         // Story 8.1 AC1: Persist checkpoint after each successful batch
         const checkpoint: CheckpointData = {

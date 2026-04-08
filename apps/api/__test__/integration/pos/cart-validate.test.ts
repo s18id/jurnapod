@@ -84,7 +84,7 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
     registerFixtureCleanup(`item-${item.id}`, async () => {});
 
     // Create price
-    await createTestPrice(ctx.companyId, item.id, {
+    await createTestPrice(ctx.companyId, item.id, ctx.cashierUserId, {
       price: 10000,
       isActive: true
     });
@@ -134,7 +134,7 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
     registerFixtureCleanup(`variant-${variant.id}`, async () => {});
 
     // Create price
-    await createTestPrice(ctx.companyId, item.id, {
+    await createTestPrice(ctx.companyId, item.id, ctx.cashierUserId, {
       variantId: variant.id,
       price: 15000,
       isActive: true
@@ -194,7 +194,7 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
     registerFixtureCleanup(`variant-${variant.id}`, async () => {});
 
     // Create price
-    await createTestPrice(ctx.companyId, item.id, {
+    await createTestPrice(ctx.companyId, item.id, ctx.cashierUserId, {
       variantId: variant.id,
       price: 20000,
       isActive: true
@@ -377,7 +377,7 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
     registerFixtureCleanup(`variant-${variant.id}`, async () => {});
 
     // Create price
-    await createTestPrice(ctx.companyId, item.id, {
+    await createTestPrice(ctx.companyId, item.id, ctx.cashierUserId, {
       variantId: variant.id,
       price: 25000,
       isActive: true
@@ -439,7 +439,7 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
     registerFixtureCleanup(`item-${item.id}`, async () => {});
 
     // Create price
-    await createTestPrice(ctx.companyId, item.id, {
+    await createTestPrice(ctx.companyId, item.id, ctx.cashierUserId, {
       price: 10000,
       isActive: true
     });
@@ -498,14 +498,14 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
       .execute();
 
     // Create default price
-    await createTestPrice(ctx.companyId, item.id, {
+    await createTestPrice(ctx.companyId, item.id, ctx.cashierUserId, {
       variantId: variant.id,
       price: 10000,
       isActive: true
     });
 
     // Create outlet-specific price
-    await createTestPrice(ctx.companyId, item.id, {
+    await createTestPrice(ctx.companyId, item.id, ctx.cashierUserId, {
       outletId: ctx.outletId,
       variantId: variant.id,
       price: 18000,

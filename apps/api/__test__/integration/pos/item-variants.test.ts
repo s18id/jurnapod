@@ -80,7 +80,7 @@ describe('pos.item-variants', { timeout: 30000 }, () => {
 
     // Create a price for the item (default price)
     const db = await import('../../helpers/db').then(m => m.getTestDb());
-    await createTestPrice(ctx.companyId, item.id, {
+    await createTestPrice(ctx.companyId, item.id, ctx.cashierUserId, {
       price: 10000,
       isActive: true
     });
@@ -129,13 +129,13 @@ describe('pos.item-variants', { timeout: 30000 }, () => {
 
     // Create item default price
     const db = await import('../../helpers/db').then(m => m.getTestDb());
-    await createTestPrice(ctx.companyId, item.id, {
+    await createTestPrice(ctx.companyId, item.id, ctx.cashierUserId, {
       price: 10000,
       isActive: true
     });
 
     // Create outlet-specific price for the variant
-    await createTestPrice(ctx.companyId, item.id, {
+    await createTestPrice(ctx.companyId, item.id, ctx.cashierUserId, {
       outletId: ctx.outletId,
       variantId: variant.id,
       price: 15000,
@@ -252,7 +252,7 @@ describe('pos.item-variants', { timeout: 30000 }, () => {
 
     // Create default price
     const db = await import('../../helpers/db').then(m => m.getTestDb());
-    await createTestPrice(ctx.companyId, item.id, {
+    await createTestPrice(ctx.companyId, item.id, ctx.cashierUserId, {
       price: 25000,
       isActive: true
     });

@@ -7,6 +7,7 @@
 
 /**
  * Actor performing a mutation, used for audit logging.
+ * All mutations must have a valid userId — no sentinel IDs allowed.
  */
 export type MutationAuditActor = {
   userId: number;

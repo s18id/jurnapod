@@ -525,11 +525,12 @@ export async function createTestVariant(
 
 /**
  * Create a test price using the canonical itemPriceService.
- * Uses a bypass actor for test fixtures that need to create company defaults.
+ * Requires a real userId for audit logging.
  */
 export async function createTestPrice(
   companyId: number,
   itemId: number,
+  userId: number,
   options?: Partial<{
     outletId: number | null;
     variantId: number | null;
@@ -537,11 +538,7 @@ export async function createTestPrice(
     isActive: boolean;
   }>
 ): Promise<PriceFixture> {
-  /**
-   * Bypass actor for test fixtures.
-   * userId: 0 indicates system-level operation.
-   */
-  const bypassActor = { userId: 0, canManageCompanyDefaults: true };
+  const actor = { userId, canManageCompanyDefaults: true };
 
   const price = await itemPricesAdapter.createItemPrice(companyId, {
     item_id: itemId,
@@ -549,7 +546,7 @@ export async function createTestPrice(
     variant_id: options?.variantId ?? null,
     price: options?.price ?? 10000,
     is_active: options?.isActive ?? true,
-  }, bypassActor);
+  }, actor);
 
   createdFixtures.prices.push(price);
   return price;
