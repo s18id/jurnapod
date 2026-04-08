@@ -4,10 +4,9 @@
 import { sql } from "kysely";
 import { type KyselySchema } from "../db.js";
 import { ensureUserHasOutletAccess as commonUtilsEnsureUserHasOutletAccess } from "./common-utils.js";
-// Re-export withTransaction from @jurnapod/db for backward compatibility
-// Modules still using mysql2-style transactions import from here
-// After migration, modules should import directly from @jurnapod/db
-export { withTransaction } from "@jurnapod/db";
+// Re-export transaction helpers from @jurnapod/db
+// withTransactionRetry is preferred - it handles MySQL deadlocks automatically
+export { withTransaction, withTransactionRetry } from "@jurnapod/db";
 export type { Transaction } from "@jurnapod/db";
 
 // Re-export for backward compatibility - prefer importing from common-utils directly

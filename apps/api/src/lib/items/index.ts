@@ -6,7 +6,7 @@ import { toRfc3339Required } from "@jurnapod/shared";
 import { getDb, type KyselySchema } from "../db.js";
 import { DatabaseConflictError, DatabaseReferenceError } from "../master-data-errors.js";
 import { isMysqlError, mysqlDuplicateErrorCode } from "../shared/master-data-utils.js";
-import { withTransaction, type Transaction } from "@jurnapod/db";
+import { withTransactionRetry, withTransaction, type Transaction } from "@jurnapod/db";
 
 type MutationAuditActor = {
   userId: number;
@@ -235,7 +235,8 @@ export async function createItem(
 ) {
   const db = getDb();
 
-  return withTransaction(db, async (trx) => {
+  // Retry on deadlock since parallel test fixtures can contend on items table
+  return withTransactionRetry(db, async (trx) => {
     try {
       if (typeof input.item_group_id === "number") {
         await ensureCompanyItemGroupExists(trx, companyId, input.item_group_id);
@@ -306,7 +307,8 @@ export async function updateItem(
 ) {
   const db = getDb();
 
-  return withTransaction(db, async (trx) => {
+  // Retry on deadlock since parallel test fixtures can contend on items table
+  return withTransactionRetry(db, async (trx) => {
     try {
       if (typeof input.item_group_id === "number") {
         await ensureCompanyItemGroupExists(trx, companyId, input.item_group_id);
@@ -409,7 +411,8 @@ export async function deleteItem(
 ): Promise<boolean> {
   const db = getDb();
 
-  return withTransaction(db, async (trx) => {
+  // Retry on deadlock since parallel test fixtures can contend on items table
+  return withTransactionRetry(db, async (trx) => {
     const before = await findItemByIdWithTransaction(trx, companyId, itemId, {
       forUpdate: true
     });

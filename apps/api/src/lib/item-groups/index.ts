@@ -8,9 +8,9 @@ import { DatabaseConflictError, DatabaseReferenceError } from "../master-data-er
 import {
   isMysqlError,
   mysqlDuplicateErrorCode,
-  recordMasterDataAuditLog,
-  withTransaction
+  recordMasterDataAuditLog
 } from "../shared/master-data-utils.js";
+import { withTransactionRetry } from "@jurnapod/db";
 
 type MutationAuditActor = {
   userId: number;
@@ -183,7 +183,8 @@ export async function createItemGroup(
   actor?: MutationAuditActor
 ) {
   const db = getDb();
-  return withTransaction(db, async (trx) => {
+  // Retry on deadlock since parallel test fixtures can contend on item_groups table
+  return withTransactionRetry(db, async (trx) => {
     try {
       if (typeof input.parent_id === "number") {
         await ensureCompanyItemGroupExists(trx, companyId, input.parent_id);
@@ -253,7 +254,8 @@ export async function createItemGroupsBulk(
   actor?: MutationAuditActor
 ): Promise<{ created_count: number; groups: Awaited<ReturnType<typeof findItemGroupById>>[] }> {
   const db = getDb();
-  return withTransaction(db, async (trx) => {
+  // Retry on deadlock since parallel test fixtures can contend on item_groups table
+  return withTransactionRetry(db, async (trx) => {
     const normalizedRows = rows.map((r) => ({
       code: r.code?.trim() ?? null,
       name: r.name.trim(),
@@ -426,7 +428,8 @@ export async function updateItemGroup(
   actor?: MutationAuditActor
 ) {
   const db = getDb();
-  return withTransaction(db, async (trx) => {
+  // Retry on deadlock since parallel test fixtures can contend on item_groups table
+  return withTransactionRetry(db, async (trx) => {
     const before = await findItemGroupByIdWithExecutor(trx, companyId, groupId, {
       forUpdate: true
     });
@@ -521,7 +524,8 @@ export async function deleteItemGroup(
   actor?: MutationAuditActor
 ): Promise<boolean> {
   const db = getDb();
-  return withTransaction(db, async (trx) => {
+  // Retry on deadlock since parallel test fixtures can contend on item_groups table
+  return withTransactionRetry(db, async (trx) => {
     const before = await findItemGroupByIdWithExecutor(trx, companyId, groupId, {
       forUpdate: true
     });
