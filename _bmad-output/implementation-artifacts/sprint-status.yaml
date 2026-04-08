@@ -410,7 +410,7 @@ development_status:
   epic-34-retrospective: done
 
   # Epic 35: Route Library Extraction + Kysely Compliance
-  epic-35: in_progress
+  epic-35: done
   35-1-accounts-extraction: done
   35-2-platform-routes: done
   35-3-reporting-routes: done

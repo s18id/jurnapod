@@ -33,18 +33,17 @@
 | Epic 27 | POS Sync Push Boundary Completion | done | epic-27-sprint-plan |
 | Epic 28 | Sales Payments Extraction | done | epic-28-sprint-plan |
 | Epic 29 | Fixed Assets / Depreciation | done | epic-29-sprint-plan |
-| Epic 30 | Sync & Financial Observability | done | epic-30-sprint-plan |
+| Epic 30 | Sync & Financial Observability | done | epic-30-retrospective |
 | Epic 31 | API Detachment Completion | done | epic-31-sprint-plan |
 | Epic 32 | Financial Period Close & Reconciliation Workspace | done | epic-32-sprint-plan |
 | Epic 33 | Permission System Consolidation | done | epic-33-retrospective |
 | Epic 34 | Test Reorganization & Assessment | done | epic-34-sprint-plan |
+| Epic 35 | Route Library Extraction + Kysely Compliance | done | epic-35-sprint-plan |
 
-## In Progress
+## Upcoming
 
-| Epic | Title | Status | Sprint Plan |
-|------|-------|--------|-------------|
-| Epic 35 | Route Library Extraction + Kysely Compliance | in-progress | epic-35-sprint-plan |
+| Epic | Title | Status |
+|------|-------|--------|
+| Epic 36 | OpenAPI Documentation & Swagger UI | ready |
 
----
-
-_Last Updated: 2026-04-08_
+_Last Updated: 2026-04-09_

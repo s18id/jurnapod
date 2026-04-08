@@ -2,7 +2,7 @@
 
 ## Status
 
-**in-progress**
+**done**
 
 ## Epic Goal
 
@@ -52,8 +52,8 @@ This epic covers 12 route files with 27 total lint violations:
 
 ## Definition of Done
 
-- [ ] `npm run lint -w @jurnapod/api` passes with 0 errors
-- [ ] `npm run typecheck -w @jurnapod/api` passes
-- [ ] `npm run build -w @jurnapod/api` succeeds
-- [ ] All adapter shims deleted from `apps/api/src/lib/{domain}/`
-- [ ] All routes import from package libraries, not direct DB access
+- [x] `npm run lint -w @jurnapod/api` passes with 0 errors
+- [x] `npm run typecheck -w @jurnapod/api` passes
+- [x] `npm run build -w @jurnapod/api` succeeds
+- [x] All adapter shims deleted from `apps/api/src/lib/{domain}/`
+- [x] All routes import from package libraries, not direct DB access
