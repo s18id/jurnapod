@@ -12,12 +12,10 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { authenticateRequest, requireAccess, type AuthContext } from "@/lib/auth-guard.js";
 import { errorResponse } from "@/lib/response.js";
-import { getDb } from "@/lib/db.js";
+import { getPeriodTransitionAuditService } from "@/lib/audit.js";
 import {
-  PeriodTransitionAuditService,
   type PeriodTransitionAuditQuery
 } from "@jurnapod/modules-platform/audit/period-transition";
-import { AuditService } from "@jurnapod/modules-platform";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -125,10 +123,7 @@ auditRoutes.get("/period-transitions", async (c) => {
       offset: queryParams.offset ?? 0,
     };
 
-    const db = getDb();
-    const auditService = new AuditService(db);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const periodTransitionService = new PeriodTransitionAuditService(db, auditService as any);
+    const periodTransitionService = getPeriodTransitionAuditService();
 
     const result = await periodTransitionService.queryAudits(query);
 
@@ -174,10 +169,7 @@ auditRoutes.get("/period-transitions/:id", async (c) => {
   }
 
   try {
-    const { getDb } = await import("@/lib/db.js");
-    const { AuditService } = await import("@jurnapod/modules-platform");
-    const auditService = new AuditService(getDb() as any);
-    const periodTransitionService = new PeriodTransitionAuditService(getDb() as any, auditService as any);
+    const periodTransitionService = getPeriodTransitionAuditService();
 
     const record = await periodTransitionService.getAuditById(companyId, auditId);
 

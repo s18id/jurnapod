@@ -20,28 +20,27 @@ import {
   NumericIdSchema
 } from "@jurnapod/shared";
 import {
-  createInvoiceService,
+  createInvoiceService as getInvoiceService,
   type InvoiceService,
   DatabaseConflictError,
   DatabaseForbiddenError,
   DatabaseReferenceError,
   InvoiceStatusError
 } from "@jurnapod/modules-sales";
-import { CompanyService } from "@jurnapod/modules-platform";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { requireAccess } from "@/lib/auth-guard";
-import { getDb } from "@/lib/db";
 import { errorResponse, successResponse } from "@/lib/response";
 import type { AuthContext } from "@/lib/auth-guard";
 import { createApiSalesDb } from "@/lib/modules-sales/sales-db";
 import { getAccessScopeChecker } from "@/lib/modules-sales/access-scope-checker";
+import { getCompanyService } from "@/lib/companies";
 
 const invoiceRoutes = new Hono();
 
 // Create invoice service instance using the adapter layer
 const db = createApiSalesDb();
 const accessScopeChecker = getAccessScopeChecker();
-const invoiceService: InvoiceService = createInvoiceService({
+const invoiceService: InvoiceService = getInvoiceService({
   db,
   accessScopeChecker
 });
@@ -50,7 +49,7 @@ const numberingTemplateConflictMessage =
   "No numbering template configured. Please configure document numbering in settings.";
 
 // Company service for fetching company details (e.g., timezone)
-const companyService = new CompanyService(getDb());
+const companyService = getCompanyService();
 
 // Helper to parse outlet_id from request body for auth guard
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -300,6 +299,23 @@ invoiceRoutes.patch("/:id", async (c) => {
     // For now, use the same schema as create (simplified)
     // TODO: Create proper update schema
     const input = SalesInvoiceUpdateRequestSchema.parse(payload);
+
+    // Validate user can access the existing invoice outlet before allowing update
+    const existingInvoice = await invoiceService.getInvoice(auth.companyId, invoiceId, {
+      userId: auth.userId
+    });
+    if (!existingInvoice) {
+      return errorResponse("NOT_FOUND", "Invoice not found", 404);
+    }
+
+    const hasExistingOutletAccess = await userHasOutletAccess(
+      auth.userId,
+      auth.companyId,
+      existingInvoice.outlet_id
+    );
+    if (!hasExistingOutletAccess) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
 
     // Validate outlet access if outlet_id is being changed
     if (input.outlet_id !== undefined) {

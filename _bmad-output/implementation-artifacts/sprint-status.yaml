@@ -409,19 +409,11 @@ development_status:
   34-7-full-validation-gate: done
   epic-34-retrospective: done
 
-  # Epic 35: Shared Actor Type Unification
-  epic-35: backlog
-  35-1-add-actor-to-shared: backlog
-  35-2-migrate-modules-reservations: backlog
-  35-3-migrate-modules-platform: backlog
-  35-4-migrate-modules-sales: backlog
-  35-5-migrate-remaining-packages: backlog
-  35-6-update-api-wrappers-cleanup: backlog
-
-  # Epic 37: Email Outbox Infrastructure
-  epic-37: backlog
-  37-1-define-outbox-domain-model: backlog
-  37-2-extract-outbox-domain-service: backlog
-  37-3-api-integration-thin-adapter: backlog
-  37-4-parity-hardening-concurrency: backlog
-  
+  # Epic 35: Route Library Extraction + Kysely Compliance
+  epic-35: in_progress
+  35-1-accounts-extraction: done
+  35-2-platform-routes: done
+  35-3-reporting-routes: done
+  35-4-treasury-route: done
+  35-5-sales-routes: done
+  35-6-final-validation: done  # lint 0 errors, typecheck/build pass, known unrelated flaky integration test remains

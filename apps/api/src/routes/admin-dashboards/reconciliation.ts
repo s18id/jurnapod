@@ -11,9 +11,9 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { errorResponse } from "../../lib/response.js";
 import {
-  ReconciliationDashboardService,
   type ReconciliationDashboardQuery,
 } from "@jurnapod/modules-accounting/reconciliation";
+import { getReconciliationDashboardService } from "../../lib/admin-dashboards.js";
 
 // Enum schemas for query parameter validation
 const AccountTypeFilterSchema = z.enum(["CASH", "INVENTORY", "RECEIVABLES", "PAYABLES"]);
@@ -121,8 +121,7 @@ reconciliationRoutes.get("/", async (c) => {
     };
 
     // Get dashboard data
-    const { getDb } = await import("../../lib/db.js");
-    const dashboardService = new ReconciliationDashboardService(getDb() as any);
+    const dashboardService = getReconciliationDashboardService();
     
     const dashboard = await dashboardService.getDashboard(query);
 
@@ -173,8 +172,7 @@ reconciliationRoutes.get("/:accountId/drilldown", async (c) => {
     const periodId = url.searchParams.get("period_id") ? Number(url.searchParams.get("period_id")) : undefined;
 
     // Get drilldown data
-    const { getDb } = await import("../../lib/db.js");
-    const dashboardService = new ReconciliationDashboardService(getDb() as any);
+    const dashboardService = getReconciliationDashboardService();
     
     const drilldown = await dashboardService.getVarianceDrilldown(
       companyId,

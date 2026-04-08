@@ -22,12 +22,11 @@ import {
   type AuthContext
 } from "../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../lib/response.js";
-import { getDb } from "../lib/db.js";
 import {
-  CompanyService,
   CompanyNotFoundError,
   CompanyCodeExistsError
 } from "@jurnapod/modules-platform";
+import { getCompanyService } from "../lib/companies.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -97,7 +96,7 @@ companyRoutes.use("/*", async (c, next) => {
 });
 
 // Service instance
-const companyService = new CompanyService(getDb());
+const companyService = getCompanyService();
 
 // GET /companies - List companies
 // - SUPER_ADMIN: can see all companies

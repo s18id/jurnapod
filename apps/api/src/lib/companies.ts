@@ -3,7 +3,7 @@
 
 import { getDb } from "./db";
 import type { KyselySchema } from "@jurnapod/db";
-import { AuditService } from "@jurnapod/modules-platform";
+import { AuditService, CompanyService } from "@jurnapod/modules-platform";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 import { sql } from "kysely";
 
@@ -1124,4 +1124,11 @@ export async function reactivateCompany(params: {
 
     return normalizeCompanyRow(rows);
   });
+}
+
+/**
+ * Factory wrapper so routes don't instantiate CompanyService directly.
+ */
+export function getCompanyService(): CompanyService {
+  return new CompanyService(getDb());
 }

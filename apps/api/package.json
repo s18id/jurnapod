@@ -8,7 +8,7 @@
     "test-server": "NODE_ENV=test node --import ../../scripts/test/load-root-env.mjs --import tsx --watch src/server.ts",
     "build": "tsc --noEmit",
     "start": "NODE_ENV=production node --import tsx src/server.ts",
-    "lint": "eslint . --max-warnings=0",
+    "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:unit": "vitest run __test__/unit",

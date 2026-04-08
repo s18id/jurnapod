@@ -11,10 +11,10 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { errorResponse } from "../../lib/response.js";
 import {
-  TrialBalanceService,
   type TrialBalanceQuery,
 } from "@jurnapod/modules-accounting/trial-balance";
 import { authenticateRequest, requireAccess, type AuthContext } from "../../lib/auth-guard.js";
+import { getTrialBalanceService } from "../../lib/admin-dashboards.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -100,8 +100,7 @@ trialBalanceRoutes.get("/", async (c) => {
     };
 
     // Get trial balance data
-    const { getDb } = await import("../../lib/db.js");
-    const trialBalanceService = new TrialBalanceService(getDb() as any);
+    const trialBalanceService = getTrialBalanceService();
 
     const trialBalance = await trialBalanceService.getTrialBalance(query);
 
@@ -157,8 +156,7 @@ trialBalanceRoutes.get("/validate", async (c) => {
     };
 
     // Run pre-close validation
-    const { getDb } = await import("../../lib/db.js");
-    const trialBalanceService = new TrialBalanceService(getDb() as any);
+    const trialBalanceService = getTrialBalanceService();
 
     const validationResult = await trialBalanceService.runPreCloseValidation(query);
 

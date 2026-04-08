@@ -29,7 +29,7 @@ import {
   CashBankForbiddenError,
   CashBankStatusError
 } from "@jurnapod/modules-treasury";
-import { createCashBankService } from "../lib/treasury-adapter.js";
+import { createCashBankService as getCashBankService } from "../lib/treasury-adapter.js";
 import { FiscalYearNotOpenError } from "../lib/fiscal-years.js";
 
 declare module "hono" {
@@ -78,7 +78,7 @@ cashBankTransactionsRoutes.use("/*", async (c, next) => {
 cashBankTransactionsRoutes.get("/", async (c) => {
   try {
     const auth = c.get("auth");
-    const service = createCashBankService();
+    const service = getCashBankService();
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
@@ -117,7 +117,7 @@ cashBankTransactionsRoutes.get("/", async (c) => {
 cashBankTransactionsRoutes.post("/", async (c) => {
   try {
     const auth = c.get("auth");
-    const service = createCashBankService();
+    const service = getCashBankService();
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
@@ -178,7 +178,7 @@ cashBankTransactionsRoutes.post("/", async (c) => {
 cashBankTransactionsRoutes.post("/:id/post", async (c) => {
   try {
     const auth = c.get("auth");
-    const service = createCashBankService();
+    const service = getCashBankService();
     
     // Check access permission - posting requires create permission (not update)
     const accessResult = await requireAccess({
@@ -225,7 +225,7 @@ cashBankTransactionsRoutes.post("/:id/post", async (c) => {
 cashBankTransactionsRoutes.post("/:id/void", async (c) => {
   try {
     const auth = c.get("auth");
-    const service = createCashBankService();
+    const service = getCashBankService();
     
     // Check access permission - voiding requires create permission (not delete)
     const accessResult = await requireAccess({

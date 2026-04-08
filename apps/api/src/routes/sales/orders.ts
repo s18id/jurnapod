@@ -18,26 +18,26 @@ import {
   SalesOrderListQuerySchema
 } from "@jurnapod/shared";
 import {
-  createOrderService,
+  createOrderService as getOrderService,
   type OrderService,
   DatabaseConflictError,
   DatabaseForbiddenError,
   DatabaseReferenceError
 } from "@jurnapod/modules-sales";
-import { CompanyService } from "@jurnapod/modules-platform";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { requireAccess } from "@/lib/auth-guard";
 import { errorResponse, successResponse } from "@/lib/response";
 import type { AuthContext } from "@/lib/auth-guard";
 import { createApiSalesDb } from "@/lib/modules-sales/sales-db";
 import { getAccessScopeChecker } from "@/lib/modules-sales/access-scope-checker";
+import { getCompanyService } from "@/lib/companies";
 
 const orderRoutes = new Hono();
 
 // Create order service instance using the adapter layer
 const db = createApiSalesDb();
 const accessScopeChecker = getAccessScopeChecker();
-const orderService: OrderService = createOrderService({
+const orderService: OrderService = getOrderService({
   db,
   accessScopeChecker
 });
@@ -46,7 +46,7 @@ const numberingTemplateConflictMessage =
   "No numbering template configured. Please configure document numbering in settings.";
 
 // Company service for fetching company details (e.g., timezone)
-const companyService = new CompanyService(getDb());
+const companyService = getCompanyService();
 
 // ============================================================================
 // GET /sales/orders - List orders with filtering
@@ -56,6 +56,15 @@ orderRoutes.get("/", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
+    const accessResult = await requireAccess({
+      module: "sales",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
     const url = new URL(c.req.raw.url);
     const parsed = SalesOrderListQuerySchema.parse({
       outlet_id: url.searchParams.get("outlet_id") ?? undefined,
@@ -113,6 +122,15 @@ orderRoutes.post("/", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
+    const accessResult = await requireAccess({
+      module: "sales",
+      permission: "create"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
     let payload: unknown;
     try {
       payload = await c.req.json();

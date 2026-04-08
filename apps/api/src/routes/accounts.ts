@@ -53,6 +53,8 @@ import {
   listFiscalYears,
   createFiscalYear,
   getFiscalYearById,
+  initiateFiscalYearClose,
+  approveFiscalYearClose,
   FiscalYearNotFoundError,
   FiscalYearCodeExistsError,
   FiscalYearDateRangeError,
@@ -63,7 +65,6 @@ import {
   FiscalYearAlreadyClosedError,
   FiscalYearClosePreconditionError,
   RetainedEarningsAccountNotFoundError,
-  closeFiscalYear,
   FISCAL_YEAR_CLOSE_STATUS,
 } from "../lib/fiscal-years.js";
 import {
@@ -929,6 +930,11 @@ accountRoutes.post("/fiscal-years", async (c) => {
       status: z.enum(["OPEN", "CLOSED"]).optional().default("OPEN")
     }).parse(payload);
 
+    // Tenant isolation: users can only create fiscal years for their own company
+    if (input.company_id !== auth.companyId) {
+      return errorResponse("FORBIDDEN", "Cannot create fiscal year for another company", 403);
+    }
+
     const fiscalYear = await createFiscalYear({
       company_id: input.company_id,
       code: input.code,
@@ -1121,14 +1127,8 @@ accountRoutes.post("/fiscal-years/:id/close", async (c) => {
     // This will throw if preconditions aren't met (e.g., no retained earnings account)
     const preview = await getFiscalYearClosePreview(auth.companyId, fiscalYearId);
 
-    // Import closeFiscalYear to create the close request
-    const { getDb } = await import("../lib/db.js");
-    const db = getDb();
-
-    // Call closeFiscalYear to create the request (without actually closing yet)
-    // The idempotency mechanism will handle if this was already called
-    const closeResult = await closeFiscalYear(
-      db,
+    // Initiate close - creates the idempotency record without actually closing
+    const closeResult = await initiateFiscalYearClose(
       fiscalYearId,
       closeRequestId,
       {
@@ -1209,108 +1209,25 @@ accountRoutes.post("/fiscal-years/:id/close/approve", async (c) => {
 
     const fiscalYearId = NumericIdSchema.parse(c.req.param("id"));
 
-    // Parse optional request body
+    // close_request_id is required to preserve idempotency between initiate and approve steps
     const payload = await c.req.json().catch(() => ({}));
-    const closeRequestId = (payload as { close_request_id?: string }).close_request_id 
-      ?? `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+    const approvePayload = z.object({
+      close_request_id: z.string().min(1)
+    }).parse(payload);
+    const closeRequestId = approvePayload.close_request_id;
 
-    // Import the journals service to post the closing entries
-    const { JournalsService, checkGlImbalanceByBatchId } = await import("@jurnapod/modules-accounting");
-    const { getDb } = await import("../lib/db.js");
-    const db = getDb();
-    const journalsService = new JournalsService(db);
-
-    // Wrap ALL operations in a single transaction for atomicity
-    // If any step fails, everything rolls back - no partial state
-    const result = await db.transaction().execute(async (trx) => {
-      // 1. Get preview within transaction for consistent reads
-      const preview = await getFiscalYearClosePreview(auth.companyId, fiscalYearId, trx);
-
-      const postedBatchIds: number[] = [];
-      let hasImbalance = false;
-      let imbalanceDetails: { batchId: number; imbalance: number } | null = null;
-
-      if (preview.closingEntries.length > 0) {
-        // Create a single balanced journal entry for all closing entries
-        const lines = preview.closingEntries.map(entry => ({
-          account_id: entry.accountId,
-          debit: entry.debit,
-          credit: entry.credit,
-          description: entry.description
-        }));
-
-        // Verify the entries balance using fixed-point precision (DECIMAL(19,4)).
-        // Avoid floating-point drift for monetary totals.
-        const MONEY_SCALE = 10_000;
-        const toScaled = (value: number): number => Math.round(value * MONEY_SCALE);
-        const totalDebitScaled = lines.reduce((sum, l) => sum + toScaled(l.debit), 0);
-        const totalCreditScaled = lines.reduce((sum, l) => sum + toScaled(l.credit), 0);
-
-        if (totalDebitScaled !== totalCreditScaled) {
-          const totalDebit = totalDebitScaled / MONEY_SCALE;
-          const totalCredit = totalCreditScaled / MONEY_SCALE;
-          throw new Error(
-            `ENTRIES_NOT_BALANCED:Closing entries are not balanced: debit=${totalDebit}, credit=${totalCredit}`
-          );
-        }
-
-        // 2. Post journal entries within transaction
-        const journalResult = await journalsService.createManualEntry(
-          {
-            company_id: auth.companyId,
-            entry_date: preview.entryDate,
-            description: preview.description,
-            lines
-          },
-          auth.userId,
-          trx  // Pass transaction for atomicity
-        );
-        postedBatchIds.push(journalResult.id);
-
-        // Check for GL imbalance within transaction - happens AFTER posting but BEFORE commit.
-        // This check is for visibility/monitoring purposes: if imbalance detected, entries are
-        // committed but the imbalance is logged. Actual posting validation happens in createManualEntry
-        // which would have already rejected unbalanced entries. This late check catches any edge cases.
-        const imbalanceResult = await checkGlImbalanceByBatchId(trx, journalResult.id, auth.companyId);
-        if (imbalanceResult) {
-          hasImbalance = true;
-          imbalanceDetails = {
-            batchId: imbalanceResult.journalBatchId,
-            imbalance: imbalanceResult.imbalance
-          };
-        }
+    // Delegate to library function - handles all DB orchestration internally
+    const result = await approveFiscalYearClose(
+      auth.companyId,
+      fiscalYearId,
+      closeRequestId,
+      {
+        companyId: auth.companyId,
+        requestedByUserId: auth.userId ?? 0,
+        requestedAtEpochMs: Date.now(),
+        reason: "Fiscal year close approved"
       }
-
-      // 3. Update fiscal year status within same transaction
-      // This ensures atomicity - either both journal entries AND fiscal year close succeed, or both fail
-      const closeResult = await closeFiscalYear(
-        db,
-        fiscalYearId,
-        closeRequestId,
-        {
-          companyId: auth.companyId,
-          requestedByUserId: auth.userId ?? 0,
-          requestedAtEpochMs: Date.now(),
-          reason: `Fiscal year close approved. Posted ${postedBatchIds.length} closing entry batch(es).`
-        },
-        trx  // Pass transaction for atomicity
-      );
-
-      return {
-        success: closeResult.success,
-        fiscalYearId: closeResult.fiscalYearId,
-        closeRequestId: closeResult.closeRequestId,
-        status: closeResult.status,
-        previousStatus: closeResult.previousStatus,
-        newStatus: closeResult.newStatus,
-        postedBatchIds,
-        netIncome: preview.netIncome,
-        totalIncome: preview.totalIncome,
-        totalExpenses: preview.totalExpenses,
-        hasImbalance,
-        imbalanceDetails: imbalanceDetails ?? undefined
-      };
-    });
+    );
 
     return successResponse(result);
   } catch (error) {

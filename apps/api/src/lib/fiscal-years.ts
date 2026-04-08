@@ -31,6 +31,11 @@ import {
   type ClosePreviewResult,
   type FiscalYearStatusResult,
 } from "@jurnapod/modules-accounting/fiscal-year";
+import {
+  JournalsService,
+  checkGlImbalanceByBatchId,
+  type JournalsDbClient,
+} from "@jurnapod/modules-accounting";
 
 // Re-export types from package
 export {
@@ -163,6 +168,22 @@ export async function closeFiscalYear(
   return service.closeFiscalYear(fiscalYearId, closeRequestId, context, trx as FiscalYearDbClient);
 }
 
+/**
+ * Initiate fiscal year close (first step before approve).
+ * 
+ * This creates the idempotency record for the close request.
+ * The actual close (status update to CLOSED) happens in approveFiscalYearClose.
+ */
+export async function initiateFiscalYearClose(
+  fiscalYearId: number,
+  closeRequestId: string,
+  context: CloseFiscalYearContext
+): Promise<CloseFiscalYearResult> {
+  const db = getDb();
+  const service = new FiscalYearService(db as FiscalYearDbClient, createSettingsPort(db));
+  return service.closeFiscalYear(fiscalYearId, closeRequestId, context);
+}
+
 export async function getFiscalYearClosePreview(
   companyId: number,
   fiscalYearId: number,
@@ -178,4 +199,140 @@ export async function getFiscalYearStatus(
   fiscalYearId: number
 ): Promise<FiscalYearStatusResult> {
   return createFiscalYearService().getFiscalYearStatus(companyId, fiscalYearId);
+}
+
+// =============================================================================
+// Fiscal Year Close Approve Flow
+// =============================================================================
+
+/**
+ * Result of the fiscal year close approve operation.
+ */
+export interface ApproveFiscalYearCloseResult {
+  success: boolean;
+  fiscalYearId: number;
+  closeRequestId: string;
+  status: string;
+  previousStatus: string;
+  newStatus: string;
+  postedBatchIds: number[];
+  netIncome: number;
+  totalIncome: number;
+  totalExpenses: number;
+  hasImbalance: boolean;
+  imbalanceDetails?: {
+    batchId: number;
+    imbalance: number;
+  };
+}
+
+/**
+ * Approve and execute fiscal year close with journal posting.
+ * 
+ * This function encapsulates the full close/approve flow:
+ * 1. Get close preview (P&L balances, retained earnings account)
+ * 2. Post closing journal entries within a transaction
+ * 3. Check for GL imbalance
+ * 4. Update fiscal year status to CLOSED
+ * 
+ * All operations are atomic - either all succeed or all rollback.
+ */
+export async function approveFiscalYearClose(
+  companyId: number,
+  fiscalYearId: number,
+  closeRequestId: string,
+  context: CloseFiscalYearContext
+): Promise<ApproveFiscalYearCloseResult> {
+  const db = getDb();
+
+  return await db.transaction().execute(async (tx) => {
+    const journalsService = new JournalsService(tx as JournalsDbClient);
+
+    // 1. Get preview within transaction for consistent reads
+    const preview = await getFiscalYearClosePreview(companyId, fiscalYearId, tx as KyselySchema);
+
+    const postedBatchIds: number[] = [];
+    let hasImbalance = false;
+    let imbalanceDetails: { batchId: number; imbalance: number } | null = null;
+
+    if (preview.closingEntries.length > 0) {
+      // Create a single balanced journal entry for all closing entries
+      const lines = preview.closingEntries.map(entry => ({
+        account_id: entry.accountId,
+        debit: entry.debit,
+        credit: entry.credit,
+        description: entry.description
+      }));
+
+      // Verify the entries balance using fixed-point precision (DECIMAL(19,4)).
+      // Avoid floating-point drift for monetary totals.
+      const MONEY_SCALE = 10_000;
+      const toScaled = (value: number): number => Math.round(value * MONEY_SCALE);
+      const totalDebitScaled = lines.reduce((sum, l) => sum + toScaled(l.debit), 0);
+      const totalCreditScaled = lines.reduce((sum, l) => sum + toScaled(l.credit), 0);
+
+      if (totalDebitScaled !== totalCreditScaled) {
+        const totalDebit = totalDebitScaled / MONEY_SCALE;
+        const totalCredit = totalCreditScaled / MONEY_SCALE;
+        throw new Error(
+          `ENTRIES_NOT_BALANCED:Closing entries are not balanced: debit=${totalDebit}, credit=${totalCredit}`
+        );
+      }
+
+      // 2. Post journal entries within transaction
+      const journalResult = await journalsService.createManualEntry(
+        {
+          company_id: companyId,
+          entry_date: preview.entryDate,
+          description: preview.description,
+          lines
+        },
+        context.requestedByUserId,
+        tx as KyselySchema
+      );
+      postedBatchIds.push(journalResult.id);
+
+      // Check for GL imbalance within transaction - happens AFTER posting but BEFORE commit.
+      const imbalanceResult = await checkGlImbalanceByBatchId(tx as KyselySchema, journalResult.id, companyId);
+      if (imbalanceResult) {
+        hasImbalance = true;
+        imbalanceDetails = {
+          batchId: imbalanceResult.journalBatchId,
+          imbalance: imbalanceResult.imbalance
+        };
+        throw new Error(
+          `ENTRIES_NOT_BALANCED:GL imbalance detected after posting (batch=${imbalanceResult.journalBatchId}, imbalance=${imbalanceResult.imbalance})`
+        );
+      }
+    }
+
+    // 3. Update fiscal year status within same transaction
+    const closeResult = await closeFiscalYear(
+      tx as KyselySchema,
+      fiscalYearId,
+      closeRequestId,
+      {
+        companyId: context.companyId,
+        requestedByUserId: context.requestedByUserId,
+        requestedAtEpochMs: context.requestedAtEpochMs,
+        reason: `Fiscal year close approved. Posted ${postedBatchIds.length} closing entry batch(es).`
+      },
+      tx as KyselySchema
+    );
+
+    return {
+      success: closeResult.success,
+      fiscalYearId: closeResult.fiscalYearId,
+      closeRequestId: closeResult.closeRequestId,
+      status: closeResult.status,
+      previousStatus: closeResult.previousStatus,
+      newStatus: closeResult.newStatus,
+      postedBatchIds,
+      netIncome: preview.netIncome,
+      totalIncome: preview.totalIncome,
+      totalExpenses: preview.totalExpenses,
+      hasImbalance,
+      imbalanceDetails: imbalanceDetails ?? undefined
+    };
+  });
 }

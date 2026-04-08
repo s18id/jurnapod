@@ -63,6 +63,8 @@ adminRunbookRoutes.get("/runbook.md", async (c) => {
   try {
     void c.get("auth"); // Validate auth is set
 
+    // NOTE: Static markdown runbook content intentionally includes SQL snippets for operations docs.
+    // eslint-disable-next-line jurnapod-test-rules/no-route-business-logic
     const markdown = `# Jurnapod Operations Runbook
 
 This runbook contains response procedures for common alerts and operational issues.

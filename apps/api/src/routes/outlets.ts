@@ -380,7 +380,7 @@ outletsRoutes.delete("/:id", async (c) => {
     if (companyIdParam !== null) {
       const requestedCompanyId = Number(companyIdParam);
       if (requestedCompanyId !== auth.companyId) {
-        return errorResponse("INVALID_REQUEST", "Cannot delete outlets from another company", 400);
+        return errorResponse("INVALID_REQUEST", "Cannot delete outlets for another company", 400);
       }
     }
 

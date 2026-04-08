@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { AuditService, type AuditDbClient } from "@jurnapod/modules-platform";
+import { PeriodTransitionAuditService } from "@jurnapod/modules-platform/audit/period-transition";
 import { getDb } from "./db";
 
 /**
@@ -23,4 +24,19 @@ export function getAuditService(): AuditService {
     auditServiceInstance = createAuditService();
   }
   return auditServiceInstance;
+}
+
+let periodTransitionAuditServiceInstance: PeriodTransitionAuditService | null = null;
+
+/**
+ * Get singleton PeriodTransitionAuditService instance.
+ */
+export function getPeriodTransitionAuditService(): PeriodTransitionAuditService {
+  if (!periodTransitionAuditServiceInstance) {
+    const db = getDb();
+    const auditService = getAuditService();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    periodTransitionAuditServiceInstance = new PeriodTransitionAuditService(db, auditService as any);
+  }
+  return periodTransitionAuditServiceInstance;
 }

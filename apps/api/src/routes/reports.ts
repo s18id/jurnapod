@@ -48,6 +48,7 @@ import {
   emitReportSuccess,
   handleReportError,
 } from "@/lib/report-error-handler";
+import { getCompanyService } from "@/lib/companies";
 import type { AuthContext } from "@/lib/auth-guard";
 import type { ReportType } from "@/lib/report-telemetry";
 
@@ -587,9 +588,7 @@ reportRoutes.get("/receivables-ageing", async (c) => {
     }
 
     // Timezone resolution
-    const { CompanyService } = await import("@jurnapod/modules-platform");
-    const { getDb } = await import("@/lib/db");
-    const companyService = new CompanyService(getDb());
+    const companyService = getCompanyService();
     const company = await companyService.getCompany({ companyId: auth.companyId });
     const timezone = company.timezone ?? 'UTC';
 
