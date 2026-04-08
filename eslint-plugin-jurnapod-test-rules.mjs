@@ -148,6 +148,54 @@ const noRawSqlInsertItemsRule = {
 };
 
 /**
+ * Check if a string looks like a raw SQL statement.
+ * Uses SQL-shape regex to avoid false positives from plain English phrases.
+ *
+ * Flags actual SQL statements:
+ *   SELECT ... FROM ...
+ *   INSERT INTO ...
+ *   UPDATE ... SET ...
+ *   DELETE FROM ...
+ *
+ * Does NOT flag plain English containing SQL words:
+ *   "Resuming from batch"  (not a FROM clause)
+ *   "Item update failed"   (not an UPDATE statement)
+ *   "Select from options"  (not a SELECT query)
+ */
+function isRawSqlLiteral(text) {
+  // Guard against undefined/null input
+  if (!text || typeof text !== 'string') {
+    return false;
+  }
+  // Normalize: strip quotes/backticks, lowercase for keyword detection
+  const normalized = text.toLowerCase();
+
+  // Must contain SQL keyword near structural elements
+  // SELECT ... FROM / WHERE
+  if (/\bselect\b[\s\S]{1,200}\bfrom\b/.test(normalized) ||
+      /\bselect\b[\s\S]{1,50}\bwhere\b/.test(normalized)) {
+    return true;
+  }
+
+  // INSERT INTO ... VALUES / SELECT / ON DUPLICATE
+  if (/\binsert\b[\s\S]{1,200}\binto\b/.test(normalized)) {
+    return true;
+  }
+
+  // UPDATE ... SET ...
+  if (/\bupdate\b[\s\S]{1,200}\bset\b/.test(normalized)) {
+    return true;
+  }
+
+  // DELETE FROM ...
+  if (/\bdelete\b[\s\S]{1,200}\bfrom\b/.test(normalized)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * ESLint Rule: no-route-business-logic
  * 
  * Enforces that API routes remain thin (adapter-only, no business logic).
@@ -243,13 +291,9 @@ const noRouteBusinessLogicRule = {
       // Flag direct SQL strings
       TemplateLiteral(node) {
         const sourceCode = context.getSourceCode();
-        const text = sourceCode.getText(node).toLowerCase();
-        
-        // Check for SQL keywords (rough heuristic)
-        if ((text.includes('select ') || text.includes('insert ') || 
-             text.includes('update ') || text.includes('delete ') ||
-             text.includes(' from ') || text.includes(' where ')) &&
-            text.includes('`')) {
+        const text = sourceCode.getText(node);
+
+        if (isRawSqlLiteral(text)) {
           context.report({
             node,
             messageId: "noRawSql",
@@ -260,11 +304,7 @@ const noRouteBusinessLogicRule = {
       // Flag raw SQL in string literals
       Literal(node) {
         if (typeof node.value === 'string') {
-          const text = node.value.toLowerCase();
-          // Check for SQL patterns
-          if ((text.includes('select ') || text.includes('insert ') || 
-               text.includes('update ') || text.includes('delete ') ||
-               text.includes(' from ') || text.includes(' where '))) {
+          if (isRawSqlLiteral(node.value)) {
             context.report({
               node,
               messageId: "noRawSql",
