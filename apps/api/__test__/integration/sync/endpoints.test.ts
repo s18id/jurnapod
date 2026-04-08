@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
-import { cleanupTestFixtures, getTestAccessToken } from '../../fixtures';
+import { resetFixtureRegistry, getTestAccessToken } from '../../fixtures';
 
 let baseUrl: string;
 let accessToken: string;
@@ -23,7 +23,7 @@ describe('sync.endpoints', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    await cleanupTestFixtures();
+    resetFixtureRegistry();
     await closeTestDb();
   });
 

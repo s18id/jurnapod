@@ -6,19 +6,22 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
-import { cleanupTestFixtures, getTestAccessToken } from '../../fixtures';
+import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext } from '../../fixtures';
 
 let baseUrl: string;
 let accessToken: string;
+let outletId: number;
 
 describe('sync.push', { timeout: 30000 }, () => {
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
+    const syncContext = await getSeedSyncContext();
+    outletId = syncContext.outletId;
   });
 
   afterAll(async () => {
-    await cleanupTestFixtures();
+    resetFixtureRegistry();
     await closeTestDb();
   });
 
@@ -40,7 +43,7 @@ describe('sync.push', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        outlet_id: 1,
+        outlet_id: outletId,
         transactions: []
       })
     });
