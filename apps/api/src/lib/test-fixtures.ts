@@ -9,19 +9,58 @@
  * - Self-contained and order-independent
  * - Idempotent (can run multiple times safely)
  * - Support both success and failure cases
- * - Clean up after themselves
+ * - Clean up after themselves (but see cleanup policy below)
  * 
- * Usage:
+ * =============================================================================
+ * HYBRID CLEANUP POLICY (Default: Option 1 - Unique-per-test data)
+ * =============================================================================
+ * 
+ * Option 1 (DEFAULT): Unique-per-test data, no destructive cleanup
+ * ---------------------------------------------------------------
+ * Tests create unique data per run using timestamp-based codes.
+ * Cleanup is handled by resetting the registry without DELETING records.
+ * This allows data to cascade naturally and avoids FK constraint issues.
+ * 
  * ```typescript
- * import { createTestCompany, createTestOutlet, cleanupTestFixtures } from "@/lib/test-fixtures";
+ * import { createTestCompany, resetFixtureRegistry } from "@/lib/test-fixtures";
  * 
  * test("my test", async () => {
  *   const company = await createTestCompany();
  *   const outlet = await createTestOutlet(company.id);
- *   // ... test code
- *   await cleanupTestFixtures();
+ *   // ... test code (records remain but are not tracked)
+ * });
+ * 
+ * afterAll(async () => {
+ *   resetFixtureRegistry();  // Option 1: Just reset registry (no deletes)
+ *   await closeTestDb();
  * });
  * ```
+ * 
+ * Option 2 (OPT-IN): Strict scoped cleanup with destructive deletes
+ * ------------------------------------------------------------------
+ * Use when tests must immediately free resources or prevent data reuse.
+ * Explicitly opt-in by calling cleanupTestFixtures() instead.
+ * 
+ * ```typescript
+ * import { createTestCompany, cleanupTestFixtures } from "@/lib/test-fixtures";
+ * 
+ * test("my test", async () => {
+ *   const company = await createTestCompany();
+ *   // ... test code
+ * });
+ * 
+ * afterAll(async () => {
+ *   await cleanupTestFixtures();  // Option 2: Explicitly delete records
+ *   await closeTestDb();
+ * });
+ * ```
+ * 
+ * =============================================================================
+ * When to use which:
+ * - Option 1 (default): Most integration tests, especially read-heavy or 
+ *   tests that don't modify shared state
+ * - Option 2: Tests that create heavy data, need immediate cleanup, or
+ *   must prevent data reuse across test files
  */
 
 import { getDb } from "./db";
@@ -30,6 +69,7 @@ import { createCompanyBasic, CompanyCodeExistsError } from "./companies";
 import { createOutletBasic, OutletCodeExistsError } from "./outlets";
 import { createUserBasic, UserEmailExistsError } from "./users";
 import { createItem } from "./items/index.js";
+import { itemPricesAdapter } from "./item-prices/adapter.js";
 import { DatabaseConflictError } from "./master-data-errors.js";
 import { createVariantAttribute } from "./item-variants";
 import { MODULE_PERMISSION_BITS, buildPermissionMask, type ModulePermission } from "@jurnapod/auth";
@@ -74,12 +114,27 @@ export type VariantFixture = {
   variant_name: string;
 };
 
+export type PriceFixture = {
+  id: number;
+  item_id: number;
+  outlet_id: number | null;
+  variant_id: number | null;
+  price: number;
+  is_active: boolean;
+};
+
 export type TestFixtures = {
   companies: CompanyFixture[];
   outlets: OutletFixture[];
   users: UserFixture[];
   items: ItemFixture[];
   variants: VariantFixture[];
+  prices: PriceFixture[];
+};
+
+type RegisteredCleanupTask = {
+  name: string;
+  fn: () => Promise<void> | void;
 };
 
 // ============================================================================
@@ -91,8 +146,24 @@ const createdFixtures: TestFixtures = {
   outlets: [],
   users: [],
   items: [],
-  variants: []
+  variants: [],
+  prices: []
 };
+
+const registeredCleanupTasks: RegisteredCleanupTask[] = [];
+
+/**
+ * Register additional cleanup work for test data not created via fixture helpers.
+ *
+ * Tasks run during cleanupTestFixtures() in reverse registration order (LIFO),
+ * before fixture-registry deletes.
+ */
+export function registerFixtureCleanup(
+  name: string,
+  fn: () => Promise<void> | void
+): void {
+  registeredCleanupTasks.push({ name, fn });
+}
 
 // ============================================================================
 // Company Fixtures
@@ -308,6 +379,20 @@ export async function createTestUser(
         return existing;
       }
     }
+    // Handle MySQL duplicate key error (e.g., concurrent fixture creation across test files)
+    const mysqlErr = error as { code?: string };
+    if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
+      const result = await sql`SELECT id, company_id, email, password_hash FROM users WHERE company_id = ${companyId} AND email = ${email.toLowerCase()} LIMIT 1`.execute(db);
+      if (result.rows.length > 0) {
+        const row = result.rows[0] as { id: number; company_id: number; email: string; password_hash: string | null };
+        return {
+          id: Number(row.id),
+          company_id: Number(row.company_id),
+          email: row.email,
+          password_hash: row.password_hash ?? undefined
+        };
+      }
+    }
     throw error;
   }
 }
@@ -435,6 +520,42 @@ export async function createTestVariant(
 }
 
 // ============================================================================
+// Price Fixtures
+// ============================================================================
+
+/**
+ * Create a test price using the canonical itemPriceService.
+ * Uses a bypass actor for test fixtures that need to create company defaults.
+ */
+export async function createTestPrice(
+  companyId: number,
+  itemId: number,
+  options?: Partial<{
+    outletId: number | null;
+    variantId: number | null;
+    price: number;
+    isActive: boolean;
+  }>
+): Promise<PriceFixture> {
+  /**
+   * Bypass actor for test fixtures.
+   * userId: 0 indicates system-level operation.
+   */
+  const bypassActor = { userId: 0, canManageCompanyDefaults: true };
+
+  const price = await itemPricesAdapter.createItemPrice(companyId, {
+    item_id: itemId,
+    outlet_id: options?.outletId ?? null,
+    variant_id: options?.variantId ?? null,
+    price: options?.price ?? 10000,
+    is_active: options?.isActive ?? true,
+  }, bypassActor);
+
+  createdFixtures.prices.push(price);
+  return price;
+}
+
+// ============================================================================
 // Cleanup
 // ============================================================================
 
@@ -451,6 +572,16 @@ export async function createTestVariant(
  */
 export async function cleanupTestFixtures(): Promise<void> {
   const db = getDb();
+
+  // 0. Run registered cleanup tasks first (for side-effects not tracked in fixture registry).
+  for (let i = registeredCleanupTasks.length - 1; i >= 0; i--) {
+    const task = registeredCleanupTasks[i];
+    try {
+      await task.fn();
+    } catch (error) {
+      console.warn(`Failed to run registered cleanup task '${task.name}':`, error);
+    }
+  }
   
   // Clean up in reverse dependency order
   // Note: MySQL FK constraints should handle most cascading deletes,
@@ -463,6 +594,15 @@ export async function cleanupTestFixtures(): Promise<void> {
       await sql`DELETE FROM item_variant_attributes WHERE item_id IN (SELECT id FROM items WHERE id = ${variant.item_id})`.execute(db);
     } catch (error) {
       console.warn(`Failed to cleanup variant ${variant.id}:`, error);
+    }
+  }
+  
+  // 1b. Prices (depend on items)
+  for (const price of createdFixtures.prices) {
+    try {
+      await sql`DELETE FROM item_prices WHERE id = ${price.id}`.execute(db);
+    } catch (error) {
+      console.warn(`Failed to cleanup price ${price.id}:`, error);
     }
   }
   
@@ -508,6 +648,7 @@ export async function cleanupTestFixtures(): Promise<void> {
   createdFixtures.users = [];
   createdFixtures.items = [];
   createdFixtures.variants = [];
+  registeredCleanupTasks.length = 0;
 }
 
 /**
@@ -520,6 +661,7 @@ export function resetFixtureRegistry(): void {
   createdFixtures.users = [];
   createdFixtures.items = [];
   createdFixtures.variants = [];
+  registeredCleanupTasks.length = 0;
 }
 
 // ============================================================================
@@ -694,6 +836,86 @@ export async function setupUserPermission(params: {
     : MODULE_PERMISSION_BITS[params.permission];
   
   await setModulePermission(params.companyId, roleId, params.module, mask);
+}
+
+export type SeedSyncContext = {
+  companyId: number;
+  outletId: number;
+  cashierUserId: number;
+};
+
+/**
+ * Resolve seeded sync context and reuse an existing cashier when available.
+ * Falls back to deterministic cashier creation per company when not found.
+ */
+export async function getSeedSyncContext(options?: {
+  companyCode?: string;
+  outletCode?: string;
+}): Promise<SeedSyncContext> {
+  const companyCode = options?.companyCode ?? process.env.JP_COMPANY_CODE;
+  const outletCode = options?.outletCode ?? process.env.JP_OUTLET_CODE ?? "MAIN";
+
+  if (!companyCode) {
+    throw new Error("JP_COMPANY_CODE must be set for sync integration tests");
+  }
+
+  const db = getDb();
+  const companyOutlet = await db
+    .selectFrom("companies as c")
+    .innerJoin("outlets as o", "o.company_id", "c.id")
+    .select(["c.id as company_id", "o.id as outlet_id"])
+    .where("c.code", "=", companyCode)
+    .where("o.code", "=", outletCode)
+    .executeTakeFirst();
+
+  if (!companyOutlet) {
+    throw new Error(
+      `Seed company/outlet not found for JP_COMPANY_CODE=${companyCode}, JP_OUTLET_CODE=${outletCode}`
+    );
+  }
+
+  const companyId = Number(companyOutlet.company_id);
+  const outletId = Number(companyOutlet.outlet_id);
+
+  const existingCashier = await db
+    .selectFrom("users as u")
+    .innerJoin("user_role_assignments as ura", "ura.user_id", "u.id")
+    .innerJoin("roles as r", "r.id", "ura.role_id")
+    .select("u.id as user_id")
+    .where("u.company_id", "=", companyId)
+    .where("u.is_active", "=", 1)
+    .where((eb) => eb.or([eb("r.code", "=", "CASHIER"), eb("r.name", "like", "%cashier%")]))
+    .orderBy("u.id", "asc")
+    .executeTakeFirst();
+
+  if (existingCashier) {
+    return {
+      companyId,
+      outletId,
+      cashierUserId: Number(existingCashier.user_id)
+    };
+  }
+
+  const cashier = await createTestUser(companyId, {
+    email: `sync-test-cashier+${companyId}@example.com`,
+    name: "Sync Test Cashier"
+  });
+
+  // Keep this deterministic sync cashier reusable across test files.
+  // It should not be removed by cleanupTestFixtures(), otherwise each file
+  // will recreate it and we lose cross-suite reuse.
+  createdFixtures.users = createdFixtures.users.filter((u) => u.id !== cashier.id);
+
+  // Only assign CASHIER role. Do not mutate module_roles here,
+  // because this helper is used broadly across integration tests.
+  const cashierRoleId = await getRoleIdByCode("CASHIER");
+  await assignUserGlobalRole(cashier.id, cashierRoleId);
+
+  return {
+    companyId,
+    outletId,
+    cashierUserId: cashier.id
+  };
 }
 
 // ============================================================================

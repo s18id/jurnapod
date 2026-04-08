@@ -85,6 +85,27 @@ afterAll(async () => { await closeTestDb(); });
 ```
 The server starts on first lock acquisition and stops when all locks are released.
 
+### Test Log Rule (MANDATORY)
+**Always run tests in the background with PID file tracking.** Never rely on terminal output alone.
+
+```bash
+# CORRECT: Background test with PID file
+nohup npm test -w @jurnapod/api > logs/test-results.log 2>&1 & echo $! > logs/test.pid
+# Wait for completion
+while kill -0 $(cat logs/test.pid) 2>/dev/null; do sleep 5; done
+# Read results
+cat logs/test-results.log | grep -E "^(FAIL|Test Files|Tests)"
+
+# WRONG: Foreground test (times out on long runs)
+npm test -w @jurnapod/api
+```
+
+**Workflow:**
+1. Run `nohup ... > logfile.log 2>&1 & echo $! > logs/test.pid`
+2. Poll with `kill -0 $(cat logs/test.pid)` until done
+3. Inspect log file — never rely on terminal output
+4. Keep log files out of git (they're in `.gitignore`)
+
 ### Database Testing Policy (MANDATORY)
 - **NEVER use mock DB for database-backed business logic tests.**
 - Any code path that reads/writes SQL tables (Kysely queries, transactions, posting logic, import validation, sync persistence, auth/role lookups, report queries) must be validated with a **real database**.

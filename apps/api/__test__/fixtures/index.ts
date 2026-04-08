@@ -4,29 +4,55 @@
 /**
  * Test Fixtures - Re-exports from lib/test-fixtures.ts
  * 
- * Use these for creating test data in integration tests.
- * All fixtures automatically register for cleanup.
+ * =============================================================================
+ * HYBRID CLEANUP POLICY (Default: Option 1 - Unique-per-test data)
+ * =============================================================================
  * 
- * Usage:
+ * Option 1 (DEFAULT): Unique-per-test data, no destructive cleanup
+ * Tests use timestamp-based unique codes. afterAll should call
+ * resetFixtureRegistry() to clear the registry without deleting records.
+ * 
  * ```typescript
  * import { 
  *   createTestCompany, 
  *   createTestOutlet, 
  *   createTestUser,
- *   cleanupTestFixtures 
+ *   resetFixtureRegistry 
  * } from './fixtures';
  * 
  * test('creates item', async () => {
  *   const company = await createTestCompany();
  *   const outlet = await createTestOutlet(company.id);
- *   const user = await createTestUser(company.id);
  *   // ... test code
  * });
  * 
  * afterAll(async () => {
- *   await cleanupTestFixtures();
+ *   resetFixtureRegistry();  // Default: reset registry without deleting
+ *   await closeTestDb();
  * });
  * ```
+ * 
+ * Option 2 (OPT-IN): Strict scoped cleanup with destructive deletes
+ * Use cleanupTestFixtures() instead when immediate cleanup is required.
+ * 
+ * ```typescript
+ * import { 
+ *   createTestCompany, 
+ *   cleanupTestFixtures 
+ * } from './fixtures';
+ * 
+ * afterAll(async () => {
+ *   await cleanupTestFixtures();  // Opt-in: explicitly delete records
+ *   await closeTestDb();
+ * });
+ * ```
+ * 
+ * =============================================================================
+ * DEFAULT POLICY RATIONALE:
+ * - Unique-per-test data is the safest default (no data collisions)
+ * - resetFixtureRegistry() is faster (no DELETE queries)
+ * - Cascade deletes handle FK constraints naturally
+ * - cleanupTestFixtures() remains available for tests that need it
  */
 
 // Re-export all fixtures from lib/test-fixtures
@@ -38,8 +64,10 @@ export {
   createTestUser,
   createTestItem,
   createTestVariant,
+  createTestPrice,
   createTestFixtureSet,
   createFullTestFixtureSet,
+  registerFixtureCleanup,
   cleanupTestFixtures,
   resetFixtureRegistry,
   getRoleIdByCode,
@@ -47,10 +75,13 @@ export {
   assignUserOutletRole,
   setModulePermission,
   setupUserPermission,
+  getSeedSyncContext,
   getTestAccessToken,
   type CompanyFixture,
   type OutletFixture,
   type UserFixture,
   type ItemFixture,
   type VariantFixture,
+  type PriceFixture,
+  type SeedSyncContext,
 } from '../../src/lib/test-fixtures';

@@ -14,7 +14,7 @@
  * Uses JP_TEST_BASE_URL env var if set, otherwise uses default test port
  */
 export function getTestBaseUrl(): string {
-  return process.env.JP_TEST_BASE_URL ?? 'http://127.0.0.1:3003';
+  return process.env.JP_TEST_BASE_URL ?? 'http://127.0.0.1:3001';
 }
 
 /**
