@@ -9,7 +9,6 @@
 
 import { getDb } from "@/lib/db";
 import { itemPricesAdapter } from "@/lib/item-prices/adapter.js";
-import { withTransactionRetry } from "@jurnapod/db";
 
 // ============================================================================
 // Types

@@ -6,7 +6,7 @@ import { toRfc3339Required } from "@jurnapod/shared";
 import { getDb, type KyselySchema } from "../db.js";
 import { DatabaseConflictError, DatabaseReferenceError } from "../master-data-errors.js";
 import { isMysqlError, mysqlDuplicateErrorCode } from "../shared/master-data-utils.js";
-import { withTransactionRetry, withTransaction, type Transaction } from "@jurnapod/db";
+import { withTransactionRetry, type Transaction } from "@jurnapod/db";
 
 type MutationAuditActor = {
   userId: number;
