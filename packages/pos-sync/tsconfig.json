@@ -1,19 +1,16 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "composite": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true
+    "rootDir": "src",
+    "outDir": "dist",
+    "composite": true
   },
   "include": ["src/**/*"],
   "references": [
-    {"path": "../shared"},
-    {"path": "../sync-core"},
-    {"path": "../modules/inventory-costing"},
-    {"path": "../modules/inventory"},
-    {"path": "../modules/accounting"}
+    { "path": "../shared" },
+    { "path": "../sync-core" },
+    { "path": "../modules/inventory-costing" },
+    { "path": "../modules/inventory" },
+    { "path": "../modules/accounting" }
   ]
 }

@@ -29,6 +29,7 @@ export type VariantSaleInsertInput = {
   outlet_id: number;
   variant_id: number;
   item_id?: number;
+  client_tx_id: string;
   quantity: number;
   unit_price: number;
   total_price: number;
@@ -36,21 +37,16 @@ export type VariantSaleInsertInput = {
 };
 
 export type VariantSaleCheckItem = {
-  variant_id: number;
-  occurred_at: string;
+  client_tx_id: string;
 };
-
-// ============================================================================
-// Query Functions
-// ============================================================================
 
 /**
  * Insert a new variant sale into variant_sales.
- * The unique constraint on (company_id, outlet_id, variant_id, occurred_at)
- * ensures idempotency - duplicate inserts will be rejected.
- * 
+ * The unique constraint on (company_id, outlet_id, client_tx_id) ensures idempotency
+ * - duplicate inserts with same client_tx_id will be rejected by the DB.
+ *
  * Timestamp authority:
- * - occurred_at: CLIENT-authoritative transaction timestamp
+ * - trx_at: CLIENT-authoritative transaction timestamp
  * - created_at: SERVER-authoritative (DB default)
  */
 export async function insertVariantSale(
@@ -63,15 +59,17 @@ export async function insertVariantSale(
        outlet_id,
        variant_id,
        item_id,
-       quantity,
+       client_tx_id,
+       qty,
        unit_price,
-       total_price,
-       occurred_at
+       total_amount,
+       trx_at
      ) VALUES (
        ${sale.company_id},
        ${sale.outlet_id},
        ${sale.variant_id},
        ${sale.item_id ?? null},
+       ${sale.client_tx_id},
        ${sale.quantity},
        ${sale.unit_price},
        ${sale.total_price},
@@ -84,21 +82,22 @@ export async function insertVariantSale(
 }
 
 /**
- * Check if a variant sale exists by company_id + outlet_id + variant_id + occurred_at.
+ * Check if a variant sale exists by company_id + outlet_id + client_tx_id.
  * Used for idempotency checks in sync push.
+ * The unique constraint on (company_id, outlet_id, client_tx_id) ensures
+ * each client_tx_id maps to at most one variant sale record.
  * Returns the existing record if found.
  */
 export async function checkVariantSaleExists(
   db: KyselySchema,
   companyId: number,
   outletId: number,
-  variantId: number,
-  occurredAt: string
+  clientTxId: string
 ): Promise<VariantSaleQueryResult | null> {
   const result = await sql`
-    SELECT id, company_id, outlet_id, variant_id, quantity, unit_price, total_price, occurred_at, created_at
+    SELECT id, company_id, outlet_id, variant_id, qty, unit_price, total_amount, trx_at, created_at
      FROM variant_sales
-     WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND variant_id = ${variantId} AND occurred_at = ${occurredAt}
+     WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND client_tx_id = ${clientTxId}
      LIMIT 1
   `.execute(db);
 
@@ -112,17 +111,19 @@ export async function checkVariantSaleExists(
     company_id: Number(row.company_id),
     outlet_id: Number(row.outlet_id),
     variant_id: Number(row.variant_id),
-    quantity: Number(row.quantity),
+    quantity: Number(row.qty),
     unit_price: row.unit_price,
-    total_price: row.total_price,
-    occurred_at: row.occurred_at,
+    total_price: row.total_amount,
+    occurred_at: row.trx_at,
     created_at: row.created_at
   };
 }
 
 /**
- * Batch check which variant sales exist by company_id + outlet_id + variant_id + occurred_at.
+ * Batch check which variant sales exist by company_id + outlet_id + client_tx_id.
  * Used for idempotency checks when processing multiple variant sales.
+ * Uses parameterized query to prevent SQL injection - client_tx_id values
+ * are bound as query parameters, not interpolated into the query string.
  * Returns an array of existing records.
  */
 export async function batchCheckVariantSalesExist(
@@ -135,20 +136,14 @@ export async function batchCheckVariantSalesExist(
     return [];
   }
 
-  // Build batch query with multiple (variant_id, occurred_at) pairs
-  const conditions: string[] = [];
-  const params: (number | string)[] = [];
-
-  for (const item of items) {
-    conditions.push(`(variant_id = ${item.variant_id} AND occurred_at = '${item.occurred_at}')`);
-  }
-
-  const whereClause = conditions.join(" OR ");
+  // Build parameterized query with client_tx_id values
+  // Using sql.join to safely create the IN clause with proper parameterization
+  const clientTxIds = items.map(item => sql`${item.client_tx_id}`);
 
   const result = await sql`
-    SELECT id, company_id, outlet_id, variant_id, quantity, unit_price, total_price, occurred_at, created_at
+    SELECT id, company_id, outlet_id, variant_id, qty, unit_price, total_amount, trx_at, created_at
      FROM variant_sales
-     WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND (${sql.raw(whereClause)})
+     WHERE company_id = ${companyId} AND outlet_id = ${outletId} AND client_tx_id IN (${sql.join(clientTxIds)})
   `.execute(db);
 
   return result.rows.map((row) => {
@@ -158,10 +153,10 @@ export async function batchCheckVariantSalesExist(
       company_id: Number(r.company_id),
       outlet_id: Number(r.outlet_id),
       variant_id: Number(r.variant_id),
-      quantity: Number(r.quantity),
+      quantity: Number(r.qty),
       unit_price: r.unit_price,
-      total_price: r.total_price,
-      occurred_at: r.occurred_at,
+      total_price: r.total_amount,
+      occurred_at: r.trx_at,
       created_at: r.created_at
     };
   });

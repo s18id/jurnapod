@@ -227,4 +227,25 @@ When modifying this package:
 - `@jurnapod/api` — Uses this package for sending transactional emails
 - `@jurnapod/shared` — Shared contracts for email schemas
 
+## Database Testing Policy (MANDATORY)
+
+**NO MOCK DB for DB-backed business logic tests.** Use real DB via `.env`.
+
+Mocking database interactions for code that reads/writes SQL tables creates a **false sense of security** and introduces **severe production risk**:
+
+- Mocks don't catch SQL syntax errors, schema mismatches, or constraint violations
+- Mocks hide transaction isolation issues that only manifest under real concurrency
+- Mocks mask performance problems that only appear with real data volumes
+- Integration tests with real DB catch these issues early, before production
+
+**What may still be mocked:**
+- External HTTP services
+- Message queues
+- File system operations
+- Time (use `vi.useFakeTimers()`)
+
+**Non-DB logic** (pure computation) may use unit tests without database.
+
+Any DB mock found in DB-backed tests is a P0 risk and must be treated as a blocker.
+
 For project-wide conventions, see root `AGENTS.md`.

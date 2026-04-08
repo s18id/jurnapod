@@ -5,7 +5,6 @@
 ---
 
 ## Agent Routing
-
 | When you need... | Use this agent |
 |------------------|----------------|
 | Implement a story (from spec) | `bmad-dev-story` |
@@ -153,6 +152,29 @@ Focused tests required when changing:
 - Financial reports
 
 Flag code that filters `audit_logs` by `result` instead of `success`.
+
+---
+
+## Database Testing Policy (MANDATORY)
+
+**NO MOCK DB for DB-backed business logic tests.** Use real DB via `.env`.
+
+Any DB mock found in DB-backed tests is a P0 risk and must be treated as a blocker.
+
+Mocking database interactions for code that reads/writes SQL tables creates a **false sense of security** and introduces **severe production risk**:
+
+- Mocks don't catch SQL syntax errors, schema mismatches, or constraint violations
+- Mocks hide transaction isolation issues that only manifest under real concurrency
+- Mocks mask performance problems that only appear with real data volumes
+- Integration tests with real DB catch these issues early, before production
+
+**What may still be mocked:**
+- External HTTP services
+- Message queues
+- File system operations
+- Time (use `vi.useFakeTimers()`)
+
+**Non-DB logic** (pure computation, pure function utilities) may use unit tests without database.
 
 ---
 

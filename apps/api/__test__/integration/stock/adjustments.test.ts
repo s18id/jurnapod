@@ -14,6 +14,7 @@ let baseUrl: string;
 let accessToken: string;
 let outletId: number;
 let companyId: number;
+let authTestProductId: number;
 
 describe('stock.adjustments', { timeout: 30000 }, () => {
   beforeAll(async () => {
@@ -22,6 +23,14 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
     const syncContext = await getSeedSyncContext();
     outletId = syncContext.outletId;
     companyId = syncContext.companyId;
+    // Query a valid product ID for auth/validation tests (ID used only when auth passes)
+    const db = getTestDb();
+    const productResult = await sql`
+      SELECT id FROM items
+      WHERE company_id = ${companyId}
+      LIMIT 1
+    `.execute(db);
+    authTestProductId = Number((productResult.rows[0] as { id: number }).id);
   });
 
   afterAll(async () => {
@@ -33,12 +42,12 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
     const res = await fetch(`${baseUrl}/api/outlets/${outletId}/stock/adjustments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ product_id: 1, adjustment_quantity: 10, reason: 'Test' })
+      body: JSON.stringify({ product_id: authTestProductId, adjustment_quantity: 10, reason: 'Test' })
     });
     expect(res.status).toBe(401);
   });
 
-  it('creates positive stock adjustment', async () => {
+  it('validates adjustment_quantity is integer', async () => {
     // Create test item with price (for cost resolution)
     const item = await createTestItem(companyId, {
       sku: `ADJ-POS-${Date.now()}`,
@@ -269,7 +278,7 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        product_id: 1,
+        product_id: authTestProductId,
         adjustment_quantity: 10.5,
         reason: 'Test'
       })

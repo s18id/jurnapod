@@ -106,10 +106,13 @@ npm test -w @jurnapod/api
 3. Inspect log file — never rely on terminal output
 4. Keep log files out of git (they're in `.gitignore`)
 
-### Database Testing Policy (MANDATORY)
+## Database Testing Policy (MANDATORY)
+
 - **NEVER use mock DB for database-backed business logic tests.**
 - Any code path that reads/writes SQL tables (Kysely queries, transactions, posting logic, import validation, sync persistence, auth/role lookups, report queries) must be validated with a **real database**.
 - Mocking is acceptable only for pure logic with no database interaction.
+
+Any DB mock found in DB-backed tests is a P0 risk and must be treated as a blocker.
 
 ### Fixture Policy
 - Use `createTestCompany()`, `createTestOutlet()`, `createTestUser()` from `__test__/fixtures`

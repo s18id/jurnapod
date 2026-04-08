@@ -163,9 +163,11 @@ npm run test:verbose  # Verbose output
 
 ---
 
-## DB Testing Policy
+## Database Testing Policy (MANDATORY)
 
 **NO MOCK DB for DB-backed business logic tests.** Use real DB integration via `.env`.
+
+Any DB mock found in DB-backed tests is a P0 risk and must be treated as a blocker.
 
 This package (`@jurnapod/telemetry`) contains observability primitives (SLO, metrics, correlation) with NO database operations. All tests are unit tests for pure computation.
 
@@ -194,6 +196,11 @@ afterAll(async () => {
 ```
 
 **Non-DB logic (pure computation) may use unit tests without database.**
+
+**Why no mocks for DB-backed tests?**
+- Mocking database interactions for code that reads/writes SQL tables creates a **false sense of security** and can introduce **severe production risk/destruction**
+- Mocks do not catch SQL/schema/constraint mismatches
+- Mocks hide transaction and concurrency behavior
 
 ---
 

@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
-import { closeTestDb } from '../../helpers/db';
+import { closeTestDb, getTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -13,14 +13,33 @@ import {
   createTestItem,
   registerFixtureCleanup
 } from '../../fixtures';
+import { sql } from 'kysely';
 
 let baseUrl: string;
 let accessToken: string;
+let authTestIngredientItemId: number;
+let authTestRecipeId: number;
 
 describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
+    // Query valid IDs for auth/validation tests (IDs used only when auth passes)
+    const ctx = await getSeedSyncContext();
+    const db = getTestDb();
+    const itemResult = await sql`
+      SELECT id FROM items WHERE company_id = ${ctx.companyId} LIMIT 1
+    `.execute(db);
+    authTestIngredientItemId = Number((itemResult.rows[0] as { id: number }).id);
+    // Also get a recipe item ID for auth/validation tests that need a recipe ID
+    const recipeResult = await sql`
+      SELECT id FROM items WHERE company_id = ${ctx.companyId} AND item_type = 'RECIPE' LIMIT 1
+    `.execute(db);
+    if (recipeResult.rows.length > 0) {
+      authTestRecipeId = Number((recipeResult.rows[0] as { id: number }).id);
+    } else {
+      authTestRecipeId = authTestIngredientItemId; // fallback
+    }
   });
 
   afterAll(async () => {
@@ -29,10 +48,10 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
   });
 
   it('rejects request without auth', async () => {
-    const res = await fetch(`${baseUrl}/api/inventory/recipes/1/ingredients`, {
+    const res = await fetch(`${baseUrl}/api/inventory/recipes/${authTestRecipeId}/ingredients`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ingredient_item_id: 1, quantity: 10 })
+      body: JSON.stringify({ ingredient_item_id: authTestIngredientItemId, quantity: 10 })
     });
     expect(res.status).toBe(401);
   });
@@ -44,7 +63,7 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ ingredient_item_id: 1, quantity: 10 })
+      body: JSON.stringify({ ingredient_item_id: authTestIngredientItemId, quantity: 10 })
     });
     expect(res.status).toBe(400);
   });
@@ -56,7 +75,7 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ ingredient_item_id: 1, quantity: 10 })
+      body: JSON.stringify({ ingredient_item_id: authTestIngredientItemId, quantity: 10 })
     });
     expect(res.status).toBe(404);
   });

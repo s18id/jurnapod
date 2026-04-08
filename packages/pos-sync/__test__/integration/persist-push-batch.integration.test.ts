@@ -47,6 +47,7 @@ interface TestFixtures {
   testCompanyId: number;
   testOutletId: number;
   cashierUserId: number;
+  testItemId: number;
 }
 
 async function setupTestFixtures(): Promise<TestFixtures> {
@@ -98,11 +99,26 @@ async function setupTestFixtures(): Promise<TestFixtures> {
     );
   }
 
+  // Find a real item for this company
+  const itemRows = await sql`
+    SELECT id FROM items 
+    WHERE company_id = ${Number(companyRows[0].company_id)}
+    LIMIT 1
+  `.execute(db);
+
+  if (itemRows.rows.length === 0) {
+    throw new Error(
+      `Test requires at least one item in company ${config.companyCode} — run seed first`
+    );
+  }
+  const testItemId = Number((itemRows.rows[0] as { id: number }).id);
+
   return {
     db,
     testCompanyId: Number(companyRows[0].company_id),
     testOutletId: Number(companyRows[0].outlet_id),
     cashierUserId: Number((userResult.rows[0] as { id: number }).id),
+    testItemId,
   };
 }
 
@@ -176,7 +192,7 @@ describe('persistPushBatch Integration', () => {
           status: 'COMPLETED',
           service_type: 'TAKEAWAY',
           trx_at: '2024-01-15T10:30:00+07:00',
-          items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+          items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
           payments: [{ method: 'CASH', amount: 15000 }],
         },
         {
@@ -187,7 +203,7 @@ describe('persistPushBatch Integration', () => {
           status: 'COMPLETED',
           service_type: 'TAKEAWAY',
           trx_at: '2024-01-15T10:35:00+07:00',
-          items: [{ item_id: 1, qty: 2, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+          items: [{ item_id: fixtures.testItemId, qty: 2, price_snapshot: 15000, name_snapshot: 'Test Item' }],
           payments: [{ method: 'CASH', amount: 30000 }],
         },
       ];
@@ -215,7 +231,7 @@ describe('persistPushBatch Integration', () => {
         status: 'COMPLETED',
         service_type: 'TAKEAWAY',
         trx_at: '2024-01-15T11:00:00+07:00',
-        items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+        items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
         payments: [{ method: 'CASH', amount: 15000 }],
       };
 
@@ -252,7 +268,7 @@ describe('persistPushBatch Integration', () => {
           status: 'COMPLETED',
           service_type: 'TAKEAWAY',
           trx_at: '2024-01-15T11:30:00+07:00',
-          items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+          items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
           payments: [{ method: 'CASH', amount: 15000 }],
         },
         {
@@ -263,7 +279,7 @@ describe('persistPushBatch Integration', () => {
           status: 'COMPLETED',
           service_type: 'TAKEAWAY',
           trx_at: '2024-01-15T11:35:00+07:00',
-          items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+          items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
           payments: [{ method: 'CASH', amount: 15000 }],
         },
       ];
@@ -292,7 +308,7 @@ describe('persistPushBatch Integration', () => {
           status: 'COMPLETED',
           service_type: 'TAKEAWAY',
           trx_at: '2024-01-15T12:00:00+07:00',
-          items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+          items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
           payments: [{ method: 'CASH', amount: 15000 }],
         },
         {
@@ -303,7 +319,7 @@ describe('persistPushBatch Integration', () => {
           status: 'COMPLETED',
           service_type: 'TAKEAWAY',
           trx_at: '2024-01-15T12:05:00+07:00',
-          items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+          items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
           payments: [{ method: 'CASH', amount: 15000 }],
         },
       ];
@@ -331,7 +347,7 @@ describe('persistPushBatch Integration', () => {
         status: 'COMPLETED',
         service_type: 'DINE_IN', // DINE_IN requires table_id
         trx_at: '2024-01-15T12:30:00+07:00',
-        items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+        items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
         payments: [{ method: 'CASH', amount: 15000 }],
         // table_id is missing!
       };
@@ -359,7 +375,7 @@ describe('persistPushBatch Integration', () => {
         status: 'COMPLETED',
         service_type: 'TAKEAWAY',
         trx_at: `2024-01-15T13:${String(i).padStart(2, '0')}:00+07:00`,
-        items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+        items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
         payments: [{ method: 'CASH', amount: 15000 }],
       }));
 
@@ -386,7 +402,7 @@ describe('persistPushBatch Integration', () => {
         status: 'COMPLETED',
         service_type: 'TAKEAWAY',
         trx_at: `2024-01-15T14:${String(i).padStart(2, '0')}:00+07:00`,
-        items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+        items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
         payments: [{ method: 'CASH', amount: 15000 }],
       }));
 
@@ -413,7 +429,7 @@ describe('persistPushBatch Integration', () => {
         status: 'COMPLETED',
         service_type: 'TAKEAWAY',
         trx_at: `2024-01-15T15:${String(i).padStart(2, '0')}:00+07:00`,
-        items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+        items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
         payments: [{ method: 'CASH', amount: 15000 }],
       }));
 
@@ -442,7 +458,7 @@ describe('persistPushBatch Integration', () => {
           status: 'COMPLETED',
           service_type: 'TAKEAWAY',
           trx_at: '2024-01-15T16:00:00+07:00',
-          items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+          items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
           payments: [{ method: 'CASH', amount: 15000 }],
         },
         {
@@ -453,7 +469,7 @@ describe('persistPushBatch Integration', () => {
           status: 'COMPLETED',
           service_type: 'TAKEAWAY',
           trx_at: '2024-01-15T16:05:00+07:00',
-          items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+          items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
           payments: [{ method: 'CASH', amount: 15000 }],
         },
         {
@@ -464,7 +480,7 @@ describe('persistPushBatch Integration', () => {
           status: 'COMPLETED',
           service_type: 'TAKEAWAY',
           trx_at: '2024-01-15T16:00:00+07:00', // Must be IDENTICAL to first occurrence for idempotency
-          items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+          items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
           payments: [{ method: 'CASH', amount: 15000 }],
         },
       ];
@@ -497,7 +513,7 @@ describe('persistPushBatch Integration', () => {
           status: 'COMPLETED',
           service_type: 'TAKEAWAY',
           trx_at: '2024-01-15T17:00:00+07:00',
-          items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+          items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
           payments: [{ method: 'CASH', amount: 15000 }],
         },
         {
@@ -508,7 +524,7 @@ describe('persistPushBatch Integration', () => {
           status: 'COMPLETED',
           service_type: 'DINE_IN', // Missing table_id
           trx_at: '2024-01-15T17:05:00+07:00',
-          items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+          items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
           payments: [{ method: 'CASH', amount: 15000 }],
         },
         {
@@ -519,7 +535,7 @@ describe('persistPushBatch Integration', () => {
           status: 'COMPLETED',
           service_type: 'TAKEAWAY',
           trx_at: '2024-01-15T17:10:00+07:00',
-          items: [{ item_id: 1, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+          items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
           payments: [{ method: 'CASH', amount: 15000 }],
         },
       ];

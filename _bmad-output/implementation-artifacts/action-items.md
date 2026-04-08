@@ -1,6 +1,6 @@
 # Action Items Tracker
 
-**Last Updated:** 2026-04-05T16:00:00Z
+**Last Updated:** 2026-04-08T00:00:00Z
 **Review Cadence:** Monthly at sprint retrospective
 
 ---
@@ -10,10 +10,10 @@
 | Priority | Open | Done | Won't Fix | Total |
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
-| P1 | 2 | 6 | 0 | 8 |
-| P2 | 2 | 7 | 0 | 9 |
+| P1 | 4 | 6 | 0 | 10 |
+| P2 | 8 | 7 | 0 | 15 |
 | P3 | 0 | 2 | 3 | 5 |
-| **Total** | **4** | **19** | **3** | **26** |
+| **Total** | **12** | **19** | **3** | **34** |
 
 ---
 
@@ -29,6 +29,8 @@
 |----|--------|------|-------|--------|
 | E33-A1 | Add "blast radius check" to shared contract changes | Epic 33 | Charlie | Open |
 | E33-A4 | Add shared constant change verification to test checklist | Epic 33 | Dana | Open |
+| E34-A4 | Add "zero test failures" CI gate | Epic 34 | Quinn | Open |
+| E34-A5 | Audit test fixtures for sentinel IDs (all FK constraints) | Epic 34 | Amelia | Open |
 
 ---
 
@@ -40,6 +42,12 @@
 |----|--------|------|-------|--------|
 | E33-A2 | Add dead code audit step to consolidation stories | Epic 33 | Bob | Open |
 | E33-A3 | Document permission bit canonical values in shared/README | Epic 33 | Elena | Open |
+| E34-A1 | Create pre-reorganization tool standardization checklist | Epic 34 | Winston | Open |
+| E34-A2 | Build automated import path update script | Epic 34 | Barry | Open |
+| E34-A3 | Document database fixture standards | Epic 34 | Amelia | Open |
+| E34-A6 | Add vitest alias config template to all packages | Epic 34 | Winston | Open |
+| E34-A7 | Document DB cleanup hook patterns | Epic 34 | Murat | Open |
+| E34-A8 | Create lint rule unit test template | Epic 34 | Barry | Open |
 | E31-A1 | Document canonical test fixture pattern | Epic 31 | Tech Writer | Done |
 | E31-A2 | Add adapter deletion checklist to extraction stories | Epic 31 | Tech Writer | Done |
 
@@ -162,4 +170,4 @@ Examples:
 - `E8-A1` = Epic 8, Action 1
 - `E15-A2` = Epic 15, Action 2
 
-_Last Updated: 2026-04-05T16:00:00Z_
+_Last Updated: 2026-04-08T00:00:00Z_

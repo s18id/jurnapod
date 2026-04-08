@@ -170,9 +170,11 @@ describe('AccountSchema', () => {
 
 ---
 
-## DB Testing Policy (for packages consuming @jurnapod/shared)
+## Database Testing Policy (MANDATORY)
 
 **NO MOCK DB for DB-backed business logic tests.** Use real DB integration via `.env`.
+
+Any DB mock found in DB-backed tests is a P0 risk and must be treated as a blocker.
 
 This package (`@jurnapod/shared`) contains no database code itself, but packages that depend on it and perform DB operations MUST follow this policy:
 
@@ -201,6 +203,7 @@ afterAll(async () => {
 ```
 
 **Why no mocks for DB-backed tests?**
+- Mocking database interactions for code that reads/writes SQL tables creates a **false sense of security** and can introduce **severe production risk/destruction**
 - Mocks don't catch SQL syntax errors, schema mismatches, or constraint violations
 - Mocks don't reveal transaction isolation issues
 - Integration with real DB catches performance problems early

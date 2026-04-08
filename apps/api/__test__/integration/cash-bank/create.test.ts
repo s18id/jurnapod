@@ -18,12 +18,21 @@ import { sql } from 'kysely';
 let baseUrl: string;
 let accessToken: string;
 let seedCtx: { companyId: number; outletId: number };
+let authTestAccountId: number;
 
 describe('cash-bank.create', { timeout: 30000 }, () => {
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     seedCtx = await getSeedSyncContext();
+    // Query a valid account ID for auth/validation tests (ID used only when auth passes)
+    const db = getTestDb();
+    const accountResult = await sql`
+      SELECT id FROM accounts
+      WHERE company_id = ${seedCtx.companyId}
+      LIMIT 1
+    `.execute(db);
+    authTestAccountId = Number((accountResult.rows[0] as { id: number }).id);
   });
 
   afterAll(async () => {
@@ -38,8 +47,8 @@ describe('cash-bank.create', { timeout: 30000 }, () => {
       body: JSON.stringify({
         transaction_type: 'MUTATION',
         description: 'Test mutation',
-        source_account_id: 1,
-        destination_account_id: 2,
+        source_account_id: authTestAccountId,
+        destination_account_id: authTestAccountId,
         amount: 100000
       })
     });
@@ -323,8 +332,8 @@ describe('cash-bank.create', { timeout: 30000 }, () => {
       body: JSON.stringify({
         transaction_type: 'INVALID_TYPE',
         description: 'Bad type',
-        source_account_id: 1,
-        destination_account_id: 2,
+        source_account_id: authTestAccountId,
+        destination_account_id: authTestAccountId,
         amount: 100000
       })
     });

@@ -130,43 +130,23 @@ Add to existing checklist:
   - import mapping
   - account classification logic
 
-### DB Testing Policy
+## Database Testing Policy (MANDATORY)
 
-**NO MOCK DB for DB-backed business logic tests.** Use real DB integration via `.env`.
+**NO MOCK DB for DB-backed business logic tests.** Use real DB via `.env`.
 
-DB-backed tests (tests that exercise database queries, transactions, or constraints) MUST use real database connections:
+Any DB mock found in DB-backed tests is a P0 risk and must be treated as a blocker.
 
-```typescript
-// Load .env before other imports
-import path from 'path';
-import { config as loadEnv } from 'dotenv';
-loadEnv({ path: path.resolve(process.cwd(), '.env') });
+Mocking database interactions for code that reads/writes SQL tables creates a **false sense of security** and introduces **severe production risk**:
 
-import { createKysely, type KyselySchema } from '@jurnapod/db';
-
-const db = createKysely({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
-
-// CRITICAL: Clean up in afterAll
-afterAll(async () => {
-  await db.destroy();
-});
-```
-
-**Why no mocks for DB-backed tests?**
 - Mocks don't catch SQL syntax errors, schema mismatches, or constraint violations
-- Mocks don't reveal transaction isolation issues
-- Integration with real DB catches performance problems early
+- Mocks hide transaction isolation issues that only manifest under real concurrency
+- Mocks mask performance problems that only appear with real data volumes
+- Integration tests with real DB catch these issues early, before production
 
-**What to mock instead:**
+**What may still be mocked:**
 - External HTTP services
 - Message queues
 - File system operations
 - Time (use `vi.useFakeTimers()`)
 
-**Non-DB logic (pure computation) may use unit tests without database.**
+**Non-DB logic** (pure computation) may use unit tests without database.

@@ -54,6 +54,8 @@
     "db:reconcile:pos-journals": "npm run db:reconcile:pos-journals -w @jurnapod/db --",
     "db:audit:system-roles": "npm run db:audit:system-roles -w @jurnapod/db",
     "db:consolidate:system-roles": "npm run db:consolidate:system-roles -w @jurnapod/db",
+    "test": "npm run test -ws --if-present",
+    "test:ci": "npm run test -ws --if-present -- --reporter=json --outputFile=test-results.json",
     "test:scripts": "node --test scripts/tests/*.test.mjs",
     "test:single": "npm run test:unit:single -w @jurnapod/api --",
     "test:unit:routes": "npm run test:unit:routes -w @jurnapod/api",

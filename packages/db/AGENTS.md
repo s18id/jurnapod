@@ -292,9 +292,11 @@ When modifying this package:
 
 ---
 
-## DB Testing Policy
+## Database Testing Policy (MANDATORY)
 
 **NO MOCK DB for DB-backed business logic tests.** Use real DB integration via `.env`.
+
+Any DB mock found in DB-backed tests is a P0 risk and must be treated as a blocker.
 
 DB-backed tests (tests that exercise database queries, transactions, or constraints) MUST use real database connections:
 

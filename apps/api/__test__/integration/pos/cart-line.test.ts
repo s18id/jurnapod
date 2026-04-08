@@ -16,14 +16,23 @@ import {
   createTestPrice,
   registerFixtureCleanup
 } from '../../fixtures';
+import { sql } from 'kysely';
 
 let baseUrl: string;
 let accessToken: string;
+let authTestItemId: number;
 
 describe('pos.cart-line', { timeout: 30000 }, () => {
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
+    // Query a valid item ID for auth/validation tests (ID used only when auth passes)
+    const ctx = await getSeedSyncContext();
+    const db = getTestDb();
+    const itemResult = await sql`
+      SELECT id FROM items WHERE company_id = ${ctx.companyId} LIMIT 1
+    `.execute(db);
+    authTestItemId = Number((itemResult.rows[0] as { id: number }).id);
   });
 
   afterAll(async () => {
@@ -35,7 +44,7 @@ describe('pos.cart-line', { timeout: 30000 }, () => {
     const res = await fetch(`${baseUrl}/api/pos/cart/line`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ item_id: 1, qty: 1 })
+      body: JSON.stringify({ item_id: authTestItemId, qty: 1 })
     });
     expect(res.status).toBe(401);
   });

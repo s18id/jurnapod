@@ -169,10 +169,23 @@ When modifying this package:
 
 ## Database Testing Policy (MANDATORY)
 
-**NO MOCK DB for DB-backed business logic tests.** Use real DB integration via `.env`.
+**NO MOCK DB for DB-backed business logic tests.** Use real DB via `.env`.
 
-- Any code path that reads/writes SQL tables must be validated with a real database.
-- Use integration tests for DB-backed behavior; do not claim correctness with stubbed/mocked DB executors.
-- Always close/destroy DB clients/pools in teardown to avoid hanging test processes.
+Any DB mock found in DB-backed tests is a P0 risk and must be treated as a blocker.
+
+Mocking database interactions for code that reads/writes SQL tables creates a **false sense of security** and introduces **severe production risk**:
+
+- Mocks don't catch SQL syntax errors, schema mismatches, or constraint violations
+- Mocks hide transaction isolation issues that only manifest under real concurrency
+- Mocks mask performance problems that only appear with real data volumes
+- Integration tests with real DB catch these issues early, before production
+
+**What may still be mocked:**
+- External HTTP services
+- Message queues
+- File system operations
+- Time (use `vi.useFakeTimers()`)
+
+**Non-DB logic** (pure computation) may use unit tests without database.
 
 For project-wide conventions, see root `AGENTS.md`.

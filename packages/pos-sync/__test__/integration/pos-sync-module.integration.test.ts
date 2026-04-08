@@ -57,6 +57,7 @@ interface TestFixtures {
   testUserId: number;
   testCompanyId: number;
   testOutletId: number;
+  testItemId: number;
 }
 
 async function setupTestFixtures(): Promise<TestFixtures> {
@@ -109,11 +110,27 @@ async function setupTestFixtures(): Promise<TestFixtures> {
     );
   }
 
+  // Find a real item for this company
+  const companyId = Number((userRows.rows[0] as { user_id: number; company_id: number }).company_id);
+  const itemRows = await sql`
+    SELECT id FROM items 
+    WHERE company_id = ${companyId}
+    LIMIT 1
+  `.execute(db);
+
+  if (itemRows.rows.length === 0) {
+    throw new Error(
+      `Test requires at least one item in company ${config.companyCode} — run seed first`
+    );
+  }
+  const testItemId = Number((itemRows.rows[0] as { id: number }).id);
+
   return {
     db,
     testUserId: Number((userRows.rows[0] as { user_id: number; company_id: number }).user_id),
-    testCompanyId: Number((userRows.rows[0] as { user_id: number; company_id: number }).company_id),
+    testCompanyId: companyId,
     testOutletId: Number(outletRows[0].outlet_id),
+    testItemId,
   };
 }
 
@@ -301,7 +318,7 @@ describe('PosSyncModule Integration', () => {
           trx_at: '2024-01-15T10:30:00+07:00',
           items: [
             {
-              item_id: 1,
+              item_id: fixtures.testItemId,
               qty: 1,
               price_snapshot: 15000,
               name_snapshot: 'Test Item',
@@ -341,7 +358,7 @@ describe('PosSyncModule Integration', () => {
           trx_at: '2024-01-15T10:30:00+07:00',
           items: [
             {
-              item_id: 1,
+              item_id: fixtures.testItemId,
               qty: 1,
               price_snapshot: 15000,
               name_snapshot: 'Test Item',
@@ -395,7 +412,7 @@ describe('PosSyncModule Integration', () => {
           trx_at: '2024-01-15T10:30:00+07:00',
           items: [
             {
-              item_id: 1,
+              item_id: fixtures.testItemId,
               qty: 1,
               price_snapshot: 15000,
               name_snapshot: 'Test Item',
@@ -434,7 +451,7 @@ describe('PosSyncModule Integration', () => {
           trx_at: '2024-01-15T10:30:00+07:00',
           items: [
             {
-              item_id: 1,
+              item_id: fixtures.testItemId,
               qty: 1,
               price_snapshot: 15000,
               name_snapshot: 'Test Item',
@@ -476,7 +493,7 @@ describe('PosSyncModule Integration', () => {
           updated_at: '2024-01-15T10:30:00+07:00',
           lines: [
             {
-              item_id: 1,
+              item_id: fixtures.testItemId,
               name_snapshot: 'Test Item',
               item_type_snapshot: 'PRODUCT',
               unit_price_snapshot: 15000,
@@ -605,7 +622,7 @@ describe('PosSyncModule Integration', () => {
         const cancellation: ItemCancellationPush = {
           cancellation_id: uniqueId('cancel'),
           order_id: 'test-seed-order-3',
-          item_id: 1,
+          item_id: fixtures.testItemId,
           variant_id: undefined,
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
@@ -636,7 +653,7 @@ describe('PosSyncModule Integration', () => {
         const cancellation: ItemCancellationPush = {
           cancellation_id: cancellationId,
           order_id: 'test-seed-order-4',
-          item_id: 1,
+          item_id: fixtures.testItemId,
           variant_id: undefined,
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
@@ -760,6 +777,125 @@ describe('PosSyncModule Integration', () => {
         expect(result.variantSaleResults).toBeDefined();
         expect(result.variantSaleResults![0].result).toBe('ERROR');
         expect(result.variantSaleResults![0].message).toContain('company_id mismatch');
+      });
+
+      it('should detect duplicate by same client_tx_id', async () => {
+        if (!testVariant) {
+          return; // Skip if no variants
+        }
+
+        const clientTxId = uniqueId('sale-dup');
+        const sale: VariantSalePush = {
+          client_tx_id: clientTxId,
+          company_id: fixtures.testCompanyId,
+          outlet_id: fixtures.testOutletId,
+          variant_id: testVariant.id,
+          item_id: testVariant.item_id,
+          qty: 1,
+          unit_price: 15000,
+          total_amount: 15000,
+          trx_at: '2024-01-15T10:30:00+07:00',
+        };
+
+        // First push - should succeed
+        const firstResult = await module.handlePushSync({
+          db: fixtures.db,
+          companyId: fixtures.testCompanyId,
+          outletId: fixtures.testOutletId,
+          transactions: [],
+          activeOrders: [],
+          orderUpdates: [],
+          itemCancellations: [],
+          variantSales: [sale],
+          variantStockAdjustments: [],
+          correlationId,
+        });
+
+        expect(firstResult.variantSaleResults).toBeDefined();
+        expect(firstResult.variantSaleResults![0].result).toBe('OK');
+
+        // Second push with same client_tx_id - should be DUPLICATE
+        const secondResult = await module.handlePushSync({
+          db: fixtures.db,
+          companyId: fixtures.testCompanyId,
+          outletId: fixtures.testOutletId,
+          transactions: [],
+          activeOrders: [],
+          orderUpdates: [],
+          itemCancellations: [],
+          variantSales: [sale],
+          variantStockAdjustments: [],
+          correlationId,
+        });
+
+        expect(secondResult.variantSaleResults).toBeDefined();
+        expect(secondResult.variantSaleResults![0].result).toBe('DUPLICATE');
+      });
+
+      it('should NOT detect as duplicate when same variant/trx_at but different client_tx_id', async () => {
+        if (!testVariant) {
+          return; // Skip if no variants
+        }
+
+        // First sale
+        const sale1: VariantSalePush = {
+          client_tx_id: uniqueId('sale-diff-tx-1'),
+          company_id: fixtures.testCompanyId,
+          outlet_id: fixtures.testOutletId,
+          variant_id: testVariant.id,
+          item_id: testVariant.item_id,
+          qty: 1,
+          unit_price: 15000,
+          total_amount: 15000,
+          trx_at: '2024-01-15T10:30:00+07:00', // Same time
+        };
+
+        // Second sale with SAME variant and same trx_at but DIFFERENT client_tx_id
+        const sale2: VariantSalePush = {
+          client_tx_id: uniqueId('sale-diff-tx-2'), // Different client_tx_id!
+          company_id: fixtures.testCompanyId,
+          outlet_id: fixtures.testOutletId,
+          variant_id: testVariant.id,
+          item_id: testVariant.item_id,
+          qty: 1,
+          unit_price: 15000,
+          total_amount: 15000,
+          trx_at: '2024-01-15T10:30:00+07:00', // Same time
+        };
+
+        // Push first sale
+        const firstResult = await module.handlePushSync({
+          db: fixtures.db,
+          companyId: fixtures.testCompanyId,
+          outletId: fixtures.testOutletId,
+          transactions: [],
+          activeOrders: [],
+          orderUpdates: [],
+          itemCancellations: [],
+          variantSales: [sale1],
+          variantStockAdjustments: [],
+          correlationId,
+        });
+
+        expect(firstResult.variantSaleResults![0].result).toBe('OK');
+
+        // Push second sale - should succeed (different client_tx_id, even though same variant/trx_at)
+        const secondResult = await module.handlePushSync({
+          db: fixtures.db,
+          companyId: fixtures.testCompanyId,
+          outletId: fixtures.testOutletId,
+          transactions: [],
+          activeOrders: [],
+          orderUpdates: [],
+          itemCancellations: [],
+          variantSales: [sale2],
+          variantStockAdjustments: [],
+          correlationId,
+        });
+
+        // Should be OK, not DUPLICATE (different client_tx_id)
+        expect(secondResult.variantSaleResults).toBeDefined();
+        expect(secondResult.variantSaleResults![0].result).toBe('OK');
       });
     });
 
@@ -905,7 +1041,7 @@ describe('PosSyncModule Integration', () => {
           status: 'COMPLETED',
           service_type: 'TAKEAWAY',
           trx_at: '2024-01-15T10:30:00+07:00',
-          items: [{ item_id: 1, qty: 1, price_snapshot: 10000, name_snapshot: 'Item' }],
+          items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 10000, name_snapshot: 'Item' }],
           payments: [{ method: 'CASH', amount: 10000 }],
         };
 
@@ -937,7 +1073,7 @@ describe('PosSyncModule Integration', () => {
         const cancellation: ItemCancellationPush = {
           cancellation_id: uniqueId('cancel-combined'),
           order_id: 'test-seed-order-4',  // Use seeded order that exists in DB
-          item_id: 1,
+          item_id: fixtures.testItemId,
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
           cancelled_quantity: 1,

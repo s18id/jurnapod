@@ -805,13 +805,12 @@ async function processVariantSales(
         continue;
       }
 
-      // Check for duplicate
+      // Check for duplicate using client_tx_id (idempotency key per unique constraint)
       const existed = await checkVariantSaleExists(
         db,
         sale.company_id,
         sale.outlet_id,
-        sale.variant_id,
-        sale.trx_at
+        sale.client_tx_id
       );
       if (existed) {
         results.push({ client_tx_id: sale.client_tx_id, result: "DUPLICATE" });
@@ -827,6 +826,7 @@ async function processVariantSales(
         outlet_id: sale.outlet_id,
         variant_id: sale.variant_id,
         item_id: sale.item_id,
+        client_tx_id: sale.client_tx_id,
         quantity: sale.qty,
         unit_price: sale.unit_price,
         total_price: sale.total_amount,
@@ -844,6 +844,20 @@ async function processVariantSales(
 
       results.push({ client_tx_id: sale.client_tx_id, result: "OK" });
     } catch (error) {
+      // Handle MySQL duplicate key error (errno 1062) on insert.
+      // The check-before-insert pattern prevents most duplicates, but a TOCTOU race
+      // can still hit the unique constraint when two concurrent requests both pass the
+      // check and then one inserts first. Map that to DUPLICATE rather than ERROR.
+      if (typeof error === "object" && error !== null && "errno" in error && (error as { errno?: number }).errno === 1062) {
+        console.warn("pos_sync_push_variant_sale_duplicate_race", {
+          correlation_id: correlationId,
+          client_tx_id: sale.client_tx_id,
+          variant_id: sale.variant_id,
+        });
+        results.push({ client_tx_id: sale.client_tx_id, result: "DUPLICATE" });
+        continue;
+      }
+
       console.error("pos_sync_push_variant_sale_failed", {
         correlation_id: correlationId,
         client_tx_id: sale.client_tx_id,

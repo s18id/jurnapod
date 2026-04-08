@@ -10,16 +10,26 @@ import {
   resetFixtureRegistry,
   getTestAccessToken,
   getSeedSyncContext,
+  createTestItem,
   registerFixtureCleanup
 } from '../../../fixtures';
 
 let baseUrl: string;
 let accessToken: string;
+let authTestItemId: number;
 
 describe('inventory.item-prices.create', { timeout: 30000 }, () => {
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
+    // Create a minimal item for auth/validation tests (ID used only when auth passes)
+    const ctx = await getSeedSyncContext();
+    const item = await createTestItem(ctx.companyId, {
+      sku: `AUTH-TEST-${Date.now()}`,
+      name: 'Auth Test Item',
+      type: 'PRODUCT',
+    });
+    authTestItemId = item.id;
   });
 
   afterAll(async () => {
@@ -31,7 +41,7 @@ describe('inventory.item-prices.create', { timeout: 30000 }, () => {
     const res = await fetch(`${baseUrl}/api/inventory/item-prices`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ item_id: 1, price: 100 })
+      body: JSON.stringify({ item_id: authTestItemId, price: 100 })
     });
     expect(res.status).toBe(401);
   });
