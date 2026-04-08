@@ -34,6 +34,7 @@ import {
   DatabaseConflictError,
   DatabaseReferenceError
 } from "../lib/master-data-errors.js";
+import { InventoryConflictError } from "@jurnapod/modules-inventory";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -154,7 +155,7 @@ suppliesRoutes.post("/", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
-    if (error instanceof DatabaseConflictError) {
+    if (error instanceof InventoryConflictError) {
       return errorResponse("CONFLICT", "Supply conflict", 409);
     }
 
@@ -239,13 +240,17 @@ suppliesRoutes.patch("/:id", async (c) => {
       userId: auth.userId
     });
 
+    if (!updatedSupply) {
+      return errorResponse("NOT_FOUND", "Supply not found", 404);
+    }
+
     return successResponse(updatedSupply);
   } catch (error) {
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request", 400);
     }
 
-    if (error instanceof DatabaseConflictError) {
+    if (error instanceof InventoryConflictError) {
       return errorResponse("CONFLICT", "Supply conflict", 409);
     }
 
@@ -275,9 +280,13 @@ suppliesRoutes.delete("/:id", async (c) => {
 
     const supplyId = NumericIdSchema.parse(c.req.param("id"));
 
-    await deleteSupply(auth.companyId, supplyId, {
+    const deleted = await deleteSupply(auth.companyId, supplyId, {
       userId: auth.userId
     });
+
+    if (!deleted) {
+      return errorResponse("NOT_FOUND", "Supply not found", 404);
+    }
 
     return successResponse({
       id: supplyId,

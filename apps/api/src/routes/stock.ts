@@ -61,12 +61,11 @@ declare module "hono" {
  * Auth middleware for stock routes
  * Extracts auth context and sets c.set("auth", authContext)
  */
-async function authMiddleware(c: Context, next: () => Promise<void>): Promise<void> {
+async function authMiddleware(c: Context, next: () => Promise<void>): Promise<void | Response> {
   const authResult = await authenticateRequest(c.req.raw);
   if (!authResult.success) {
     c.status(401);
-    c.json({ success: false, error: { code: "UNAUTHORIZED", message: "Missing or invalid access token" } });
-    return;
+    return c.json({ success: false, error: { code: "UNAUTHORIZED", message: "Missing or invalid access token" } });
   }
   c.set("auth", authResult.auth);
   await next();

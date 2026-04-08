@@ -10,31 +10,35 @@
  */
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { z } from "zod";
 import { NumericIdSchema, ServiceSessionStatusIdSchema } from "@jurnapod/shared";
-import { requireAccess } from "@/lib/auth-guard";
+import { authenticateRequest, requireAccess } from "@/lib/auth-guard";
 import { errorResponse, successResponse } from "@/lib/response";
 import { listSessions } from "@/lib/service-sessions";
 import { userHasOutletAccess } from "@/lib/auth";
 import type { AuthContext } from "@/lib/auth-guard";
 
+declare module "hono" {
+  interface ContextVariableMap {
+    auth: AuthContext;
+  }
+}
+
 const dineinRoutes = new Hono();
 
-// Auth middleware
-dineinRoutes.use("/*", async (c, next) => {
-  const authResult = await requireAccess({
-    roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN", "CASHIER"],
-    module: "pos",
-    permission: "read"
-  });
-  
-  if (authResult) {
-    return authResult;
+// Auth middleware - authenticate all requests
+async function dineinAuthMiddleware(c: Context, next: () => Promise<void>): Promise<void | Response> {
+  const authResult = await authenticateRequest(c.req.raw);
+  if (!authResult.success) {
+    c.status(401);
+    return c.json({ success: false, error: { code: "UNAUTHORIZED", message: "Missing or invalid access token" } });
   }
-  
-  c.set("auth", c.get("auth"));
+  c.set("auth", authResult.auth);
   await next();
-});
+}
+
+dineinRoutes.use("/*", dineinAuthMiddleware);
 
 // ============================================================================
 // GET /dinein/sessions - List service sessions
@@ -42,6 +46,14 @@ dineinRoutes.use("/*", async (c, next) => {
 
 dineinRoutes.get("/sessions", async (c) => {
   const auth = c.get("auth") as AuthContext;
+
+  // Guard: check roles and POS module permission
+  const guardResult = await requireAccess({
+    roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN", "CASHIER"],
+    module: "pos",
+    permission: "read"
+  })(c.req.raw, auth);
+  if (guardResult) return guardResult;
 
   try {
     const url = new URL(c.req.raw.url);
@@ -138,6 +150,14 @@ dineinRoutes.get("/sessions", async (c) => {
 dineinRoutes.get("/tables", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
+  // Guard: check roles and POS module permission
+  const guardResult = await requireAccess({
+    roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN", "CASHIER"],
+    module: "pos",
+    permission: "read"
+  })(c.req.raw, auth);
+  if (guardResult) return guardResult;
+
   try {
     const url = new URL(c.req.raw.url);
     const outletIdRaw = url.searchParams.get("outletId");
@@ -166,7 +186,7 @@ dineinRoutes.get("/tables", async (c) => {
         tableName: table.tableName,
         capacity: table.capacity,
         zone: table.zone,
-        occupancyStatusId: table.occupancyStatusId,
+        occupancyStatusId: Number(table.occupancyStatusId),
         availableNow: table.availableNow,
         currentSessionId: table.currentSessionId?.toString() ?? null,
         currentReservationId: table.currentReservationId?.toString() ?? null,

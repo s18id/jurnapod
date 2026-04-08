@@ -916,7 +916,7 @@ inventoryRoutes.get("/items/:id/variants/:variantId/prices", async (c) => {
   }
 
   try {
-    // item ID validated via param schema
+    const itemId = NumericIdSchema.parse(c.req.param("id"));
     const variantId = NumericIdSchema.parse(c.req.param("variantId"));
 
     const url = new URL(c.req.raw.url);
@@ -929,18 +929,21 @@ inventoryRoutes.get("/items/:id/variants/:variantId/prices", async (c) => {
     if (outletIdParam) {
       const outletId = NumericIdSchema.parse(outletIdParam);
       variantPrices = await itemPricesAdapter.listItemPrices(auth.companyId, {
+        itemId,
         outletId,
         variantId,
         includeDefaults: canAccessDefaults
       });
     } else {
       variantPrices = await itemPricesAdapter.listItemPrices(auth.companyId, {
+        itemId,
         variantId
       });
     }
 
     return successResponse(variantPrices);
   } catch (error) {
+    console.log("ABOUT TO CHECK ZOD ERROR");
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
     }
