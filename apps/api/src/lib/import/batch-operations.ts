@@ -258,12 +258,8 @@ export async function batchUpdatePrices(
 /**
  * Insert prices in batch.
  *
- * Uses createItemPrice for each price to get deadlock retry protection
- * and proper audit logging.
- * 
- * Note: Each createItemPrice call has its own withTransactionRetry internally,
- * so we don't wrap the entire batch in a transaction. This avoids nested
- * transaction issues that can cause deadlocks.
+ * Uses batchCreateItemPrices for efficient bulk insert with single transaction
+ * and deadlock retry protection.
  *
  * @param companyId - Company ID for the prices
  * @param prices - Array of prices to insert
@@ -284,19 +280,17 @@ export async function batchInsertPrices(
    */
   const importActor = { userId: 0, canManageCompanyDefaults: true };
 
-  const ids: number[] = [];
+  // Use batchCreateItemPrices for single transaction + retry
+  const createdPrices = await itemPricesAdapter.batchCreateItemPrices(
+    companyId,
+    prices.map(p => ({
+      item_id: p.item_id,
+      outlet_id: p.outlet_id ?? null,
+      price: p.price,
+      is_active: p.is_active,
+    })),
+    importActor
+  );
 
-  for (const price of prices) {
-    const createdPrice = await itemPricesAdapter.createItemPrice(companyId, {
-      item_id: price.item_id,
-      outlet_id: price.outlet_id ?? null,
-      variant_id: null,
-      price: price.price,
-      is_active: price.is_active,
-    }, importActor);
-
-    ids.push(createdPrice.id);
-  }
-
-  return ids;
+  return createdPrices.map(p => p.id);
 }

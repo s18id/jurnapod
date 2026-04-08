@@ -42,5 +42,8 @@ export { createKysely, getKysely, type KyselySchema } from './kysely/index.js';
 export { withTransaction, withTransactionRetry } from './kysely/transaction.js';
 export type { Transaction } from './kysely/transaction.js';
 
+// Batch operations
+export { batchInsert, batchInsertWithChunking, BATCH_MAX_SIZE } from './batch.js';
+
 // Config type for passing to createKysely
 export type { DbPoolConfig } from './pool.js';

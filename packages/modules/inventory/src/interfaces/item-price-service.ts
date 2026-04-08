@@ -104,4 +104,27 @@ export interface ItemPriceService {
    * @returns true if deleted, false if not found
    */
   deleteItemPrice(companyId: number, itemPriceId: number, actor?: MutationAuditActor): Promise<boolean>;
+
+  /**
+   * Create multiple item prices in a single batch operation.
+   * 
+   * Uses a single transaction with batch insert for efficiency.
+   * Validation is performed on all items before any insert.
+   * 
+   * @param companyId - The company ID (required)
+   * @param inputs - Array of item price creation inputs (max 500 per batch)
+   * @param actor - Optional audit actor
+   * @returns Array of created item prices
+   */
+  batchCreateItemPrices(
+    companyId: number,
+    inputs: Array<{
+      item_id: number;
+      outlet_id: number | null;
+      variant_id?: number | null;
+      price: number;
+      is_active?: boolean;
+    }>,
+    actor?: MutationAuditActor
+  ): Promise<ItemPrice[]>;
 }

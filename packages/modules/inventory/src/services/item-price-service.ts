@@ -538,6 +538,106 @@ export class ItemPriceServiceImpl implements ItemPriceService {
       return true;
     });
   }
+
+  async batchCreateItemPrices(
+    companyId: number,
+    inputs: Array<{
+      item_id: number;
+      outlet_id: number | null;
+      variant_id?: number | null;
+      price: number;
+      is_active?: boolean;
+    }>,
+    actor?: MutationAuditActor
+  ): Promise<ItemPrice[]> {
+    if (inputs.length === 0) {
+      return [];
+    }
+
+    const db = getInventoryDb();
+    return withTransactionRetry(db, async (trx) => {
+      // Validate all items exist first
+      const itemIds = [...new Set(inputs.map(i => i.item_id))];
+      for (const itemId of itemIds) {
+        await ensureCompanyItemExists(trx, companyId, itemId);
+      }
+
+      // Validate all outlets exist
+      const outletIds = [...new Set(inputs.filter(i => i.outlet_id !== null).map(i => i.outlet_id!))];
+      for (const outletId of outletIds) {
+        await ensureCompanyOutletExists(trx, companyId, outletId);
+      }
+
+      // Validate variant_ids if provided
+      for (const input of inputs) {
+        if (input.variant_id != null) {
+          const variantRow = await trx
+            .selectFrom("item_variants")
+            .where("id", "=", input.variant_id)
+            .where("item_id", "=", input.item_id)
+            .where("company_id", "=", companyId)
+            .select(["id"])
+            .executeTakeFirst();
+          if (!variantRow) {
+            throw new InventoryReferenceError("Variant not found for item");
+          }
+        }
+      }
+
+      // Batch insert
+      const values = inputs.map(input => ({
+        company_id: companyId,
+        outlet_id: input.outlet_id,
+        item_id: input.item_id,
+        variant_id: input.variant_id ?? null,
+        price: input.price,
+        is_active: input.is_active === false ? 0 : 1
+      }));
+
+      const insertResult = await trx
+        .insertInto("item_prices")
+        .values(values as never)
+        .executeTakeFirst();
+
+      const firstInsertId = Number(insertResult.insertId);
+      const insertedIds: number[] = [];
+      
+      for (let i = 0; i < inputs.length; i++) {
+        insertedIds.push(firstInsertId + i);
+      }
+
+      // Fetch all created prices
+      const createdPrices = await trx
+        .selectFrom("item_prices")
+        .where("id", "in", insertedIds)
+        .where("company_id", "=", companyId)
+        .selectAll()
+        .execute();
+
+      // Record audit log for batch
+      await recordItemPriceAuditLog(trx, {
+        companyId,
+        outletId: null,
+        actor,
+        action: itemPriceAuditActions.create,
+        payload: {
+          batch_size: inputs.length,
+          after: createdPrices
+        }
+      });
+
+      return createdPrices.map(row => ({
+        id: row.id,
+        company_id: row.company_id,
+        outlet_id: row.outlet_id,
+        item_id: row.item_id,
+        variant_id: row.variant_id,
+        price: Number(row.price),
+        is_active: row.is_active === 1,
+        updated_at: new Date(row.updated_at).toISOString(),
+      }));
+    });
+  }
 }
 
 // Default instance for convenience
