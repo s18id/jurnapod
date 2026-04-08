@@ -11,10 +11,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-// Hardcoded project root since relative path resolution is problematic with tsx
-const PROJECT_ROOT = "/home/ahmad/jurnapod";
+// Dynamic path resolution that works in both local and CI environments
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PROJECT_ROOT = resolve(__dirname, "../../../../");
 const scriptPath = resolve(PROJECT_ROOT, "scripts/telemetry-coverage-check.sh");
 
 describe("Quality Gate Script", () => {
