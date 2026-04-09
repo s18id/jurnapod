@@ -13,6 +13,9 @@
  */
 
 import { Hono } from "hono";
+import { z } from "zod";
+import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
+import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";
 
 declare module "hono" {
@@ -38,5 +41,53 @@ stockSyncRoutes.use("/*", async (c, next) => {
 stockSyncRoutes.get("/", async (c) => {
   return c.json({ success: false, error: { code: "NOT_FOUND", message: "Stock sync moved to /outlets/:outletId/stock" } }, 404);
 });
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * Stock sync error response schema
+ */
+const StockSyncErrorResponseSchema = zodOpenApi
+  .object({
+    success: zodOpenApi.literal(false).openapi({ example: false }),
+    error: zodOpenApi
+      .object({
+        code: zodOpenApi.string().openapi({ description: "Error code" }),
+        message: zodOpenApi.string().openapi({ description: "Error message" }),
+      })
+      .openapi("StockSyncErrorDetail"),
+  })
+  .openapi("StockSyncErrorResponse");
+
+/**
+ * Registers sync stock routes with an OpenAPIHono instance.
+ */
+export function registerSyncStockRoutes(app: { openapi: OpenAPIHonoType["openapi"] }): void {
+  const stockSyncRoute = createRoute({
+    path: "/sync/stock",
+    method: "get",
+    tags: ["Sync"],
+    summary: "Stock sync (deprecated)",
+    description: "Stock sync has moved to /outlets/:outletId/stock",
+    security: [{ BearerAuth: [] }],
+    responses: {
+      404: {
+        content: { "application/json": { schema: StockSyncErrorResponseSchema } },
+        description: "Stock sync endpoint moved",
+      },
+      401: {
+        content: { "application/json": { schema: StockSyncErrorResponseSchema } },
+        description: "Unauthorized",
+      },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(stockSyncRoute, (async (c: any) => {
+    return c.json({ success: false, error: { code: "NOT_FOUND", message: "Stock sync moved to /outlets/:outletId/stock" } }, 404);
+  }) as any);
+}
 
 export { stockSyncRoutes };

@@ -14,6 +14,8 @@
  */
 
 import { Hono } from "hono";
+import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
+import type { OpenAPIHono } from "@hono/zod-openapi";
 import {
   authenticateRequest,
   requireAccess,
@@ -1199,3 +1201,300 @@ importRoutes.get("/:entityType/template", async (c) => {
 });
 
 export { importRoutes };
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * Import validation response schema
+ */
+const ImportValidationResponseSchema = zodOpenApi.object({
+  success: zodOpenApi.literal(true),
+  data: zodOpenApi.object({
+    totalRows: zodOpenApi.number(),
+    validRows: zodOpenApi.number(),
+    errorRows: zodOpenApi.number(),
+    validRowIndices: zodOpenApi.array(zodOpenApi.number()),
+    errorRowIndices: zodOpenApi.array(zodOpenApi.number()),
+  }),
+}).openapi("ImportValidationResponse");
+
+/**
+ * Import apply response schema
+ */
+const ImportApplyResponseSchema = zodOpenApi.object({
+  success: zodOpenApi.literal(true),
+  data: zodOpenApi.object({
+    success: zodOpenApi.number(),
+    failed: zodOpenApi.number(),
+    created: zodOpenApi.number(),
+    updated: zodOpenApi.number(),
+    batchesCompleted: zodOpenApi.number(),
+    batchesFailed: zodOpenApi.number(),
+    rowsProcessed: zodOpenApi.number(),
+  }),
+}).openapi("ImportApplyResponse");
+
+/**
+ * Registers import routes with an OpenAPIHono instance.
+ */
+export function registerImportRoutes(app: OpenAPIHono): void {
+  // POST /import/:entityType/upload - Upload and parse import file
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/import/{entityType}/upload",
+      operationId: "uploadImport",
+      summary: "Upload import file",
+      description: "Upload and parse an import file (CSV or Excel).",
+      tags: ["Import"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          entityType: zodOpenApi.string().openapi({ description: "Entity type: items or prices" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "File uploaded and parsed",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.object({
+                  uploadId: zodOpenApi.string(),
+                  filename: zodOpenApi.string(),
+                  rowCount: zodOpenApi.number(),
+                  columns: zodOpenApi.array(zodOpenApi.string()),
+                  sampleData: zodOpenApi.array(zodOpenApi.array(zodOpenApi.string())),
+                }).openapi("UploadImportResponse"),
+              }),
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "inventory", permission: "create" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      try {
+        const entityType = c.req.param("entityType") as EntityType;
+        if (entityType !== "items" && entityType !== "prices") {
+          return errorResponse("INVALID_REQUEST", `Invalid entity type: ${entityType}. Must be 'items' or 'prices'.`, 400);
+        }
+
+        const formData = await c.req.formData();
+        const file = formData.get("file") as File | null;
+        if (!file) return errorResponse("INVALID_REQUEST", "No file provided", 400);
+
+        const MAX_FILE_SIZE = 50 * 1024 * 1024;
+        if (file.size > MAX_FILE_SIZE) return errorResponse("FILE_TOO_LARGE", "File exceeds 50MB limit", 400);
+
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const parseResult = parseFileSync(buffer, file.name);
+
+        if (parseResult.errors.length > 0 && parseResult.rows.length === 0) {
+          return errorResponse("PARSE_ERROR", `Failed to parse file: ${parseResult.errors[0].message}`, 400);
+        }
+
+        const sessionId = randomUUID();
+        const sampleData = parseResult.rows.slice(0, 5).map((row: ImportRow) => row.rawData);
+        const columns = parseResult.rows.length > 0 ? Object.keys(parseResult.rows[0].data) : [];
+        const fileHash = computeFileHash(buffer);
+
+        await createSession(sessionId, auth.companyId, entityType, {
+          entityType,
+          filename: file.name,
+          rowCount: parseResult.rows.length,
+          columns,
+          sampleData,
+          rows: parseResult.rows,
+        });
+        await updateFileHash(sessionId, auth.companyId, fileHash);
+
+        return successResponse({
+          uploadId: sessionId,
+          filename: file.name,
+          rowCount: parseResult.rows.length,
+          columns,
+          sampleData,
+          parseErrors: parseResult.errors.map(e => ({ row: e.rowNumber, message: e.message })),
+        });
+      } catch (error) {
+        console.error("Upload error:", error);
+        return errorResponse("INTERNAL_ERROR", "Failed to process upload", 500);
+      }
+    }
+  );
+
+  // POST /import/:entityType/validate - Validate mapped data
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/import/{entityType}/validate",
+      operationId: "validateImport",
+      summary: "Validate import data",
+      description: "Validate mapped import data against business rules.",
+      tags: ["Import"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          entityType: zodOpenApi.string().openapi({ description: "Entity type: items or prices" }),
+        }),
+        body: {
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                uploadId: zodOpenApi.string().openapi({ description: "Upload session ID" }),
+                mappings: zodOpenApi.array(zodOpenApi.object({
+                  sourceColumn: zodOpenApi.string(),
+                  targetField: zodOpenApi.string(),
+                })),
+              }).openapi("ValidateImportRequest"),
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: "Validation result",
+          content: {
+            "application/json": {
+              schema: ImportValidationResponseSchema,
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+        404: { description: "Upload session not found" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "inventory", permission: "create" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      try {
+        const entityType = c.req.param("entityType") as EntityType;
+        if (entityType !== "items" && entityType !== "prices") {
+          return errorResponse("INVALID_REQUEST", `Invalid entity type: ${entityType}. Must be 'items' or 'prices'.`, 400);
+        }
+
+        const body = await c.req.json();
+        const { uploadId, mappings } = body as { uploadId: string; mappings: ColumnMappingRequest["mappings"] };
+        if (!uploadId) return errorResponse("INVALID_REQUEST", "Missing uploadId", 400);
+        if (!mappings || !Array.isArray(mappings) || mappings.length === 0) {
+          return errorResponse("INVALID_REQUEST", "Missing or invalid mappings", 400);
+        }
+
+        const stored = await getSession(uploadId, auth.companyId);
+        if (!stored) return errorResponse("NOT_FOUND", "Upload session not found or expired", 404);
+
+        const session = stored.payload as unknown as UploadSession;
+        const mappingValidation = validateMappings(entityType, mappings, session.columns);
+        if (!mappingValidation.valid) return errorResponse("INVALID_REQUEST", mappingValidation.errors.join("; "), 400);
+
+        const fieldDefs = getFieldDefinitions(entityType);
+        const mappedRows = session.rows.map(row => mapRowData(row, mappings, fieldDefs));
+
+        const validRowIndices: number[] = [];
+        const errorRowIndices: number[] = [];
+
+        for (let i = 0; i < mappedRows.length; i++) {
+          const { row, mappedData } = { row: session.rows[i], mappedData: mappedRows[i] };
+          let hasErrors = false;
+
+          for (const [field, def] of Object.entries(fieldDefs)) {
+            if (def.required && (mappedData[field] === undefined || mappedData[field] === null || mappedData[field] === "")) {
+              hasErrors = true;
+            }
+          }
+
+          if (hasErrors) errorRowIndices.push(row.rowNumber);
+          else validRowIndices.push(row.rowNumber);
+        }
+
+        return successResponse({
+          totalRows: session.rowCount,
+          validRows: validRowIndices.length,
+          errorRows: errorRowIndices.length,
+          validRowIndices,
+          errorRowIndices,
+        });
+      } catch (error) {
+        console.error("Validation error:", error);
+        return errorResponse("INTERNAL_ERROR", "Failed to validate data", 500);
+      }
+    }
+  );
+
+  // GET /import/:entityType/template - Download import template
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/import/{entityType}/template",
+      operationId: "getImportTemplate",
+      summary: "Get import template",
+      description: "Download an import template for items or prices.",
+      tags: ["Import"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          entityType: zodOpenApi.string().openapi({ description: "Entity type: items or prices" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "CSV template file",
+          content: {
+            "text/csv": {
+              schema: zodOpenApi.string().openapi({ description: "CSV content" }),
+            },
+          },
+        },
+        400: { description: "Invalid entity type" },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "inventory", permission: "read" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const entityType = c.req.param("entityType") as EntityType;
+      if (entityType !== "items" && entityType !== "prices") {
+        return errorResponse("INVALID_REQUEST", `Invalid entity type: ${entityType}. Must be 'items' or 'prices'.`, 400);
+      }
+
+      const fieldDefs = getFieldDefinitions(entityType);
+      const headers = Object.keys(fieldDefs);
+      const sampleRow: Record<string, string> = {};
+      for (const [field, def] of Object.entries(fieldDefs)) {
+        switch (def.type) {
+          case "string": sampleRow[field] = def.required ? `sample_${field}` : ""; break;
+          case "integer":
+          case "number": sampleRow[field] = def.required ? "1" : ""; break;
+          case "boolean": sampleRow[field] = "true"; break;
+          default: sampleRow[field] = "";
+        }
+      }
+
+      const csvContent = [headers.join(","), headers.map(h => sampleRow[h] || "").join(",")].join("\n");
+      const filename = `jurnapod-${entityType}-template.csv`;
+
+      return new Response(csvContent, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv",
+          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Content-Length": String(Buffer.byteLength(csvContent)),
+        },
+      });
+    }
+  );
+}

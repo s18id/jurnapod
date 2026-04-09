@@ -7,6 +7,8 @@
  */
 
 import { Hono } from "hono";
+import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
+import type { OpenAPIHono } from "@hono/zod-openapi";
 import { errorResponse } from "../../lib/response.js";
 import { getOutboxMetricsSnapshot, getSyncHealthMetricsSnapshot } from "../../lib/metrics/dashboard-metrics.js";
 import type { AuthContext } from "../../lib/auth-guard.js";
@@ -253,3 +255,68 @@ syncDashboardRoutes.get("/", async (c) => {
 });
 
 export { syncDashboardRoutes };
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * Registers sync dashboard routes with an OpenAPIHono instance.
+ */
+export function registerSyncDashboardRoutes(app: OpenAPIHono): void {
+  // GET /admin/dashboard/sync - Sync health dashboard
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/admin/dashboard/sync",
+      operationId: "getSyncDashboard",
+      summary: "Sync health dashboard",
+      description: "Get sync health dashboard with outbox and sync metrics.",
+      tags: ["Admin"],
+      security: [{ BearerAuth: [] }],
+      responses: {
+        200: {
+          description: "Sync health dashboard HTML",
+          content: {
+            "text/html": {
+              schema: zodOpenApi.string().openapi({ description: "HTML dashboard" }),
+            },
+          },
+        },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const outboxSnapshot = await getOutboxMetricsSnapshot(auth.companyId);
+      const syncSnapshot = await getSyncHealthMetricsSnapshot(auth.companyId);
+
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sync Health Dashboard - Jurnapod</title>
+</head>
+<body>
+  <h1>Sync Health Dashboard</h1>
+  <div class="metric">
+    <span class="metric-label">Total Lag Items</span>
+    <span class="metric-value">${outboxSnapshot.totalLagItems.toLocaleString()}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">Max Retry Depth</span>
+    <span class="metric-value">${outboxSnapshot.maxRetryDepth}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">Push Operations</span>
+    <span class="metric-value">${syncSnapshot.pushOperations.toLocaleString()}</span>
+  </div>
+</body>
+</html>`;
+
+      c.header("Content-Type", "text/html");
+      return c.body(html);
+    }
+  );
+}

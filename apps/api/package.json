@@ -23,7 +23,8 @@
     "test:watch": "vitest",
     "test:ws": "node ../../scripts/websocket-test.js",
     "fix:duplicate-roles": "tsx src/scripts/fix-duplicate-role-assignments.ts",
-    "check:test-sql": "npx tsx scripts/check-test-sql.ts"
+    "check:test-sql": "npx tsx scripts/check-test-sql.ts",
+    "generate:openapi-scaffold": "tsx scripts/generate-openapi-scaffold.ts"
   },
   "dependencies": {
     "@hono/zod-openapi": "^0.14.8",
@@ -39,6 +40,7 @@
     "@jurnapod/shared": "0.3.0",
     "@jurnapod/sync-core": "0.3.0",
     "@node-rs/argon2": "^2.0.2",
+    "@scalar/hono-api-reference": "^0.10.6",
     "bcryptjs": "^3.0.2",
     "bwip-js": "^4.8.0",
     "hono": "^4.0.0",

@@ -11,6 +11,8 @@
  */
 
 import { Hono } from "hono";
+import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
+import type { OpenAPIHono } from "@hono/zod-openapi";
 import {
   authenticateRequest,
   type AuthContext
@@ -416,3 +418,173 @@ async function handleSseRequest(
 
 export { progressRoutes };
 export { SSE_POLL_INTERVAL_MS, SSE_KEEPALIVE_INTERVAL_MS };
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * Operation progress response schema
+ */
+const OperationProgressSchema = zodOpenApi.object({
+  operationId: zodOpenApi.string(),
+  total: zodOpenApi.number(),
+  completed: zodOpenApi.number(),
+  percentage: zodOpenApi.number(),
+  status: zodOpenApi.string(),
+  etaSeconds: zodOpenApi.number().nullable(),
+  startedAt: zodOpenApi.string(),
+  updatedAt: zodOpenApi.string(),
+  completedAt: zodOpenApi.string().nullable(),
+}).openapi("OperationProgress");
+
+/**
+ * Registers progress routes with an OpenAPIHono instance.
+ */
+export function registerProgressRoutes(app: OpenAPIHono): void {
+  // GET /api/operations/:operationId/progress - Get progress for an operation
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/api/operations/{operationId}/progress",
+      operationId: "getOperationProgress",
+      summary: "Get operation progress",
+      description: "Get progress for a long-running operation with optional SSE.",
+      tags: ["Progress"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          operationId: zodOpenApi.string().openapi({ description: "Operation ID" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Operation progress",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: OperationProgressSchema,
+              }).openapi("GetOperationProgressResponse"),
+            },
+          },
+        },
+        404: { description: "Operation not found" },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const operationId = c.req.param("operationId");
+
+      try {
+        const progress = await getProgress(operationId, auth.companyId);
+        if (!progress) return errorResponse("NOT_FOUND", "Operation not found", 404);
+
+        const percentage = calculatePercentage(progress);
+        const etaSeconds = calculateEta(progress);
+
+        return successResponse({
+          operationId: progress.operationId,
+          total: progress.totalUnits,
+          completed: progress.completedUnits,
+          percentage,
+          status: progress.status,
+          etaSeconds,
+          startedAt: progress.startedAt.toISOString(),
+          updatedAt: progress.updatedAt.toISOString(),
+          completedAt: progress.completedAt?.toISOString() ?? null,
+          details: progress.details ?? undefined,
+        });
+      } catch (error) {
+        console.error(`[progress] Error getting progress for operation ${operationId}:`, error);
+        return errorResponse("INTERNAL_ERROR", "Failed to get operation progress", 500);
+      }
+    }
+  );
+
+  // GET /api/operations - List all operations
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/api/operations",
+      operationId: "listOperations",
+      summary: "List operations",
+      description: "List all long-running operations for the company.",
+      tags: ["Progress"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        query: zodOpenApi.object({
+          status: zodOpenApi.string().optional().openapi({ description: "Status filter" }),
+          type: zodOpenApi.string().optional().openapi({ description: "Type filter" }),
+          limit: zodOpenApi.string().optional().openapi({ description: "Limit" }),
+          offset: zodOpenApi.string().optional().openapi({ description: "Offset" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "List of operations",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.object({
+                  operations: zodOpenApi.array(OperationProgressSchema),
+                  total: zodOpenApi.number(),
+                  limit: zodOpenApi.number(),
+                  offset: zodOpenApi.number(),
+                }).openapi("ListOperationsResponse"),
+              }),
+            },
+          },
+        },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+
+      const status = c.req.query("status") as OperationStatus | undefined;
+      const type = c.req.query("type") as OperationType | undefined;
+      const limit = parseInt(c.req.query("limit") ?? "50", 10);
+      const offset = parseInt(c.req.query("offset") ?? "0", 10);
+
+      const validStatuses: OperationStatus[] = ["running", "completed", "failed", "cancelled"];
+      if (status && !validStatuses.includes(status)) {
+        return errorResponse("INVALID_REQUEST", `Invalid status. Must be one of: ${validStatuses.join(", ")}`, 400);
+      }
+
+      const validTypes: OperationType[] = ["import", "export", "batch_update"];
+      if (type && !validTypes.includes(type)) {
+        return errorResponse("INVALID_REQUEST", `Invalid type. Must be one of: ${validTypes.join(", ")}`, 400);
+      }
+
+      try {
+        const result = await listProgress(auth.companyId, {
+          status,
+          type,
+          limit: Math.min(limit, 100),
+          offset,
+        });
+
+        const operations = result.operations.map((op) => ({
+          operationId: op.operationId,
+          type: op.operationType,
+          total: op.totalUnits,
+          completed: op.completedUnits,
+          percentage: calculatePercentage(op),
+          status: op.status,
+          etaSeconds: op.status === "running" ? calculateEta(op) : null,
+          startedAt: op.startedAt.toISOString(),
+          updatedAt: op.updatedAt.toISOString(),
+          completedAt: op.completedAt?.toISOString() ?? null,
+        }));
+
+        return successResponse({ operations, total: result.total, limit, offset });
+      } catch (error) {
+        console.error("[progress] Error listing operations:", error);
+        return errorResponse("INTERNAL_ERROR", "Failed to list operations", 500);
+      }
+    }
+  );
+}

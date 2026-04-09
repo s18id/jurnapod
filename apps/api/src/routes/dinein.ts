@@ -12,6 +12,8 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
+import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
+import type { OpenAPIHono } from "@hono/zod-openapi";
 import { NumericIdSchema, ServiceSessionStatusIdSchema } from "@jurnapod/shared";
 import { authenticateRequest, requireAccess } from "@/lib/auth-guard";
 import { errorResponse, successResponse } from "@/lib/response";
@@ -209,3 +211,214 @@ dineinRoutes.get("/tables", async (c) => {
 });
 
 export { dineinRoutes };
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * Session data schema
+ */
+const SessionDataSchema = zodOpenApi.object({
+  id: zodOpenApi.string().openapi({ description: "Session ID" }),
+  tableId: zodOpenApi.string().openapi({ description: "Table ID" }),
+  tableCode: zodOpenApi.string().openapi({ description: "Table code" }),
+  tableName: zodOpenApi.string().openapi({ description: "Table name" }),
+  statusId: zodOpenApi.number().openapi({ description: "Status ID" }),
+  statusLabel: zodOpenApi.string().openapi({ description: "Status label" }),
+  startedAt: zodOpenApi.string().openapi({ description: "Started at" }),
+  guestCount: zodOpenApi.number().openapi({ description: "Guest count" }),
+  guestName: zodOpenApi.string().nullable().openapi({ description: "Guest name" }),
+  lineCount: zodOpenApi.number().openapi({ description: "Line count" }),
+  totalAmount: zodOpenApi.number().openapi({ description: "Total amount" }),
+}).openapi("SessionData");
+
+/**
+ * Table data schema
+ */
+const TableDataSchema = zodOpenApi.object({
+  tableId: zodOpenApi.string().openapi({ description: "Table ID" }),
+  tableCode: zodOpenApi.string().openapi({ description: "Table code" }),
+  tableName: zodOpenApi.string().openapi({ description: "Table name" }),
+  capacity: zodOpenApi.number().openapi({ description: "Capacity" }),
+  zone: zodOpenApi.string().nullable().openapi({ description: "Zone" }),
+  occupancyStatusId: zodOpenApi.number().openapi({ description: "Occupancy status ID" }),
+  availableNow: zodOpenApi.boolean().openapi({ description: "Available now" }),
+  currentSessionId: zodOpenApi.string().nullable().openapi({ description: "Current session ID" }),
+  currentReservationId: zodOpenApi.string().nullable().openapi({ description: "Current reservation ID" }),
+  guestCount: zodOpenApi.number().nullable().openapi({ description: "Guest count" }),
+}).openapi("TableData");
+
+/**
+ * Registers dine-in routes with an OpenAPIHono instance.
+ */
+export function registerDineInRoutes(app: OpenAPIHono): void {
+  // GET /dinein/sessions - List service sessions
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/dinein/sessions",
+      operationId: "listDineInSessions",
+      summary: "List dine-in sessions",
+      description: "List service sessions for dine-in with optional filters.",
+      tags: ["DineIn"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        query: zodOpenApi.object({
+          outletId: zodOpenApi.string().openapi({ description: "Outlet ID" }),
+          limit: zodOpenApi.string().optional().openapi({ description: "Limit" }),
+          offset: zodOpenApi.string().optional().openapi({ description: "Offset" }),
+          status: zodOpenApi.string().optional().openapi({ description: "Status" }),
+          tableId: zodOpenApi.string().optional().openapi({ description: "Table ID" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "List of sessions",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.object({
+                  sessions: zodOpenApi.array(SessionDataSchema),
+                  pagination: zodOpenApi.object({
+                    total: zodOpenApi.number(),
+                    limit: zodOpenApi.number(),
+                    offset: zodOpenApi.number(),
+                    hasMore: zodOpenApi.boolean(),
+                  }),
+                }).openapi("DineInSessionsResponse"),
+              }),
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth") as AuthContext;
+      const guardResult = await requireAccess({
+        roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN", "CASHIER"],
+        module: "pos",
+        permission: "read"
+      })(c.req.raw, auth);
+      if (guardResult) return guardResult;
+
+      const url = new URL(c.req.raw.url);
+      const outletIdRaw = url.searchParams.get("outletId");
+      if (!outletIdRaw) return errorResponse("MISSING_OUTLET_ID", "outletId query parameter is required", 400);
+
+      const outletId = NumericIdSchema.parse(outletIdRaw);
+      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, outletId);
+      if (!hasAccess) return errorResponse("FORBIDDEN", "Forbidden", 403);
+
+      const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") ?? "20", 10), 1), 100);
+      const offset = Math.max(parseInt(url.searchParams.get("offset") ?? "0", 10), 0);
+      const statusParam = url.searchParams.get("status");
+      const status = statusParam ? parseInt(statusParam, 10) : undefined;
+
+      const { sessions, total } = await listSessions({
+        companyId: BigInt(auth.companyId),
+        outletId: BigInt(outletId),
+        limit,
+        offset,
+        statusId: status as unknown as import("@jurnapod/shared").ServiceSessionStatusType | undefined,
+        tableId: url.searchParams.get("tableId") ? BigInt(url.searchParams.get("tableId") as string) : undefined,
+      });
+
+      return c.json({
+        success: true,
+        data: {
+          sessions: sessions.map((session) => ({
+            id: session.id.toString(),
+            tableId: session.tableId.toString(),
+            tableCode: session.tableCode,
+            tableName: session.tableName,
+            statusId: session.statusId,
+            statusLabel: session.statusLabel,
+            startedAt: session.startedAt.toISOString(),
+            guestCount: session.guestCount,
+            guestName: session.guestName,
+            lineCount: session.lines.length,
+            totalAmount: session.lines.reduce((sum, line) => sum + line.lineTotal, 0),
+          })),
+          pagination: { total, limit, offset, hasMore: total > offset + sessions.length },
+        },
+      });
+    }
+  );
+
+  // GET /dinein/tables - List tables with occupancy
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/dinein/tables",
+      operationId: "listDineInTables",
+      summary: "List dine-in tables",
+      description: "List tables with occupancy information.",
+      tags: ["DineIn"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        query: zodOpenApi.object({
+          outletId: zodOpenApi.string().openapi({ description: "Outlet ID" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "List of tables",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.object({
+                  tables: zodOpenApi.array(TableDataSchema),
+                }).openapi("DineInTablesResponse"),
+              }),
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth") as AuthContext;
+      const guardResult = await requireAccess({
+        roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN", "CASHIER"],
+        module: "pos",
+        permission: "read"
+      })(c.req.raw, auth);
+      if (guardResult) return guardResult;
+
+      const url = new URL(c.req.raw.url);
+      const outletIdRaw = url.searchParams.get("outletId");
+      if (!outletIdRaw) return errorResponse("MISSING_OUTLET_ID", "outletId query parameter is required", 400);
+
+      const outletId = NumericIdSchema.parse(outletIdRaw);
+      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, outletId);
+      if (!hasAccess) return errorResponse("FORBIDDEN", "Forbidden", 403);
+
+      const { getTableBoard } = await import("@/lib/table-occupancy");
+      const tables = await getTableBoard(BigInt(auth.companyId), BigInt(outletId));
+
+      return c.json({
+        success: true,
+        data: {
+          tables: tables.map(table => ({
+            tableId: table.tableId.toString(),
+            tableCode: table.tableCode,
+            tableName: table.tableName,
+            capacity: table.capacity,
+            zone: table.zone,
+            occupancyStatusId: Number(table.occupancyStatusId),
+            availableNow: table.availableNow,
+            currentSessionId: table.currentSessionId?.toString() ?? null,
+            currentReservationId: table.currentReservationId?.toString() ?? null,
+            guestCount: table.guestCount,
+          })),
+        },
+      });
+    }
+  );
+}

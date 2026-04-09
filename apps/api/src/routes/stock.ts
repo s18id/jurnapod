@@ -12,9 +12,11 @@
  */
 
 import { Hono } from "hono";
-import type { Context } from "hono";
+import type { Context, Handler } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
+import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
+import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import {
   getStockLevels,
   getStockTransactions,
@@ -368,5 +370,271 @@ stockRoutes.post(
     }
   }
 );
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+type OpenAPIHonoInterface = {
+  openapi: OpenAPIHonoType["openapi"];
+};
+
+const StockLevelResponseSchema = z.object({
+  success: z.boolean(),
+  data: z.object({
+    company_id: z.number(),
+    outlet_id: z.number(),
+    items: z.array(z.unknown())
+  })
+}).openapi("StockLevelResponse");
+
+const StockTransactionsResponseSchema = z.object({
+  success: z.boolean(),
+  data: z.object({
+    company_id: z.number(),
+    outlet_id: z.number(),
+    transactions: z.array(z.unknown()),
+    pagination: z.object({
+      total: z.number(),
+      limit: z.number(),
+      offset: z.number(),
+      has_more: z.boolean()
+    })
+  })
+}).openapi("StockTransactionsResponse");
+
+const StockAlertsResponseSchema = z.object({
+  success: z.boolean(),
+  data: z.object({
+    company_id: z.number(),
+    outlet_id: z.number(),
+    alerts: z.array(z.unknown()),
+    total_alerts: z.number()
+  })
+}).openapi("StockAlertsResponse");
+
+const StockAdjustmentResponseSchema = z.object({
+  success: z.boolean(),
+  data: z.object({
+    message: z.string(),
+    company_id: z.number(),
+    outlet_id: z.number(),
+    product_id: z.number(),
+    adjustment_quantity: z.number(),
+    reason: z.string()
+  })
+}).openapi("StockAdjustmentResponse");
+
+const ErrorResponseSchema = z.object({
+  success: z.boolean(),
+  error: z.object({
+    code: z.string(),
+    message: z.string()
+  })
+}).openapi("ErrorResponse");
+
+export const registerStockRoutes = (app: OpenAPIHonoInterface): void => {
+  // GET /stock - Get stock levels
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/stock",
+      tags: ["Stock"],
+      summary: "Get stock levels",
+      description: "Get stock levels for a company/outlet",
+      security: [{ BearerAuth: [] }],
+      request: {
+        query: z.object({
+          product_id: NumericIdSchema.optional()
+        })
+      },
+      responses: {
+        200: { content: { "application/json": { schema: StockLevelResponseSchema } }, description: "Stock levels retrieved" },
+        400: { content: { "application/json": { schema: ErrorResponseSchema } }, description: "Invalid request" },
+        401: { content: { "application/json": { schema: ErrorResponseSchema } }, description: "Unauthorized" },
+        500: { content: { "application/json": { schema: ErrorResponseSchema } }, description: "Internal server error" }
+      }
+    }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async (c: any): Promise<any> => {
+      try {
+        const auth = c.get("auth");
+        const outletId = parseInt(c.req.param("outletId") ?? "", 10);
+        const { product_id } = c.req.valid('query');
+
+        const productIds = product_id ? [product_id] : undefined;
+        const stockLevels = await getStockLevels(auth.companyId, outletId, productIds);
+
+        return successResponse({
+          company_id: auth.companyId,
+          outlet_id: outletId,
+          items: stockLevels
+        });
+      } catch (error) {
+        console.error("Get stock levels error:", error);
+        if (error instanceof z.ZodError) {
+          return errorResponse("VALIDATION_ERROR", "Invalid request parameters", 400);
+        }
+        return errorResponse("INTERNAL_ERROR", error instanceof Error ? error.message : "Failed to get stock levels", 500);
+      }
+    }
+  ) as unknown as Handler;
+
+  // GET /stock/transactions - Get stock transaction history
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/stock/transactions",
+      tags: ["Stock"],
+      summary: "Get stock transactions",
+      description: "Get stock transaction history",
+      security: [{ BearerAuth: [] }],
+      request: {
+        query: z.object({
+          product_id: NumericIdSchema.optional(),
+          transaction_type: z.coerce.number().int().optional(),
+          limit: z.coerce.number().int().positive().max(500).default(100),
+          offset: z.coerce.number().int().nonnegative().default(0)
+        })
+      },
+      responses: {
+        200: { content: { "application/json": { schema: StockTransactionsResponseSchema } }, description: "Transactions retrieved" },
+        400: { content: { "application/json": { schema: ErrorResponseSchema } }, description: "Invalid request" },
+        401: { content: { "application/json": { schema: ErrorResponseSchema } }, description: "Unauthorized" },
+        500: { content: { "application/json": { schema: ErrorResponseSchema } }, description: "Internal server error" }
+      }
+    }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async (c: any): Promise<any> => {
+      try {
+        const auth = c.get("auth");
+        const outletId = parseInt(c.req.param("outletId") ?? "", 10);
+        const { product_id, transaction_type, limit, offset } = c.req.valid('query');
+
+        const { transactions, total } = await getStockTransactions(auth.companyId, outletId, {
+          product_id,
+          transaction_type,
+          limit,
+          offset
+        });
+
+        return successResponse({
+          company_id: auth.companyId,
+          outlet_id: outletId,
+          transactions,
+          pagination: { total, limit, offset, has_more: offset + transactions.length < total }
+        });
+      } catch (error) {
+        console.error("Get stock transactions error:", error);
+        if (error instanceof z.ZodError) {
+          return errorResponse("VALIDATION_ERROR", "Invalid request parameters", 400);
+        }
+        return errorResponse("INTERNAL_ERROR", error instanceof Error ? error.message : "Failed to get stock transactions", 500);
+      }
+    }
+  ) as unknown as Handler;
+
+  // GET /stock/low - Get low stock alerts
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/stock/low",
+      tags: ["Stock"],
+      summary: "Get low stock alerts",
+      description: "Get low stock alerts for an outlet",
+      security: [{ BearerAuth: [] }],
+      responses: {
+        200: { content: { "application/json": { schema: StockAlertsResponseSchema } }, description: "Alerts retrieved" },
+        400: { content: { "application/json": { schema: ErrorResponseSchema } }, description: "Invalid request" },
+        401: { content: { "application/json": { schema: ErrorResponseSchema } }, description: "Unauthorized" },
+        500: { content: { "application/json": { schema: ErrorResponseSchema } }, description: "Internal server error" }
+      }
+    }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async (c: any): Promise<any> => {
+      try {
+        const auth = c.get("auth");
+        const outletId = parseInt(c.req.param("outletId") ?? "", 10);
+        const alerts = await getLowStockAlerts(auth.companyId, outletId);
+        return successResponse({
+          company_id: auth.companyId,
+          outlet_id: outletId,
+          alerts,
+          total_alerts: alerts.length
+        });
+      } catch (error) {
+        console.error("Get low stock alerts error:", error);
+        if (error instanceof z.ZodError) {
+          return errorResponse("VALIDATION_ERROR", "Invalid request parameters", 400);
+        }
+        return errorResponse("INTERNAL_ERROR", error instanceof Error ? error.message : "Failed to get low stock alerts", 500);
+      }
+    }
+  ) as unknown as Handler;
+
+  // POST /stock/adjustments - Manual stock adjustment
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/stock/adjustments",
+      tags: ["Stock"],
+      summary: "Adjust stock",
+      description: "Manual stock adjustment",
+      security: [{ BearerAuth: [] }],
+      request: {
+        body: {
+          content: {
+            "application/json": { schema: StockAdjustmentBodySchema }
+          }
+        }
+      },
+      responses: {
+        200: { content: { "application/json": { schema: StockAdjustmentResponseSchema } }, description: "Stock adjusted" },
+        400: { content: { "application/json": { schema: ErrorResponseSchema } }, description: "Invalid request" },
+        401: { content: { "application/json": { schema: ErrorResponseSchema } }, description: "Unauthorized" },
+        500: { content: { "application/json": { schema: ErrorResponseSchema } }, description: "Internal server error" }
+      }
+    }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async (c: any): Promise<any> => {
+      try {
+        const auth = c.get("auth");
+        const outletId = parseInt(c.req.param("outletId") ?? "", 10);
+        const { product_id, adjustment_quantity, reason } = c.req.valid('json');
+
+        const adjustmentInput: StockAdjustmentInput = {
+          company_id: auth.companyId,
+          outlet_id: outletId,
+          product_id,
+          adjustment_quantity,
+          reason,
+          reference_id: `MANUAL-${Date.now()}`,
+          user_id: auth.userId
+        };
+
+        const success = await adjustStock(adjustmentInput);
+
+        if (!success) {
+          return errorResponse("ADJUSTMENT_FAILED", "Failed to adjust stock. Insufficient quantity or stock record not found.", 400);
+        }
+
+        return successResponse({
+          message: "Stock adjusted successfully",
+          company_id: auth.companyId,
+          outlet_id: outletId,
+          product_id,
+          adjustment_quantity,
+          reason
+        });
+      } catch (error) {
+        console.error("Stock adjustment error:", error);
+        if (error instanceof z.ZodError) {
+          return errorResponse("VALIDATION_ERROR", "Invalid request parameters", 400);
+        }
+        return errorResponse("INTERNAL_ERROR", error instanceof Error ? error.message : "Failed to adjust stock", 500);
+      }
+    }
+  ) as unknown as Handler;
+};
 
 export { stockRoutes };

@@ -9,6 +9,8 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
+import type { OpenAPIHono } from "@hono/zod-openapi";
 import { errorResponse } from "../../lib/response.js";
 import {
   type ReconciliationDashboardQuery,
@@ -196,3 +198,161 @@ reconciliationRoutes.get("/:accountId/drilldown", async (c) => {
 });
 
 export { reconciliationRoutes };
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * Registers reconciliation routes with an OpenAPIHono instance.
+ */
+export function registerReconciliationRoutes(app: OpenAPIHono): void {
+  // GET /admin/dashboard/reconciliation - Reconciliation dashboard
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/admin/dashboard/reconciliation",
+      operationId: "getReconciliationDashboard",
+      summary: "Reconciliation dashboard",
+      description: "Get reconciliation dashboard with account variance metrics.",
+      tags: ["Admin"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        query: zodOpenApi.object({
+          fiscal_year_id: zodOpenApi.string().optional().openapi({ description: "Fiscal year ID" }),
+          period_id: zodOpenApi.string().optional().openapi({ description: "Period ID" }),
+          outlet_id: zodOpenApi.string().optional().openapi({ description: "Outlet ID" }),
+          account_types: zodOpenApi.string().optional().openapi({ description: "Account types (comma-separated)" }),
+          statuses: zodOpenApi.string().optional().openapi({ description: "Statuses (comma-separated)" }),
+          include_drilldown: zodOpenApi.string().optional().openapi({ description: "Include drilldown" }),
+          trend_periods: zodOpenApi.string().optional().openapi({ description: "Trend periods" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Reconciliation dashboard data",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.any(),
+              }).openapi("ReconciliationDashboardResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const companyId = auth.companyId;
+
+      try {
+        const url = new URL(c.req.url);
+        const fiscalYearId = url.searchParams.get("fiscal_year_id") ? Number(url.searchParams.get("fiscal_year_id")) : undefined;
+        const periodId = url.searchParams.get("period_id") ? Number(url.searchParams.get("period_id")) : undefined;
+        const outletId = url.searchParams.get("outlet_id") ? Number(url.searchParams.get("outlet_id")) : undefined;
+        const includeDrilldown = url.searchParams.get("include_drilldown") === "true";
+        const trendPeriods = url.searchParams.get("trend_periods") ? Number(url.searchParams.get("trend_periods")) : 3;
+
+        const query: ReconciliationDashboardQuery = {
+          companyId,
+          outletId,
+          fiscalYearId,
+          periodId,
+          includeDrilldown,
+          trendPeriods,
+        };
+
+        const dashboardService = getReconciliationDashboardService();
+        const dashboard = await dashboardService.getDashboard(query);
+
+        const metrics = await register.getMetricsAsJSON();
+        const glImbalanceMetric = metrics.find((m: { name: string }) => m.name === "gl_imbalance_detected_total");
+        const filteredGlImbalance = glImbalanceMetric?.values?.filter((v: { labels: Record<string, unknown> }) =>
+          String(v.labels.company_id) === String(companyId)
+        ) ?? [];
+        const glImbalanceCount = filteredGlImbalance.reduce((sum: number, v: { value: number }) => sum + v.value, 0);
+
+        const enhancedDashboard = {
+          ...dashboard,
+          glImbalanceMetric: {
+            ...dashboard.glImbalanceMetric,
+            totalImbalances: dashboard.glImbalanceMetric.totalImbalances + glImbalanceCount,
+          },
+        };
+
+        return c.json({ success: true, data: enhancedDashboard });
+      } catch (error) {
+        console.error("GET /admin/dashboard/reconciliation failed", error);
+        return errorResponse("INTERNAL_SERVER_ERROR", "Failed to load reconciliation dashboard", 500);
+      }
+    }
+  );
+
+  // GET /admin/dashboard/reconciliation/:accountId/drilldown - Variance drilldown
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/admin/dashboard/reconciliation/{accountId}/drilldown",
+      operationId: "getReconciliationDrilldown",
+      summary: "Reconciliation drilldown",
+      description: "Get variance drilldown for a specific account.",
+      tags: ["Admin"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          accountId: zodOpenApi.string().openapi({ description: "Account ID" }),
+        }),
+        query: zodOpenApi.object({
+          fiscal_year_id: zodOpenApi.string().optional().openapi({ description: "Fiscal year ID" }),
+          period_id: zodOpenApi.string().optional().openapi({ description: "Period ID" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Variance drilldown data",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.any(),
+              }).openapi("ReconciliationDrilldownResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+        404: { description: "Account not found" },
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const companyId = auth.companyId;
+      const accountId = Number(c.req.param("accountId"));
+
+      if (isNaN(accountId)) {
+        return errorResponse("BAD_REQUEST", "Invalid account ID", 400);
+      }
+
+      try {
+        const url = new URL(c.req.url);
+        const fiscalYearId = url.searchParams.get("fiscal_year_id") ? Number(url.searchParams.get("fiscal_year_id")) : undefined;
+        const periodId = url.searchParams.get("period_id") ? Number(url.searchParams.get("period_id")) : undefined;
+
+        const dashboardService = getReconciliationDashboardService();
+        const drilldown = await dashboardService.getVarianceDrilldown(companyId, accountId, periodId, fiscalYearId);
+
+        if (!drilldown) {
+          return errorResponse("NOT_FOUND", "Account not found", 404);
+        }
+
+        return c.json({ success: true, data: drilldown });
+      } catch (error) {
+        console.error("GET /admin/dashboard/reconciliation/:accountId/drilldown failed", error);
+        return errorResponse("INTERNAL_SERVER_ERROR", "Failed to load variance drilldown", 500);
+      }
+    }
+  );
+}

@@ -8,6 +8,10 @@
  */
 
 import { Hono } from "hono";
+import type { Handler } from "hono";
+import { z } from "zod";
+import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
+import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { checkSyncModuleHealth } from "../../lib/sync-modules.js";
 import { readClientIp } from "../../lib/request-meta.js";
 import { authenticateRequest } from "../../lib/auth-guard.js";
@@ -130,3 +134,111 @@ healthRoutes.get("/", async (c) => {
 });
 
 export { healthRoutes };
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * Sync health check response schema
+ */
+const SyncHealthResponseSchema = zodOpenApi
+  .object({
+    success: zodOpenApi.literal(true).openapi({ example: true }),
+    data: zodOpenApi
+      .object({
+        status: zodOpenApi.string().openapi({ description: "Health status" }),
+        modules: zodOpenApi.record(zodOpenApi.string()).openapi({ description: "Module status map" }),
+        timestamp: zodOpenApi.string().openapi({ description: "ISO 8601 timestamp" }),
+      })
+      .openapi("SyncHealthData"),
+  })
+  .openapi("SyncHealthResponse");
+
+/**
+ * Sync health check error response schema
+ */
+const SyncHealthErrorResponseSchema = zodOpenApi
+  .object({
+    success: zodOpenApi.literal(false).openapi({ example: false }),
+    error: zodOpenApi
+      .object({
+        code: zodOpenApi.string().openapi({ description: "Error code" }),
+        message: zodOpenApi.string().openapi({ description: "Error message" }),
+      })
+      .openapi("SyncHealthErrorDetail"),
+  })
+  .openapi("SyncHealthErrorResponse");
+
+/**
+ * Registers sync health routes with an OpenAPIHono instance.
+ */
+export function registerSyncHealthRoutes(app: { openapi: OpenAPIHonoType["openapi"] }): void {
+  const healthRoute = createRoute({
+    path: "/sync/health",
+    method: "get",
+    tags: ["Sync"],
+    summary: "Sync health check",
+    description: "Check sync module health with rate limiting",
+    security: [{ BearerAuth: [] }],
+    responses: {
+      200: {
+        content: { "application/json": { schema: SyncHealthResponseSchema } },
+        description: "Sync module is healthy",
+      },
+      401: {
+        content: { "application/json": { schema: SyncHealthErrorResponseSchema } },
+        description: "Unauthorized",
+      },
+      503: {
+        content: { "application/json": { schema: SyncHealthErrorResponseSchema } },
+        description: "Sync module unhealthy",
+      },
+      429: {
+        content: { "application/json": { schema: SyncHealthErrorResponseSchema } },
+        description: "Rate limit exceeded",
+      },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(healthRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    if (!auth) {
+      return c.json({ success: false, error: { code: "UNAUTHORIZED", message: "Missing auth context" } }, 401);
+    }
+
+    const ipAddress = readClientIp(c.req.raw);
+    const rateLimitKey = getRateLimitKey(auth.userId, ipAddress);
+    const rateLimitResult = checkRateLimit(rateLimitKey);
+
+    if (!rateLimitResult.allowed) {
+      return createRateLimitResponse(rateLimitResult.resetAt);
+    }
+
+    try {
+      const healthStatus = await checkSyncModuleHealth();
+
+      if (!healthStatus.healthy) {
+        return c.json(
+          {
+            success: false,
+            error: { code: "SYNC_UNHEALTHY", message: "One or more sync modules are unhealthy", modules: healthStatus.modules }
+          },
+          503
+        );
+      }
+
+      return c.json({
+        success: true,
+        data: { status: "healthy", modules: healthStatus.modules, timestamp: new Date().toISOString() }
+      });
+    } catch (error) {
+      console.error("Sync health check error:", error);
+      return c.json(
+        { success: false, error: { code: "HEALTH_CHECK_ERROR", message: "Failed to check sync module health" } },
+        500
+      );
+    }
+  }) as unknown as Handler);
+}

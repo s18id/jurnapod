@@ -16,6 +16,8 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
+import type { OpenAPIHono } from "@hono/zod-openapi";
 import { NumericIdSchema } from "@jurnapod/shared";
 import {
   authenticateRequest,
@@ -255,3 +257,266 @@ rolesRoutes.delete("/:id", async (c) => {
 });
 
 export { rolesRoutes };
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * Role data schema
+ */
+const RoleDataSchema = zodOpenApi.object({
+  id: zodOpenApi.number().openapi({ description: "Role ID" }),
+  company_id: zodOpenApi.number().openapi({ description: "Company ID" }),
+  code: zodOpenApi.string().openapi({ description: "Role code" }),
+  name: zodOpenApi.string().openapi({ description: "Role name" }),
+  role_level: zodOpenApi.number().optional().openapi({ description: "Role level" }),
+  created_at: zodOpenApi.string().openapi({ description: "Created at" }),
+  updated_at: zodOpenApi.string().openapi({ description: "Updated at" }),
+}).openapi("RoleData");
+
+/**
+ * Registers role routes with an OpenAPIHono instance.
+ */
+export function registerRoleRoutes(app: OpenAPIHono): void {
+  // GET /roles - List roles
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/roles",
+      operationId: "listRoles",
+      summary: "List roles",
+      description: "List all roles for the company.",
+      tags: ["Roles"],
+      security: [{ BearerAuth: [] }],
+      responses: {
+        200: {
+          description: "List of roles",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.array(RoleDataSchema),
+              }).openapi("RoleListResponse"),
+            },
+          },
+        },
+        401: { description: "Unauthorized" },
+        403: { description: "Forbidden" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "roles", permission: "read" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const roles = await listRoles(auth.companyId);
+      return c.json({ success: true, data: roles });
+    }
+  );
+
+  // POST /roles - Create role
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/roles",
+      operationId: "createRole",
+      summary: "Create role",
+      description: "Create a new role (admin only).",
+      tags: ["Roles"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        body: {
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                code: zodOpenApi.string().min(1).max(32).openapi({ description: "Role code" }),
+                name: zodOpenApi.string().min(1).max(191).openapi({ description: "Role name" }),
+                role_level: zodOpenApi.number().int().optional().openapi({ description: "Role level" }),
+              }).openapi("CreateRoleRequest"),
+            },
+          },
+        },
+      },
+      responses: {
+        201: {
+          description: "Role created",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: RoleDataSchema,
+              }).openapi("CreateRoleResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "roles", permission: "create" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const payload = await c.req.json();
+      const input = CreateRoleSchema.parse(payload);
+      const role = await createRole({
+        companyId: auth.companyId,
+        code: input.code,
+        name: input.name,
+        roleLevel: input.role_level,
+        actor: { userId: auth.userId, ipAddress: readClientIp(c.req.raw) },
+      });
+      return c.json({ success: true, data: role }, 201);
+    }
+  );
+
+  // GET /roles/:id - Get role
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/roles/{id}",
+      operationId: "getRole",
+      summary: "Get role",
+      description: "Get role by ID.",
+      tags: ["Roles"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          id: zodOpenApi.string().openapi({ description: "Role ID" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Role details",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: RoleDataSchema,
+              }).openapi("GetRoleResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid role ID" },
+        401: { description: "Unauthorized" },
+        404: { description: "Role not found" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "roles", permission: "read" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const roleId = NumericIdSchema.parse(c.req.param("id"));
+      const role = await getRole(roleId);
+      return c.json({ success: true, data: role });
+    }
+  );
+
+  // PATCH /roles/:id - Update role
+  app.openapi(
+    createRoute({
+      method: "patch",
+      path: "/roles/{id}",
+      operationId: "updateRole",
+      summary: "Update role",
+      description: "Update role details.",
+      tags: ["Roles"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          id: zodOpenApi.string().openapi({ description: "Role ID" }),
+        }),
+        body: {
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                name: zodOpenApi.string().min(1).max(191).optional().openapi({ description: "Role name" }),
+              }).openapi("UpdateRoleRequest"),
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: "Role updated",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: RoleDataSchema,
+              }).openapi("UpdateRoleResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+        404: { description: "Role not found" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "roles", permission: "update" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const roleId = NumericIdSchema.parse(c.req.param("id"));
+      const payload = await c.req.json();
+      const input = UpdateRoleSchema.parse(payload);
+      const role = await updateRole({
+        companyId: auth.companyId,
+        roleId,
+        name: input.name,
+        actor: { userId: auth.userId, ipAddress: readClientIp(c.req.raw) },
+      });
+      return c.json({ success: true, data: role });
+    }
+  );
+
+  // DELETE /roles/:id - Delete role
+  app.openapi(
+    createRoute({
+      method: "delete",
+      path: "/roles/{id}",
+      operationId: "deleteRole",
+      summary: "Delete role",
+      description: "Delete a role.",
+      tags: ["Roles"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          id: zodOpenApi.string().openapi({ description: "Role ID" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Role deleted",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+              }).openapi("DeleteRoleResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid role ID" },
+        401: { description: "Unauthorized" },
+        404: { description: "Role not found" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "roles", permission: "delete" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const roleId = NumericIdSchema.parse(c.req.param("id"));
+      await deleteRole({
+        companyId: auth.companyId,
+        roleId,
+        actor: { userId: auth.userId, ipAddress: readClientIp(c.req.raw) },
+      });
+      return c.json({ success: true });
+    }
+  );
+}

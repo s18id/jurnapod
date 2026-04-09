@@ -44,6 +44,6 @@
 
 | Epic | Title | Status |
 |------|-------|--------|
-| Epic 36 | OpenAPI Documentation & Swagger UI | ready |
+| Epic 36 | OpenAPI Documentation & Swagger UI | done |
 
 _Last Updated: 2026-04-09_

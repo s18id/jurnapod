@@ -16,6 +16,8 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
+import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { NumericIdSchema } from "@jurnapod/shared";
 import {
   authenticateRequest,
@@ -304,5 +306,127 @@ suppliesRoutes.delete("/:id", async (c) => {
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to delete supply", 500);
   }
 });
+
+// ============================================================================
+// OpenAPI Route Registration (for use with OpenAPIHono)
+// ============================================================================
+
+/**
+ * Registers supply routes with an OpenAPIHono instance.
+ * This enables auto-generated OpenAPI specs for the supply endpoints.
+ */
+export function registerSupplyRoutes(app: { openapi: OpenAPIHonoType["openapi"] }): void {
+  // GET /supplies - List supplies
+  const listSuppliesRoute = createRoute({
+    path: "/supplies",
+    method: "get",
+    tags: ["Inventory"],
+    summary: "List supplies",
+    description: "List supply items with optional filtering",
+    security: [{ BearerAuth: [] }],
+    request: {
+      query: z.object({
+        is_active: z.string().optional(),
+      }),
+    },
+    responses: {
+      200: { description: "List of supplies" },
+      400: { description: "Invalid request" },
+      401: { description: "Unauthorized" },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(listSuppliesRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    const query = c.req.valid("query") || {};
+    
+    let isActiveFilter: boolean | undefined;
+    if (query.is_active === "true") {
+      isActiveFilter = true;
+    } else if (query.is_active === "false") {
+      isActiveFilter = false;
+    }
+
+    const supplies = await listSupplies(auth.companyId, { isActive: isActiveFilter });
+    return c.json({ success: true, data: supplies });
+  }) as any);
+
+  // GET /supplies/:id - Get supply
+  const getSupplyRoute = createRoute({
+    path: "/supplies/{id}",
+    method: "get",
+    tags: ["Inventory"],
+    summary: "Get supply",
+    description: "Get a single supply by ID",
+    security: [{ BearerAuth: [] }],
+    request: {
+      params: zodOpenApi.object({
+        id: NumericIdSchema,
+      }),
+    },
+    responses: {
+      200: { description: "Supply details" },
+      400: { description: "Invalid request" },
+      401: { description: "Unauthorized" },
+      404: { description: "Supply not found" },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(getSupplyRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    const { id } = c.req.valid("param");
+    const supplyId = NumericIdSchema.parse(id);
+
+    const supply = await findSupplyById(auth.companyId, supplyId);
+    if (!supply) {
+      return c.json({ success: false, error: { code: "NOT_FOUND", message: "Supply not found" } }, 404);
+    }
+
+    return c.json({ success: true, data: supply });
+  }) as any);
+
+  // POST /supplies - Create supply
+  const createSupplyRoute = createRoute({
+    path: "/supplies",
+    method: "post",
+    tags: ["Inventory"],
+    summary: "Create supply",
+    description: "Create a new supply item",
+    security: [{ BearerAuth: [] }],
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: SupplyCreateSchema,
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Supply created" },
+      400: { description: "Invalid request" },
+      401: { description: "Unauthorized" },
+      409: { description: "Supply conflict" },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(createSupplyRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    const payload = await c.req.json();
+    const input = SupplyCreateSchema.parse(payload);
+
+    const supply = await createSupply(auth.companyId, {
+      sku: input.sku,
+      name: input.name,
+      unit: input.unit,
+      is_active: input.is_active
+    }, { userId: auth.userId });
+
+    return c.json({ success: true, data: supply }, 201);
+  }) as any);
+}
 
 export { suppliesRoutes };

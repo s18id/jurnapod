@@ -15,6 +15,8 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
+import type { OpenAPIHono } from "@hono/zod-openapi";
 import { NumericIdSchema } from "@jurnapod/shared";
 import {
   authenticateRequest,
@@ -275,3 +277,283 @@ companyRoutes.patch("/:id", async (c) => {
 });
 
 export { companyRoutes };
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * Company response schema
+ */
+const CompanyDataSchema = zodOpenApi.object({
+  id: zodOpenApi.number().openapi({ description: "Company ID" }),
+  code: zodOpenApi.string().openapi({ description: "Company code" }),
+  name: zodOpenApi.string().openapi({ description: "Company name" }),
+  legal_name: zodOpenApi.string().optional().openapi({ description: "Legal name" }),
+  tax_id: zodOpenApi.string().nullable().optional().openapi({ description: "Tax ID" }),
+  email: zodOpenApi.string().nullable().optional().openapi({ description: "Email" }),
+  phone: zodOpenApi.string().nullable().optional().openapi({ description: "Phone" }),
+  address_line1: zodOpenApi.string().nullable().optional().openapi({ description: "Address line 1" }),
+  address_line2: zodOpenApi.string().nullable().optional().openapi({ description: "Address line 2" }),
+  city: zodOpenApi.string().nullable().optional().openapi({ description: "City" }),
+  postal_code: zodOpenApi.string().nullable().optional().openapi({ description: "Postal code" }),
+  timezone: zodOpenApi.string().nullable().optional().openapi({ description: "Timezone" }),
+  currency_code: zodOpenApi.string().nullable().optional().openapi({ description: "Currency code" }),
+  is_active: zodOpenApi.boolean().optional().openapi({ description: "Is active" }),
+  created_at: zodOpenApi.string().openapi({ description: "Created at" }),
+  updated_at: zodOpenApi.string().openapi({ description: "Updated at" }),
+}).openapi("CompanyData");
+
+/**
+ * Registers company routes with an OpenAPIHono instance.
+ */
+export function registerCompanyRoutes(app: OpenAPIHono): void {
+  // GET /companies - List companies
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/companies",
+      operationId: "listCompanies",
+      summary: "List companies",
+      description: "List all companies. SUPER_ADMIN can see all, others see only their own.",
+      tags: ["Companies"],
+      security: [{ BearerAuth: [] }],
+      responses: {
+        200: {
+          description: "List of companies",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.array(CompanyDataSchema),
+              }).openapi("CompanyListResponse"),
+            },
+          },
+        },
+        401: { description: "Unauthorized" },
+        403: { description: "Forbidden" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "companies", permission: "read" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const url = new URL(c.req.raw.url);
+      const isActive = url.searchParams.get("is_active");
+      const isSuperAdmin = auth.role === "SUPER_ADMIN";
+      const companyIdFilter = isSuperAdmin ? undefined : auth.companyId;
+
+      const companyService = getCompanyService();
+      const companies = await companyService.listCompanies({
+        companyId: companyIdFilter,
+        includeDeleted: isActive === "false",
+      });
+      return c.json({ success: true, data: companies });
+    }
+  );
+
+  // POST /companies - Create company
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/companies",
+      operationId: "createCompany",
+      summary: "Create company",
+      description: "Create a new company (super admin only).",
+      tags: ["Companies"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        body: {
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                code: zodOpenApi.string().min(1).max(32).openapi({ description: "Company code" }),
+                name: zodOpenApi.string().min(1).max(191).openapi({ description: "Company name" }),
+                legal_name: zodOpenApi.string().max(191).optional().openapi({ description: "Legal name" }),
+                tax_id: zodOpenApi.string().max(191).nullable().optional().openapi({ description: "Tax ID" }),
+                email: zodOpenApi.string().email().max(191).nullable().optional().openapi({ description: "Email" }),
+                phone: zodOpenApi.string().max(50).nullable().optional().openapi({ description: "Phone" }),
+                address_line1: zodOpenApi.string().max(191).nullable().optional().openapi({ description: "Address" }),
+                address_line2: zodOpenApi.string().max(191).nullable().optional().openapi({ description: "Address" }),
+                city: zodOpenApi.string().max(100).nullable().optional().openapi({ description: "City" }),
+                postal_code: zodOpenApi.string().max(20).nullable().optional().openapi({ description: "Postal code" }),
+                timezone: zodOpenApi.string().max(50).nullable().optional().openapi({ description: "Timezone" }),
+                currency_code: zodOpenApi.string().min(3).max(3).nullable().optional().openapi({ description: "Currency code" }),
+              }).openapi("CreateCompanyRequest"),
+            },
+          },
+        },
+      },
+      responses: {
+        201: {
+          description: "Company created",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: CompanyDataSchema,
+              }).openapi("CreateCompanyResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+        409: { description: "Company code already exists" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "companies", permission: "create" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const payload = await c.req.json();
+      const input = CreateCompanySchema.parse(payload);
+      const companyService = getCompanyService();
+
+      const company = await companyService.createCompany({
+        code: input.code,
+        name: input.name,
+        legal_name: input.legal_name,
+        tax_id: input.tax_id,
+        email: input.email,
+        phone: input.phone,
+        address_line1: input.address_line1,
+        address_line2: input.address_line2,
+        city: input.city,
+        postal_code: input.postal_code,
+        timezone: input.timezone,
+        currency_code: input.currency_code,
+        actor: { userId: auth.userId, ipAddress: getClientIp(c.req.raw) },
+      });
+      return c.json({ success: true, data: company }, 201);
+    }
+  );
+
+  // GET /companies/:id - Get company
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/companies/{id}",
+      operationId: "getCompany",
+      summary: "Get company",
+      description: "Get company details by ID.",
+      tags: ["Companies"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          id: zodOpenApi.string().openapi({ description: "Company ID" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Company details",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: CompanyDataSchema,
+              }).openapi("GetCompanyResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid company ID" },
+        401: { description: "Unauthorized" },
+        404: { description: "Company not found" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const companyId = NumericIdSchema.parse(c.req.param("id"));
+
+      if (companyId !== auth.companyId) {
+        const accessResult = await requireAccess({ module: "companies", permission: "read" })(c.req.raw, auth);
+        if (accessResult !== null) return accessResult;
+      }
+
+      const companyService = getCompanyService();
+      const company = await companyService.getCompany({ companyId });
+      return c.json({ success: true, data: company });
+    }
+  );
+
+  // PATCH /companies/:id - Update company
+  app.openapi(
+    createRoute({
+      method: "patch",
+      path: "/companies/{id}",
+      operationId: "updateCompany",
+      summary: "Update company",
+      description: "Update company details.",
+      tags: ["Companies"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          id: zodOpenApi.string().openapi({ description: "Company ID" }),
+        }),
+        body: {
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                name: zodOpenApi.string().min(1).max(191).optional().openapi({ description: "Company name" }),
+                legal_name: zodOpenApi.string().max(191).nullable().optional().openapi({ description: "Legal name" }),
+                tax_id: zodOpenApi.string().max(191).nullable().optional().openapi({ description: "Tax ID" }),
+                email: zodOpenApi.string().email().max(191).nullable().optional().openapi({ description: "Email" }),
+                phone: zodOpenApi.string().max(50).nullable().optional().openapi({ description: "Phone" }),
+                address_line1: zodOpenApi.string().max(191).nullable().optional().openapi({ description: "Address" }),
+                address_line2: zodOpenApi.string().max(191).nullable().optional().openapi({ description: "Address" }),
+                city: zodOpenApi.string().max(100).nullable().optional().openapi({ description: "City" }),
+                postal_code: zodOpenApi.string().max(20).nullable().optional().openapi({ description: "Postal code" }),
+                timezone: zodOpenApi.string().max(50).nullable().optional().openapi({ description: "Timezone" }),
+                currency_code: zodOpenApi.string().min(3).max(3).nullable().optional().openapi({ description: "Currency code" }),
+              }).openapi("UpdateCompanyRequest"),
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: "Company updated",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: CompanyDataSchema,
+              }).openapi("UpdateCompanyResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+        404: { description: "Company not found" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const companyId = NumericIdSchema.parse(c.req.param("id"));
+      const accessResult = await requireAccess({ module: "companies", permission: "update" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const payload = await c.req.json();
+      const input = UpdateCompanySchema.parse(payload);
+      const companyService = getCompanyService();
+
+      const company = await companyService.updateCompany({
+        companyId,
+        name: input.name,
+        legal_name: input.legal_name,
+        tax_id: input.tax_id,
+        email: input.email,
+        phone: input.phone,
+        address_line1: input.address_line1,
+        address_line2: input.address_line2,
+        city: input.city,
+        postal_code: input.postal_code,
+        timezone: input.timezone,
+        currency_code: input.currency_code,
+        actor: { userId: auth.userId, ipAddress: getClientIp(c.req.raw) },
+      });
+      return c.json({ success: true, data: company });
+    }
+  );
+}

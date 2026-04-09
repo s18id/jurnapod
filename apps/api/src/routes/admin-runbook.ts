@@ -12,6 +12,8 @@
  */
 
 import { Hono } from "hono";
+import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
+import type { OpenAPIHono } from "@hono/zod-openapi";
 import { authenticateRequest, requireAccess, type AuthContext } from "../lib/auth-guard.js";
 import { errorResponse } from "../lib/response.js";
 
@@ -443,3 +445,100 @@ kubectl logs -l app=jurnapod-api --tail=500 | grep -E "ERROR|WARN"
 });
 
 export { adminRunbookRoutes };
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * Registers admin runbook routes with an OpenAPIHono instance.
+ */
+export function registerAdminRunbookRoutes(app: OpenAPIHono): void {
+  // GET /admin/runbook.md - Get operations runbook
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/admin/runbook.md",
+      operationId: "getRunbook",
+      summary: "Get operations runbook",
+      description: "Get the operations runbook as markdown.",
+      tags: ["Admin"],
+      security: [{ BearerAuth: [] }],
+      responses: {
+        200: {
+          description: "Operations runbook markdown",
+          content: {
+            "text/markdown": {
+              schema: zodOpenApi.string().openapi({ description: "Runbook markdown content" }),
+            },
+          },
+        },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "settings", permission: "read" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const markdown = `# Jurnapod Operations Runbook
+
+This runbook contains response procedures for common alerts and operational issues.
+
+---
+
+## Sync Issues
+
+### High Outbox Lag
+**Symptoms:** \`outbox_lag_items > 100\`
+**Severity:** Critical
+
+### Duplicate Suppression Spike
+**Symptoms:** \`client_tx_id_duplicates_total > 100\` in 5 minutes
+**Severity:** Warning
+
+### Sync Latency Breach
+**Symptoms:** Sync push latency p95 > 500ms for 5 minutes
+**Severity:** Warning
+
+### Sync Failure Rate Spike
+**Symptoms:** \`sync_push_total{status=failed}\` rate > 0.5% over 5 minutes
+**Severity:** Critical
+
+---
+
+## Financial Issues
+
+### Journal Posting Failures
+**Symptoms:** \`journal_post_failure_total\` increasing
+**Severity:** Critical
+
+### GL Imbalance Detected
+**Symptoms:** \`gl_imbalance_detected_total > 0\`
+**Severity:** Critical
+
+### Missing Journal Alert
+**Symptoms:** \`journal_missing_alert_total\` increasing
+**Severity:** Warning
+
+---
+
+## Escalation Path
+
+| Severity | Response Time | Escalation |
+|----------|---------------|------------|
+| Critical (P1) | 15 minutes | On-call engineer → Engineering Lead |
+| Warning (P2) | 1 hour | Team lead → Engineering Lead |
+| Info (P3) | Next business day | Team lead |
+
+---
+
+*Last Updated: 2026-04-04*
+*Maintained by: Operations Team*
+`;
+
+      c.header("Content-Type", "text/markdown; charset=utf-8");
+      return c.body(markdown);
+    }
+  );
+}

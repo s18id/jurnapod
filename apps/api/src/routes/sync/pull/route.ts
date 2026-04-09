@@ -12,6 +12,5 @@
  * The structure is established here - full wiring is a follow-up.
  */
 
-// Re-export the syncPullRoutes from the main pull.ts
-// This maintains the current API contract while establishing the route/layer separation
-export { syncPullRoutes } from "../pull.js";
+// Re-export the syncPullRoutes and registration function from the main pull.ts
+export { syncPullRoutes, registerSyncPullRoutes } from "../pull.js";

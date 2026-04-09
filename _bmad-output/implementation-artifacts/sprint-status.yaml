@@ -220,7 +220,7 @@ development_status:
   19-10-migrate-api-lib-cost-recipe: done
   19-11-migrate-api-lib-reports: done
   19-12-migrate-api-routes: done
-  19-13-final-verification: backlog (300+ type errors - TD-037)
+  19-13-final-verification: backlog
   epic-19-retrospective: done
 
   # Epic 20: Schema Consolidation & JSON Normalization
@@ -417,3 +417,18 @@ development_status:
   35-4-treasury-route: done
   35-5-sales-routes: done
   35-6-final-validation: done  # lint 0 errors, typecheck/build pass, known unrelated flaky integration test remains
+  epic-35-retrospective: done
+
+  # Epic 36: OpenAPI Documentation & Swagger UI
+  epic-36: done
+  36-1-infrastructure-config: done
+  36-2-auth-health-routes: done
+  36-3-sync-pos-routes: done
+  36-4-sales-accounting-routes: done
+  36-5-inventory-settings-routes: done
+  36-6-remaining-routes: done
+  36-7-openapi-regenerator: done
+  36-8-extract-spec-to-json: done
+  36-9-openapi-auto-gen-poc: done
+  36-10-expand-auto-gen-all: done
+  epic-36-retrospective: done

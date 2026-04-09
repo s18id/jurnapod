@@ -11,6 +11,8 @@
  */
 
 import { Hono } from "hono";
+import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
+import type { OpenAPIHono } from "@hono/zod-openapi";
 import {
   authenticateRequest,
   requireAccess,
@@ -438,3 +440,193 @@ exportRoutes.get("/:entityType/columns", async (c) => {
 });
 
 export { exportRoutes };
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * Export columns response schema
+ */
+const ExportColumnsResponseSchema = zodOpenApi.object({
+  success: zodOpenApi.literal(true),
+  data: zodOpenApi.object({
+    entityType: zodOpenApi.string(),
+    columns: zodOpenApi.array(zodOpenApi.object({
+      key: zodOpenApi.string(),
+      header: zodOpenApi.string(),
+      fieldType: zodOpenApi.string(),
+    })),
+    defaultColumns: zodOpenApi.array(zodOpenApi.string()),
+  }),
+}).openapi("ExportColumnsResponse");
+
+/**
+ * Registers export routes with an OpenAPIHono instance.
+ */
+export function registerExportRoutes(app: OpenAPIHono): void {
+  // POST /export/:entityType - Export items or prices
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/export/{entityType}",
+      operationId: "exportData",
+      summary: "Export data",
+      description: "Export items or prices to CSV or Excel format.",
+      tags: ["Export"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          entityType: zodOpenApi.string().openapi({ description: "Entity type: items or prices" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Exported data file",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.any().openapi("ExportResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "inventory", permission: "read" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      try {
+        const url = new URL(c.req.raw.url);
+        const entityType = c.req.param("entityType") as EntityType;
+
+        if (entityType !== "items" && entityType !== "prices") {
+          return errorResponse("INVALID_REQUEST", `Invalid entity type: ${entityType}. Must be 'items' or 'prices'.`, 400);
+        }
+
+        const params = parseExportParams(url);
+        const columns = getColumnsForEntity(entityType, params.columns);
+
+        if (columns.length === 0) {
+          return errorResponse("INVALID_REQUEST", "No valid columns selected for export", 400);
+        }
+
+        const data = entityType === "items"
+          ? await fetchItemsForExport(auth.companyId, params)
+          : await fetchPricesForExport(auth.companyId, params);
+
+        const format = params.format;
+        const rowCount = data.length;
+        const filename = generateFilename(entityType, format);
+
+        if (format === "xlsx" && rowCount > EXCEL_MAX_ROWS) {
+          return errorResponse("INVALID_REQUEST", `Excel export is limited to ${EXCEL_MAX_ROWS.toLocaleString()} rows.`, 400);
+        }
+
+        if (format === "csv" && shouldUseStreaming(rowCount)) {
+          async function* dataGenerator() {
+            for (const row of data) { yield row; }
+          }
+
+          const streamGenerator = generateCSVStream(dataGenerator(), columns, { format: "csv", includeHeaders: true });
+          const readableStream = createReadableStream(streamGenerator);
+
+          return new Response(readableStream, {
+            status: 200,
+            headers: {
+              "Content-Type": getContentType("csv"),
+              "Content-Disposition": `attachment; filename="${filename}"`,
+            },
+          });
+        }
+
+        let buffer: Buffer;
+        let contentType: string;
+
+        if (format === "xlsx") {
+          buffer = rowCount > STREAMING_THRESHOLD
+            ? generateExcelChunked(data, columns, { format: "xlsx" })
+            : generateExcel(data, columns, { format: "xlsx" });
+          contentType = getContentType("xlsx");
+        } else {
+          buffer = generateCSVBuffer(data, columns, { format: "csv" });
+          contentType = getContentType("csv");
+        }
+
+        const uint8Array = new Uint8Array(buffer);
+        const blob = new Blob([uint8Array], { type: contentType });
+
+        return new Response(blob, {
+          status: 200,
+          headers: {
+            "Content-Type": contentType,
+            "Content-Disposition": `attachment; filename="${filename}"`,
+            "Content-Length": String(buffer.length),
+          },
+        });
+      } catch (error) {
+        console.error("Export error:", error);
+        return errorResponse("INTERNAL_ERROR", "Failed to generate export", 500);
+      }
+    }
+  );
+
+  // GET /export/:entityType/columns - List available columns
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/export/{entityType}/columns",
+      operationId: "getExportColumns",
+      summary: "Get export columns",
+      description: "List available columns for export.",
+      tags: ["Export"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          entityType: zodOpenApi.string().openapi({ description: "Entity type: items or prices" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Export columns",
+          content: {
+            "application/json": {
+              schema: ExportColumnsResponseSchema,
+            },
+          },
+        },
+        400: { description: "Invalid entity type" },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "inventory", permission: "read" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const entityType = c.req.param("entityType") as EntityType;
+
+      if (entityType !== "items" && entityType !== "prices") {
+        return errorResponse("INVALID_REQUEST", `Invalid entity type: ${entityType}. Must be 'items' or 'prices'.`, 400);
+      }
+
+      const allColumns = entityType === "items" ? ITEM_EXPORT_COLUMNS : PRICE_EXPORT_COLUMNS;
+      const defaults = entityType === "items" ? DEFAULT_ITEM_COLUMNS : DEFAULT_PRICE_COLUMNS;
+
+      return c.json({
+        success: true,
+        data: {
+          entityType,
+          columns: allColumns.map((col) => ({
+            key: col.key,
+            header: col.header,
+            fieldType: col.fieldType || "string"
+          })),
+          defaultColumns: defaults
+        },
+      });
+    }
+  );
+}

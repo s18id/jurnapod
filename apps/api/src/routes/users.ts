@@ -15,6 +15,8 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
+import type { OpenAPIHono } from "@hono/zod-openapi";
 import { NumericIdSchema } from "@jurnapod/shared";
 import {
   authenticateRequest,
@@ -521,3 +523,300 @@ usersRoutes.get("/outlets", async (c) => {
 });
 
 export { usersRoutes };
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * User data schema
+ */
+const UserDataSchema = zodOpenApi.object({
+  id: zodOpenApi.number().openapi({ description: "User ID" }),
+  company_id: zodOpenApi.number().openapi({ description: "Company ID" }),
+  email: zodOpenApi.string().openapi({ description: "Email" }),
+  is_active: zodOpenApi.boolean().openapi({ description: "Is active" }),
+  created_at: zodOpenApi.string().openapi({ description: "Created at" }),
+  updated_at: zodOpenApi.string().openapi({ description: "Updated at" }),
+}).openapi("UserData");
+
+/**
+ * Registers user routes with an OpenAPIHono instance.
+ */
+export function registerUserRoutes(app: OpenAPIHono): void {
+  // GET /users/me - Get current user
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/users/me",
+      operationId: "getCurrentUser",
+      summary: "Get current user",
+      description: "Get the currently authenticated user's profile.",
+      tags: ["Users"],
+      security: [{ BearerAuth: [] }],
+      responses: {
+        200: {
+          description: "User profile",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: UserDataSchema,
+              }).openapi("GetCurrentUserResponse"),
+            },
+          },
+        },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const user = await findActiveUserById(auth.userId, auth.companyId);
+      if (!user) return errorResponse("NOT_FOUND", "User not found", 404);
+      return c.json({ success: true, data: user });
+    }
+  );
+
+  // GET /users - List users
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/users",
+      operationId: "listUsers",
+      summary: "List users",
+      description: "List all users for the company (admin only).",
+      tags: ["Users"],
+      security: [{ BearerAuth: [] }],
+      responses: {
+        200: {
+          description: "List of users",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.array(UserDataSchema),
+              }).openapi("UserListResponse"),
+            },
+          },
+        },
+        401: { description: "Unauthorized" },
+        403: { description: "Forbidden" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "users", permission: "read" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const url = new URL(c.req.raw.url);
+      const companyIdParam = url.searchParams.get("company_id");
+      const requestedCompanyId = companyIdParam ? Number(companyIdParam) : auth.companyId;
+      const users = await listUsers(requestedCompanyId, { userId: auth.userId, companyId: auth.companyId });
+      return c.json({ success: true, data: users });
+    }
+  );
+
+  // POST /users - Create user
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/users",
+      operationId: "createUser",
+      summary: "Create user",
+      description: "Create a new user (admin only).",
+      tags: ["Users"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        body: {
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                email: zodOpenApi.string().email().max(191).openapi({ description: "Email" }),
+                password: zodOpenApi.string().min(8).max(255).openapi({ description: "Password" }),
+                is_active: zodOpenApi.boolean().optional().default(true).openapi({ description: "Is active" }),
+                role_codes: zodOpenApi.array(zodOpenApi.string()).optional().default([]).openapi({ description: "Role codes" }),
+                outlet_ids: zodOpenApi.array(zodOpenApi.number()).optional().default([]).openapi({ description: "Outlet IDs" }),
+              }).openapi("CreateUserRequest"),
+            },
+          },
+        },
+      },
+      responses: {
+        201: {
+          description: "User created",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: UserDataSchema,
+              }).openapi("CreateUserResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "users", permission: "create" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const payload = await c.req.json();
+      const input = CreateUserSchema.parse(payload);
+      const user = await createUser({
+        companyId: auth.companyId,
+        email: input.email,
+        password: input.password,
+        isActive: input.is_active,
+        roleCodes: input.role_codes,
+        outletIds: input.outlet_ids,
+        outletRoleAssignments: input.outlet_role_assignments.map((a) => ({
+          outletId: a.outlet_id,
+          roleCodes: a.role_codes,
+        })),
+        actor: { userId: auth.userId, ipAddress: readClientIp(c.req.raw) },
+      });
+      return c.json({ success: true, data: user }, 201);
+    }
+  );
+
+  // GET /users/:id - Get user by ID
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/users/{id}",
+      operationId: "getUser",
+      summary: "Get user",
+      description: "Get user by ID.",
+      tags: ["Users"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          id: zodOpenApi.string().openapi({ description: "User ID" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "User details",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: UserDataSchema,
+              }).openapi("GetUserResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid user ID" },
+        401: { description: "Unauthorized" },
+        404: { description: "User not found" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const userId = NumericIdSchema.parse(c.req.param("id"));
+      const user = await findUserById(auth.companyId, userId);
+      if (!user) return errorResponse("NOT_FOUND", "User not found", 404);
+      return c.json({ success: true, data: user });
+    }
+  );
+
+  // POST /users/:id/roles - Set user roles
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/users/{id}/roles",
+      operationId: "setUserRoles",
+      summary: "Set user roles",
+      description: "Set roles for a user (admin only).",
+      tags: ["Users"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          id: zodOpenApi.string().openapi({ description: "User ID" }),
+        }),
+        body: {
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                role_codes: zodOpenApi.array(zodOpenApi.string()).openapi({ description: "Role codes" }),
+                outlet_id: zodOpenApi.number().optional().openapi({ description: "Outlet ID" }),
+              }).openapi("SetUserRolesRequest"),
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: "Roles set",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+              }).openapi("SetUserRolesResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+        403: { description: "Forbidden" },
+        404: { description: "User or role not found" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "users", permission: "update" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const userId = NumericIdSchema.parse(c.req.param("id"));
+      const payload = await c.req.json();
+      const input = SetUserRolesSchema.parse(payload);
+
+      await setUserRoles({
+        companyId: auth.companyId,
+        userId,
+        roleCodes: input.role_codes,
+        outletId: input.outlet_id,
+        actor: { userId: auth.userId, ipAddress: readClientIp(c.req.raw) },
+      });
+      return c.json({ success: true });
+    }
+  );
+
+  // GET /users/roles - List available roles
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/users/roles",
+      operationId: "listRoles",
+      summary: "List roles",
+      description: "List all available roles for the company.",
+      tags: ["Users"],
+      security: [{ BearerAuth: [] }],
+      responses: {
+        200: {
+          description: "List of roles",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.array(zodOpenApi.object({
+                  id: zodOpenApi.number(),
+                  code: zodOpenApi.string(),
+                  name: zodOpenApi.string(),
+                })),
+              }).openapi("RoleListResponse"),
+            },
+          },
+        },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const roles = await listRoles(auth.companyId);
+      return c.json({ success: true, data: roles });
+    }
+  );
+}

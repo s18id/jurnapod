@@ -14,6 +14,5 @@
  * the current behavior while establishing the layered structure.
  */
 
-// Re-export the syncPushRoutes from the main push.ts
-// This maintains the current API contract while establishing the route/layer separation
-export { syncPushRoutes } from "../push.js";
+// Re-export the syncPushRoutes and registration function from the main push.ts
+export { syncPushRoutes, registerSyncPushRoutes } from "../push.js";

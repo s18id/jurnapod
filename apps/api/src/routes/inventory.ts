@@ -16,6 +16,8 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
+import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import {
   ItemCreateRequestSchema,
   NumericIdSchema
@@ -1112,5 +1114,151 @@ inventoryRoutes.get("/items/:id/prices", async (c) => {
     return errorResponse("INTERNAL_SERVER_ERROR", "Item prices request failed", 500);
   }
 });
+
+// ============================================================================
+// OpenAPI Route Registration (for use with OpenAPIHono)
+// ============================================================================
+
+/**
+ * Registers inventory routes with an OpenAPIHono instance.
+ * This enables auto-generated OpenAPI specs for the inventory endpoints.
+ */
+export function registerInventoryRoutes(app: { openapi: OpenAPIHonoType["openapi"] }): void {
+  // GET /inventory/items - List items
+  const listItemsRoute = createRoute({
+    path: "/inventory/items",
+    method: "get",
+    tags: ["Inventory"],
+    summary: "List items",
+    description: "List inventory items with optional filtering",
+    security: [{ BearerAuth: [] }],
+    request: {
+      query: z.object({
+        company_id: NumericIdSchema.optional(),
+        is_active: z.string().optional(),
+      }),
+    },
+    responses: {
+      200: { description: "List of items" },
+      400: { description: "Invalid request" },
+      401: { description: "Unauthorized" },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(listItemsRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    const query = c.req.valid("query") || {};
+    
+    if (query.company_id && query.company_id !== auth.companyId) {
+      return c.json({ success: false, error: { code: "INVALID_REQUEST", message: "Invalid request" } }, 400);
+    }
+
+    const isActive = query.is_active === "true" ? true : query.is_active === "false" ? false : undefined;
+    const items = await itemsAdapter.listItems(auth.companyId, { isActive });
+
+    return c.json({ success: true, data: items });
+  }) as any);
+
+  // GET /inventory/items/:id - Get single item
+  const getItemRoute = createRoute({
+    path: "/inventory/items/{id}",
+    method: "get",
+    tags: ["Inventory"],
+    summary: "Get item",
+    description: "Get a single inventory item by ID",
+    security: [{ BearerAuth: [] }],
+    request: {
+      params: zodOpenApi.object({
+        id: NumericIdSchema,
+      }),
+    },
+    responses: {
+      200: { description: "Item details" },
+      400: { description: "Invalid request" },
+      401: { description: "Unauthorized" },
+      404: { description: "Item not found" },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(getItemRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    const { id } = c.req.valid("param");
+    const itemId = NumericIdSchema.parse(id);
+
+    const item = await itemsAdapter.findItemById(auth.companyId, itemId);
+    if (!item) {
+      return c.json({ success: false, error: { code: "NOT_FOUND", message: "Item not found" } }, 404);
+    }
+
+    return c.json({ success: true, data: item });
+  }) as any);
+
+  // POST /inventory/items - Create item
+  const createItemRoute = createRoute({
+    path: "/inventory/items",
+    method: "post",
+    tags: ["Inventory"],
+    summary: "Create item",
+    description: "Create a new inventory item",
+    security: [{ BearerAuth: [] }],
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: ItemCreateRequestSchema,
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Item created" },
+      400: { description: "Invalid request" },
+      401: { description: "Unauthorized" },
+      409: { description: "Item conflict" },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(createItemRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    const payload = await c.req.json();
+    const input = ItemCreateRequestSchema.parse(payload);
+
+    const item = await itemsAdapter.createItem(auth.companyId, {
+      sku: input.sku,
+      name: input.name,
+      type: input.type,
+      item_group_id: input.item_group_id,
+      cogs_account_id: input.cogs_account_id,
+      inventory_asset_account_id: input.inventory_asset_account_id,
+      is_active: input.is_active
+    }, { userId: auth.userId });
+
+    return c.json({ success: true, data: item }, 201);
+  }) as any);
+
+  // GET /inventory/item-groups - List item groups
+  const listItemGroupsRoute = createRoute({
+    path: "/inventory/item-groups",
+    method: "get",
+    tags: ["Inventory"],
+    summary: "List item groups",
+    description: "List inventory item groups",
+    security: [{ BearerAuth: [] }],
+    responses: {
+      200: { description: "List of item groups" },
+      401: { description: "Unauthorized" },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(listItemGroupsRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    const groups = await itemGroupsAdapter.listItemGroups(auth.companyId);
+    return c.json({ success: true, data: groups });
+  }) as any);
+}
 
 export { inventoryRoutes };

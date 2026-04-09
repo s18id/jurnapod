@@ -16,6 +16,8 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
+import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { NumericIdSchema } from "@jurnapod/shared";
 import {
   authenticateRequest,
@@ -276,5 +278,77 @@ recipesRoutes.get("/:id/cost", async (c) => {
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to calculate recipe cost", 500);
   }
 });
+
+// ============================================================================
+// OpenAPI Route Registration (for use with OpenAPIHono)
+// ============================================================================
+
+/**
+ * Registers recipe routes with an OpenAPIHono instance.
+ * This enables auto-generated OpenAPI specs for the recipe endpoints.
+ */
+export function registerRecipeRoutes(app: { openapi: OpenAPIHonoType["openapi"] }): void {
+  // GET /recipes/:id/ingredients - List recipe ingredients
+  const listIngredientsRoute = createRoute({
+    path: "/recipes/{id}/ingredients",
+    method: "get",
+    tags: ["Inventory"],
+    summary: "List recipe ingredients",
+    description: "Get ingredients for a recipe",
+    security: [{ BearerAuth: [] }],
+    request: {
+      params: zodOpenApi.object({
+        id: NumericIdSchema,
+      }),
+    },
+    responses: {
+      200: { description: "List of ingredients" },
+      400: { description: "Invalid request" },
+      401: { description: "Unauthorized" },
+      404: { description: "Recipe not found" },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(listIngredientsRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    const { id } = c.req.valid("param");
+    const recipeId = NumericIdSchema.parse(id);
+
+    const ingredients = await getRecipeIngredients(auth.companyId, recipeId);
+    return c.json({ success: true, data: ingredients });
+  }) as any);
+
+  // GET /recipes/:id/cost - Get recipe cost
+  const getRecipeCostRoute = createRoute({
+    path: "/recipes/{id}/cost",
+    method: "get",
+    tags: ["Inventory"],
+    summary: "Get recipe cost",
+    description: "Calculate the total cost of a recipe",
+    security: [{ BearerAuth: [] }],
+    request: {
+      params: zodOpenApi.object({
+        id: NumericIdSchema,
+      }),
+    },
+    responses: {
+      200: { description: "Recipe cost" },
+      400: { description: "Invalid request" },
+      401: { description: "Unauthorized" },
+      404: { description: "Recipe not found" },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(getRecipeCostRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    const { id } = c.req.valid("param");
+    const recipeId = NumericIdSchema.parse(id);
+
+    const cost = await calculateRecipeCost(auth.companyId, recipeId);
+    return c.json({ success: true, data: cost });
+  }) as any);
+}
 
 export { recipesRoutes };

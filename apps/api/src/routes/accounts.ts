@@ -14,6 +14,8 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
+import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import {
   AccountCreateRequestSchema,
   AccountUpdateRequestSchema,
@@ -1630,5 +1632,159 @@ accountRoutes.post("/fixed-assets/events/:id/void", async (c) => {
     return errorResponse("INTERNAL_ERROR", "Void failed", 500);
   }
 });
+
+// ============================================================================
+// OpenAPI Route Registration (for use with OpenAPIHono)
+// ============================================================================
+
+/**
+ * Registers account routes with an OpenAPIHono instance.
+ * This enables auto-generated OpenAPI specs for the account endpoints.
+ */
+export function registerAccountRoutes(app: { openapi: OpenAPIHonoType["openapi"] }): void {
+  // GET /accounts - List accounts
+  const listAccountsRoute = createRoute({
+    path: "/accounts",
+    method: "get",
+    tags: ["Accounting"],
+    summary: "List accounts",
+    description: "List chart of accounts with optional filtering",
+    security: [{ BearerAuth: [] }],
+    request: {
+      query: zodOpenApi.object({
+        company_id: NumericIdSchema,
+        is_active: zodOpenApi.string().optional(),
+        is_payable: zodOpenApi.string().optional(),
+        report_group: zodOpenApi.enum(["NRC", "PL"]).optional(),
+        parent_account_id: NumericIdSchema.optional(),
+        search: zodOpenApi.string().optional(),
+        include_children: zodOpenApi.string().optional(),
+      }),
+    },
+    responses: {
+      200: { description: "List of accounts" },
+      400: { description: "Invalid request" },
+      401: { description: "Unauthorized" },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(listAccountsRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    const query = c.req.valid("query");
+    
+    if (query.company_id !== auth.companyId) {
+      return c.json({ success: false, error: { code: "COMPANY_MISMATCH", message: "Company ID mismatch" } }, 400);
+    }
+
+    const accounts = await listAccounts({
+      company_id: query.company_id,
+      is_active: query.is_active === "true" || query.is_active === "1" ? true : query.is_active === "false" || query.is_active === "0" ? false : undefined,
+      is_payable: query.is_payable === "true" || query.is_payable === "1" ? true : query.is_payable === "false" || query.is_payable === "0" ? false : undefined,
+      report_group: query.report_group,
+      parent_account_id: query.parent_account_id,
+      search: query.search,
+      include_children: query.include_children === "true" || query.include_children === "1",
+    });
+
+    return c.json({ success: true, data: accounts });
+  }) as any);
+
+  // GET /accounts/:id - Get single account
+  const getAccountRoute = createRoute({
+    path: "/accounts/{id}",
+    method: "get",
+    tags: ["Accounting"],
+    summary: "Get account",
+    description: "Get a single account by ID",
+    security: [{ BearerAuth: [] }],
+    request: {
+      params: zodOpenApi.object({
+        id: NumericIdSchema,
+      }),
+    },
+    responses: {
+      200: { description: "Account details" },
+      400: { description: "Invalid request" },
+      401: { description: "Unauthorized" },
+      404: { description: "Account not found" },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(getAccountRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    const { id } = c.req.valid("param");
+    const accountId = NumericIdSchema.parse(id);
+
+    const account = await getAccountById(accountId, auth.companyId);
+    if (!account) {
+      return c.json({ success: false, error: { code: "NOT_FOUND", message: "Account not found" } }, 404);
+    }
+
+    return c.json({ success: true, data: account });
+  }) as any);
+
+  // POST /accounts - Create account
+  const createAccountRoute = createRoute({
+    path: "/accounts",
+    method: "post",
+    tags: ["Accounting"],
+    summary: "Create account",
+    description: "Create a new chart of account entry",
+    security: [{ BearerAuth: [] }],
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: AccountCreateRequestSchema,
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Account created" },
+      400: { description: "Invalid request" },
+      401: { description: "Unauthorized" },
+      409: { description: "Account code already exists" },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(createAccountRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    const payload = await c.req.json();
+    const input = AccountCreateRequestSchema.parse(payload);
+
+    if (input.company_id !== auth.companyId) {
+      return c.json({ success: false, error: { code: "COMPANY_MISMATCH", message: "Company ID mismatch" } }, 400);
+    }
+
+    const account = await createAccount(input, auth.userId);
+    return c.json({ success: true, data: account }, 201);
+  }) as any);
+
+  // GET /accounts/types - Get account types
+  const getAccountTypesRoute = createRoute({
+    path: "/accounts/types",
+    method: "get",
+    tags: ["Accounting"],
+    summary: "Get account types",
+    description: "Get list of available account types",
+    security: [{ BearerAuth: [] }],
+    responses: {
+      200: { description: "List of account types" },
+      401: { description: "Unauthorized" },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(getAccountTypesRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    const { listAccountTypes } = await import("../lib/account-types.js");
+    const types = await listAccountTypes({ company_id: auth.companyId });
+    return c.json({ success: true, data: types });
+  }) as any);
+}
 
 export { accountRoutes };

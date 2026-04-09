@@ -26,6 +26,8 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
+import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";
 import { errorResponse } from "../../lib/response.js";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
@@ -90,5 +92,124 @@ checkDuplicateRoutes.post("/", async (c) => {
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to check duplicate", 500);
   }
 });
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * Check duplicate request schema
+ */
+const CheckDuplicateRequestSchemaOpenApi = zodOpenApi
+  .object({
+    client_tx_id: zodOpenApi.string().uuid().openapi({ description: "Client transaction UUID" }),
+    company_id: zodOpenApi.number().int().positive().openapi({ description: "Company ID" }),
+  })
+  .openapi("CheckDuplicateRequest");
+
+/**
+ * Check duplicate response schema (not a duplicate)
+ */
+const CheckDuplicateNotFoundResponseSchema = zodOpenApi
+  .object({
+    is_duplicate: zodOpenApi.literal(false).openapi({ example: false }),
+  })
+  .openapi("CheckDuplicateNotFoundResponse");
+
+/**
+ * Check duplicate response schema (is a duplicate)
+ */
+const CheckDuplicateFoundResponseSchema = zodOpenApi
+  .object({
+    is_duplicate: zodOpenApi.literal(true).openapi({ example: true }),
+    existing_id: zodOpenApi.string().openapi({ description: "Existing transaction ID" }),
+    created_at: zodOpenApi.string().openapi({ description: "Creation timestamp" }),
+  })
+  .openapi("CheckDuplicateFoundResponse");
+
+/**
+ * Registers sync check-duplicate routes with an OpenAPIHono instance.
+ */
+export function registerCheckDuplicateRoutes(app: { openapi: OpenAPIHonoType["openapi"] }): void {
+  const checkDuplicateRoute = createRoute({
+    path: "/sync/check-duplicate",
+    method: "post",
+    tags: ["Sync"],
+    summary: "Check for duplicate transaction",
+    description: "Preflight duplicate check for client transaction IDs",
+    security: [{ BearerAuth: [] }],
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: CheckDuplicateRequestSchemaOpenApi,
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        content: {
+          "application/json": {
+            schema: zodOpenApi.union([CheckDuplicateNotFoundResponseSchema, CheckDuplicateFoundResponseSchema]),
+          },
+        },
+        description: "Duplicate check completed",
+      },
+      400: {
+        content: { "application/json": { schema: zodOpenApi.object({ success: zodOpenApi.literal(false), error: zodOpenApi.object({ code: zodOpenApi.string(), message: zodOpenApi.string() }) }) } },
+        description: "Validation error",
+      },
+      401: {
+        content: { "application/json": { schema: zodOpenApi.object({ success: zodOpenApi.literal(false), error: zodOpenApi.object({ code: zodOpenApi.string(), message: zodOpenApi.string() }) }) } },
+        description: "Unauthorized",
+      },
+      403: {
+        content: { "application/json": { schema: zodOpenApi.object({ success: zodOpenApi.literal(false), error: zodOpenApi.object({ code: zodOpenApi.string(), message: zodOpenApi.string() }) }) } },
+        description: "Forbidden",
+      },
+      500: {
+        content: { "application/json": { schema: zodOpenApi.object({ success: zodOpenApi.literal(false), error: zodOpenApi.object({ code: zodOpenApi.string(), message: zodOpenApi.string() }) }) } },
+        description: "Internal server error",
+      },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(checkDuplicateRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    const correlationId = getRequestCorrelationId(c.req.raw);
+
+    try {
+      const body = await c.req.json();
+      const parsed = CheckDuplicateRequestSchema.safeParse(body);
+
+      if (!parsed.success) {
+        return errorResponse("VALIDATION_ERROR", parsed.error.issues[0]?.message || "Invalid request", 400);
+      }
+
+      const { client_tx_id, company_id } = parsed.data;
+
+      if (company_id !== auth.companyId) {
+        return errorResponse("FORBIDDEN", "Cannot check duplicates for other companies", 403);
+      }
+
+      const result = await checkDuplicateClientTx(company_id, client_tx_id);
+
+      if (result.isDuplicate) {
+        return c.json({
+          is_duplicate: true,
+          existing_id: result.existingId,
+          created_at: result.createdAt?.toISOString()
+        });
+      }
+
+      return c.json({ is_duplicate: false });
+    } catch (error) {
+      console.error("POST /sync/check-duplicate failed", { correlation_id: correlationId, error });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Failed to check duplicate", 500);
+    }
+  }) as any);
+}
 
 export { checkDuplicateRoutes };

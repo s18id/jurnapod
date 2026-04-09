@@ -24,6 +24,8 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
+import type { OpenAPIHono } from "@hono/zod-openapi";
 import { authenticateRequest } from "@/lib/auth-guard";
 import { successResponse } from "@/lib/response";
 import {
@@ -622,3 +624,377 @@ reportRoutes.get("/receivables-ageing", async (c) => {
 });
 
 export { reportRoutes };
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * Registers report routes with an OpenAPIHono instance.
+ */
+export function registerReportRoutes(app: OpenAPIHono): void {
+  // GET /reports/trial-balance - Trial balance report
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/reports/trial-balance",
+      operationId: "getTrialBalanceReport",
+      summary: "Trial balance report",
+      description: "Generate trial balance report with optional filters.",
+      tags: ["Reports"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        query: zodOpenApi.object({
+          outlet_id: zodOpenApi.string().optional().openapi({ description: "Outlet ID" }),
+          date_from: zodOpenApi.string().optional().openapi({ description: "Date from" }),
+          date_to: zodOpenApi.string().optional().openapi({ description: "Date to" }),
+          as_of: zodOpenApi.string().optional().openapi({ description: "As of date" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Trial balance report",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.object({
+                  filters: zodOpenApi.object({
+                    outlet_ids: zodOpenApi.array(zodOpenApi.number()),
+                    date_from: zodOpenApi.string().nullable(),
+                    date_to: zodOpenApi.string().nullable(),
+                    as_of: zodOpenApi.string().nullable(),
+                  }),
+                  totals: zodOpenApi.object({
+                    total_debit: zodOpenApi.number(),
+                    total_credit: zodOpenApi.number(),
+                    balance: zodOpenApi.number(),
+                  }),
+                  rows: zodOpenApi.array(zodOpenApi.any()),
+                }).openapi("TrialBalanceReportResponse"),
+              }),
+            },
+          },
+        },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const startTime = Date.now();
+      const REPORT_TYPE = "trial_balance";
+
+      try {
+        const url = new URL(c.req.raw.url);
+        const parsed = reportQuerySchema.extend({
+          as_of: z.string().datetime({ offset: true }).optional()
+        }).parse({
+          outlet_id: url.searchParams.get("outlet_id") ?? undefined,
+          date_from: url.searchParams.get("date_from") ?? undefined,
+          date_to: url.searchParams.get("date_to") ?? undefined,
+          as_of: url.searchParams.get("as_of") ?? undefined,
+        });
+
+        const { error, context } = await buildReportContext(c, "accounting", parsed);
+        if (error) return error;
+        if (!context) throw new Error("Context not built");
+
+        const rows = await executeReport(
+          REPORT_TYPE as ReportType,
+          context.auth.companyId,
+          () => getTrialBalance({
+            companyId: context.auth.companyId,
+            outletIds: context.outletIds,
+            dateFrom: context.dateFrom,
+            dateTo: context.dateTo,
+            asOf: parsed.as_of,
+            includeUnassignedOutlet: !parsed.outlet_id,
+            timezone: context.timezone
+          }),
+          { startTime }
+        );
+
+        const totals = rows.reduce(
+          (acc: any, row: any) => ({
+            total_debit: acc.total_debit + row.total_debit,
+            total_credit: acc.total_credit + row.total_credit,
+            balance: acc.balance + row.balance
+          }),
+          { total_debit: 0, total_credit: 0, balance: 0 }
+        );
+
+        emitReportSuccess(REPORT_TYPE as ReportType, context.auth.companyId, startTime, rows.length);
+        return successResponse({
+          filters: {
+            outlet_ids: context.outletIds,
+            date_from: context.dateFrom,
+            date_to: context.dateTo,
+            as_of: parsed.as_of ?? null
+          },
+          totals,
+          rows
+        });
+      } catch (error) {
+        const auth = c.get("auth") as AuthContext;
+        return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
+      }
+    }
+  );
+
+  // GET /reports/profit-loss - Profit & Loss report
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/reports/profit-loss",
+      operationId: "getProfitLossReport",
+      summary: "Profit & Loss report",
+      description: "Generate profit and loss report with optional filters.",
+      tags: ["Reports"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        query: zodOpenApi.object({
+          outlet_id: zodOpenApi.string().optional().openapi({ description: "Outlet ID" }),
+          date_from: zodOpenApi.string().optional().openapi({ description: "Date from" }),
+          date_to: zodOpenApi.string().optional().openapi({ description: "Date to" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Profit & Loss report",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.any(),
+              }).openapi("ProfitLossReportResponse"),
+            },
+          },
+        },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const startTime = Date.now();
+      const REPORT_TYPE = "profit_loss";
+
+      try {
+        const url = new URL(c.req.raw.url);
+        const parsed = parseReportQuery(reportQuerySchema, url);
+
+        const { error, context } = await buildReportContext(c, "accounting", parsed);
+        if (error) return error;
+        if (!context) throw new Error("Context not built");
+
+        const result = await executeReport(
+          REPORT_TYPE as ReportType,
+          context.auth.companyId,
+          () => getProfitLoss({
+            companyId: context.auth.companyId,
+            outletIds: context.outletIds,
+            dateFrom: context.dateFrom,
+            dateTo: context.dateTo,
+            timezone: context.timezone
+          }),
+          { startTime, rowCount: (r: any) => r.rows.length }
+        );
+
+        emitReportSuccess(REPORT_TYPE as ReportType, context.auth.companyId, startTime, result.rows.length);
+        return successResponse({
+          filters: {
+            outlet_ids: context.outletIds,
+            date_from: context.dateFrom,
+            date_to: context.dateTo,
+          },
+          ...result
+        });
+      } catch (error) {
+        const auth = c.get("auth") as AuthContext;
+        return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
+      }
+    }
+  );
+
+  // GET /reports/pos-transactions - POS transaction history
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/reports/pos-transactions",
+      operationId: "getPosTransactionsReport",
+      summary: "POS transactions report",
+      description: "Get POS transaction history with optional filters.",
+      tags: ["Reports"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        query: zodOpenApi.object({
+          outlet_id: zodOpenApi.string().optional().openapi({ description: "Outlet ID" }),
+          date_from: zodOpenApi.string().optional().openapi({ description: "Date from" }),
+          date_to: zodOpenApi.string().optional().openapi({ description: "Date to" }),
+          limit: zodOpenApi.string().optional().openapi({ description: "Limit" }),
+          offset: zodOpenApi.string().optional().openapi({ description: "Offset" }),
+          status: zodOpenApi.string().optional().openapi({ description: "Status" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "POS transactions report",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.any(),
+              }).openapi("PosTransactionsReportResponse"),
+            },
+          },
+        },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const startTime = Date.now();
+      const REPORT_TYPE = "pos_transactions";
+
+      try {
+        const url = new URL(c.req.raw.url);
+        const parsed = reportPaginationSchema.extend({
+          status: z.enum(["COMPLETED", "VOID", "REFUND"]).optional(),
+        }).parse({
+          outlet_id: url.searchParams.get("outlet_id") ?? undefined,
+          date_from: url.searchParams.get("date_from") ?? undefined,
+          date_to: url.searchParams.get("date_to") ?? undefined,
+          limit: url.searchParams.get("limit") ?? undefined,
+          offset: url.searchParams.get("offset") ?? undefined,
+          status: url.searchParams.get("status") ?? undefined,
+        });
+
+        const { error, context } = await buildReportContext(c, "pos", parsed, { supportsCashierOnly: true });
+        if (error) return error;
+        if (!context) throw new Error("Context not built");
+
+        const limit = Math.min(parsed.limit ?? 50, 100);
+        const offset = parsed.offset ?? 0;
+
+        const result = await executeReport(
+          REPORT_TYPE as ReportType,
+          context.auth.companyId,
+          () => listPosTransactions({
+            companyId: context.auth.companyId,
+            outletIds: context.outletIds,
+            dateFrom: context.dateFrom,
+            dateTo: context.dateTo,
+            timezone: context.timezone,
+            status: parsed.status,
+            userId: context.cashierOnly ? context.auth.userId : undefined,
+            limit,
+            offset,
+          }),
+          { startTime, rowCount: (r: any) => r.transactions.length }
+        );
+
+        emitReportSuccess(REPORT_TYPE as ReportType, context.auth.companyId, startTime, result.transactions.length);
+        return successResponse({
+          filters: {
+            outlet_ids: context.outletIds,
+            date_from: context.dateFrom,
+            date_to: context.dateTo,
+            status: parsed.status ?? null,
+            user_id: context.cashierOnly ? context.auth.userId : null,
+          },
+          pagination: {
+            limit,
+            offset,
+            total: result.total,
+            hasMore: result.total > offset + result.transactions.length,
+          },
+          transactions: result.transactions
+        });
+      } catch (error) {
+        const auth = c.get("auth") as AuthContext;
+        return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
+      }
+    }
+  );
+
+  // GET /reports/daily-sales - Daily sales summary
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/reports/daily-sales",
+      operationId: "getDailySalesReport",
+      summary: "Daily sales report",
+      description: "Get daily sales summary with optional filters.",
+      tags: ["Reports"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        query: zodOpenApi.object({
+          outlet_id: zodOpenApi.string().optional().openapi({ description: "Outlet ID" }),
+          date_from: zodOpenApi.string().optional().openapi({ description: "Date from" }),
+          date_to: zodOpenApi.string().optional().openapi({ description: "Date to" }),
+          status: zodOpenApi.string().optional().openapi({ description: "Status" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Daily sales report",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.any(),
+              }).openapi("DailySalesReportResponse"),
+            },
+          },
+        },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const startTime = Date.now();
+      const REPORT_TYPE = "daily_sales";
+
+      try {
+        const url = new URL(c.req.raw.url);
+        const parsed = reportQuerySchema.extend({
+          status: z.enum(["COMPLETED", "VOID", "REFUND"]).optional(),
+        }).parse({
+          outlet_id: url.searchParams.get("outlet_id") ?? undefined,
+          date_from: url.searchParams.get("date_from") ?? undefined,
+          date_to: url.searchParams.get("date_to") ?? undefined,
+          status: url.searchParams.get("status") ?? undefined,
+        });
+
+        const { error, context } = await buildReportContext(c, "pos", parsed, { supportsCashierOnly: true });
+        if (error) return error;
+        if (!context) throw new Error("Context not built");
+
+        const rows = await executeReport(
+          REPORT_TYPE as ReportType,
+          context.auth.companyId,
+          () => listDailySalesSummary({
+            companyId: context.auth.companyId,
+            outletIds: context.outletIds,
+            dateFrom: context.dateFrom,
+            dateTo: context.dateTo,
+            timezone: context.timezone,
+            userId: context.cashierOnly ? context.auth.userId : undefined,
+            status: parsed.status,
+          }),
+          { startTime }
+        );
+
+        emitReportSuccess(REPORT_TYPE as ReportType, context.auth.companyId, startTime, rows.length);
+        return successResponse({
+          filters: {
+            outlet_ids: context.outletIds,
+            date_from: context.dateFrom,
+            date_to: context.dateTo,
+            user_id: context.cashierOnly ? context.auth.userId : null,
+            status: parsed.status ?? null,
+          },
+          rows
+        });
+      } catch (error) {
+        const auth = c.get("auth") as AuthContext;
+        return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
+      }
+    }
+  );
+}

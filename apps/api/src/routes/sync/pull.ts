@@ -16,6 +16,8 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
+import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { NumericIdSchema, SyncPullPayloadSchema } from "@jurnapod/shared";
 import { authenticateRequest, requireAccessForOutletQuery, type AuthContext } from "../../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../../lib/response.js";
@@ -114,5 +116,111 @@ syncPullRoutes.get("/", async (c) => {
     return errorResponse("INTERNAL_SERVER_ERROR", "Sync pull failed", 500);
   }
 });
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * Sync pull request query schema
+ */
+const SyncPullQuerySchema = zodOpenApi
+  .object({
+    outlet_id: NumericIdSchema.openapi({ description: "Outlet ID" }),
+    since_version: zodOpenApi.coerce.number().int().min(0).default(0).openapi({ description: "Sync version cursor" }),
+    orders_cursor: zodOpenApi.coerce.number().int().min(0).optional().openapi({ description: "Orders pagination cursor" }),
+  })
+  .openapi("SyncPullQuery");
+
+/**
+ * Sync pull error response schema
+ */
+const SyncPullErrorResponseSchema = zodOpenApi
+  .object({
+    success: zodOpenApi.literal(false).openapi({ example: false }),
+    error: zodOpenApi
+      .object({
+        code: zodOpenApi.string().openapi({ description: "Error code" }),
+        message: zodOpenApi.string().openapi({ description: "Error message" }),
+      })
+      .openapi("SyncPullErrorDetail"),
+  })
+  .openapi("SyncPullErrorResponse");
+
+/**
+ * Registers sync pull routes with an OpenAPIHono instance.
+ */
+export function registerSyncPullRoutes(app: { openapi: OpenAPIHonoType["openapi"] }): void {
+  const pullRoute = createRoute({
+    path: "/sync/pull",
+    method: "get",
+    tags: ["Sync"],
+    summary: "Pull sync data",
+    description: "Pull master data from server with version cursor",
+    security: [{ BearerAuth: [] }],
+    request: {
+      query: SyncPullQuerySchema,
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: SyncPullPayloadSchema } },
+        description: "Sync pull successful",
+      },
+      400: {
+        content: { "application/json": { schema: SyncPullErrorResponseSchema } },
+        description: "Invalid request",
+      },
+      401: {
+        content: { "application/json": { schema: SyncPullErrorResponseSchema } },
+        description: "Unauthorized",
+      },
+      500: {
+        content: { "application/json": { schema: SyncPullErrorResponseSchema } },
+        description: "Internal server error",
+      },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(pullRoute, (async (c: any) => {
+    const auth = c.get("auth");
+    const correlationId = getRequestCorrelationId(c.req.raw);
+
+    try {
+      const url = new URL(c.req.raw.url);
+      const input = syncPullRequestSchema.parse({
+        outlet_id: url.searchParams.get("outlet_id"),
+        since_version: url.searchParams.get("since_version") ?? 0,
+        orders_cursor: url.searchParams.get("orders_cursor") ?? undefined
+      });
+
+      const module = getPosSyncModule();
+      const pullResult = await module.handlePullSync({
+        companyId: auth.companyId,
+        outletId: input.outlet_id,
+        sinceVersion: input.since_version,
+        ordersCursor: input.orders_cursor ?? 0
+      });
+
+      const response = SyncPullPayloadSchema.parse(pullResult.payload);
+
+      return successResponse(response);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return errorResponse("INVALID_REQUEST", "Invalid request parameters", 400);
+      }
+
+      if (error instanceof Error && error.message === "outlet_id is required") {
+        return errorResponse("INVALID_REQUEST", "outlet_id query parameter is required", 400);
+      }
+
+      console.error("GET /sync/pull failed", {
+        correlation_id: correlationId,
+        error
+      });
+      return errorResponse("INTERNAL_SERVER_ERROR", "Sync pull failed", 500);
+    }
+  }) as any);
+}
 
 export { syncPullRoutes };

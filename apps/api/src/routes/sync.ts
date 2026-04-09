@@ -9,6 +9,8 @@
  */
 
 import { Hono } from "hono";
+import { createRoute } from "@hono/zod-openapi";
+import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { healthRoutes } from "./sync/health.js";
 import { checkDuplicateRoutes } from "./sync/check-duplicate.js";
 import { syncPushRoutes } from "./sync/push.js";
@@ -28,5 +30,12 @@ syncRoutes.route("/check-duplicate", checkDuplicateRoutes);
 syncRoutes.route("/push", syncPushRoutes);
 syncRoutes.route("/pull", syncPullRoutes);
 syncRoutes.route("/stock", stockSyncRoutes);
+
+// Re-export registration functions from sub-routes
+export { registerSyncHealthRoutes } from "./sync/health.js";
+export { registerCheckDuplicateRoutes } from "./sync/check-duplicate.js";
+export { registerSyncPushRoutes } from "./sync/push.js";
+export { registerSyncPullRoutes } from "./sync/pull.js";
+export { registerSyncStockRoutes } from "./sync/stock.js";
 
 export { syncRoutes };

@@ -46,6 +46,7 @@ import { progressRoutes } from './routes/progress.js';
 import { adminDashboardRoutes } from './routes/admin-dashboards/index.js';
 import { adminRunbookRoutes } from './routes/admin-runbook.js';
 import { auditRoutes } from './routes/audit.js';
+import { swaggerRoutes } from './routes/swagger.js';
 
 const HTTP_LOG_ENABLED = process.env.JP_HTTP_LOG === "1";
 
@@ -188,6 +189,12 @@ export function createApp(): Hono {
 
   // Register admin runbook routes
   app.route("/admin", adminRunbookRoutes);
+
+  // Register swagger routes (only in non-production)
+  // Mount at root so /swagger and /swagger.json are at root level
+  if (process.env.NODE_ENV !== "production") {
+    app.route("/", swaggerRoutes);
+  }
 
   app.notFound(() => {
     return Response.json(

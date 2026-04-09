@@ -9,6 +9,8 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
+import type { OpenAPIHono } from "@hono/zod-openapi";
 import { errorResponse } from "../../lib/response.js";
 import {
   type TrialBalanceQuery,
@@ -171,3 +173,159 @@ trialBalanceRoutes.get("/validate", async (c) => {
 });
 
 export { trialBalanceRoutes };
+
+// ============================================================================
+// OpenAPI Route Registration
+// ============================================================================
+
+/**
+ * Registers trial balance routes with an OpenAPIHono instance.
+ */
+export function registerTrialBalanceRoutes(app: OpenAPIHono): void {
+  // GET /admin/dashboard/trial-balance - Trial balance report
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/admin/dashboard/trial-balance",
+      operationId: "getTrialBalance",
+      summary: "Trial balance",
+      description: "Get trial balance report with optional fiscal year and period filters.",
+      tags: ["Admin"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        query: zodOpenApi.object({
+          fiscal_year_id: zodOpenApi.string().optional().openapi({ description: "Fiscal year ID" }),
+          period_id: zodOpenApi.string().optional().openapi({ description: "Period ID" }),
+          outlet_id: zodOpenApi.string().optional().openapi({ description: "Outlet ID" }),
+          as_of_epoch_ms: zodOpenApi.string().optional().openapi({ description: "As of epoch ms" }),
+          include_zero_balances: zodOpenApi.string().optional().openapi({ description: "Include zero balances" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Trial balance data",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.any(),
+              }).openapi("TrialBalanceResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const companyId = auth.companyId;
+
+      try {
+        const url = new URL(c.req.url);
+        const rawQuery = {
+          fiscal_year_id: url.searchParams.get("fiscal_year_id") ?? undefined,
+          period_id: url.searchParams.get("period_id") ?? undefined,
+          outlet_id: url.searchParams.get("outlet_id") ?? undefined,
+          as_of_epoch_ms: url.searchParams.get("as_of_epoch_ms") ?? undefined,
+          include_zero_balances: url.searchParams.get("include_zero_balances") ?? undefined,
+        };
+
+        const parseResult = trialBalanceQuerySchema.safeParse(rawQuery);
+        if (!parseResult.success) {
+          return errorResponse("BAD_REQUEST", `Invalid query parameters: ${parseResult.error.errors.map(e => e.message).join(", ")}`, 400);
+        }
+
+        const validated = parseResult.data;
+        const query: TrialBalanceQuery = {
+          companyId,
+          outletId: validated.outlet_id,
+          fiscalYearId: validated.fiscal_year_id,
+          periodId: validated.period_id,
+          asOfEpochMs: validated.as_of_epoch_ms,
+          includeZeroBalances: validated.include_zero_balances === "true",
+        };
+
+        const trialBalanceService = getTrialBalanceService();
+        const trialBalance = await trialBalanceService.getTrialBalance(query);
+
+        return c.json({ success: true, data: trialBalance });
+      } catch (error) {
+        console.error("GET /admin/dashboard/trial-balance failed", error);
+        return errorResponse("INTERNAL_SERVER_ERROR", "Failed to load trial balance", 500);
+      }
+    }
+  );
+
+  // GET /admin/dashboard/trial-balance/validate - Pre-close validation
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/admin/dashboard/trial-balance/validate",
+      operationId: "validateTrialBalance",
+      summary: "Validate trial balance",
+      description: "Run pre-close validation on trial balance.",
+      tags: ["Admin"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        query: zodOpenApi.object({
+          fiscal_year_id: zodOpenApi.string().openapi({ description: "Fiscal year ID" }),
+          period_id: zodOpenApi.string().optional().openapi({ description: "Period ID" }),
+          outlet_id: zodOpenApi.string().optional().openapi({ description: "Outlet ID" }),
+          as_of_epoch_ms: zodOpenApi.string().optional().openapi({ description: "As of epoch ms" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Validation result",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.any(),
+              }).openapi("TrialBalanceValidationResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const companyId = auth.companyId;
+
+      try {
+        const url = new URL(c.req.url);
+        const rawQuery = {
+          fiscal_year_id: url.searchParams.get("fiscal_year_id") ?? undefined,
+          period_id: url.searchParams.get("period_id") ?? undefined,
+          outlet_id: url.searchParams.get("outlet_id") ?? undefined,
+          as_of_epoch_ms: url.searchParams.get("as_of_epoch_ms") ?? undefined,
+        };
+
+        const parseResult = trialBalanceValidateQuerySchema.safeParse(rawQuery);
+        if (!parseResult.success) {
+          return errorResponse("BAD_REQUEST", `Invalid query parameters: ${parseResult.error.errors.map(e => e.message).join(", ")}`, 400);
+        }
+
+        const validated = parseResult.data;
+        const query: TrialBalanceQuery = {
+          companyId,
+          outletId: validated.outlet_id,
+          fiscalYearId: validated.fiscal_year_id,
+          periodId: validated.period_id,
+          asOfEpochMs: validated.as_of_epoch_ms,
+        };
+
+        const trialBalanceService = getTrialBalanceService();
+        const validationResult = await trialBalanceService.runPreCloseValidation(query);
+
+        return c.json({ success: true, data: validationResult });
+      } catch (error) {
+        console.error("GET /admin/dashboard/trial-balance/validate failed", error);
+        return errorResponse("INTERNAL_SERVER_ERROR", "Failed to run pre-close validation", 500);
+      }
+    }
+  );
+}
