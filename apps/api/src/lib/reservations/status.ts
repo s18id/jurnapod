@@ -337,7 +337,7 @@ export async function updateReservationStatus(
         );
         if (occupancy && occupancy.reservationId === id) {
           // Table is held for this reservation, release it
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           
           const releaseResult = await sql`
             UPDATE table_occupancy 
              SET status_id = ${TableOccupancyStatus.AVAILABLE}, 
@@ -420,7 +420,7 @@ export async function updateReservationStatus(
         );
         if (occupancy && occupancy.reservationId === id) {
           // Table is held for this reservation, release it
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           
           const releaseResult = await sql`
             UPDATE table_occupancy 
              SET status_id = ${TableOccupancyStatus.AVAILABLE}, 
@@ -488,7 +488,7 @@ export async function updateReservationStatus(
     const updateClause = sql.join(updates, sql`, `);
 
     // Execute update
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const updateResult = await sql`
       UPDATE reservations 
        SET ${updateClause}

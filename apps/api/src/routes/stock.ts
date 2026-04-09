@@ -15,8 +15,7 @@ import { Hono } from "hono";
 import type { Context, Handler } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
-import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
-import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
+import { createRoute, type OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import {
   getStockLevels,
   getStockTransactions,

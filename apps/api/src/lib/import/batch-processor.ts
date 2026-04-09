@@ -441,7 +441,7 @@ export function formatProgress(progress: ProgressInfo): string {
 /**
  * Extended batch context with database connection
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export interface BatchContextWithConnection extends BatchContext {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   connection?: import("kysely").Kysely<any>;

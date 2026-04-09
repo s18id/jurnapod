@@ -15,17 +15,11 @@
 
 import { Hono } from "hono";
 import type { Handler } from "hono";
-import { z } from "zod";
-import { z as zodOpenApi, createRoute, OpenAPIHono } from "@hono/zod-openapi";
+import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { checkDatabaseHealth, getSyncMetricsSnapshot, getImportMetricsSnapshot, getExportMetricsSnapshot } from "../lib/metrics/health.js";
 
 const healthRoutes = new Hono();
-
-// Type for the app that can register OpenAPI routes
-type OpenAPIHonoInterface = {
-  openapi: OpenAPIHonoType["openapi"];
-};
 
 // ============================================================================
 // OpenAPI Schemas

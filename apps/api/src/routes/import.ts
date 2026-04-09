@@ -1221,22 +1221,6 @@ const ImportValidationResponseSchema = zodOpenApi.object({
 }).openapi("ImportValidationResponse");
 
 /**
- * Import apply response schema
- */
-const ImportApplyResponseSchema = zodOpenApi.object({
-  success: zodOpenApi.literal(true),
-  data: zodOpenApi.object({
-    success: zodOpenApi.number(),
-    failed: zodOpenApi.number(),
-    created: zodOpenApi.number(),
-    updated: zodOpenApi.number(),
-    batchesCompleted: zodOpenApi.number(),
-    batchesFailed: zodOpenApi.number(),
-    rowsProcessed: zodOpenApi.number(),
-  }),
-}).openapi("ImportApplyResponse");
-
-/**
  * Registers import routes with an OpenAPIHono instance.
  */
 export function registerImportRoutes(app: OpenAPIHono): void {

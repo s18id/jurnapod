@@ -51,7 +51,7 @@ interface XlsxStreamReader extends NodeJS.WritableStream {
   on(event: 'end', handler: () => void): this;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+ 
 const XlsxStreamReaderModule = await import('xlsx-stream-reader') as {
   default: new (options?: { verbose?: boolean; formatting?: boolean; saxTrim?: boolean }) => XlsxStreamReader;
 };

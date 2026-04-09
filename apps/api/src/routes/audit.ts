@@ -354,7 +354,7 @@ export function registerAuditRoutes(app: OpenAPIHono): void {
         }
 
         return c.json({ success: true, data: record });
-      } catch (error) {
+      } catch {
         return errorResponse("INTERNAL_SERVER_ERROR", "Failed to get period transition audit record", 500);
       }
     }

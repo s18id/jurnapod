@@ -410,18 +410,18 @@ export function registerAdminDashboardRoutes(app: OpenAPIHono): void {
 /**
  * Forward to sub-router registration functions
  */
-function registerSyncDashboardRoutes(app: OpenAPIHono): void {
+function registerSyncDashboardRoutes(_app: OpenAPIHono): void {
   // Sync routes are mounted via Hono routing
 }
 
-function registerReconciliationRoutes(app: OpenAPIHono): void {
+function registerReconciliationRoutes(_app: OpenAPIHono): void {
   // Reconciliation routes are mounted via Hono routing
 }
 
-function registerTrialBalanceRoutes(app: OpenAPIHono): void {
+function registerTrialBalanceRoutes(_app: OpenAPIHono): void {
   // Trial balance routes are mounted via Hono routing
 }
 
-function registerPeriodCloseRoutes(app: OpenAPIHono): void {
+function registerPeriodCloseRoutes(_app: OpenAPIHono): void {
   // Period close routes are mounted via Hono routing
 }

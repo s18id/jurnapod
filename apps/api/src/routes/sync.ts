@@ -9,8 +9,6 @@
  */
 
 import { Hono } from "hono";
-import { createRoute } from "@hono/zod-openapi";
-import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { healthRoutes } from "./sync/health.js";
 import { checkDuplicateRoutes } from "./sync/check-duplicate.js";
 import { syncPushRoutes } from "./sync/push.js";

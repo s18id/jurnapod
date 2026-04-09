@@ -13,7 +13,6 @@
  */
 
 import { Hono } from "hono";
-import { z } from "zod";
 import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";
