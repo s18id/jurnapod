@@ -9,6 +9,7 @@
 
 import { getDb } from "@/lib/db";
 import { itemPricesAdapter } from "@/lib/item-prices/adapter.js";
+import { withTransactionRetry } from "@jurnapod/db";
 
 // ============================================================================
 // Types
@@ -113,40 +114,53 @@ export async function batchFindItemsBySkus(
 /**
  * Update items in batch.
  *
+ * Uses withTransactionRetry to handle deadlocks from parallel test fixtures.
+ *
  * @param updates - Array of item updates
  * @returns Number of rows updated
  */
 export async function batchUpdateItems(
+  companyId: number,
   updates: BatchItemUpdate[]
 ): Promise<number> {
-  let updated = 0;
+  if (updates.length === 0) {
+    return 0;
+  }
 
   const db = getDb();
 
-  for (const item of updates) {
-    const result = await db
-      .updateTable("items")
-      .set({
-        name: item.name,
-        item_type: item.item_type,
-        barcode: item.barcode ?? null,
-        item_group_id: item.item_group_id ?? null,
-        cogs_account_id: item.cogs_account_id ?? null,
-        inventory_asset_account_id: item.inventory_asset_account_id ?? null,
-        is_active: item.is_active ? 1 : 0,
-        updated_at: new Date()
-      })
-      .where("id", "=", item.id)
-      .executeTakeFirst();
+  // Wrap in transaction with deadlock retry
+  return withTransactionRetry(db, async (trx) => {
+    let updated = 0;
 
-    updated += Number(result?.numUpdatedRows ?? 0);
-  }
+    for (const item of updates) {
+      const result = await trx
+        .updateTable("items")
+        .set({
+          name: item.name,
+          item_type: item.item_type,
+          barcode: item.barcode ?? null,
+          item_group_id: item.item_group_id ?? null,
+          cogs_account_id: item.cogs_account_id ?? null,
+          inventory_asset_account_id: item.inventory_asset_account_id ?? null,
+          is_active: item.is_active ? 1 : 0,
+          updated_at: new Date()
+        })
+        .where("id", "=", item.id)
+        .where("company_id", "=", companyId)
+        .executeTakeFirst();
 
-  return updated;
+      updated += Number(result?.numUpdatedRows ?? 0);
+    }
+
+    return updated;
+  });
 }
 
 /**
  * Insert items in batch.
+ *
+ * Uses withTransactionRetry to handle deadlocks from parallel test fixtures.
  *
  * @param companyId - Company ID for the items
  * @param items - Array of items to insert
@@ -156,30 +170,37 @@ export async function batchInsertItems(
   companyId: number,
   items: BatchItemInsert[]
 ): Promise<number[]> {
-  const ids: number[] = [];
+  if (items.length === 0) {
+    return [];
+  }
 
   const db = getDb();
 
-  for (const item of items) {
-    const result = await db
-      .insertInto("items")
-      .values({
-        company_id: companyId,
-        sku: item.sku,
-        name: item.name,
-        item_type: item.item_type,
-        barcode: item.barcode ?? null,
-        item_group_id: item.item_group_id ?? null,
-        cogs_account_id: item.cogs_account_id ?? null,
-        inventory_asset_account_id: item.inventory_asset_account_id ?? null,
-        is_active: item.is_active ? 1 : 0
-      })
-      .executeTakeFirst();
+  // Wrap in transaction with deadlock retry
+  return withTransactionRetry(db, async (trx) => {
+    const ids: number[] = [];
 
-    ids.push(Number(result.insertId));
-  }
+    for (const item of items) {
+      const result = await trx
+        .insertInto("items")
+        .values({
+          company_id: companyId,
+          sku: item.sku,
+          name: item.name,
+          item_type: item.item_type,
+          barcode: item.barcode ?? null,
+          item_group_id: item.item_group_id ?? null,
+          cogs_account_id: item.cogs_account_id ?? null,
+          inventory_asset_account_id: item.inventory_asset_account_id ?? null,
+          is_active: item.is_active ? 1 : 0
+        })
+        .executeTakeFirst();
 
-  return ids;
+      ids.push(Number(result.insertId));
+    }
+
+    return ids;
+  });
 }
 
 // ============================================================================
@@ -227,31 +248,42 @@ export async function batchFindPricesByItemIds(
 /**
  * Update prices in batch.
  *
+ * Uses withTransactionRetry to handle deadlocks and lock timeouts.
+ *
  * @param updates - Array of price updates
  * @returns Number of rows updated
  */
 export async function batchUpdatePrices(
+  companyId: number,
   updates: BatchPriceUpdate[]
 ): Promise<number> {
-  let updated = 0;
+  if (updates.length === 0) {
+    return 0;
+  }
 
   const db = getDb();
 
-  for (const price of updates) {
-    const result = await db
-      .updateTable("item_prices")
-      .set({
-        price: price.price,
-        is_active: price.is_active ? 1 : 0,
-        updated_at: new Date()
-      })
-      .where("id", "=", price.id)
-      .executeTakeFirst();
+  // Wrap in transaction with deadlock/lock-timeout retry
+  return withTransactionRetry(db, async (trx) => {
+    let updated = 0;
 
-    updated += Number(result?.numUpdatedRows ?? 0);
-  }
+    for (const price of updates) {
+      const result = await trx
+        .updateTable("item_prices")
+        .set({
+          price: price.price,
+          is_active: price.is_active ? 1 : 0,
+          updated_at: new Date()
+        })
+        .where("id", "=", price.id)
+        .where("company_id", "=", companyId)
+        .executeTakeFirst();
 
-  return updated;
+      updated += Number(result?.numUpdatedRows ?? 0);
+    }
+
+    return updated;
+  });
 }
 
 /**

@@ -545,7 +545,6 @@ async function applyItemImport(
               inventory_asset_account_id: invAccountId,
               is_active: isActive,
             });
-            result.updated++;
           } else {
             inserts.push({
               sku,
@@ -557,19 +556,20 @@ async function applyItemImport(
               inventory_asset_account_id: invAccountId,
               is_active: isActive,
             });
-            result.created++;
           }
         } catch (error) {
           result.errors.push({ row: rowIndex + 1, error: error instanceof Error ? error.message : "Unknown error" });
         }
       }
 
-      // Execute batch operations
+      // Execute batch operations — counts are updated only after successful writes
       if (updates.length > 0) {
-        await batchUpdateItems(updates);
+        const updatedCount = await batchUpdateItems(companyId, updates);
+        result.updated += updatedCount;
       }
       if (inserts.length > 0) {
-        await batchInsertItems(companyId, inserts);
+        const insertedIds = await batchInsertItems(companyId, inserts);
+        result.created += insertedIds.length;
       }
 
       result.batchesCompleted++;
@@ -668,7 +668,6 @@ async function applyPriceImport(
               price,
               is_active: isActive,
             });
-            result.updated++;
           } else {
             inserts.push({
               item_id: itemId,
@@ -676,19 +675,20 @@ async function applyPriceImport(
               price,
               is_active: isActive,
             });
-            result.created++;
           }
         } catch (error) {
           result.errors.push({ row: rowIndex + 1, error: error instanceof Error ? error.message : "Unknown error" });
         }
       }
 
-      // Execute batch operations
+      // Execute batch operations — counts are updated only after successful writes
       if (updates.length > 0) {
-        await batchUpdatePrices(updates);
+        const updatedCount = await batchUpdatePrices(companyId, updates);
+        result.updated += updatedCount;
       }
       if (inserts.length > 0) {
-        await batchInsertPrices(companyId, inserts, actor);
+        const insertedIds = await batchInsertPrices(companyId, inserts, actor);
+        result.created += insertedIds.length;
       }
 
       result.batchesCompleted++;

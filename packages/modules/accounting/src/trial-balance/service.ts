@@ -629,7 +629,7 @@ export class TrialBalanceService {
     }>`
       SELECT
         jb.id as batch_id,
-        jb.description as batch_description,
+        jb.doc_type as batch_description,
         COALESCE(SUM(jl.debit), 0) AS total_debits,
         COALESCE(SUM(jl.credit), 0) AS total_credits
       FROM journal_batches jb
@@ -637,7 +637,7 @@ export class TrialBalanceService {
       WHERE jb.company_id = ${companyId}
         AND jl.line_date >= ${periodStart}
         AND jl.line_date <= ${periodEnd}
-      GROUP BY jb.id, jb.description
+      GROUP BY jb.id, jb.doc_type
       HAVING COALESCE(SUM(jl.debit), 0) <> COALESCE(SUM(jl.credit), 0)
       ORDER BY jb.id DESC
     `.execute(this.db);

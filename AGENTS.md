@@ -176,6 +176,23 @@ Mocking database interactions for code that reads/writes SQL tables creates a **
 
 **Non-DB logic** (pure computation, pure function utilities) may use unit tests without database.
 
+### Test Data Setup Integrity (MANDATORY)
+
+For integration tests, **raw SQL `INSERT`/`UPDATE` for test setup is a P0 blocker** when a canonical library/fixture function already exists.
+
+- ✅ Required: Use canonical helpers from `apps/api/src/lib/test-fixtures.ts` (or package-level equivalents)
+- ❌ Forbidden: Ad-hoc setup writes in tests that bypass domain/library invariants
+
+If existing helper is too broad or missing required behavior:
+1. Refactor helper into smaller reusable parts
+2. Add a canonical fixture/helper for that setup path
+3. Reuse it across tests (DRY)
+
+Allowed raw SQL in tests remains limited to:
+- teardown/cleanup
+- read-only verification
+- schema introspection
+
 ---
 
 ## Canonical Test Directory Structure

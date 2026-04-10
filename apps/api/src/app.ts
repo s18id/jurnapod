@@ -15,10 +15,13 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { compress } from 'hono/compress';
 import { logger as honoLogger } from 'hono/logger';
+import { createReadStream, existsSync } from "node:fs";
+import { extname, join } from "node:path";
 import { stockRoutes } from './routes/stock.js';
 import { syncRoutes } from './routes/sync.js';
 import { salesRoutes } from './routes/sales.js';
 import { inventoryRoutes } from './routes/inventory.js';
+import { imageRoutes as inventoryImagesRoutes } from './routes/inventory-images.js';
 import { healthRoutes } from './routes/health.js';
 import { rolesRoutes } from './routes/roles.js';
 import { authRoutes } from './routes/auth.js';
@@ -117,6 +120,59 @@ export function createApp(): Hono {
     }
   });
 
+  // Static file serving for uploaded images
+  // Serves files from JP_UPLOAD_PATH at /uploads/* URL path
+  const UPLOAD_URL_PREFIX = "/uploads";
+  const MIME_TYPES: Record<string, string> = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+  };
+
+  app.use(`${UPLOAD_URL_PREFIX}/*`, async (c, next) => {
+    const method = c.req.method;
+    if (method !== "GET" && method !== "HEAD") {
+      return next();
+    }
+
+    const pathname = c.req.path;
+    if (!pathname.startsWith(UPLOAD_URL_PREFIX + "/")) {
+      return next();
+    }
+
+    const uploadPath = process.env.JP_UPLOAD_PATH || "./uploads";
+    const fileRelPath = pathname.slice(UPLOAD_URL_PREFIX.length + 1);
+    const absPath = join(uploadPath, fileRelPath);
+
+    // Security: prevent path traversal
+    if (!absPath.startsWith(join(uploadPath))) {
+      return c.body("Forbidden", 403);
+    }
+
+    if (!existsSync(absPath)) {
+      return c.body("Not Found", 404);
+    }
+
+    const ext = extname(absPath).toLowerCase();
+    const contentType = MIME_TYPES[ext] || "application/octet-stream";
+
+    c.header("Content-Type", contentType);
+    c.header("Cache-Control", "public, max-age=31536000, immutable");
+    c.header("X-Content-Type-Options", "nosniff");
+
+    if (method === "HEAD") {
+      return c.body(null);
+    }
+
+    // Convert Node.js ReadStream to Web ReadableStream for Hono
+    const webStream = createReadStream(absPath) as unknown as ReadableStream;
+    return c.body(webStream);
+  });
+
   // Register stock routes using Hono's app.route() pattern
   app.route("/api/outlets/:outletId/stock", stockRoutes);
 
@@ -142,6 +198,9 @@ export function createApp(): Hono {
 
   // Register inventory routes
   app.route("/api/inventory", inventoryRoutes);
+
+  // Register inventory image routes under /api/inventory/items
+  app.route("/api/inventory/items", inventoryImagesRoutes);
 
   // Register users routes
   app.route("/api/users", usersRoutes);

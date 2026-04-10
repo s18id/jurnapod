@@ -9,7 +9,7 @@ import type {
 } from "@jurnapod/shared";
 import { toRfc3339Required } from "@jurnapod/shared";
 import { sql } from "kysely";
-import type { KyselySchema } from "@jurnapod/db";
+import { withTransactionRetry, type KyselySchema } from "@jurnapod/db";
 
 /**
  * Database client interface for dependency injection
@@ -131,8 +131,8 @@ export class JournalsService {
 
     const batchId = await (trx 
       ? this.executeManualEntryInsert(trx, data, docId, totalDebit, totalCredit, userId)
-      : this.db.transaction().execute(async (innerTrx) => 
-          this.executeManualEntryInsert(innerTrx, data, docId, totalDebit, totalCredit, userId)
+      : withTransactionRetry(this.db, async (innerTrx) => 
+          this.executeManualEntryInsert(innerTrx as unknown as KyselySchema, data, docId, totalDebit, totalCredit, userId)
         )
     );
 

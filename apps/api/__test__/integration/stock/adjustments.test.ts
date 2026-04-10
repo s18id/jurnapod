@@ -6,14 +6,14 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
-import { getTestDb, closeTestDb } from '../../helpers/db';
-import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext, createTestItem, registerFixtureCleanup } from '../../fixtures';
-import { sql } from 'kysely';
+import { closeTestDb } from '../../helpers/db';
+import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext, createTestItem, createTestPrice, createTestStock } from '../../fixtures';
 
 let baseUrl: string;
 let accessToken: string;
 let outletId: number;
 let companyId: number;
+let cashierUserId: number;
 let authTestProductId: number;
 
 describe('stock.adjustments', { timeout: 30000 }, () => {
@@ -23,14 +23,16 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
     const syncContext = await getSeedSyncContext();
     outletId = syncContext.outletId;
     companyId = syncContext.companyId;
-    // Query a valid product ID for auth/validation tests (ID used only when auth passes)
-    const db = getTestDb();
-    const productResult = await sql`
-      SELECT id FROM items
-      WHERE company_id = ${companyId}
-      LIMIT 1
-    `.execute(db);
-    authTestProductId = Number((productResult.rows[0] as { id: number }).id);
+    cashierUserId = syncContext.cashierUserId;
+
+    // Create a valid product ID for auth/validation tests
+    const authTestItem = await createTestItem(companyId, {
+      sku: `ADJ-AUTH-${Date.now()}`,
+      name: 'Auth Validation Product',
+      type: 'PRODUCT',
+      trackStock: true,
+    });
+    authTestProductId = authTestItem.id;
   });
 
   afterAll(async () => {
@@ -56,24 +58,9 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
       trackStock: true
     });
 
-    // Insert item price for cost resolution
-    const db = getTestDb();
-    await sql`
-      INSERT INTO item_prices (company_id, item_id, price, created_at, updated_at)
-      VALUES (${companyId}, ${item.id}, 10000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `.execute(db);
-
-    // Insert initial stock
-    await sql`
-      INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity, created_at, updated_at)
-      VALUES (${companyId}, ${outletId}, ${item.id}, 50, 0, 50, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `.execute(db);
-
-    registerFixtureCleanup(`adj_pos_${item.id}`, async () => {
-      await sql`DELETE FROM inventory_transactions WHERE product_id = ${item.id} AND reference_type = 'ADJUSTMENT'`.execute(db);
-      await sql`DELETE FROM inventory_stock WHERE product_id = ${item.id} AND outlet_id = ${outletId}`.execute(db);
-      await sql`DELETE FROM item_prices WHERE item_id = ${item.id}`.execute(db);
-    });
+    // Canonical setup via fixtures
+    await createTestPrice(companyId, item.id, cashierUserId, { price: 10000, isActive: true });
+    await createTestStock(companyId, item.id, outletId, 50, cashierUserId);
 
     // Make positive adjustment
     const res = await fetch(`${baseUrl}/api/outlets/${outletId}/stock/adjustments`, {
@@ -106,24 +93,9 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
       trackStock: true
     });
 
-    // Insert item price for cost resolution
-    const db = getTestDb();
-    await sql`
-      INSERT INTO item_prices (company_id, item_id, price, created_at, updated_at)
-      VALUES (${companyId}, ${item.id}, 10000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `.execute(db);
-
-    // Insert initial stock (only 10 units)
-    await sql`
-      INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity, created_at, updated_at)
-      VALUES (${companyId}, ${outletId}, ${item.id}, 10, 0, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `.execute(db);
-
-    registerFixtureCleanup(`adj_neg_${item.id}`, async () => {
-      await sql`DELETE FROM inventory_transactions WHERE product_id = ${item.id} AND reference_type = 'ADJUSTMENT'`.execute(db);
-      await sql`DELETE FROM inventory_stock WHERE product_id = ${item.id} AND outlet_id = ${outletId}`.execute(db);
-      await sql`DELETE FROM item_prices WHERE item_id = ${item.id}`.execute(db);
-    });
+    // Canonical setup via fixtures
+    await createTestPrice(companyId, item.id, cashierUserId, { price: 10000, isActive: true });
+    await createTestStock(companyId, item.id, outletId, 10, cashierUserId);
 
     // Try to deduct more than available (negative adjustment of -15 when only 10 exist)
     const res = await fetch(`${baseUrl}/api/outlets/${outletId}/stock/adjustments`, {
@@ -154,24 +126,9 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
       trackStock: true
     });
 
-    // Insert item price
-    const db = getTestDb();
-    await sql`
-      INSERT INTO item_prices (company_id, item_id, price, created_at, updated_at)
-      VALUES (${companyId}, ${item.id}, 10000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `.execute(db);
-
-    // Insert initial stock (100 units)
-    await sql`
-      INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity, created_at, updated_at)
-      VALUES (${companyId}, ${outletId}, ${item.id}, 100, 0, 100, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `.execute(db);
-
-    registerFixtureCleanup(`adj_valid_neg_${item.id}`, async () => {
-      await sql`DELETE FROM inventory_transactions WHERE product_id = ${item.id} AND reference_type = 'ADJUSTMENT'`.execute(db);
-      await sql`DELETE FROM inventory_stock WHERE product_id = ${item.id} AND outlet_id = ${outletId}`.execute(db);
-      await sql`DELETE FROM item_prices WHERE item_id = ${item.id}`.execute(db);
-    });
+    // Canonical setup via fixtures
+    await createTestPrice(companyId, item.id, cashierUserId, { price: 10000, isActive: true });
+    await createTestStock(companyId, item.id, outletId, 100, cashierUserId);
 
     // Make valid negative adjustment
     const res = await fetch(`${baseUrl}/api/outlets/${outletId}/stock/adjustments`, {
@@ -202,16 +159,8 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
       trackStock: true
     });
 
-    // Insert item price
-    const db = getTestDb();
-    await sql`
-      INSERT INTO item_prices (company_id, item_id, price, created_at, updated_at)
-      VALUES (${companyId}, ${item.id}, 10000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `.execute(db);
-
-    registerFixtureCleanup(`adj_no_reason_${item.id}`, async () => {
-      await sql`DELETE FROM item_prices WHERE item_id = ${item.id}`.execute(db);
-    });
+    // Canonical setup via fixtures
+    await createTestPrice(companyId, item.id, cashierUserId, { price: 10000, isActive: true });
 
     // Try adjustment without reason
     const res = await fetch(`${baseUrl}/api/outlets/${outletId}/stock/adjustments`, {
@@ -322,24 +271,9 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
       trackStock: true
     });
 
-    // Insert item price
-    const db = getTestDb();
-    await sql`
-      INSERT INTO item_prices (company_id, item_id, price, created_at, updated_at)
-      VALUES (${companyId}, ${item.id}, 10000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `.execute(db);
-
-    // Insert initial stock
-    await sql`
-      INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity, created_at, updated_at)
-      VALUES (${companyId}, ${outletId}, ${item.id}, 50, 0, 50, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `.execute(db);
-
-    registerFixtureCleanup(`adj_txn_${item.id}`, async () => {
-      await sql`DELETE FROM inventory_transactions WHERE product_id = ${item.id} AND reference_type = 'ADJUSTMENT'`.execute(db);
-      await sql`DELETE FROM inventory_stock WHERE product_id = ${item.id} AND outlet_id = ${outletId}`.execute(db);
-      await sql`DELETE FROM item_prices WHERE item_id = ${item.id}`.execute(db);
-    });
+    // Canonical setup via fixtures
+    await createTestPrice(companyId, item.id, cashierUserId, { price: 10000, isActive: true });
+    await createTestStock(companyId, item.id, outletId, 50, cashierUserId);
 
     // Make adjustment
     await fetch(`${baseUrl}/api/outlets/${outletId}/stock/adjustments`, {

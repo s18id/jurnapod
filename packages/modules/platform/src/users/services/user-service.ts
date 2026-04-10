@@ -3,6 +3,7 @@
 
 import type { KyselySchema } from "@jurnapod/db";
 import { toRfc3339Required } from "@jurnapod/shared";
+import { withTransactionRetry } from "@jurnapod/db";
 import type { UserProfile, UserRow, UserOutletRoleAssignment } from "../types/user.js";
 import type { RoleSnapshot } from "../types/role.js";
 import {
@@ -525,7 +526,7 @@ export class UserService {
     const { RoleSchema } = await import("@jurnapod/shared");
     const { NumericIdSchema } = await import("@jurnapod/shared");
 
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTransactionRetry(this.db, async (trx) => {
       const created = await this.createUserBasicTx(
         {
           companyId: params.companyId,
@@ -776,7 +777,7 @@ export class UserService {
     email: string;
     actor: UserActor;
   }): Promise<UserProfile> {
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTransactionRetry(this.db, async (trx) => {
       await ensureUserExists(trx, params.companyId, params.userId);
 
       await ensureSuperAdminTargetManagedBySelf(
@@ -844,7 +845,7 @@ export class UserService {
   }): Promise<UserProfile> {
     const { RoleSchema, NumericIdSchema } = await import("@jurnapod/shared");
 
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTransactionRetry(this.db, async (trx) => {
       await ensureUserExists(trx, params.companyId, params.userId);
 
       await ensureSuperAdminTargetManagedBySelf(
@@ -1020,7 +1021,7 @@ export class UserService {
   }): Promise<UserProfile> {
     const { NumericIdSchema } = await import("@jurnapod/shared");
 
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTransactionRetry(this.db, async (trx) => {
       await ensureUserExists(trx, params.companyId, params.userId);
 
       await ensureSuperAdminTargetManagedBySelf(
@@ -1077,7 +1078,7 @@ export class UserService {
     passwordHash: string;
     actor: UserActor;
   }): Promise<void> {
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTransactionRetry(this.db, async (trx) => {
       await ensureSuperAdminTargetManagedBySelf(
         trx,
         params.companyId,
@@ -1124,7 +1125,7 @@ export class UserService {
     isActive: boolean;
     actor: UserActor;
   }): Promise<UserProfile> {
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTransactionRetry(this.db, async (trx) => {
       if (!params.isActive) {
         const isSuperAdmin = await userHasSuperAdminRole(trx, params.userId);
         if (isSuperAdmin) {

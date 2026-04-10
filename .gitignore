@@ -29,3 +29,6 @@ apps/pos/ios/
 # BMAD configuration
 _bmad
 .ignore
+
+# Uploaded files (images, exports, etc.)
+uploads/

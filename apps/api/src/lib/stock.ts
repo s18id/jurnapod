@@ -13,6 +13,7 @@
 
 import { getDb, type KyselySchema } from "@/lib/db";
 import { sql } from "kysely";
+import { withTransactionRetry } from "@jurnapod/db";
 
 // Transaction type constants
 export const TransactionType = {
@@ -65,7 +66,7 @@ async function withExecutorTransaction<T>(
   if (db.isTransaction) {
     return callback(db);
   }
-  return db.transaction().execute(async (trx) => callback(trx as unknown as KyselySchema));
+  return withTransactionRetry(db, async (trx) => callback(trx as unknown as KyselySchema));
 }
 
 // ============================================================================

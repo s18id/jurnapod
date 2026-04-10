@@ -117,7 +117,13 @@ Any DB mock found in DB-backed tests is a P0 risk and must be treated as a block
 ### Fixture Policy
 - Use `createTestCompany()`, `createTestOutlet()`, `createTestUser()` from `__test__/fixtures`
 - Direct DB writes are **not allowed** for test data setup
-- Exception: Teardown/cleanup, read-only verification
+- Any raw SQL `INSERT`/`UPDATE` test setup that bypasses canonical fixtures is a **P0 blocker**
+- Exception: Teardown/cleanup, read-only verification, schema introspection
+
+If an existing fixture/helper is too broad for a test scenario:
+1. Refactor the helper into smaller reusable parts
+2. Add a canonical fixture/helper for the new setup path
+3. Reuse it across tests (DRY) instead of ad-hoc SQL setup
 
 ---
 
@@ -213,6 +219,10 @@ test("permission check", async () => {
 // ❌ Ad-hoc SQL for test setup
 await pool.execute(`INSERT INTO user_role_assignments (user_id, role_id, outlet_id) VALUES (?, ?, NULL)`, [userId, roleId]);
 ```
+
+**P0 Rule:** Any ad-hoc SQL `INSERT`/`UPDATE` used for test setup when a canonical fixture/helper exists is a **P0 blocker**.
+
+If no suitable helper exists, create/refactor one first (DRY), then use it.
 
 **Exception:** Ad-hoc SQL is allowed only for: 1) Teardown/cleanup, 2) Read-only verifications when no library function exists, 3) Schema introspection.
 

@@ -5,6 +5,7 @@ import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import type { InsertResult } from "kysely";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
+import { withTransactionRetry } from "@jurnapod/db";
 
 import {
   MODULE_DEFINITIONS,
@@ -116,7 +117,11 @@ async function ensureDefaultOutlet(
     }
   }
 
-  return insertId > 0 ? insertId : companyId;
+  if (insertId > 0) {
+    return insertId;
+  }
+
+  throw new Error(`Failed to resolve default outlet id for company ${companyId}`);
 }
 
 async function upsertRole(
@@ -382,8 +387,13 @@ export class CompanyService {
    * Use this for testing - it only inserts the company row.
    * For production use, use createCompany() which includes bootstrap.
    */
-  async createCompanyBasic(params: CreateCompanyInput): Promise<{ id: number; code: string; name: string }> {
-    const existing = await this.db
+  async createCompanyBasic(
+    params: CreateCompanyInput,
+    db?: KyselySchema
+  ): Promise<{ id: number; code: string; name: string }> {
+    const database = db ?? this.db;
+
+    const existing = await database
       .selectFrom('companies')
       .where('code', '=', params.code)
       .select(['id'])
@@ -393,7 +403,7 @@ export class CompanyService {
       throw new CompanyCodeExistsError(`Company with code ${params.code} already exists`);
     }
 
-    const result = await this.db
+    const result = await database
       .insertInto('companies')
       .values({
         code: params.code,
@@ -423,47 +433,30 @@ export class CompanyService {
    * For testing, use createCompanyBasic() instead.
    */
   async createCompany(params: CreateCompanyInputWithActor): Promise<CompanyResponse> {
-    const auditService = new AuditService(this.db);
+    const createdCompany = await withTransactionRetry(this.db, async (trx) => {
+      const created = await this.createCompanyBasic({
+        code: params.code,
+        name: params.name,
+        legal_name: params.legal_name,
+        tax_id: params.tax_id,
+        email: params.email,
+        phone: params.phone,
+        timezone: params.timezone,
+        currency_code: params.currency_code,
+        address_line1: params.address_line1,
+        address_line2: params.address_line2,
+        city: params.city,
+        postal_code: params.postal_code
+      }, trx);
 
-    try {
-      await this.db.transaction().execute(async (trx) => {
-        const created = await this.createCompanyBasic({
-          code: params.code,
-          name: params.name,
-          legal_name: params.legal_name,
-          tax_id: params.tax_id,
-          email: params.email,
-          phone: params.phone,
-          timezone: params.timezone,
-          currency_code: params.currency_code,
-          address_line1: params.address_line1,
-          address_line2: params.address_line2,
-          city: params.city,
-          postal_code: params.postal_code
-        });
+      const companyId = created.id;
 
-        const companyId = created.id;
-
-        await bootstrapCompanyDefaults(trx, {
-          companyId,
-          actor: params.actor
-        });
+      await bootstrapCompanyDefaults(trx, {
+        companyId,
+        actor: params.actor
       });
 
-      const companyId = await this.db
-        .selectFrom('companies')
-        .where('code', '=', params.code)
-        .select(['id'])
-        .executeTakeFirst()
-        .then(row => row ? Number(row.id) : 0);
-
-      if (companyId === 0) {
-        throw new CompanyNotFoundError(`Company not found after creation`);
-      }
-
-      const auditContext = buildAuditContext(companyId, params.actor);
-
-      const rows = await this.db
+      const row = await trx
         .selectFrom('companies')
         .where('id', '=', companyId)
         .select([
@@ -473,20 +466,21 @@ export class CompanyService {
         ])
         .executeTakeFirst();
 
-      if (!rows) {
+      if (!row) {
         throw new CompanyNotFoundError(`Company with id ${companyId} not found`);
       }
 
-      const createdCompany = rows;
+      const auditService = new AuditService(trx);
+      const auditContext = buildAuditContext(companyId, params.actor);
       await auditService.logCreate(auditContext, "company", companyId, {
-        code: createdCompany.code,
-        name: createdCompany.name
+        code: row.code,
+        name: row.name
       });
 
-      return normalizeCompanyRow(createdCompany);
-    } catch (error) {
-      throw error;
-    }
+      return row;
+    });
+
+    return normalizeCompanyRow(createdCompany);
   }
 
   /**
@@ -547,9 +541,8 @@ export class CompanyService {
    * Update a company
    */
   async updateCompany(params: UpdateCompanyInput): Promise<CompanyResponse> {
-    const auditService = new AuditService(this.db);
-
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTransactionRetry(this.db, async (trx) => {
+      const auditService = new AuditService(trx);
       const currentCompany = await ensureCompanyExists(trx, params.companyId, {
         includeDeleted: true
       });
@@ -660,9 +653,8 @@ export class CompanyService {
    * Deactivate a company (soft delete)
    */
   async deactivateCompany(params: DeactivateCompanyInput): Promise<CompanyResponse> {
-    const auditService = new AuditService(this.db);
-
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTransactionRetry(this.db, async (trx) => {
+      const auditService = new AuditService(trx);
       const company = await ensureCompanyExists(trx, params.companyId, {
         includeDeleted: true
       });
@@ -710,9 +702,8 @@ export class CompanyService {
    * Reactivate a deactivated company
    */
   async reactivateCompany(params: ReactivateCompanyInput): Promise<CompanyResponse> {
-    const auditService = new AuditService(this.db);
-
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTransactionRetry(this.db, async (trx) => {
+      const auditService = new AuditService(trx);
       const company = await ensureCompanyExists(trx, params.companyId, {
         includeDeleted: true
       });

@@ -3,6 +3,7 @@
 
 import { getDb } from "./db";
 import type { KyselySchema } from "@jurnapod/db";
+import { withTransactionRetry } from "@jurnapod/db";
 import { AuditService, CompanyService } from "@jurnapod/modules-platform";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 import { sql } from "kysely";
@@ -765,48 +766,31 @@ export async function createCompany(params: {
   actor: CompanyActor;
 }): Promise<CompanyResponse> {
   const db = getDb();
-  const auditService = new AuditService(db);
+  const createdCompany = await withTransactionRetry(db, async (trx) => {
+    // Use createCompanyBasic to insert the company row inside the same transaction
+    const created = await createCompanyBasic({
+      code: params.code,
+      name: params.name,
+      legal_name: params.legal_name,
+      tax_id: params.tax_id,
+      email: params.email,
+      phone: params.phone,
+      timezone: params.timezone,
+      currency_code: params.currency_code,
+      address_line1: params.address_line1,
+      address_line2: params.address_line2,
+      city: params.city,
+      postal_code: params.postal_code
+    }, trx);
 
-  try {
-    await db.transaction().execute(async (trx) => {
-      // Use createCompanyBasic to insert the company row
-      const created = await createCompanyBasic({
-        code: params.code,
-        name: params.name,
-        legal_name: params.legal_name,
-        tax_id: params.tax_id,
-        email: params.email,
-        phone: params.phone,
-        timezone: params.timezone,
-        currency_code: params.currency_code,
-        address_line1: params.address_line1,
-        address_line2: params.address_line2,
-        city: params.city,
-        postal_code: params.postal_code
-      });
+    const companyId = created.id;
 
-      const companyId = created.id;
-
-      await bootstrapCompanyDefaults(trx, {
-        companyId,
-        actor: params.actor
-      });
+    await bootstrapCompanyDefaults(trx, {
+      companyId,
+      actor: params.actor
     });
 
-    const companyId = await db
-      .selectFrom('companies')
-      .where('code', '=', params.code)
-      .select(['id'])
-      .executeTakeFirst()
-      .then(row => row ? Number(row.id) : 0);
-
-    if (companyId === 0) {
-      throw new CompanyNotFoundError(`Company not found after creation`);
-    }
-
-    const auditContext = buildAuditContext(companyId, params.actor);
-
-    const rows = await db
+    const row = await trx
       .selectFrom('companies')
       .where('id', '=', companyId)
       .select([
@@ -816,20 +800,21 @@ export async function createCompany(params: {
       ])
       .executeTakeFirst();
 
-    if (!rows) {
+    if (!row) {
       throw new CompanyNotFoundError(`Company with id ${companyId} not found`);
     }
 
-    const createdCompany = rows;
+    const auditService = new AuditService(trx);
+    const auditContext = buildAuditContext(companyId, params.actor);
     await auditService.logCreate(auditContext, "company", companyId, {
-      code: createdCompany.code,
-      name: createdCompany.name
+      code: row.code,
+      name: row.name
     });
 
-    return normalizeCompanyRow(createdCompany);
-  } catch (error) {
-    throw error;
-  }
+    return row;
+  });
+
+  return normalizeCompanyRow(createdCompany);
 }
 
 /**
@@ -916,7 +901,7 @@ export async function updateCompany(params: {
   const db = getDb();
   const auditService = new AuditService(db);
 
-  return await db.transaction().execute(async (trx) => {
+  return withTransactionRetry(db, async (trx) => {
     const currentCompany = await ensureCompanyExists(trx, params.companyId, {
       includeDeleted: true
     });
@@ -1033,7 +1018,7 @@ export async function deactivateCompany(params: {
   const db = getDb();
   const auditService = new AuditService(db);
 
-  return await db.transaction().execute(async (trx) => {
+  return withTransactionRetry(db, async (trx) => {
     const company = await ensureCompanyExists(trx, params.companyId, {
       includeDeleted: true
     });
@@ -1084,7 +1069,7 @@ export async function reactivateCompany(params: {
   const db = getDb();
   const auditService = new AuditService(db);
 
-  return await db.transaction().execute(async (trx) => {
+  return withTransactionRetry(db, async (trx) => {
     const company = await ensureCompanyExists(trx, params.companyId, {
       includeDeleted: true
     });

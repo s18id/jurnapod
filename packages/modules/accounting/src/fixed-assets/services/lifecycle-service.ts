@@ -10,6 +10,7 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
+import { withTransactionRetry } from "@jurnapod/db";
 import type {
   LifecycleEvent,
   AssetBook,
@@ -139,7 +140,7 @@ export class LifecycleService {
   ): Promise<AcquisitionResult> {
     const db = this.repo["db"] as KyselySchema;
 
-    return db.transaction().execute(async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       // Find the asset
       const asset = await trx
         .selectFrom("fixed_assets")
@@ -288,7 +289,7 @@ export class LifecycleService {
   ): Promise<TransferResult> {
     const db = this.repo["db"] as KyselySchema;
 
-    return db.transaction().execute(async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       // Find the asset
       const asset = await trx
         .selectFrom("fixed_assets")
@@ -403,7 +404,7 @@ export class LifecycleService {
   ): Promise<ImpairmentResult> {
     const db = this.repo["db"] as KyselySchema;
 
-    return db.transaction().execute(async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       // Find the asset
       const asset = await trx
         .selectFrom("fixed_assets")
@@ -530,7 +531,7 @@ export class LifecycleService {
   ): Promise<DisposalResult> {
     const db = this.repo["db"] as KyselySchema;
 
-    return db.transaction().execute(async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       // Find the asset
       const asset = await trx
         .selectFrom("fixed_assets")
@@ -778,7 +779,7 @@ export class LifecycleService {
   ): Promise<VoidResult> {
     const db = this.repo["db"] as KyselySchema;
 
-    return db.transaction().execute(async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       // Find the event
       const event = await trx
         .selectFrom("fixed_asset_events")
@@ -870,7 +871,7 @@ export class LifecycleService {
         journalBatchId = await this.postVoidToJournal(
           trx,
           companyId,
-          eventId,
+          event.journal_batch_id,  // Use actual journal_batch_id, not event ID
           event.asset_id,
           event.outlet_id as number | null,
           formatDateOnly(new Date())
@@ -1749,7 +1750,7 @@ export class LifecycleService {
   private async postVoidToJournal(
     db: KyselySchema,
     companyId: number,
-    originalEventId: number,
+    originalJournalBatchId: number,
     assetId: number,
     outletId: number | null,
     eventDate: string
@@ -1757,47 +1758,86 @@ export class LifecycleService {
     // Validate fiscal year
     await this.ports.fiscalYearGuard.ensureDateWithinOpenFiscalYear(companyId, eventDate);
 
-    // Create journal batch
+    // Get original lines from the correct journal batch — enforce tenant scope
+    const originalLines = await db
+      .selectFrom("journal_lines")
+      .where("journal_batch_id", "=", originalJournalBatchId)
+      .where("company_id", "=", companyId)
+      .select(["account_id", "debit", "credit"])
+      .execute();
+
+    // Financial safety: fail loudly if original lines are missing/invalid
+    if (originalLines.length === 0) {
+      throw new LifecycleInvalidReferenceError(
+        `No journal lines found for journal_batch_id=${originalJournalBatchId}. Cannot safely reverse.`
+      );
+    }
+
+    // Create journal batch for the void reversal
     const batchResult = await db
       .insertInto("journal_batches")
       .values({
         company_id: companyId,
         outlet_id: outletId,
         doc_type: FA_VOID,
-        doc_id: originalEventId,
+        doc_id: assetId,
         posted_at: eventDate as unknown as Date,
       })
       .executeTakeFirst();
 
     const journalBatchId = Number(batchResult.insertId);
 
-    // Get original lines
-    const originalLines = await db
-      .selectFrom("journal_lines")
-      .where("journal_batch_id", "=", originalEventId)
-      .select(["account_id", "debit", "credit"])
-      .execute();
-
-    // Insert reversed lines
+    // Build reversal lines from original lines (swap debit/credit)
+    const reversalLines: Array<{ account_id: number; debit: number; credit: number; description: string }> = [];
     for (const line of originalLines) {
       const debit = Number(line.credit);
       const credit = Number(line.debit);
       if (debit > 0 || credit > 0) {
-        await db
-          .insertInto("journal_lines")
-          .values({
-            journal_batch_id: journalBatchId,
-            company_id: companyId,
-            outlet_id: outletId,
-            account_id: line.account_id,
-            line_date: eventDate as unknown as Date,
-            debit: debit,
-            credit: credit,
-            description: `Void of event ${originalEventId}`,
-          })
-          .execute();
+        reversalLines.push({
+          account_id: line.account_id,
+          debit,
+          credit,
+          description: `Void reversal of batch ${originalJournalBatchId}`,
+        });
       }
     }
+
+    // Guard: if computed reversal lines array is empty, throw
+    if (reversalLines.length === 0) {
+      throw new LifecycleInvalidReferenceError(
+        `Computed reversal lines are empty for journal_batch_id=${originalJournalBatchId}. Cannot safely reverse.`
+      );
+    }
+
+    // Financial safety: ensure reversal is balanced
+    assertJournalBalanced(reversalLines.map(l => ({ debit: l.debit, credit: l.credit })));
+
+    // Batch insert reversal lines using sql template (same pattern as postDisposalToJournal)
+    const values = reversalLines.map((line) => sql`
+      (
+        ${journalBatchId},
+        ${companyId},
+        ${outletId ?? null},
+        ${line.account_id},
+        ${eventDate},
+        ${line.debit},
+        ${line.credit},
+        ${line.description}
+      )
+    `);
+
+    await sql`
+      INSERT INTO journal_lines (
+        journal_batch_id,
+        company_id,
+        outlet_id,
+        account_id,
+        line_date,
+        debit,
+        credit,
+        description
+      ) VALUES ${sql.join(values, sql`, `)}
+    `.execute(db);
 
     return journalBatchId;
   }

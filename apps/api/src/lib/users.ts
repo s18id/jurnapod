@@ -3,6 +3,7 @@
 
 import { getDb } from "./db";
 import type { KyselySchema } from "@jurnapod/db";
+import { withTransactionRetry } from "@jurnapod/db";
 import { AuditService } from "@jurnapod/modules-platform";
 import { NumericIdSchema, RoleSchema } from "@jurnapod/shared";
 import { hashPassword, type PasswordHashPolicy } from "./password-hash";
@@ -456,7 +457,7 @@ export async function createUser(params: {
   const auditService = new AuditService(db);
   const auditContext = buildAuditContext(params.companyId, params.actor);
 
-  return await db.transaction().execute(async (trx) => {
+  const updated = await withTransactionRetry(db, async (trx) => {
     // Use createUserBasic to insert the user row
     const created = await createUserBasic({
       companyId: params.companyId,
@@ -610,6 +611,8 @@ export async function createUser(params: {
 
     return user;
   });
+
+  return updated;
 }
 
 export async function updateUserEmail(params: {
@@ -622,7 +625,7 @@ export async function updateUserEmail(params: {
   const auditService = new AuditService(db);
   const auditContext = buildAuditContext(params.companyId, params.actor);
 
-  return await db.transaction().execute(async (trx) => {
+  const updated = await withTransactionRetry(db, async (trx) => {
     await ensureUserExists(trx, params.companyId, params.userId);
 
     await ensureSuperAdminTargetManagedBySelf(
@@ -669,6 +672,9 @@ export async function updateUserEmail(params: {
 
     return updated;
   });
+
+  return updated;
+
 }
 
 export async function setUserRoles(params: {
@@ -682,7 +688,7 @@ export async function setUserRoles(params: {
   const auditService = new AuditService(db);
   const auditContext = buildAuditContext(params.companyId, params.actor);
 
-  return await db.transaction().execute(async (trx) => {
+  const updated = await withTransactionRetry(db, async (trx) => {
     await ensureUserExists(trx, params.companyId, params.userId);
 
     await ensureSuperAdminTargetManagedBySelf(
@@ -812,8 +818,6 @@ export async function setUserRoles(params: {
       );
     }
 
-    await sendRoleChangeNotification(params.companyId, params.userId, roleCodes);
-
     const updated = await findUserById(params.companyId, params.userId, trx);
     if (!updated) {
       throw new UserNotFoundError("User not found after role update");
@@ -821,6 +825,12 @@ export async function setUserRoles(params: {
 
     return updated;
   });
+
+  // Keep side effects outside retry callback to prevent duplicate delivery
+  // when deadlock retries re-execute the transaction block.
+  await sendRoleChangeNotification(params.companyId, params.userId, params.roleCodes);
+
+  return updated;
 }
 
 export async function setUserOutlets(params: {
@@ -833,7 +843,7 @@ export async function setUserOutlets(params: {
   const auditService = new AuditService(db);
   const auditContext = buildAuditContext(params.companyId, params.actor);
 
-  return await db.transaction().execute(async (trx) => {
+  return withTransactionRetry(db, async (trx) => {
     await ensureUserExists(trx, params.companyId, params.userId);
 
     await ensureSuperAdminTargetManagedBySelf(
@@ -898,7 +908,7 @@ export async function setUserPassword(params: {
   const auditService = new AuditService(db);
   const auditContext = buildAuditContext(params.companyId, params.actor);
 
-  await db.transaction().execute(async (trx) => {
+  await withTransactionRetry(db, async (trx) => {
     await ensureSuperAdminTargetManagedBySelf(
       trx,
       params.actor.userId,
@@ -943,7 +953,7 @@ export async function setUserActiveState(params: {
   const auditService = new AuditService(db);
   const auditContext = buildAuditContext(params.companyId, params.actor);
 
-  return await db.transaction().execute(async (trx) => {
+  return withTransactionRetry(db, async (trx) => {
     // Prevent deactivating SUPER_ADMIN users (including self, for safety)
     if (!params.isActive) {
       const isSuperAdmin = await userHasSuperAdminRole(
@@ -1106,7 +1116,7 @@ export async function createRole(params: {
   const db = getDb();
   const auditService = new AuditService(db);
 
-  return await db.transaction().execute(async (trx) => {
+  return withTransactionRetry(db, async (trx) => {
     const actorMaxLevel = await getUserMaxRoleLevelForConnection(
       trx,
       params.companyId,
@@ -1172,7 +1182,7 @@ export async function updateRole(params: {
   const db = getDb();
   const auditService = new AuditService(db);
 
-  return await db.transaction().execute(async (trx) => {
+  return withTransactionRetry(db, async (trx) => {
     // Get current role
     const currentRole = await trx
       .selectFrom('roles')
@@ -1231,7 +1241,7 @@ export async function deleteRole(params: {
   const db = getDb();
   const auditService = new AuditService(db);
 
-  await db.transaction().execute(async (trx) => {
+  await withTransactionRetry(db, async (trx) => {
     // Get current role
     const role = await trx
       .selectFrom('roles')
@@ -1359,7 +1369,7 @@ export async function setModuleRolePermission(params: {
   const db = getDb();
   const auditService = new AuditService(db);
 
-  return await db.transaction().execute(async (trx) => {
+  return withTransactionRetry(db, async (trx) => {
     const roleRows = await trx
       .selectFrom('roles')
       .where('id', '=', params.roleId)

@@ -6,14 +6,14 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
-import { getTestDb, closeTestDb } from '../../helpers/db';
-import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext, createTestItem, registerFixtureCleanup } from '../../fixtures';
-import { sql } from 'kysely';
+import { closeTestDb } from '../../helpers/db';
+import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext, createTestItem, createTestPrice, createTestStock, setTestItemLowStockThreshold } from '../../fixtures';
 
 let baseUrl: string;
 let accessToken: string;
 let outletId: number;
 let companyId: number;
+let cashierUserId: number;
 
 describe('stock.low', { timeout: 30000 }, () => {
   beforeAll(async () => {
@@ -22,6 +22,7 @@ describe('stock.low', { timeout: 30000 }, () => {
     const syncContext = await getSeedSyncContext();
     outletId = syncContext.outletId;
     companyId = syncContext.companyId;
+    cashierUserId = syncContext.cashierUserId;
   });
 
   afterAll(async () => {
@@ -59,20 +60,9 @@ describe('stock.low', { timeout: 30000 }, () => {
       trackStock: true
     });
 
-    // Set low_stock_threshold via direct update (required for low stock alerts)
-    await sql`UPDATE items SET low_stock_threshold = 20 WHERE id = ${item.id}`.execute(getTestDb());
-
-    // Insert inventory_stock with quantity below threshold
-    const db = getTestDb();
-    await sql`
-      INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity, created_at, updated_at)
-      VALUES (${companyId}, ${outletId}, ${item.id}, 10, 0, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `.execute(db);
-
-    registerFixtureCleanup(`low_stock_${item.id}`, async () => {
-      await sql`DELETE FROM inventory_stock WHERE product_id = ${item.id} AND outlet_id = ${outletId}`.execute(db);
-      await sql`UPDATE items SET low_stock_threshold = NULL WHERE id = ${item.id}`.execute(db);
-    });
+    await setTestItemLowStockThreshold(companyId, item.id, 20);
+    await createTestPrice(companyId, item.id, cashierUserId, { price: 10000, isActive: true });
+    await createTestStock(companyId, item.id, outletId, 10, cashierUserId);
 
     // Query low stock alerts
     const res = await fetch(`${baseUrl}/api/outlets/${outletId}/stock/low`, {
@@ -99,20 +89,9 @@ describe('stock.low', { timeout: 30000 }, () => {
       trackStock: true
     });
 
-    // Set low_stock_threshold
-    await sql`UPDATE items SET low_stock_threshold = 20 WHERE id = ${item.id}`.execute(getTestDb());
-
-    // Insert inventory_stock with quantity above threshold
-    const db = getTestDb();
-    await sql`
-      INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity, created_at, updated_at)
-      VALUES (${companyId}, ${outletId}, ${item.id}, 50, 0, 50, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `.execute(db);
-
-    registerFixtureCleanup(`normal_stock_${item.id}`, async () => {
-      await sql`DELETE FROM inventory_stock WHERE product_id = ${item.id} AND outlet_id = ${outletId}`.execute(db);
-      await sql`UPDATE items SET low_stock_threshold = NULL WHERE id = ${item.id}`.execute(db);
-    });
+    await setTestItemLowStockThreshold(companyId, item.id, 20);
+    await createTestPrice(companyId, item.id, cashierUserId, { price: 10000, isActive: true });
+    await createTestStock(companyId, item.id, outletId, 50, cashierUserId);
 
     // Query low stock alerts
     const res = await fetch(`${baseUrl}/api/outlets/${outletId}/stock/low`, {
@@ -150,18 +129,9 @@ describe('stock.low', { timeout: 30000 }, () => {
       trackStock: true
     });
 
-    await sql`UPDATE items SET low_stock_threshold = 10 WHERE id = ${item.id}`.execute(getTestDb());
-
-    const db = getTestDb();
-    await sql`
-      INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity, created_at, updated_at)
-      VALUES (${companyId}, ${outletId}, ${item.id}, 5, 0, 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `.execute(db);
-
-    registerFixtureCleanup(`sku_test_${item.id}`, async () => {
-      await sql`DELETE FROM inventory_stock WHERE product_id = ${item.id} AND outlet_id = ${outletId}`.execute(db);
-      await sql`UPDATE items SET low_stock_threshold = NULL WHERE id = ${item.id}`.execute(db);
-    });
+    await setTestItemLowStockThreshold(companyId, item.id, 10);
+    await createTestPrice(companyId, item.id, cashierUserId, { price: 10000, isActive: true });
+    await createTestStock(companyId, item.id, outletId, 5, cashierUserId);
 
     const res = await fetch(`${baseUrl}/api/outlets/${outletId}/stock/low`, {
       headers: { 'Authorization': `Bearer ${accessToken}` }

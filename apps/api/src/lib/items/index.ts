@@ -236,7 +236,9 @@ export async function createItem(
   const db = getDb();
 
   // Retry on deadlock since parallel test fixtures can contend on items table
-  return withTransactionRetry(db, async (trx) => {
+  return withTransactionRetry(
+    db,
+    async (trx) => {
     try {
       if (typeof input.item_group_id === "number") {
         await ensureCompanyItemGroupExists(trx, companyId, input.item_group_id);
@@ -288,7 +290,14 @@ export async function createItem(
 
       throw error;
     }
-  });
+    },
+    {
+      // Item creation is highly contended in integration fixtures.
+      // Give deadlock retry a bit more room before surfacing an error.
+      maxAttempts: 8,
+      initialDelayMs: 100,
+    }
+  );
 }
 
 export async function updateItem(

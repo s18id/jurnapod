@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { getDb, type KyselySchema } from "./db";
+import { withTransactionRetry } from "@jurnapod/db";
 
 // =============================================================================
 // Types
@@ -142,7 +143,7 @@ async function findTaxRateByIdWithExecutor(
 
 async function withTransaction<T>(operation: (db: KyselySchema) => Promise<T>): Promise<T> {
   const db = getDb();
-  return db.transaction().execute(operation);
+  return withTransactionRetry(db, operation);
 }
 
 // =============================================================================

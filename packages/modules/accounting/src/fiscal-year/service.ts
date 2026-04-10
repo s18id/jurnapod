@@ -11,6 +11,7 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
+import { withTransactionRetry } from "@jurnapod/db";
 import {
   type FiscalYear,
   type FiscalYearCreateRequest,
@@ -198,7 +199,7 @@ export class FiscalYearService {
     const status: FiscalYearStatus = input.status ?? "OPEN";
     this.assertDateRange(input.start_date, input.end_date);
 
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTransactionRetry(this.db, async (trx) => {
       if (status === "OPEN") {
         const allowMultiple = await this.allowMultipleOpenFiscalYears(trx, input.company_id);
         await this.assertOpenFiscalYearRules(
@@ -254,7 +255,7 @@ export class FiscalYearService {
     input: FiscalYearUpdateRequest,
     actorUserId?: number
   ): Promise<FiscalYear | null> {
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTransactionRetry(this.db, async (trx) => {
       const current = await trx
         .selectFrom("fiscal_years")
         .where("company_id", "=", companyId)
@@ -399,7 +400,8 @@ export class FiscalYearService {
   }
 
   /**
-   * Close a fiscal year with idempotency protection
+   * Close a fiscal year with idempotency protection.
+   * All idempotency claims, state transitions, and writes happen inside a single retried transaction.
    */
   async closeFiscalYear(
     fiscalYearId: number,
@@ -408,156 +410,52 @@ export class FiscalYearService {
     trx?: FiscalYearDbClient
   ): Promise<CloseFiscalYearResult> {
     const { companyId, requestedByUserId, requestedAtEpochMs } = context;
-    const now = requestedAtEpochMs;
 
-    // If external transaction provided, use it for atomic operations
+    // If external transaction provided, use it for atomic operations (unchanged)
     if (trx) {
       return await this.closeFiscalYearWithTransaction(trx, fiscalYearId, closeRequestId, context);
     }
 
-    // Original behavior: insert PENDING record outside transaction, then execute close in transaction with retry
-    let closeRequestDbId: number | undefined;
-
-    try {
-      const insertResult = await this.db
-        .insertInto("fiscal_year_close_requests")
-        .values({
-          company_id: companyId,
-          fiscal_year_id: fiscalYearId,
-          close_request_id: closeRequestId,
-          status: FISCAL_YEAR_CLOSE_STATUS.PENDING,
-          fiscal_year_status_before: "UNKNOWN",
-          fiscal_year_status_after: "CLOSED",
-          requested_by_user_id: requestedByUserId,
-          requested_at_ts: requestedAtEpochMs,
-          created_at_ts: now,
-          updated_at_ts: now
-        })
-        .executeTakeFirst();
-
-      closeRequestDbId = Number(insertResult.insertId);
-    } catch (dbError: unknown) {
-      if (
-        typeof dbError === "object" &&
-        dbError !== null &&
-        "code" in dbError &&
-        (dbError as { code: string }).code === "ER_DUP_ENTRY"
-      ) {
-        // Duplicate - fetch and return existing record
-        const existingRequest = await this.db
-          .selectFrom("fiscal_year_close_requests")
-          .where("company_id", "=", companyId)
-          .where("fiscal_year_id", "=", fiscalYearId)
-          .where("close_request_id", "=", closeRequestId)
-          .select([
-            "id",
-            "status",
-            "fiscal_year_status_before",
-            "fiscal_year_status_after",
-            "result_json",
-            "failure_code",
-            "failure_message"
-          ])
-          .executeTakeFirst();
-
-        if (existingRequest) {
-          return {
-            success: existingRequest.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED,
-            fiscalYearId,
-            closeRequestId,
-            status: existingRequest.status as FiscalYearCloseStatus,
-            previousStatus: existingRequest.fiscal_year_status_before,
-            newStatus: existingRequest.fiscal_year_status_after,
-            resultJson: existingRequest.result_json
-              ? JSON.parse(existingRequest.result_json)
-              : undefined,
-            failureCode: existingRequest.failure_code ?? undefined,
-            failureMessage: existingRequest.failure_message ?? undefined
-          };
-        }
-      }
-      throw dbError;
-    }
-
-    if (closeRequestDbId === undefined) {
-      throw new Error("Failed to insert fiscal year close request");
-    }
-
-    // Execute close with row locking and retry logic
-    const maxRetries = 3;
-    let lastError: Error | null = null;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        return await this.db.transaction().execute(async (innerTrx) => {
-          return await this.executeCloseWithLocking(
-            innerTrx,
-            fiscalYearId,
-            closeRequestDbId!,
-            closeRequestId,
-            context,
-            companyId,
-            requestedByUserId
-          );
-        });
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-
-        if (lastError.message.includes("Lock wait timeout") && attempt < maxRetries) {
-          const backoffMs = Math.pow(2, attempt) * 100;
-          await new Promise((resolve) => setTimeout(resolve, backoffMs));
-          continue;
-        }
-
-        if (lastError.message.includes("Deadlock") && attempt < maxRetries) {
-          const backoffMs = Math.pow(2, attempt) * 100;
-          await new Promise((resolve) => setTimeout(resolve, backoffMs));
-          continue;
-        }
-
-        break;
-      }
-    }
-
-    // Handle failure case
-    const failureAt = Date.now();
-    const failureCode = lastError instanceof FiscalYearAlreadyClosedError
-      ? "FISCAL_YEAR_ALREADY_CLOSED"
-      : lastError instanceof FiscalYearNotFoundError
-        ? "FISCAL_YEAR_NOT_FOUND"
-        : "CLOSE_FAILED";
-
-    try {
-      await this.db
-        .updateTable("fiscal_year_close_requests")
-        .set({
-          status: FISCAL_YEAR_CLOSE_STATUS.FAILED,
-          failure_code: failureCode,
-          failure_message: lastError?.message ?? "Unknown error",
-          completed_at_ts: failureAt,
-          updated_at_ts: failureAt
-        })
-        .where("id", "=", closeRequestDbId)
-        .execute();
-    } catch {
-      // Ignore update errors on failure path
-    }
-
-    if (lastError instanceof FiscalYearNotFoundError) {
-      throw lastError;
-    }
-    if (lastError instanceof FiscalYearAlreadyClosedError) {
-      throw lastError;
-    }
-    if (lastError instanceof Error) {
-      throw new FiscalYearCloseConflictError(
-        `Failed to close fiscal year after ${maxRetries} attempts: ${lastError.message}`
+    // Single atomic path: all idempotency-claim/write/state transitions inside retried transaction
+    return await withTransactionRetry(this.db, async (innerTrx) => {
+      // Step 1: Atomically claim idempotency key via INSERT...ON DUPLICATE KEY
+      // This replaces the pre-transactional insert + retry pattern.
+      const { closeRequestDbId, existingRequest } = await this.claimCloseRequestIdempotency(
+        innerTrx,
+        companyId,
+        fiscalYearId,
+        closeRequestId,
+        context
       );
-    }
-    const unknownError = lastError ?? new Error("Unknown error during fiscal year close");
-    throw new FiscalYearCloseConflictError(
-      `Failed to close fiscal year: ${unknownError.message}`
-    );
+
+      // If duplicate found, return existing result immediately
+      if (existingRequest) {
+        return {
+          success: existingRequest.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED,
+          fiscalYearId,
+          closeRequestId,
+          status: existingRequest.status as FiscalYearCloseStatus,
+          previousStatus: existingRequest.fiscal_year_status_before,
+          newStatus: existingRequest.fiscal_year_status_after,
+          resultJson: existingRequest.result_json
+            ? JSON.parse(existingRequest.result_json)
+            : undefined,
+          failureCode: existingRequest.failure_code ?? undefined,
+          failureMessage: existingRequest.failure_message ?? undefined,
+        };
+      }
+
+      // Step 2: Execute the close with row locking (same as before, now inside same tx)
+      return await this.executeCloseWithLocking(
+        innerTrx,
+        fiscalYearId,
+        closeRequestDbId,
+        closeRequestId,
+        context,
+        companyId,
+        requestedByUserId
+      );
+    });
   }
 
   /**
@@ -894,6 +792,84 @@ export class FiscalYearService {
         reason: context.reason ?? null
       }
     };
+  }
+
+  /**
+   * Atomically claim an idempotency key for fiscal year close.
+   * Returns either the new insert ID, or an existing request record if duplicate.
+   * All happens inside a single transaction — no partial state possible.
+   */
+  private async claimCloseRequestIdempotency(
+    db: FiscalYearDbClient,
+    companyId: number,
+    fiscalYearId: number,
+    closeRequestId: string,
+    context: CloseFiscalYearContext
+  ): Promise<{
+    closeRequestDbId: number;
+    existingRequest: null;
+  } | {
+    closeRequestDbId: null;
+    existingRequest: {
+      status: string;
+      fiscal_year_status_before: string;
+      fiscal_year_status_after: string;
+      result_json: string | null;
+      failure_code: string | null;
+      failure_message: string | null;
+    };
+  }> {
+    const { requestedByUserId, requestedAtEpochMs } = context;
+    const now = requestedAtEpochMs;
+
+    try {
+      const insertResult = await db
+        .insertInto("fiscal_year_close_requests")
+        .values({
+          company_id: companyId,
+          fiscal_year_id: fiscalYearId,
+          close_request_id: closeRequestId,
+          status: FISCAL_YEAR_CLOSE_STATUS.PENDING,
+          fiscal_year_status_before: "UNKNOWN",
+          fiscal_year_status_after: "CLOSED",
+          requested_by_user_id: requestedByUserId,
+          requested_at_ts: requestedAtEpochMs,
+          created_at_ts: now,
+          updated_at_ts: now,
+        })
+        .executeTakeFirst();
+
+      return { closeRequestDbId: Number(insertResult.insertId), existingRequest: null };
+    } catch (dbError: unknown) {
+      if (
+        typeof dbError === "object" &&
+        dbError !== null &&
+        "code" in dbError &&
+        (dbError as { code: string }).code === "ER_DUP_ENTRY"
+      ) {
+        const existingRequest = await db
+          .selectFrom("fiscal_year_close_requests")
+          .where("company_id", "=", companyId)
+          .where("fiscal_year_id", "=", fiscalYearId)
+          .where("close_request_id", "=", closeRequestId)
+          .select([
+            "status",
+            "fiscal_year_status_before",
+            "fiscal_year_status_after",
+            "result_json",
+            "failure_code",
+            "failure_message",
+          ])
+          .executeTakeFirst();
+
+        if (existingRequest) {
+          return { closeRequestDbId: null, existingRequest };
+        }
+      }
+      throw dbError;
+    }
+
+    throw new Error("Failed to claim fiscal year close idempotency key");
   }
 
   private async closeFiscalYearWithTransaction(

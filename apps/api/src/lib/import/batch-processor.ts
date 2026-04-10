@@ -19,6 +19,7 @@ import type {
   ProgressCallback,
 } from './types.js';
 import { getDb } from '../db.js';
+import { withTransactionRetry } from '@jurnapod/db';
 import type { Kysely } from 'kysely';
 import { createValidationError } from './validator.js';
 
@@ -243,8 +244,8 @@ export async function processBatchesWithTransaction<T>(
     let batchResult: BatchResult<T>;
 
     try {
-      // Execute batch within a Kysely transaction
-      batchResult = await db.transaction().execute(async (trx) => {
+      // Execute batch within a Kysely transaction with deadlock retry
+      batchResult = await withTransactionRetry(db, async (trx) => {
         // Process batch with transaction handle
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const result = await processor.processBatch(batchItems, { ...context, connection: trx as any });

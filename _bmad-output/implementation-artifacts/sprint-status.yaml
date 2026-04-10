@@ -1,4 +1,4 @@
-last_updated: 2026-04-08T12:00:00Z
+last_updated: 2026-04-09T14:26:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -372,7 +372,7 @@ development_status:
   31-7b-reports-route-thinning: done
   31-7c-accounts-route-thinning: done  # no refactoring needed, ADR-0016 created
   31-8a-adapter-migration-prep: done  # Boundaries verified, lint fixes applied
-  31-8b-deletion-verification: done  # PARTIAL - backlog remaining deletion to Epic 36 (TD: 20+ imports still exist)
+  31-8b-deletion-verification: done  # Deleted: cash-bank.ts, reconciliation-service.ts, reservation-groups.ts, reservations.ts. Remaining REVIEW candidates kept (pagination.ts used by telemetry, retry.ts unused but harmless).
   31-post-epic-test-fixes: done  # Date handling, Temporal timezone, status_id fixtures
   epic-31-retrospective: done
 
@@ -432,3 +432,10 @@ development_status:
   36-9-openapi-auto-gen-poc: done
   36-10-expand-auto-gen-all: done
   epic-36-retrospective: done
+
+  # Epic 37: Generic File Uploader
+  epic-37: done
+  37-1-generic-uploader-core: done
+  37-2-item-image-adapter: done
+  37-3-refactor-item-images: done
+  37-4-delete-image-storage: done

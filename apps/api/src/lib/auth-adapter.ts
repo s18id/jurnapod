@@ -9,6 +9,7 @@
 
 import { getDb } from './db.js';
 import type { AuthDbAdapter } from '@jurnapod/auth';
+import { withTransactionRetry } from '@jurnapod/db';
 import type { Kysely } from 'kysely';
 
 /**
@@ -21,7 +22,7 @@ export function createAuthAdapter(): AuthDbAdapter {
     db: db as Kysely<any>,
 
     async transaction<T>(fn: (trx: AuthDbAdapter) => Promise<T>): Promise<T> {
-      return await db.transaction().execute(async (trx) => {
+      return await withTransactionRetry(db, async (trx) => {
         const txAdapter: AuthDbAdapter = {
           db: trx as Kysely<any>,
           transaction: async (innerFn) => innerFn(txAdapter),

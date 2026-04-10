@@ -10,6 +10,7 @@ import type {
 } from "@jurnapod/shared";
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
+import { withTransactionRetry } from "@jurnapod/db";
 
 /**
  * Database client interface for dependency injection
@@ -233,7 +234,7 @@ export class AccountsService {
       effectiveReportGroup = templateMeta?.report_group ?? ancestorMeta?.report_group ?? null;
     }
 
-    const accountId = await this.db.transaction().execute(async (trx) => {
+    const accountId = await withTransactionRetry(this.db, async (trx) => {
       const result = await trx
         .insertInto('accounts')
         .values({
@@ -496,7 +497,7 @@ export class AccountsService {
     const allParams = [...params, accountId, companyId];
     const setClause = updateFields.join(", ");
 
-    const after = await this.db.transaction().execute(async (trx) => {
+    const after = await withTransactionRetry(this.db, async (trx) => {
       // Execute update using raw SQL (complex dynamic SQL is already built)
       await sql`UPDATE accounts SET ${sql.raw(setClause)} WHERE id = ${accountId} AND company_id = ${companyId}`.execute(trx);
 
@@ -533,7 +534,7 @@ export class AccountsService {
       throw new AccountInUseError(accountId, "has journal lines or active child accounts");
     }
 
-    const account = await this.db.transaction().execute(async (trx) => {
+    const account = await withTransactionRetry(this.db, async (trx) => {
       await trx
         .updateTable('accounts')
         .set({ is_active: 0 })
@@ -566,7 +567,7 @@ export class AccountsService {
     // Verify account exists
     await this.getAccountById(accountId, companyId);
 
-    const account = await this.db.transaction().execute(async (trx) => {
+    const account = await withTransactionRetry(this.db, async (trx) => {
       await trx
         .updateTable('accounts')
         .set({ is_active: 1 })

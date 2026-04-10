@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import type { KyselySchema } from "@jurnapod/db";
+import { withTransactionRetry } from "@jurnapod/db";
 import { AuditService } from "@jurnapod/modules-platform";
 import { getDb } from "./db";
 import { toRfc3339Required } from "@jurnapod/shared";
@@ -167,7 +168,7 @@ export async function createOutlet(params: CreateOutletParams): Promise<OutletFu
   const db = getDb();
   const auditService = new AuditService(db);
 
-  return await db.transaction().execute(async (trx) => {
+  return withTransactionRetry(db, async (trx) => {
     // Check if code already exists for this company
     const existing = await trx
       .selectFrom('outlets')
@@ -254,7 +255,7 @@ export async function updateOutlet(params: UpdateOutletParams): Promise<OutletFu
   const db = getDb();
   const auditService = new AuditService(db);
 
-  return await db.transaction().execute(async (trx) => {
+  return withTransactionRetry(db, async (trx) => {
     // Get current outlet
     const rows = await trx
       .selectFrom('outlets')
@@ -375,7 +376,7 @@ export async function deleteOutlet(params: {
   const db = getDb();
   const auditService = new AuditService(db);
 
-  await db.transaction().execute(async (trx) => {
+  await withTransactionRetry(db, async (trx) => {
     // Get current outlet
     const rows = await trx
       .selectFrom('outlets')

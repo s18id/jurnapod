@@ -6,7 +6,7 @@ import type { JournalLine, PostingRequest, PostingResult, AccountMappingCode } f
 import { PostingService, type PostingMapper, type PostingRepository } from "../index.js";
 import { ACCOUNT_MAPPING_TYPE_ID_BY_CODE, accountMappingIdToCode } from "@jurnapod/shared";
 import { normalizeMoney, resolveMappingCode } from "./common.js";
-import type { KyselySchema } from "@jurnapod/db";
+import { withTransactionRetry, type KyselySchema, type Transaction } from "@jurnapod/db";
 
 // =============================================================================
 // Types
@@ -282,15 +282,25 @@ async function hasColumn(
 /**
  * Calculate COGS for a sale by retrieving item costs from inventory.
  * Uses average cost method.
+ * 
+ * Uses withTransactionRetry to handle deadlocks, but passes through
+ * if already in a transaction (db.isTransaction) to avoid nested transactions.
+ * 
+ * Schema checks (hasColumn) are performed ONCE before the retry loop as an
+ * immutable cache — schema cannot change between retry attempts, so re-checking
+ * would be wasteful and would introduce non-deterministic behavior if stale
+ * reads were somehow cached across attempts.
  */
 export async function calculateSaleCogs(
   companyId: number,
   saleItems: Array<{ itemId: number; quantity: number }>,
   db: KyselySchema
 ): Promise<CogsItemDetail[]> {
-  return await db.transaction().execute(async (trx) => {
-    const inventoryHasUnitCost = await hasColumn(trx, "inventory_transactions", "unit_cost");
-    const itemPricesHasBaseCost = await hasColumn(trx, "item_prices", "base_cost");
+  // Schema checks are immutable — compute once before retry loop for determinism.
+  const inventoryHasUnitCost = await hasColumn(db, "inventory_transactions", "unit_cost");
+  const itemPricesHasBaseCost = await hasColumn(db, "item_prices", "base_cost");
+
+  async function executorCallback(trx: Transaction): Promise<CogsItemDetail[]> {
     const uniqueItemIds = Array.from(new Set(saleItems.map((item) => Number(item.itemId))));
 
     const stockByItemId = new Map<number, { quantityOnHand: number; totalCost: number }>();
@@ -389,7 +399,13 @@ export async function calculateSaleCogs(
     }
 
     return cogsDetails;
-  });
+  }
+
+  // Use retry if not already in transaction, otherwise pass through
+  if (db.isTransaction) {
+    return executorCallback(db as unknown as Transaction);
+  }
+  return withTransactionRetry(db, executorCallback);
 }
 
 /**
@@ -651,7 +667,7 @@ async function postCogsForSaleInternal(
       useDeductionCosts: (input.deductionCosts?.length ?? 0) > 0
     };
 
-    const result = await db.transaction().execute(async (trx) => {
+    const result = await withTransactionRetry(db, async (trx) => {
       const repository = new CogsRepository(trx, lineDate);
       const mapper = new CogsPostingMapper(executor, saleDetail);
 

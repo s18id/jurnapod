@@ -11,6 +11,7 @@
 
 import type { KyselySchema } from "@/lib/db";
 import { getDb } from "@/lib/db";
+import { withTransactionRetry } from "@jurnapod/db";
 import {
   getNextDocumentNumber,
   NumberingConflictError,
@@ -79,7 +80,7 @@ export async function withTransaction<T>(
   operation: (trx: KyselySchema) => Promise<T>
 ): Promise<T> {
   const db = getDb();
-  return db.transaction().execute(operation);
+  return withTransactionRetry(db, operation);
 }
 
 // =============================================================================

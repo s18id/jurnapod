@@ -80,9 +80,78 @@ export class KyselyAdapter implements AuthDbAdapter {
    * Execute a function within a database transaction.
    */
   async transaction<T>(fn: (adapter: AuthDbAdapter) => Promise<T>): Promise<T> {
-    return await this.db.transaction().execute(async (trx) => {
+    // Already in a transaction: do not start nested transaction and do not add
+    // another retry loop on top of caller-owned transaction scope.
+    if (this.db.isTransaction) {
+      return fn(this);
+    }
+
+    const maxAttempts = 5;
+    const initialDelayMs = 100;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        return await this.db.transaction().execute(async (trx) => {
+          const txAdapter = new KyselyAdapter(trx as Kysely<DB>);
+          return await fn(txAdapter);
+        });
+      } catch (error) {
+        if (attempt < maxAttempts - 1 && isDeadlockError(error)) {
+          const delayMs = initialDelayMs * (2 ** attempt);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    // Unreachable in practice (loop either returns or throws), but keeps TS happy.
+    return this.db.transaction().execute(async (trx) => {
       const txAdapter = new KyselyAdapter(trx as Kysely<DB>);
       return await fn(txAdapter);
     });
   }
+}
+
+const MYSQL_DEADLOCK_CODE = 'ER_LOCK_DEADLOCK';
+const MYSQL_DEADLOCK_ERRNO = 1213;
+
+function isDeadlockError(error: unknown): boolean {
+  const visited = new Set<unknown>();
+  let current: unknown = error;
+
+  while (typeof current === 'object' && current !== null && !visited.has(current)) {
+    visited.add(current);
+
+    const err = current as {
+      code?: unknown;
+      errno?: unknown;
+      message?: unknown;
+      cause?: unknown;
+      originalError?: unknown;
+    };
+
+    if (typeof err.code === 'string' && err.code === MYSQL_DEADLOCK_CODE) {
+      return true;
+    }
+    if (typeof err.errno === 'number' && err.errno === MYSQL_DEADLOCK_ERRNO) {
+      return true;
+    }
+    if (typeof err.message === 'string' && err.message.toLowerCase().includes('deadlock found')) {
+      return true;
+    }
+
+    if (err.cause !== undefined) {
+      current = err.cause;
+      continue;
+    }
+    if (err.originalError !== undefined) {
+      current = err.originalError;
+      continue;
+    }
+
+    break;
+  }
+
+  return false;
 }

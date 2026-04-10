@@ -65,6 +65,7 @@
 
 import { getDb } from "./db";
 import { sql } from "kysely";
+import { withTransactionRetry } from "@jurnapod/db";
 import { createCompanyBasic, CompanyCodeExistsError } from "./companies";
 import { createOutletBasic, OutletCodeExistsError } from "./outlets";
 import { createUserBasic, UserEmailExistsError } from "./users";
@@ -72,6 +73,7 @@ import { createItem } from "./items/index.js";
 import { itemPricesAdapter } from "./item-prices/adapter.js";
 import { DatabaseConflictError } from "./master-data-errors.js";
 import { createVariantAttribute } from "./item-variants";
+import { adjustStock } from "./stock.js";
 import { MODULE_PERMISSION_BITS, buildPermissionMask, type ModulePermission } from "@jurnapod/auth";
 
 // ============================================================================
@@ -121,6 +123,13 @@ export type PriceFixture = {
   variant_id: number | null;
   price: number;
   is_active: boolean;
+};
+
+export type StockFixture = {
+  company_id: number;
+  outlet_id: number | null;
+  product_id: number;
+  quantity: number;
 };
 
 export type TestFixtures = {
@@ -550,6 +559,98 @@ export async function createTestPrice(
 
   createdFixtures.prices.push(price);
   return price;
+}
+
+/**
+ * Create test stock for an item at an outlet using adjustStock.
+ * Uses the library function so stock records are created atomically
+ * with proper inventory_transaction logging.
+ *
+ * Registers a cleanup task that resets stock to 0 (via adjustStock with negative
+ * quantity) before item cleanup cascades via FK.
+ *
+ * @param companyId  - Tenant ID
+ * @param itemId     - Item ID to set stock for
+ * @param outletId   - Outlet ID (use null for company-level stock)
+ * @param quantity   - Absolute stock quantity to set
+ * @param userId     - User performing the setup (for audit)
+ */
+export async function createTestStock(
+  companyId: number,
+  itemId: number,
+  outletId: number | null,
+  quantity: number,
+  userId: number
+): Promise<StockFixture> {
+  const result = await adjustStock({
+    company_id: companyId,
+    outlet_id: outletId,
+    product_id: itemId,
+    adjustment_quantity: quantity,
+    reason: "TEST_SETUP",
+    user_id: userId,
+  });
+
+  if (!result) {
+    throw new Error(`Failed to create test stock for item ${itemId}`);
+  }
+
+  const fixture: StockFixture = {
+    company_id: companyId,
+    outlet_id: outletId,
+    product_id: itemId,
+    quantity,
+  };
+
+  // Register cleanup: reset stock to 0 before item deletion cascades
+  registerFixtureCleanup(`stock_${itemId}_${outletId ?? 'global'}`, async () => {
+    await adjustStock({
+      company_id: companyId,
+      outlet_id: outletId,
+      product_id: itemId,
+      adjustment_quantity: -quantity,
+      reason: "TEST_TEARDOWN",
+      user_id: userId,
+    });
+  });
+
+  return fixture;
+}
+
+/**
+ * Set low_stock_threshold for a test item.
+ *
+ * Canonical test helper so integration tests don't perform ad-hoc SQL UPDATE
+ * in test files. Uses Kysely query builder for scoped update.
+ */
+export async function setTestItemLowStockThreshold(
+  companyId: number,
+  itemId: number,
+  lowStockThreshold: number | null
+): Promise<void> {
+  const db = getDb();
+
+  // Use transaction retry to handle deadlocks from parallel test fixtures
+  await withTransactionRetry(db, async (trx) => {
+    await trx
+      .updateTable("items")
+      .set({ low_stock_threshold: lowStockThreshold })
+      .where("company_id", "=", companyId)
+      .where("id", "=", itemId)
+      .execute();
+  });
+
+  registerFixtureCleanup(`item_threshold_${itemId}`, async () => {
+    const db = getDb();
+    await withTransactionRetry(db, async (trx) => {
+      await trx
+        .updateTable("items")
+        .set({ low_stock_threshold: null })
+        .where("company_id", "=", companyId)
+        .where("id", "=", itemId)
+        .execute();
+    });
+  });
 }
 
 // ============================================================================

@@ -9,6 +9,7 @@ import type {
 } from "@jurnapod/shared";
 import type { AuditServiceInterface } from "./accounts-service";
 import type { KyselySchema } from "@jurnapod/db";
+import { withTransactionRetry } from "@jurnapod/db";
 
 /**
  * Database client interface for dependency injection
@@ -129,7 +130,7 @@ export class AccountTypesService {
     // Validate name uniqueness
     await this.validateAccountTypeName(data.name, data.company_id);
 
-    const result = await this.db.transaction().execute(async (trx) => {
+    const result = await withTransactionRetry(this.db, async (trx) => {
       const insertResult = await trx
         .insertInto('account_types')
         .values({
@@ -206,7 +207,7 @@ export class AccountTypesService {
       return this.getAccountTypeById(accountTypeId, companyId);
     }
 
-    const after = await this.db.transaction().execute(async (trx) => {
+    const after = await withTransactionRetry(this.db, async (trx) => {
       await trx
         .updateTable('account_types')
         .set(updates)
@@ -247,7 +248,7 @@ export class AccountTypesService {
       throw new AccountTypeInUseError(accountTypeId);
     }
 
-    const accountType = await this.db.transaction().execute(async (trx) => {
+    const accountType = await withTransactionRetry(this.db, async (trx) => {
       await trx
         .updateTable('account_types')
         .set({ is_active: 0 })

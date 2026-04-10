@@ -39,7 +39,7 @@ export type { DB as DatabaseSchema } from './kysely/schema.js';
 // Factory functions
 export { createKysely, getKysely, type KyselySchema } from './kysely/index.js';
 
-export { withTransaction, withTransactionRetry } from './kysely/transaction.js';
+export { withTransaction, withTransactionRetry, isDeadlockError } from './kysely/transaction.js';
 export type { Transaction } from './kysely/transaction.js';
 
 // Batch operations

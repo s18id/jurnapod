@@ -9,7 +9,7 @@
  */
 
 import { sql } from "kysely";
-import type { KyselySchema } from "@jurnapod/db";
+import { isDeadlockError, withTransactionRetry, type KyselySchema } from "@jurnapod/db";
 import {
   TableOccupancyStatus,
   TableEventType,
@@ -48,8 +48,10 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isRetryableDbError(error: unknown): boolean {
+  // Use central deadlock detection for ER_LOCK_DEADLOCK
+  // Also check ER_LOCK_WAIT_TIMEOUT separately (not covered by central detector)
   const code = (error as { code?: string })?.code;
-  return code === "ER_LOCK_DEADLOCK" || code === "ER_LOCK_WAIT_TIMEOUT";
+  return isDeadlockError(error) || code === "ER_LOCK_WAIT_TIMEOUT";
 }
 
 async function columnExists(
@@ -322,7 +324,14 @@ async function applyTableEventWithTransaction(
     throw new Error(`Missing required parameters: tableId=${tableId}, companyId=${companyId}, outletId=${outletId}`);
   }
 
-  return await db.transaction().execute(async (trx) => {
+  // Schema checks are immutable — compute once before retry loop for determinism.
+  // These columns cannot change between retry attempts; re-checking inside the
+  // transaction callback would be wasteful and could introduce non-deterministic
+  // behavior if stale reads were cached across attempts.
+  const hasReservationStartTs = await columnExists(db, 'reservations', 'reservation_start_ts');
+  const hasReservationEndTs = await columnExists(db, 'reservations', 'reservation_end_ts');
+
+  return await withTransactionRetry(db, async (trx) => {
     const lockedRowsResult = await sql<{
       status_id: number | null;
       version: number | null;
@@ -521,9 +530,6 @@ async function applyTableEventWithTransaction(
           const reservationStartTs = reservedUntil.getTime();
           const effectiveDurationMinutes = await resolveReservationDefaultDurationMinutes(settingsResolver, Number(companyId));
           const reservationEndTs = reservationStartTs + effectiveDurationMinutes * 60000;
-          const hasReservationStartTs = await columnExists(db, 'reservations', 'reservation_start_ts');
-          const hasReservationEndTs = await columnExists(db, 'reservations', 'reservation_end_ts');
-
           let reservationInsertResult;
           if (hasReservationStartTs && hasReservationEndTs) {
             reservationInsertResult = await sql`

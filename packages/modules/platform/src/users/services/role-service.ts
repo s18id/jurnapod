@@ -3,6 +3,7 @@
 
 import type { KyselySchema } from "@jurnapod/db";
 import { toRfc3339Required } from "@jurnapod/shared";
+import { withTransactionRetry } from "@jurnapod/db";
 import type { RoleResponse, RoleRow } from "../types/role.js";
 import { FULL_PERMISSION_MASK, type ModuleRoleResponse } from "../types/permission.js";
 import {
@@ -120,7 +121,7 @@ export class RoleService {
     roleLevel?: number;
     actor: UserActor;
   }): Promise<RoleResponse> {
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTransactionRetry(this.db, async (trx) => {
       const actorMaxLevel = await getUserMaxRoleLevelForConnection(
         trx,
         params.companyId,
@@ -177,7 +178,7 @@ export class RoleService {
     name?: string;
     actor: UserActor;
   }): Promise<RoleResponse> {
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTransactionRetry(this.db, async (trx) => {
       const currentRole = await trx
         .selectFrom("roles")
         .where("id", "=", params.roleId)
@@ -229,7 +230,7 @@ export class RoleService {
     roleId: number;
     actor: UserActor;
   }): Promise<void> {
-    await this.db.transaction().execute(async (trx) => {
+    await withTransactionRetry(this.db, async (trx) => {
       const role = await trx
         .selectFrom("roles")
         .where("id", "=", params.roleId)
@@ -323,7 +324,7 @@ export class RoleService {
     permissionMask: number;
     actor: UserActor;
   }): Promise<ModuleRoleResponse> {
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTransactionRetry(this.db, async (trx) => {
       const roleRows = await trx
         .selectFrom("roles")
         .where("id", "=", params.roleId)

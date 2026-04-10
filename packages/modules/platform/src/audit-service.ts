@@ -4,7 +4,7 @@
 import { sql } from "kysely";
 import type { AuditLogEntryRequest, AuditAction, AuditEntityType, AuditResult, AuditStatusCode } from "@jurnapod/shared";
 import { AuditStatus } from "@jurnapod/shared";
-import type { KyselySchema } from "@jurnapod/db";
+import { isDeadlockError, type KyselySchema } from "@jurnapod/db";
 
 /**
  * Database client interface for audit logging
@@ -194,7 +194,7 @@ export class AuditService {
         `.execute(this.db);
         return;
       } catch (error) {
-        const shouldRetry = isMysqlDeadlock(error) && attempt < maxAttempts;
+        const shouldRetry = isDeadlockError(error) && attempt < maxAttempts;
         if (shouldRetry) {
           await delay(25 * attempt);
           continue;
@@ -249,15 +249,6 @@ export class AuditService {
       after: changedAfter
     };
   }
-}
-
-function isMysqlDeadlock(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) {
-    return false;
-  }
-
-  const err = error as { errno?: number; code?: string; sqlState?: string };
-  return err.errno === 1213 || err.code === "ER_LOCK_DEADLOCK" || err.sqlState === "40001";
 }
 
 function delay(ms: number): Promise<void> {

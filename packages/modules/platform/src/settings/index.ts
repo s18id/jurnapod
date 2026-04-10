@@ -3,6 +3,7 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
+import { withTransactionRetry } from "@jurnapod/db";
 import { encrypt, decrypt, type EncryptedPayload } from "./encryption.js";
 
 export { type EncryptedPayload } from "./encryption.js";
@@ -97,7 +98,7 @@ export async function ensurePlatformSettingsSeeded(
     return;
   }
 
-  await db.transaction().execute(async (trx) => {
+  await withTransactionRetry(db, async (trx) => {
     const markerRowsInTx = await sql<{ setting_key: string }>`
       SELECT setting_key FROM settings_strings WHERE setting_key = ${PLATFORM_SETTINGS_SEED_MARKER_KEY} AND company_id IS NULL AND outlet_id IS NULL LIMIT 1
     `.execute(trx);
@@ -263,7 +264,7 @@ export async function setPlatformSetting(
   encryptionKey: string
 ): Promise<void> {
 
-  await db.transaction().execute(async (trx) => {
+  await withTransactionRetry(db, async (trx) => {
     const isSensitive = isSensitiveKey(params.key);
     let valueToStore = params.value;
 
@@ -307,7 +308,7 @@ export async function setBulkPlatformSettings(
   encryptionKey: string
 ): Promise<void> {
 
-  await db.transaction().execute(async (trx) => {
+  await withTransactionRetry(db, async (trx) => {
     for (const [key, value] of Object.entries(params.settings)) {
       if (key === "mailer.smtp.pass" && (value === "" || value === null)) {
         // Delete from both tables
