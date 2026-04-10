@@ -1,4 +1,4 @@
-last_updated: 2026-04-09T14:26:00Z
+last_updated: 2026-04-10T02:52:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -439,3 +439,10 @@ development_status:
   37-2-item-image-adapter: done
   37-3-refactor-item-images: done
   37-4-delete-image-storage: done
+
+  # Epic 38: Transaction Safety & Deadlock Hardening
+  epic-38: done
+  38-1-lock-wait-timeout-retry: done
+  38-2-import-batch-correctness: done
+  38-3-company-service-audit-boundary: done
+  38-4-accounting-atomicity: done
