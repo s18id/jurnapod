@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { FlatCompat } from "@eslint/eslintrc";
 import tsParser from "@typescript-eslint/parser";
 import tsPlugin from "@typescript-eslint/eslint-plugin";
-import jurnapodTestRules from "../../eslint-plugin-jurnapod-test-rules.mjs";
+import jurnapodTestRules, { noTransactionScopeEscapeRule } from "../../eslint-plugin-jurnapod-test-rules.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -38,6 +38,8 @@ const config = [
       // Production code rules
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+      // Transaction safety rules
+      "jurnapod-test-rules/no-transaction-scope-escape": "error",
     },
   },
   // Test file specific rules

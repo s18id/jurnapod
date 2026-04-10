@@ -32,3 +32,5 @@ _bmad
 
 # Uploaded files (images, exports, etc.)
 uploads/
+
+*.tar.gz

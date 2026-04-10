@@ -338,6 +338,166 @@ const noRouteBusinessLogicRule = {
   },
 };
 
+/**
+ * ESLint Rule: no-transaction-scope-escape
+ * 
+ * Detects transaction scope escape anti-patterns:
+ * - Using outer `db` instead of `trx` inside transaction callbacks
+ * - Using `this.db` instead of `trx` inside transaction callbacks
+ * - Passing outer `db` to helper functions inside transaction callbacks
+ * 
+ * The anti-pattern looks like:
+ *   withTransactionRetry(db, async (trx) => {
+ *     // BUG: using `db` instead of `trx` escapes the transaction!
+ *     await db.selectFrom('items').execute();
+ *   });
+ * 
+ * It should be:
+ *   withTransactionRetry(db, async (trx) => {
+ *     await trx.selectFrom('items').execute();
+ *   });
+ */
+const noTransactionScopeEscapeRule = {
+  meta: {
+    type: "problem",
+    docs: {
+      description: "Disallow outer-scope database references inside transaction callbacks",
+      category: "Database Quality",
+      recommended: true,
+    },
+    fixable: null,
+    schema: [],
+    messages: {
+      outerDbAccess: "Outer-scope 'db' reference detected inside transaction callback. Use 'trx' instead to keep operations within the transaction.",
+      thisDbAccess: "Instance 'this.db' reference detected inside transaction callback. Create services with 'trx' instead to keep operations within the transaction.",
+      outerDbPassed: "Outer-scope 'db' passed to function '{{ functionName }}' inside transaction callback. Pass 'trx' instead to keep operations within the transaction.",
+    },
+  },
+  create(context) {
+    // Stack to track transaction callback scopes
+    // Each entry has: { depth: number, trxVarNames: string[] }
+    const scopeStack = [];
+    let currentDepth = 0;
+    
+    // Transaction callback parameter names to look for
+    const TRX_PARAM_NAMES = ['trx', 'tx', 'innerTrx', 'executor', 'executionCtx'];
+    
+    // Helper to check if we're inside a transaction callback
+    const isInsideTransactionCallback = () => {
+      return scopeStack.length > 0;
+    };
+    
+    // Helper to check if a node matches db access pattern
+    const isDbAccess = (node) => {
+      if (node.type === 'MemberExpression') {
+        // this.db pattern
+        if (node.object.type === 'ThisExpression' && 
+            node.property.type === 'Identifier' && 
+            node.property.name === 'db') {
+          return true;
+        }
+      }
+      return false;
+    };
+    
+    // Helper to check if it's a db identifier (but not trx)
+    const isDbIdentifier = (name) => {
+      return name === 'db' || name === 'database';
+    };
+    
+    return {
+      // Track entering a function that looks like a transaction callback
+      'ArrowFunctionExpression, FunctionExpression': function(node) {
+        const params = node.params || [];
+        const paramNames = params
+          .filter(p => p.type === 'Identifier')
+          .map(p => p.name);
+        
+        // Check if this function has a transaction parameter
+        const hasTrxParam = paramNames.some(name => TRX_PARAM_NAMES.includes(name));
+        
+        if (hasTrxParam) {
+          currentDepth++;
+          scopeStack.push({
+            depth: currentDepth,
+            trxVarNames: paramNames.filter(name => TRX_PARAM_NAMES.includes(name)),
+          });
+        }
+      },
+      
+      // Track exiting a function
+      'ArrowFunctionExpression, FunctionExpression': function(node) {
+        const params = node.params || [];
+        const paramNames = params
+          .filter(p => p.type === 'Identifier')
+          .map(p => p.name);
+        
+        const hasTrxParam = paramNames.some(name => TRX_PARAM_NAMES.includes(name));
+        
+        if (hasTrxParam && scopeStack.length > 0) {
+          scopeStack.pop();
+          currentDepth--;
+        }
+      },
+      
+      // Flag this.db access inside transaction callbacks
+      MemberExpression: function(node) {
+        if (!isInsideTransactionCallback()) return;
+        
+        // Check for this.db pattern
+        if (node.object.type === 'ThisExpression' && 
+            node.property.type === 'Identifier' && 
+            node.property.name === 'db') {
+          context.report({
+            node,
+            messageId: "thisDbAccess",
+          });
+          return;
+        }
+        
+        // Check for db.something pattern (outer db, not trx)
+        if (node.object.type === 'Identifier') {
+          const name = node.object.name;
+          // Only flag if it's 'db' or 'database' but NOT one of the trx names
+          if (isDbIdentifier(name) && !TRX_PARAM_NAMES.includes(name)) {
+            context.report({
+              node,
+              messageId: "outerDbAccess",
+            });
+          }
+        }
+      },
+      
+      // Flag passing db to functions inside transaction callbacks
+      CallExpression: function(node) {
+        if (!isInsideTransactionCallback()) return;
+        
+        // Check if db or this.db is being passed as an argument
+        const hasDbArg = node.arguments && node.arguments.some(arg => {
+          if (arg.type === 'Identifier' && isDbIdentifier(arg.name)) {
+            return true;
+          }
+          if (arg.type === 'MemberExpression' &&
+              arg.object.type === 'ThisExpression' &&
+              arg.property.type === 'Identifier' &&
+              arg.property.name === 'db') {
+            return true;
+          }
+          return false;
+        });
+        
+        if (hasDbArg && node.callee.type === 'Identifier') {
+          context.report({
+            node,
+            messageId: "outerDbPassed",
+            data: { functionName: node.callee.name },
+          });
+        }
+      },
+    };
+  },
+};
+
 /** @type {import('eslint').Linter.Plugin} */
 const plugin = {
   meta: {
@@ -348,6 +508,7 @@ const plugin = {
     "no-hardcoded-ids": noHardcodedIdsRule,
     "no-raw-sql-insert-items": noRawSqlInsertItemsRule,
     "no-route-business-logic": noRouteBusinessLogicRule,
+    "no-transaction-scope-escape": noTransactionScopeEscapeRule,
   },
   configs: {
     recommended: {
@@ -356,10 +517,11 @@ const plugin = {
         "jurnapod-test-rules/no-hardcoded-ids": "error",
         "jurnapod-test-rules/no-raw-sql-insert-items": "error",
         "jurnapod-test-rules/no-route-business-logic": "error",
+        "jurnapod-test-rules/no-transaction-scope-escape": "error",
       },
     },
   },
 };
 
 export default plugin;
-export { noHardcodedIdsRule, noRawSqlInsertItemsRule, noRouteBusinessLogicRule };
+export { noHardcodedIdsRule, noRawSqlInsertItemsRule, noRouteBusinessLogicRule, noTransactionScopeEscapeRule };
