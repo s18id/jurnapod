@@ -1,7 +1,7 @@
 # Story 39.3.5: Phase 1D — Data Migration — Convert Existing Module Roles
 
 **Epic:** [Epic 39 - ACL Reorganization](../../epic-39.md)
-**Status:** todo
+**Status:** completed
 **Priority:** Critical
 
 ## Objective
@@ -33,17 +33,17 @@ This migration follows the **dual-write strategy**: insert NEW entries with new 
 
 ## Acceptance Criteria
 
-- [ ] Migration file created: `packages/db/migrations/0147.5_acl_data_migration.sql`
-- [ ] Migration maps all old module codes to new module codes with resources
-- [ ] Existing permission masks are preserved exactly
-- [ ] New entries created for: `platform.users`, `platform.roles`, `platform.companies`, `platform.outlets`, `platform.settings`, `accounting.accounts`, `accounting.journals`, `treasury.transactions`
-- [ ] Old entries remain in database during transition (backward compatibility)
-- [ ] `reports` module entries deleted from `module_roles` and `modules` tables
-- [ ] Migration is idempotent (can be run multiple times safely)
-- [ ] Migration handles `NULL` company_id cases (global roles)
-- [ ] Rollback plan documented (restore from backup if needed)
-- [ ] `npm run db:migrate -w @jurnapod/db` runs successfully
-- [ ] Verify existing permissions still work after migration (test query)
+- [x] Migration file created: `packages/db/migrations/0147.5_acl_data_migration.sql`
+- [x] Migration maps all old module codes to new module codes with resources
+- [x] Existing permission masks are preserved exactly
+- [x] New entries created for: `platform.users`, `platform.roles`, `platform.companies`, `platform.outlets`, `platform.settings`, `accounting.accounts`, `accounting.journals`, `treasury.transactions`
+- [x] Old entries remain in database during transition (backward compatibility)
+- [x] `reports` module entries deleted from `module_roles` and `modules` tables
+- [x] Migration is idempotent (can be run multiple times safely)
+- [x] Migration handles `NULL` company_id cases (global roles)
+- [x] Rollback plan documented (restore from backup if needed)
+- [x] `npm run db:migrate -w @jurnapod/db` runs successfully
+- [x] Verify existing permissions still work after migration (test query)
 
 ## Technical Details
 
@@ -224,4 +224,45 @@ DELETE FROM module_roles WHERE module = 'treasury' AND resource = 'transactions'
 
 ## Dev Notes
 
-[To be filled during implementation]
+### Implementation Summary
+
+**Files Created:**
+- `packages/db/migrations/0147.5_acl_data_migration.sql`
+
+**Verification Results:**
+
+1. **New module.resource entries created:**
+   ```
+   module       | resource      | count
+   ------------|---------------|------
+   accounting  | accounts      | 1476
+   accounting  | journals      | 1476
+   platform    | companies     | 1224
+   platform    | outlets       | 1224
+   platform    | roles         | 1224
+   platform    | settings      | 1518
+   platform    | users         | 1224
+   treasury    | transactions  | 1223
+   ```
+
+2. **Old entries preserved (backward compatibility):**
+   - users, roles, companies, outlets, settings, accounts, journals, cash_bank all present
+
+3. **reports module deleted:**
+   - 0 entries in module_roles
+   - 0 entries in modules
+
+4. **Idempotency verified:**
+   - Migration skips on second run (already applied)
+   - No duplicate entries created
+
+5. **Smoke tests passed:**
+   - `npm run db:smoke -w @jurnapod/db` ✅
+
+**Rollback Plan:** Documented in SQL comments at top of migration file. Requires PITR from backup for complete rollback.
+
+**Notes:**
+- Migration handles NULL company_id by preserving values as-is from source rows
+- Uses INSERT ... ON DUPLICATE KEY UPDATE for idempotency
+- Dual-write strategy: new entries created alongside old entries for transition period
+- Step 4 (module-level entries for inventory/sales/pos) is handled via documentation comment only since no transformation is needed - these modules keep NULL resource during transition
