@@ -1,18 +1,27 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
+import { z } from "zod";
+
 /**
  * Access modules — used in RBAC authorization checks.
  * These are the resources/domains that can have permissions assigned.
+ * 
+ * 7 Canonical Modules: platform, pos, sales, inventory, accounting, treasury, reservations
  */
-export const ACCESS_MODULE_CODES = [
-  "users", "roles", "companies", "outlets",
-  "accounts", "journals", "cash_bank",
-  "sales", "payments", "inventory", "purchasing",
-  "reports", "settings", "pos",
+export const MODULE_CODES = [
+  "platform",
+  "pos",
+  "sales",
+  "inventory",
+  "accounting",
+  "treasury",
+  "reservations"
 ] as const;
 
-export type AccessModuleCode = typeof ACCESS_MODULE_CODES[number];
+export type ModuleCode = typeof MODULE_CODES[number];
+
+export const ModuleCodeSchema = z.enum(MODULE_CODES);
 
 /**
  * Feature modules — used in company_modules enablement table.
@@ -20,7 +29,7 @@ export type AccessModuleCode = typeof ACCESS_MODULE_CODES[number];
  */
 export const FEATURE_MODULE_CODES = [
   "platform", "pos", "sales", "inventory",
-  "accounting", "treasury", "reporting",
+  "accounting", "treasury", "reservations"
 ] as const;
 
 export type FeatureModuleCode = typeof FEATURE_MODULE_CODES[number];

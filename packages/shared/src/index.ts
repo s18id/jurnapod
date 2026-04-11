@@ -31,6 +31,7 @@ export * from "./constants/account-mapping-types";
 export * from "./constants/table-states";
 export * from "./constants/rbac";
 export * from "./constants/modules";
+export * from "./constants/resources";
 export * from "./schemas/table-reservation";
 
 // Client types and utilities

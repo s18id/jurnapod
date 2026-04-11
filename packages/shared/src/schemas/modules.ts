@@ -1,24 +1,13 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
+import { MODULE_CODES, type ModuleCode, ModuleCodeSchema } from "../constants/modules.js";
+
+// Re-export from constants for backward compatibility
+export { MODULE_CODES, type ModuleCode };
+
 import { z } from "zod";
 import { NumericIdSchema } from "./common";
-
-export const MODULE_CODES = [
-  "platform",
-  "pos",
-  "sales",
-  "inventory",
-  "purchasing",
-  "reports",
-  "settings",
-  "accounts",
-  "journals"
-] as const;
-
-export const ModuleCodeSchema = z.enum(MODULE_CODES);
-
-export type ModuleCode = z.infer<typeof ModuleCodeSchema>;
 
 export const ModuleCatalogEntrySchema = z.object({
   id: NumericIdSchema,
@@ -52,11 +41,9 @@ export const ModuleConfigSchemaMap = {
   pos: PosModuleConfigSchema,
   sales: GenericModuleConfigSchema,
   inventory: InventoryModuleConfigSchema,
-  purchasing: GenericModuleConfigSchema,
-  reports: GenericModuleConfigSchema,
-  settings: GenericModuleConfigSchema,
-  accounts: GenericModuleConfigSchema,
-  journals: GenericModuleConfigSchema
+  accounting: GenericModuleConfigSchema,
+  treasury: GenericModuleConfigSchema,
+  reservations: GenericModuleConfigSchema
 } as const satisfies Record<ModuleCode, z.ZodTypeAny>;
 
 // POS explicit settings schema
