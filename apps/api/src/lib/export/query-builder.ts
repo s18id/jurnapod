@@ -197,7 +197,7 @@ function buildItemsQuery(filters: ExportFilters, options: ExportBuildOptions): B
     FROM items i
     LEFT JOIN item_groups ig ON ig.id = i.item_group_id AND ig.company_id = i.company_id
     WHERE i.company_id = ?
-      AND i.deleted_at IS NULL
+      AND i.is_active = 1
   `;
   const values: unknown[] = [filters.company_id];
 

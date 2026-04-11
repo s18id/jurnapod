@@ -240,11 +240,11 @@ taxRatesRoutes.put("/defaults", async (c) => {
 
     return successResponse(defaultTaxRateIds);
   } catch (error) {
-    console.error("PUT /tax-defaults failed:", error);
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
+    console.error("PUT /tax-defaults failed:", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to update tax defaults", 500);
   }
 });
