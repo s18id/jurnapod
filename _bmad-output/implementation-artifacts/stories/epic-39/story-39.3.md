@@ -1,7 +1,7 @@
 # Story 39.3: Phase 1C — Database Schema Migration
 
 **Epic:** [Epic 39 - ACL Reorganization](../../epic-39.md)
-**Status:** todo
+**Status:** done
 **Priority:** High
 
 ## Objective
@@ -14,15 +14,15 @@ The database schema must be extended to support resource-level permission scopin
 
 ## Acceptance Criteria
 
-- [ ] Migration file created: `packages/db/migrations/0147_acl_reorganization.sql`
-- [ ] Resource column added to module_roles table (VARCHAR(64), NULL after module)
-- [ ] Unique constraint updated: (company_id, role_id, module, resource)
-- [ ] Index added on resource column for lookup performance
-- [ ] Migration removes reports module data from modules table
-- [ ] Migration is idempotent (can be run multiple times safely)
-- [ ] Migration includes rollback plan documentation
-- [ ] npm run db:migrate -w @jurnapod/db runs successfully
-- [ ] npm run db:smoke -w @jurnapod/db passes
+- [x] Migration file created: `packages/db/migrations/0147_acl_reorganization.sql`
+- [x] Resource column added to module_roles table (VARCHAR(64), NULL after module)
+- [x] Unique constraint updated: (company_id, role_id, module, resource)
+- [x] Index added on resource column for lookup performance
+- [x] Migration removes reports module data from modules table
+- [x] Migration is idempotent (can be run multiple times safely)
+- [x] Migration includes rollback plan documentation
+- [x] npm run db:migrate -w @jurnapod/db runs successfully
+- [x] npm run db:smoke -w @jurnapod/db passes
 
 ## Technical Details
 
@@ -69,4 +69,25 @@ The database schema must be extended to support resource-level permission scopin
 
 ## Dev Notes
 
-[To be filled during implementation]
+### Implementation Summary (2026-04-12)
+
+**Migration File Created:**
+- `packages/db/migrations/0147_acl_reorganization.sql`
+
+**Migration Steps:**
+1. **Add resource column** - `ALTER TABLE module_roles ADD COLUMN resource VARCHAR(64) NULL AFTER module`
+2. **Update unique constraint** - Drop old index, add new `uq_module_role (company_id, role_id, module, resource)`
+3. **Add index on resource column** - `ADD INDEX idx_resource (resource)`
+4. **Remove reports module** - `DELETE FROM modules WHERE code = 'reports'`
+
+**Idempotency:** All operations use `information_schema` checks. Re-run shows "skip" - confirmed idempotent.
+
+**Verification:**
+- ✅ `npm run db:migrate -w @jurnapod/db` - applied successfully
+- ✅ Re-run shows "skip" - idempotency confirmed
+- ✅ `npm run db:smoke -w @jurnapod/db` - smoke checks passed
+
+**Notes:**
+- Unique key allows multiple NULL resources (backward compatible for module-level permissions)
+- Rollback plan documented at top of migration file
+- Migration compatible with MySQL 8.0+ and MariaDB
