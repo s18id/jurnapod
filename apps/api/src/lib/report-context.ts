@@ -161,7 +161,7 @@ export async function buildReportContext(
   // Check module permission - get guard function and call it
   const accessGuard = requireAccess({
     module,
-    permission: "report"
+    permission: "analyze"
   });
   const accessResult = await accessGuard(c.req.raw, auth);
 

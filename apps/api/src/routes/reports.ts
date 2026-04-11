@@ -571,7 +571,7 @@ reportRoutes.get("/receivables-ageing", async (c) => {
 
     // Check module permission
     const { requireAccess } = await import("@/lib/auth-guard");
-    const accessGuard = requireAccess({ module: "accounting", permission: "report" });
+    const accessGuard = requireAccess({ module: "accounting", permission: "analyze" });
     const accessResult = await accessGuard(c.req.raw, auth);
     if (accessResult !== null) return accessResult;
 
