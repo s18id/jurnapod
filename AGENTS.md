@@ -116,7 +116,7 @@ All sync operations must use these field names:
 
 | Severity | Issue Examples |
 |----------|----------------|
-| **P0/P1** | Incorrect ledger balances, duplicate posting, duplicate POS transaction, tenant data leakage, auth bypass |
+| **P0/P1** | Incorrect ledger balances, duplicate posting, duplicate POS transaction, tenant data leakage, auth bypass, ACL permission bypass |
 | **P1** | Missing validation on money movement, posting, sync, import, auth, or tenant/outlet scoping |
 | **P1** | Missing/broken tests for critical accounting, sync, auth, or migration logic |
 | **P2/P3** | Concrete risks in readability, maintainability, consistency, operability |
@@ -129,6 +129,7 @@ All sync operations must use these field names:
 - POS remains offline-first with `client_tx_id` idempotency
 - Operational data must enforce `company_id` and `outlet_id`
 - Finalized records use `VOID`/`REFUND`, not silent mutation
+- ACL uses resource-level permissions (`module.resource`) per Epic 39
 
 ### Money and Persistence
 
@@ -148,6 +149,7 @@ Focused tests required when changing:
 - Accounting posting / journal balancing
 - POS sync / idempotency
 - Auth / tenant scoping
+- ACL / permission checks (resource-level permissions)
 - Imports and migrations
 - Financial reports
 
@@ -330,6 +332,14 @@ Before marking ANY story as DONE:
 - [ ] All Acceptance Criteria implemented with evidence
 - [ ] No breaking changes without cross-package alignment
 
+### ACL Implementation (Epic 39)
+- [ ] Resource-level permissions use `module.resource` format
+- [ ] `requireAccess()` supports `resource` parameter
+- [ ] Permission bits match canonical values (READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32)
+- [ ] Permission masks match canonical values (CRUD=15, CRUDA=31, CRUDAM=63)
+- [ ] Routes updated to use new module codes (no old codes like "users", "roles", "reports")
+- [ ] Database migration adds `resource` column to `module_roles` table
+
 ### Testing
 - [ ] Unit tests written and passing (in `__test__/unit/`)
 - [ ] Integration tests for API boundaries (in `__test__/integration/`)
@@ -349,6 +359,78 @@ Before marking ANY story as DONE:
 - [ ] Schema changes documented (if applicable)
 - [ ] API changes reflected in contracts
 - [ ] Dev Notes include files modified/created
+
+---
+
+## Canonical ACL & Permission Model (Epic 39)
+
+### 7 Canonical Modules
+
+| Module | Description |
+|--------|-------------|
+| `platform` | Users, roles, companies, outlets, settings |
+| `pos` | Point of sale transactions and configuration |
+| `sales` | Invoices, orders, payments |
+| `inventory` | Items, stock movements, costing |
+| `accounting` | Journals, accounts, fiscal years |
+| `treasury` | Cash/bank transactions, accounts |
+| `reservations` | Bookings, tables |
+
+### Permission Bits
+
+| Bit | Name | Value | Purpose |
+|-----|------|-------|---------|
+| 1 | READ | 1 | View data and records |
+| 2 | CREATE | 2 | Create new records |
+| 4 | UPDATE | 4 | Modify existing records |
+| 8 | DELETE | 8 | Remove records |
+| 16 | ANALYZE | 16 | Reports, dashboards, analytics |
+| 32 | MANAGE | 32 | Setup, configuration, administration |
+
+### Permission Masks
+
+| Mask | Value | Binary | Permissions |
+|------|-------|--------|-------------|
+| READ | 1 | `0b000001` | View only |
+| WRITE | 6 | `0b000110` | CREATE + UPDATE |
+| CRUD | 15 | `0b001111` | READ + CREATE + UPDATE + DELETE |
+| CRUDA | 31 | `0b011111` | CRUD + ANALYZE |
+| CRUDAM | 63 | `0b111111` | Full permissions |
+
+### Resource-Level ACL Format
+
+Permissions use `module.resource` format (e.g., `platform.users`, `accounting.journals`).
+
+**Resource Categories:**
+- **Operational**: CREATE, READ, UPDATE permissions (daily transactions)
+- **Structural**: MANAGE, READ permissions (configuration, setup)
+- **Analytical**: ANALYZE, READ permissions (reports, dashboards)
+
+### Role Permission Matrix
+
+| Role | platform | accounting | inventory | treasury | sales | pos | reservations |
+|------|----------|------------|-----------|----------|-------|-----|--------------|
+| SUPER_ADMIN | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) |
+| OWNER | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) |
+| COMPANY_ADMIN | CRUDA (31) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) |
+| ADMIN | READ (1) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) |
+| ACCOUNTANT | READ (1) | CRUDA (31) | READ (1) | READ (1) | READ (1) | READ (1) | 0 |
+| CASHIER | 0 | 0 | 0 | 0 | 0 | CRUDA (31) | CRUDA (31) |
+
+**Key Rules:**
+- `reports` module removed — use `ANALYZE` on source modules (e.g., `sales.ANALYZE` for sales reports)
+- MANAGE on `platform` for COMPANY_ADMIN: configuration, NOT company creation (SUPER_ADMIN only)
+- MANAGE on `accounting.inventory.treasury` for COMPANY_ADMIN: fiscal year setup, costing method, bank accounts
+
+### Module Resource Breakdown
+
+**platform**: users, roles, companies, outlets, settings
+**accounting**: journals, accounts, fiscal_years, reports
+**inventory**: items, stock, costing
+**treasury**: transactions, accounts
+**sales**: invoices, orders, payments
+**pos**: transactions, config
+**reservations**: bookings, tables
 
 ---
 

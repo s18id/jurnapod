@@ -138,6 +138,8 @@ If an existing fixture/helper is too broad for a test scenario:
 - Flag data access paths not enforcing `company_id` scoping.
 - Flag missing `outlet_id` scoping for outlet-specific resources.
 - Verify OWNER/ADMIN/ACCOUNTANT/CASHIER boundaries remain enforced.
+- Verify resource-level ACL using `module.resource` format (Epic 39).
+- Verify `requireAccess()` calls include `resource` parameter for new endpoints.
 
 ### Input validation
 - Flag missing Zod validation for request bodies, params, query strings, sync payloads, and import payloads.
@@ -251,7 +253,7 @@ If no suitable helper exists, create/refactor one first (DRY), then use it.
 | `getRoleIdByCode(roleCode)` | Get system role ID ("OWNER", "ADMIN", etc.) |
 | `assignUserGlobalRole(userId, roleId)` | Assign global role to user |
 | `assignUserOutletRole(userId, roleId, outletId)` | Assign outlet-scoped role |
-| `setModulePermission(companyId, roleId, module, mask)` | Set module permission |
+| `setModulePermission(companyId, roleId, module, mask, resource?)` | Set module permission (resource optional for Epic 39) |
 | `setupUserPermission({...})` | Complete permission setup in one call |
 | `cleanupTestFixtures()` | Clean up all created fixtures |
 | `resetFixtureRegistry()` | Reset registry without deleting records |

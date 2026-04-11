@@ -82,9 +82,18 @@ _Critical rules and patterns. Read before implementing. Follow ALL rules exactly
 - Max 3 retries with exponential backoff, then `FAILED`
 - Do not mutate finalized transactions; use VOID/REFUND
 
-### Module System
-- Optional: `sales`, `pos`, `inventory`, `purchasing`; Required: `platform`, `accounting`
-- Check module enablement before exposing features
+### Module System (Epic 39)
+
+**7 Canonical Modules:** platform, pos, sales, inventory, accounting, treasury, reservations
+
+**Resource-Level ACL:** Permissions use `module.resource` format (e.g., `platform.users`, `accounting.journals`)
+
+**Permission Bits:** READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32
+
+**Required Modules:** platform, accounting
+**Optional Modules:** sales, pos, inventory, treasury, reservations
+
+Check module enablement before exposing features.
 
 ---
 
@@ -246,6 +255,7 @@ await pool.execute(`INSERT INTO user_role_assignments...`);
 7. **Audit logs canonical**: Filter by `success` not `result`
 8. **Shared contracts**: TS/Zod contracts in `packages/shared` must stay aligned
 9. **Reservation timezone**: No UTC fallback; resolve in order: outlet → company
+10. **Resource-level ACL**: Permissions use `module.resource` format per Epic 39
 
 ### Critical Anti-Patterns
 - **Never** `FLOAT`/`DOUBLE` for money

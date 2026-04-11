@@ -16,7 +16,7 @@ Building on the pos module changes (Story 39.9), the reservations module is upda
 
 - [ ] All reservations routes updated to use resource-level permission checks
 - [ ] Permission matrix updated for reservations resources:
-  - `reservations.bookings`: SUPER_ADMIN/OWNER/COMPANY_ADMIN=CRUDAM, ADMIN=CRUDA, CASHIER=READ
+  - `reservations.bookings`: SUPER_ADMIN/OWNER/COMPANY_ADMIN=CRUDAM, ADMIN=CRUDA, CASHIER=CRUDA
   - `reservations.tables`: SUPER_ADMIN/OWNER/COMPANY_ADMIN=CRUDAM, ADMIN=READ
 - [ ] Tests added/updated for all reservations resource permissions
 - [ ] npm run build -w @jurnapod/modules-reservations passes
@@ -44,7 +44,7 @@ Building on the pos module changes (Story 39.9), the reservations module is upda
 2. **Reservations Resources:**
    | Resource | Category | Permission Pattern |
    |----------|----------|-------------------|
-   | bookings | Operational | CRUDAM for SUPER_ADMIN/OWNER/COMPANY_ADMIN, CRUDA for ADMIN, READ for CASHIER |
+    | bookings | Operational | CRUDAM for SUPER_ADMIN/OWNER/COMPANY_ADMIN, CRUDA for ADMIN and CASHIER |
    | tables | Structural | CRUDAM for SUPER_ADMIN/OWNER/COMPANY_ADMIN, READ for ADMIN |
 
 ## Testing Strategy

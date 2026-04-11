@@ -72,6 +72,23 @@ const params = PosSyncPullRequestSchema.parse(request.query);
 | **Accounting** | journals, posting rules |
 | **Sync** | pos-sync, backoffice-sync contracts |
 
+### RBAC Constants (Epic 39)
+
+This package exports ACL constants for the resource-level permission model:
+
+**Location:** `src/constants/rbac.ts`, `src/constants/modules.ts`
+
+**7 Canonical Modules:**
+- platform, pos, sales, inventory, accounting, treasury, reservations
+
+**Permission Bits:**
+- READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32
+
+**Permission Masks:**
+- CRUD=15, CRUDA=31, CRUDAM=63
+
+See root `AGENTS.md` for full Epic 39 ACL documentation.
+
 ### File Structure
 
 ```

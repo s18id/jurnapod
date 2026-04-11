@@ -103,12 +103,31 @@ const config: AuthConfig = {
 |--------|--------------|---------|
 | `src/tokens/` | `AccessTokenManager`, `RefreshTokenManager` | JWT sign/verify (jose), refresh token lifecycle with rotation |
 | `src/passwords/` | `PasswordHasher`, `validatePasswordPolicy` | bcryptjs/@node-rs/argon2 hashing, password policy |
-| `src/rbac/` | `RBACManager`, `checkRole`, `buildPermissionMask` | Role and permission checks with outlet scoping |
+| `src/rbac/` | `RBACManager`, `checkRole`, `buildPermissionMask` | Role and permission checks with resource-level ACL (Epic 39) |
 | `src/throttle/` | `LoginThrottle` | Rate limiting with exponential backoff (primary + IP) |
 | `src/email/` | `EmailTokenManager` | Password reset, invite, verify tokens with atomic consumption |
 | `src/oauth/` | `GoogleOAuthProvider` | Google OAuth 2.0 integration |
 | `src/lib/` | `createAuthClient` | Auth client factory assembling all managers |
 | `src/errors.ts` | `AuthError` subclasses | Typed error hierarchy |
+
+### RBAC Permission Model (Epic 39)
+
+**Resource-Level ACL**: Permissions use `module.resource` format (e.g., `platform.users`, `accounting.journals`)
+
+**Permission Bits:**
+- READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32
+
+**Role Permission Matrix:**
+| Role | platform | accounting | inventory | treasury | sales | pos | reservations |
+|------|----------|------------|-----------|----------|-------|-----|--------------|
+| SUPER_ADMIN | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) |
+| OWNER | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) |
+| COMPANY_ADMIN | CRUDA (31) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) |
+| ADMIN | READ (1) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) |
+| ACCOUNTANT | READ (1) | CRUDA (31) | READ (1) | READ (1) | READ (1) | READ (1) | 0 |
+| CASHIER | 0 | 0 | 0 | 0 | 0 | CRUDA (31) | CRUDA (31) |
+
+See root `AGENTS.md` for full Epic 39 ACL documentation.
 
 ### File Structure
 

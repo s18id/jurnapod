@@ -262,7 +262,7 @@ Resources are classified into three categories that define their intended permis
 
 | Resource | SUPER_ADMIN | OWNER | COMPANY_ADMIN | ADMIN | ACCOUNTANT | CASHIER |
 |----------|-------------|-------|---------------|-------|------------|---------|
-| bookings | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDA (31) | — | READ (1) |
+| bookings | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDA (31) | — | CRUDA (31) |
 | tables | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | READ (1) | — | — |
 
 ### Resource Category Permission Patterns
