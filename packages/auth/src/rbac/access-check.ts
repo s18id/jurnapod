@@ -25,35 +25,33 @@ export class RBACManager {
   /**
    * Main access check - evaluates role, permission, and outlet access.
    * Returns null if user doesn't exist or is inactive.
+   * SUPER_ADMIN bypasses company deleted_at check — platform-wide access.
    */
   async checkAccess(options: AccessCheckOptions): Promise<AccessCheckResult | null> {
     const { userId, companyId, allowedRoles, module, permission, outletId } = options;
 
-    // First, check if user exists and is active
-    const userExists = await this.adapter.db
+    // Check SUPER_ADMIN first — global lookup, no company_id filter
+    // SUPER_ADMIN bypasses company deleted_at check since they are platform-wide
+    const isSuperAdmin = await this.isSuperAdminUser(userId);
+
+    // Build user existence query
+    let userQuery = this.adapter.db
       .selectFrom('users as u')
       .innerJoin('companies as c', 'c.id', 'u.company_id')
       .where('u.id', '=', userId)
       .where('u.company_id', '=', companyId)
-      .where('u.is_active', '=', 1)
-      .where('c.deleted_at', 'is', null)
-      .select(['u.id'])
-      .executeTakeFirst();
+      .where('u.is_active', '=', 1);
+
+    // SUPER_ADMIN bypasses company deleted_at check — platform-wide role
+    if (!isSuperAdmin) {
+      userQuery = userQuery.where('c.deleted_at', 'is', null);
+    }
+
+    const userExists = await userQuery.select(['u.id']).executeTakeFirst();
 
     if (!userExists) {
       return null;
     }
-
-    // Check SUPER_ADMIN (use company_id for tenant scoping)
-    const isSuperAdmin = await this.adapter.db
-      .selectFrom('user_role_assignments as ura')
-      .innerJoin('roles as r', 'r.id', 'ura.role_id')
-      .where('ura.user_id', '=', userId)
-      .where('ura.company_id', '=', companyId)
-      .where('r.code', '=', 'SUPER_ADMIN')
-      .where('ura.outlet_id', 'is', null)
-      .select(['ura.id'])
-      .executeTakeFirst();
 
     // Check has global role
     const hasGlobalRole = await this.adapter.db
@@ -112,56 +110,60 @@ export class RBACManager {
       }
     }
 
-    // Permission check
+    // Permission check — SUPER_ADMIN bypasses bitmask lookup entirely
     if (module && permission) {
-      const permissionBit = MODULE_PERMISSION_BITS[permission];
-      
-      if (typeof outletId === 'number') {
-        // Check global permission with bitmask check
-        const globalPermMatch = await this.adapter.db
-          .selectFrom('user_role_assignments as ura')
-          .innerJoin('roles as r', 'r.id', 'ura.role_id')
-          .innerJoin('module_roles as mr', 'mr.role_id', 'r.id')
-          .where('ura.user_id', '=', userId)
-          .where('ura.company_id', '=', companyId)
-          .where('r.is_global', '=', 1)
-          .where('ura.outlet_id', 'is', null)
-          .where('mr.module', '=', module)
-          .where('mr.company_id', '=', companyId)
-          .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
-          .select(['mr.id'])
-          .executeTakeFirst();
-
-        // Check outlet permission with bitmask check
-        const outletPermMatch = await this.adapter.db
-          .selectFrom('user_role_assignments as ura')
-          .innerJoin('roles as r', 'r.id', 'ura.role_id')
-          .innerJoin('module_roles as mr', 'mr.role_id', 'r.id')
-          .where('ura.user_id', '=', userId)
-          .where('ura.company_id', '=', companyId)
-          .where('ura.outlet_id', '=', outletId)
-          .where('mr.module', '=', module)
-          .where('mr.company_id', '=', companyId)
-          .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
-          .select(['mr.id'])
-          .executeTakeFirst();
-
-        hasPermission = Boolean(globalPermMatch) || Boolean(outletPermMatch);
+      if (isSuperAdmin) {
+        hasPermission = true;
       } else {
-        // No outletId - check global permissions with bitmask check
-        const globalPermMatch = await this.adapter.db
-          .selectFrom('user_role_assignments as ura')
-          .innerJoin('roles as r', 'r.id', 'ura.role_id')
-          .innerJoin('module_roles as mr', 'mr.role_id', 'r.id')
-          .where('ura.user_id', '=', userId)
-          .where('ura.company_id', '=', companyId)
-          .where('mr.module', '=', module)
-          .where('mr.company_id', '=', companyId)
-          .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
-          .select(['mr.id'])
-          .executeTakeFirst();
+        const permissionBit = MODULE_PERMISSION_BITS[permission];
 
-        hasPermission = Boolean(globalPermMatch);
+        if (typeof outletId === 'number') {
+          // Check global permission with bitmask check
+          const globalPermMatch = await this.adapter.db
+            .selectFrom('user_role_assignments as ura')
+            .innerJoin('roles as r', 'r.id', 'ura.role_id')
+            .innerJoin('module_roles as mr', 'mr.role_id', 'r.id')
+            .where('ura.user_id', '=', userId)
+            .where('ura.company_id', '=', companyId)
+            .where('r.is_global', '=', 1)
+            .where('ura.outlet_id', 'is', null)
+            .where('mr.module', '=', module)
+            .where('mr.company_id', '=', companyId)
+            .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
+            .select(['mr.id'])
+            .executeTakeFirst();
+
+          // Check outlet permission with bitmask check
+          const outletPermMatch = await this.adapter.db
+            .selectFrom('user_role_assignments as ura')
+            .innerJoin('roles as r', 'r.id', 'ura.role_id')
+            .innerJoin('module_roles as mr', 'mr.role_id', 'r.id')
+            .where('ura.user_id', '=', userId)
+            .where('ura.company_id', '=', companyId)
+            .where('ura.outlet_id', '=', outletId)
+            .where('mr.module', '=', module)
+            .where('mr.company_id', '=', companyId)
+            .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
+            .select(['mr.id'])
+            .executeTakeFirst();
+
+          hasPermission = Boolean(globalPermMatch) || Boolean(outletPermMatch);
+        } else {
+          // No outletId - check global permissions with bitmask check
+          const globalPermMatch = await this.adapter.db
+            .selectFrom('user_role_assignments as ura')
+            .innerJoin('roles as r', 'r.id', 'ura.role_id')
+            .innerJoin('module_roles as mr', 'mr.role_id', 'r.id')
+            .where('ura.user_id', '=', userId)
+            .where('ura.company_id', '=', companyId)
+            .where('mr.module', '=', module)
+            .where('mr.company_id', '=', companyId)
+            .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
+            .select(['mr.id'])
+            .executeTakeFirst();
+
+          hasPermission = Boolean(globalPermMatch);
+        }
       }
     }
 
@@ -334,17 +336,8 @@ export class RBACManager {
    * Returns true if user is SUPER_ADMIN, has global role, or has outlet-specific assignment.
    */
   async hasOutletAccess(userId: number, companyId: number, outletId: number): Promise<boolean> {
-    // Check if user is SUPER_ADMIN (use company_id for tenant scoping)
-    const superAdmin = await this.adapter.db
-      .selectFrom('user_role_assignments as ura')
-      .innerJoin('roles as r', 'r.id', 'ura.role_id')
-      .where('ura.user_id', '=', userId)
-      .where('ura.company_id', '=', companyId)
-      .where('r.code', '=', 'SUPER_ADMIN')
-      .where('ura.outlet_id', 'is', null)
-      .select(['ura.id'])
-      .executeTakeFirst();
-
+    // Check if user is SUPER_ADMIN (global lookup — no company_id filter)
+    const superAdmin = await this.isSuperAdminUser(userId);
     if (superAdmin) {
       return true;
     }
@@ -423,17 +416,8 @@ export class RBACManager {
     module: string,
     permission?: ModulePermission
   ): Promise<boolean> {
-    // First check if user is SUPER_ADMIN (bypasses all checks)
-    const superAdmin = await this.adapter.db
-      .selectFrom('user_role_assignments as ura')
-      .innerJoin('roles as r', 'r.id', 'ura.role_id')
-      .where('ura.user_id', '=', userId)
-      .where('ura.company_id', '=', companyId)
-      .where('r.code', '=', 'SUPER_ADMIN')
-      .where('ura.outlet_id', 'is', null)
-      .select(['ura.id'])
-      .executeTakeFirst();
-
+    // Check if user is SUPER_ADMIN (global lookup — no company_id filter)
+    const superAdmin = await this.isSuperAdminUser(userId);
     if (superAdmin) {
       return true;
     }

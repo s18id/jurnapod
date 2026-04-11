@@ -238,7 +238,7 @@ export function requireAccess(options: AccessGuardOptions): AuthenticatedRouteGu
       return createForbiddenResponse();
     }
 
-    if (needsModuleCheck && !access.hasPermission && !access.isSuperAdmin) {
+    if (needsModuleCheck && !access.hasPermission) {
       return createForbiddenResponse();
     }
 

@@ -139,6 +139,41 @@ const ROLE_CODES = [
 | `delete` | 8 |
 | `report` | 16 |
 
+## RBAC — `checkAccess()` and SUPER_ADMIN Bypass
+
+`RBACManager.checkAccess()` is the central authorization routine. It evaluates:
+
+- User existence (`users` + `companies` join)
+- SUPER_ADMIN global detection
+- Role membership (global + outlet-scoped)
+- Module permission bitmask
+- Outlet access
+
+### SUPER_ADMIN Platform-Wide Bypass
+
+SUPER_ADMIN is handled specially inside `checkAccess()`:
+
+```typescript
+// 1. Checked FIRST — global lookup (no company_id filter)
+// SUPER_ADMIN role is platform-wide, not scoped to any company
+const isSuperAdmin = await this.isSuperAdminUser(userId);
+
+// 2. User existence — SUPER_ADMIN bypasses company deleted_at check
+// (can access even if their home company is soft-deleted)
+if (!isSuperAdmin) {
+  userQuery = userQuery.where('c.deleted_at', 'is', null);
+}
+
+// 3. Module permission — SUPER_ADMIN skips entire bitmask lookup
+if (isSuperAdmin) {
+  hasPermission = true;  // bypasses module_roles query
+}
+```
+
+**SUPER_ADMIN always returns `hasPermission = true`** for any module/permission check, regardless of `module_roles` entries.
+
+For the `hasOutletAccess()` and `canManageCompanyDefaults()` helpers, the same global `isSuperAdminUser()` lookup is used — SUPER_ADMIN gets outlet access and company management capabilities without company_id scoping.
+
 ## Database Adapter
 
 Consumers must implement `AuthDbAdapter` using Kysely:

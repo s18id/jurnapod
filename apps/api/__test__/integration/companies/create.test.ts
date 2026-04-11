@@ -57,12 +57,12 @@ describe('companies.create', { timeout: 30000 }, () => {
     });
 
     // OWNER is not SUPER_ADMIN, so 403 is expected
-    expect([403, 500]).toContain(res.status);
+    expect(res.status).toBe(403);
   });
 
   it('creates company with valid SUPER_ADMIN credentials', async () => {
     // Note: JP_SUPER_ADMIN_EMAIL may not exist in test DB (platform-level user)
-    // If no SUPER_ADMIN exists, this test verifies the endpoint rejects non-SUPER_ADMIN
+    // If no SUPER_ADMIN exists, skip the test
     const superAdminEmail = process.env.JP_SUPER_ADMIN_EMAIL;
     const superAdminPassword = process.env.JP_SUPER_ADMIN_PASSWORD;
     
@@ -71,8 +71,8 @@ describe('companies.create', { timeout: 30000 }, () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         companyCode: process.env.JP_COMPANY_CODE,
-        email: superAdminEmail || process.env.JP_OWNER_EMAIL,
-        password: superAdminPassword || process.env.JP_OWNER_PASSWORD
+        email: superAdminEmail,
+        password: superAdminPassword
       })
     });
 
@@ -100,11 +100,15 @@ describe('companies.create', { timeout: 30000 }, () => {
       })
     });
 
-    // If using OWNER credentials (not SUPER_ADMIN), expect 403
-    // If using actual SUPER_ADMIN credentials, expect 201
-    expect([200, 201, 403, 500]).toContain(res.status);
+    // SUPER_ADMIN should not get 403 — RBAC bug if 403 is returned
+    if (res.status === 403) {
+      expect.fail('SUPER_ADMIN should not get 403 — RBAC bug?');
+    }
 
-    if (res.ok || res.status === 409) {
+    // Expect success (200 or 201)
+    expect([200, 201]).toContain(res.status);
+
+    if (res.ok) {
       const body = await res.json();
       if (body.success) {
         expect(body.data).toHaveProperty('id');
@@ -154,29 +158,31 @@ describe('companies.create', { timeout: 30000 }, () => {
   });
 
   it('returns 400 for invalid email format', async () => {
+    // Use SUPER_ADMIN credentials to properly reach validation (400) not auth rejection (403)
     const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
+        email: process.env.JP_SUPER_ADMIN_EMAIL,
+        password: process.env.JP_SUPER_ADMIN_PASSWORD
       })
     });
 
     if (!loginRes.ok) {
+      // SUPER_ADMIN may not exist in test DB - skip if login fails
       expect(true).toBe(true);
       return;
     }
 
     const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const adminToken = loginBody.data?.access_token;
 
     const uniqueCode = `CO-EMAIL-${Date.now()}`;
     const res = await fetch(`${baseUrl}/api/companies`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${ownerToken}`,
+        'Authorization': `Bearer ${adminToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -186,27 +192,30 @@ describe('companies.create', { timeout: 30000 }, () => {
       })
     });
 
-    expect([400, 403]).toContain(res.status);
+    // SUPER_ADMIN reaches validation → 400 for invalid email
+    expect(res.status).toBe(400);
   });
 
   it('returns 409 for duplicate company code', async () => {
+    // Use SUPER_ADMIN credentials to properly reach business logic (409) not auth rejection (403)
     const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
+        email: process.env.JP_SUPER_ADMIN_EMAIL,
+        password: process.env.JP_SUPER_ADMIN_PASSWORD
       })
     });
 
     if (!loginRes.ok) {
+      // SUPER_ADMIN may not exist in test DB - skip if login fails
       expect(true).toBe(true);
       return;
     }
 
     const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const adminToken = loginBody.data?.access_token;
 
     // Use the seed company code which should already exist
     const seedCompanyCode = process.env.JP_COMPANY_CODE;
@@ -218,7 +227,7 @@ describe('companies.create', { timeout: 30000 }, () => {
     const res = await fetch(`${baseUrl}/api/companies`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${ownerToken}`,
+        'Authorization': `Bearer ${adminToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -227,7 +236,7 @@ describe('companies.create', { timeout: 30000 }, () => {
       })
     });
 
-    // Duplicate code should return 409
-    expect([409, 403]).toContain(res.status);
+    // SUPER_ADMIN reaches business logic → 409 for duplicate code
+    expect(res.status).toBe(409);
   });
 });

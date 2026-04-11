@@ -39,8 +39,8 @@ export const MODULE_ROLE_DEFAULTS = [
   { roleCode: "SUPER_ADMIN", module: "settings", permissionMask: PERMISSION_MASK.CRUDA },
   { roleCode: "SUPER_ADMIN", module: "pos", permissionMask: PERMISSION_MASK.CRUDA },
 
-  // OWNER has full access to everything
-  { roleCode: "OWNER", module: "companies", permissionMask: PERMISSION_MASK.CRUDA },
+  // OWNER has read + update access to their company (create/delete reserved for SUPER_ADMIN)
+  { roleCode: "OWNER", module: "companies", permissionMask: PERMISSION_MASK.READ | PERMISSION_BITS.UPDATE },
   { roleCode: "OWNER", module: "users", permissionMask: PERMISSION_MASK.CRUDA },
   { roleCode: "OWNER", module: "roles", permissionMask: PERMISSION_MASK.CRUDA },
   { roleCode: "OWNER", module: "outlets", permissionMask: PERMISSION_MASK.CRUDA },

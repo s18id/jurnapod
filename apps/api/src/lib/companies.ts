@@ -164,7 +164,8 @@ const MODULE_ROLE_DEFAULTS = [
   { roleCode: "SUPER_ADMIN", module: "reports", permissionMask: 15 },
   { roleCode: "SUPER_ADMIN", module: "settings", permissionMask: 15 },
   { roleCode: "SUPER_ADMIN", module: "pos", permissionMask: 15 },
-  { roleCode: "OWNER", module: "companies", permissionMask: 15 },
+  // OWNER: read + update own company (create/delete reserved for SUPER_ADMIN)
+  { roleCode: "OWNER", module: "companies", permissionMask: 5 }, // 5 = READ(1) | UPDATE(4)
   { roleCode: "OWNER", module: "users", permissionMask: 15 },
   { roleCode: "OWNER", module: "roles", permissionMask: 15 },
   { roleCode: "OWNER", module: "outlets", permissionMask: 15 },

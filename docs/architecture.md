@@ -309,7 +309,7 @@ CASHIER (outlet-level)
 ```
 
 **Scoping:**
-- `SUPER_ADMIN`: Platform-wide access
+- `SUPER_ADMIN`: Platform-wide access — global lookup in `user_role_assignments` (no `company_id` filter), bypasses `company.deleted_at` check, bypasses all module permission bitmask checks
 - `OWNER/ADMIN/ACCOUNTANT`: Company-scoped
 - `CASHIER`: Outlet-scoped
 

@@ -120,6 +120,16 @@ ACCOUNTANT   → company-level, accounting + reports
 CASHIER      → outlet-level, POS operations
 ```
 
+### SUPER_ADMIN platform-wide bypass (in `checkAccess()`)
+
+`SUPER_ADMIN` is handled specially inside `RBACManager.checkAccess()`:
+
+1. **`isSuperAdminUser(userId)`** — queried first using a global lookup on `user_role_assignments` (no `company_id` filter), since SUPER_ADMIN is platform-wide
+2. **User existence** — if the user is SUPER_ADMIN, the `company.deleted_at IS NULL` check is bypassed (SUPER_ADMIN can access even if their home company is soft-deleted)
+3. **Module permission bitmask** — if the user is SUPER_ADMIN, `hasPermission = true` immediately without querying `module_roles`
+
+This means SUPER_ADMIN always returns `hasPermission = true` for any `module/permission` check, regardless of `module_roles` entries.
+
 ### Outlet access check
 
 For outlet-scoped operations, outlet access is validated explicitly after role/module checks:

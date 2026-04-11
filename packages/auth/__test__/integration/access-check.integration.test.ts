@@ -313,6 +313,133 @@ test('checkAccess() detects SUPER_ADMIN', { skip: !useRealDb }, async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Test 7b: checkAccess() detects SUPER_ADMIN with NO company_id assignment
+// ---------------------------------------------------------------------------
+
+test('checkAccess() detects SUPER_ADMIN even when user_role_assignment has no company_id', { skip: !useRealDb }, async () => {
+  // This tests that isSuperAdminUser() does a global lookup without company_id filter
+  const adapter = createRealDbAdapter();
+  const companyIds: number[] = [];
+  const userIds: number[] = [];
+  const outletIdsToCleanup: number[] = [];
+
+  try {
+    // Create test company
+    const company = await createCompany(adapter);
+    companyIds.push(company.id);
+
+    // Create test user with NO role assignment in user_role_assignments for this company
+    // (simulating a platform-global SUPER_ADMIN)
+    const user = await createUser(adapter, company.id, { email: 'global-super@example.com' }, testConfig);
+    userIds.push(user.id);
+
+    // Assign SUPER_ADMIN role with company_id = NULL (global, not tied to any company)
+    const superAdminRoleId = await getRoleIdByCode(adapter, 'SUPER_ADMIN');
+    assert.ok(superAdminRoleId, 'SUPER_ADMIN role should exist in database');
+
+    // Assign WITHOUT company_id (null = global)
+    await adapter.db
+      .insertInto('user_role_assignments')
+      .values({
+        user_id: user.id,
+        role_id: superAdminRoleId,
+        company_id: null,
+        outlet_id: null
+      })
+      .execute();
+
+    const rbac = new RBACManager(adapter, testConfig);
+    const result = await rbac.checkAccess({ userId: user.id, companyId: company.id });
+
+    assert.ok(result, 'Should return access result');
+    assert.strictEqual(result!.isSuperAdmin, true, 'SUPER_ADMIN with null company_id should be detected globally');
+    assert.strictEqual(result!.hasGlobalRole, true, 'Should have global role');
+  } finally {
+    await adapter.db.deleteFrom('user_role_assignments').where('user_id', 'in', userIds).execute();
+    await cleanupUsers(adapter, userIds);
+    await cleanupOutlets(adapter, outletIdsToCleanup);
+    await cleanupCompanies(adapter, companyIds);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Test: hasOutletAccess() returns true for globally-assigned SUPER_ADMIN
+// ---------------------------------------------------------------------------
+
+test('hasOutletAccess() returns true for SUPER_ADMIN with null company_id', { skip: !useRealDb }, async () => {
+  const adapter = createRealDbAdapter();
+  const companyIds: number[] = [];
+  const userIds: number[] = [];
+  const outletIdsToCleanup: number[] = [];
+
+  try {
+    const company = await createCompany(adapter);
+    companyIds.push(company.id);
+
+    const user = await createUser(adapter, company.id, { email: 'global-super-outlet@example.com' }, testConfig);
+    userIds.push(user.id);
+
+    const superAdminRoleId = await getRoleIdByCode(adapter, 'SUPER_ADMIN');
+
+    // Global assignment (no company_id)
+    await adapter.db
+      .insertInto('user_role_assignments')
+      .values({ user_id: user.id, role_id: superAdminRoleId, company_id: null, outlet_id: null })
+      .execute();
+
+    const outlet = await createOutlet(adapter, company.id);
+    outletIdsToCleanup.push(outlet.id);
+
+    const rbac = new RBACManager(adapter, testConfig);
+    const hasAccess = await rbac.hasOutletAccess(user.id, company.id, outlet.id);
+
+    assert.strictEqual(hasAccess, true, 'SUPER_ADMIN with global assignment should have outlet access');
+  } finally {
+    await adapter.db.deleteFrom('user_role_assignments').where('user_id', 'in', userIds).execute();
+    await cleanupUsers(adapter, userIds);
+    await cleanupOutlets(adapter, outletIdsToCleanup);
+    await cleanupCompanies(adapter, companyIds);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Test: canManageCompanyDefaults() returns true for globally-assigned SUPER_ADMIN
+// ---------------------------------------------------------------------------
+
+test('canManageCompanyDefaults() returns true for SUPER_ADMIN with null company_id', { skip: !useRealDb }, async () => {
+  const adapter = createRealDbAdapter();
+  const companyIds: number[] = [];
+  const userIds: number[] = [];
+  const outletIdsToCleanup: number[] = [];
+
+  try {
+    const company = await createCompany(adapter);
+    companyIds.push(company.id);
+
+    const user = await createUser(adapter, company.id, { email: 'global-super-defaults@example.com' }, testConfig);
+    userIds.push(user.id);
+
+    const superAdminRoleId = await getRoleIdByCode(adapter, 'SUPER_ADMIN');
+
+    // Global assignment (no company_id)
+    await adapter.db
+      .insertInto('user_role_assignments')
+      .values({ user_id: user.id, role_id: superAdminRoleId, company_id: null, outlet_id: null })
+      .execute();
+
+    const rbac = new RBACManager(adapter, testConfig);
+    const canManage = await rbac.canManageCompanyDefaults(user.id, company.id, 'companies', 'create');
+
+    assert.strictEqual(canManage, true, 'SUPER_ADMIN with global assignment should be able to manage company defaults');
+  } finally {
+    await adapter.db.deleteFrom('user_role_assignments').where('user_id', 'in', userIds).execute();
+    await cleanupUsers(adapter, userIds);
+    await cleanupOutlets(adapter, outletIdsToCleanup);
+    await cleanupCompanies(adapter, companyIds);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Test 8: checkAccess() validates allowedRoles correctly
 // ---------------------------------------------------------------------------
 
