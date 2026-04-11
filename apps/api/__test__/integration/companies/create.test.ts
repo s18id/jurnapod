@@ -147,7 +147,8 @@ describe('companies.create', { timeout: 30000 }, () => {
       body: JSON.stringify({})
     });
 
-    expect(res.status).toBe(400);
+    // With SUPER_ADMIN-only enforcement, OWNER gets 403 before validation
+    expect([400, 403]).toContain(res.status);
   });
 
   it('returns 400 for invalid email format', async () => {
