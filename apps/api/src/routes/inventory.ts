@@ -175,13 +175,14 @@ inventoryRoutes.get("/variant-stats", async (c) => {
     }
 
     // Parse comma-separated item IDs
-    const itemIds = itemIdsParam.split(",").map(id => {
+    const itemIds: number[] = [];
+    for (const id of itemIdsParam.split(",")) {
       const parsed = parseInt(id.trim(), 10);
       if (isNaN(parsed) || parsed <= 0) {
-        throw new Error(`Invalid item ID: ${id}`);
+        return errorResponse("INVALID_REQUEST", `Invalid item ID: ${id}`, 400);
       }
-      return parsed;
-    });
+      itemIds.push(parsed);
+    }
 
     if (itemIds.length === 0) {
       return successResponse([]);
@@ -195,6 +196,7 @@ inventoryRoutes.get("/variant-stats", async (c) => {
     const stats = await itemsAdapter.getItemVariantStats(auth.companyId, itemIds);
     return successResponse(stats);
   } catch (error) {
+    // Only unexpected errors reach here (invalid-ID is handled above with early return)
     console.error("GET /inventory/variant-stats failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to fetch variant stats", 500);
   }

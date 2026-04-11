@@ -10,7 +10,7 @@
 
 import type { RowDataPacket } from "mysql2/promise";
 import { getDbPool, type KyselySchema } from "../db.js";
-import { sql } from "kysely";
+import { sql, CompiledQuery } from "kysely";
 
 // ============================================================================
 // Types
@@ -544,7 +544,12 @@ export async function executeExportQuery(
     return `'${String(param).replace(/'/g, "''")}'`;
   });
   
-  const result = await sql`${processedSql}`.execute(database);
+  // Use CompiledQuery.raw to execute the already-substituted SQL directly.
+  // We cannot use sql`${processedSql}` here because that treats the
+  // entire string as a single parameter (a ? placeholder), wrapping the
+  // SQL in quotes and causing a MySQL parse error.
+  const compiledQuery = CompiledQuery.raw(processedSql);
+  const result = await database.executeQuery(compiledQuery);
   
   return result.rows as RowDataPacket[];
 }

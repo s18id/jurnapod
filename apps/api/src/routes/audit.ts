@@ -139,12 +139,12 @@ auditRoutes.get("/period-transitions", async (c) => {
       }
     });
   } catch (error) {
-    console.error("GET /audit/period-transitions failed", error);
-    
     if (error instanceof z.ZodError) {
+      // Expected validation failure - return 400 without server-error logging
       return errorResponse("BAD_REQUEST", `Invalid query parameters: ${error.errors.map(e => e.message).join(", ")}`, 400);
     }
-    
+
+    console.error("GET /audit/period-transitions failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to query period transition audit logs", 500);
   }
 });

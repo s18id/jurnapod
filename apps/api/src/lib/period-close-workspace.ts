@@ -13,6 +13,13 @@
  * This is a stateless service that evaluates each checklist item live.
  */
 
+export class FiscalYearNotFoundError extends Error {
+  constructor(public readonly fiscalYearId: number, public readonly companyId: number) {
+    super(`Fiscal year ${fiscalYearId} not found for company ${companyId}`);
+    this.name = "FiscalYearNotFoundError";
+  }
+}
+
 import type { KyselySchema } from "@jurnapod/db";
 import { getDb } from "./db.js";
 import {
@@ -131,7 +138,7 @@ export class PeriodCloseWorkspaceService {
     // Get fiscal year info using package service
     const fiscalYear = await this.fiscalYearService.getFiscalYearById(companyId, fiscalYearId);
     if (!fiscalYear) {
-      throw new Error(`Fiscal year ${fiscalYearId} not found for company ${companyId}`);
+      throw new FiscalYearNotFoundError(fiscalYearId, companyId);
     }
 
     // Determine current period number (1-12, or 0 for full year)

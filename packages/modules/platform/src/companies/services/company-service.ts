@@ -198,23 +198,27 @@ async function ensureModules(db: KyselySchema): Promise<void> {
 
 async function upsertSetting(
   db: KyselySchema,
+  companyId: number,
   key: string,
   value: string
 ): Promise<void> {
   await sql`
-    INSERT INTO settings (setting_key, setting_value)
-    VALUES (${key}, ${value})
+    INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value)
+    VALUES (${companyId}, NULL, ${key}, ${value})
     ON DUPLICATE KEY UPDATE
       setting_value = VALUES(setting_value)
   `.execute(db);
 }
 
-async function ensureSettings(db: KyselySchema): Promise<void> {
+async function ensureSettings(
+  db: KyselySchema,
+  companyId: number
+): Promise<void> {
   for (const setting of SETTINGS_DEFINITIONS) {
     const envValue = process.env[setting.envKey];
     const parsedValue = setting.parse(envValue);
     const stringValue = String(parsedValue);
-    await upsertSetting(db, setting.key, stringValue);
+    await upsertSetting(db, companyId, setting.key, stringValue);
   }
 }
 
@@ -223,7 +227,7 @@ async function ensureDefaultTaxRate(
   companyId: number
 ): Promise<void> {
   await sql`
-    INSERT IGNORE INTO tax_rates (company_id, name, rate, code)
+    INSERT IGNORE INTO tax_rates (company_id, name, rate_percent, code)
     VALUES (${companyId}, 'VAT', 0.11, 'VAT')
   `.execute(db);
 }
@@ -326,7 +330,7 @@ async function bootstrapCompanyDefaults(
   await ensureDefaultOutlet(db, params.companyId);
   await ensureRoles(db);
   await ensureModules(db);
-  await ensureSettings(db);
+  await ensureSettings(db, params.companyId);
   await ensureDefaultTaxRate(db, params.companyId);
   await ensureCompanyModules(db, params.companyId);
 

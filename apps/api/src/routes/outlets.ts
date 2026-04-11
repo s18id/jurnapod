@@ -352,6 +352,9 @@ outletsRoutes.patch("/:id", async (c) => {
     if (error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
+    if (error instanceof OutletNotFoundError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
 
     console.error("PATCH /outlets/:id failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to update outlet", 500);
@@ -398,6 +401,9 @@ outletsRoutes.delete("/:id", async (c) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid outlet ID", 400);
+    }
+    if (error instanceof OutletNotFoundError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
     }
 
     console.error("DELETE /outlets/:id failed", error);

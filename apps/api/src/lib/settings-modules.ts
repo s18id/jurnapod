@@ -270,14 +270,23 @@ export async function updateCompanyModule(
     throw new ModuleNotFoundError(moduleCode);
   }
 
-  await sql`
-    INSERT INTO company_modules (company_id, module_id, enabled, config_json, updated_at)
-    VALUES (${companyId}, ${moduleId}, ${enabled ? 1 : 0}, ${configJson}, CURRENT_TIMESTAMP)
-    ON DUPLICATE KEY UPDATE
-      enabled = VALUES(enabled),
-      config_json = VALUES(config_json),
-      updated_at = CURRENT_TIMESTAMP
-  `.execute(db);
+  // null configJson means "preserve existing" — never write NULL to NOT NULL column
+  if (configJson === null) {
+    await sql`
+      UPDATE company_modules
+      SET enabled = ${enabled ? 1 : 0}, updated_at = CURRENT_TIMESTAMP
+      WHERE company_id = ${companyId} AND module_id = ${moduleId}
+    `.execute(db);
+  } else {
+    await sql`
+      INSERT INTO company_modules (company_id, module_id, enabled, config_json, updated_at)
+      VALUES (${companyId}, ${moduleId}, ${enabled ? 1 : 0}, ${configJson}, CURRENT_TIMESTAMP)
+      ON DUPLICATE KEY UPDATE
+        enabled = VALUES(enabled),
+        config_json = VALUES(config_json),
+        updated_at = CURRENT_TIMESTAMP
+    `.execute(db);
+  }
 }
 
 /**

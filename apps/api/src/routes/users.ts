@@ -188,6 +188,12 @@ usersRoutes.post("/", async (c) => {
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
+    if (error instanceof RoleScopeViolationError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+    if (error instanceof RoleLevelViolationError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
 
     console.error("POST /users failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to create user", 500);

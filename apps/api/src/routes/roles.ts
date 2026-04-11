@@ -25,7 +25,7 @@ import {
   type AuthContext
 } from "../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../lib/response.js";
-import { listRoles, getRole, createRole, updateRole, deleteRole } from "../lib/users.js";
+import { listRoles, getRole, createRole, updateRole, deleteRole, RoleLevelViolationError } from "../lib/users.js";
 import { readClientIp } from "../lib/request-meta.js";
 
 declare module "hono" {
@@ -247,8 +247,16 @@ rolesRoutes.delete("/:id", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid role ID", 400);
     }
 
+    if (error instanceof RoleLevelViolationError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+
     if (error instanceof Error && error.message.includes("not found")) {
       return errorResponse("NOT_FOUND", "Role not found", 404);
+    }
+
+    if (error instanceof Error && error.message.includes("users are assigned")) {
+      return errorResponse("CONFLICT", error.message, 409);
     }
 
     console.error("DELETE /roles/:id failed", error);

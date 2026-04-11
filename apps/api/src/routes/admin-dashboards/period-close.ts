@@ -11,7 +11,7 @@ import { z } from "zod";
 import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { errorResponse } from "../../lib/response.js";
-import { getPeriodCloseWorkspace } from "../../lib/period-close-workspace.js";
+import { getPeriodCloseWorkspace, FiscalYearNotFoundError } from "../../lib/period-close-workspace.js";
 import { authenticateRequest, requireAccess, type AuthContext } from "../../lib/auth-guard.js";
 
 declare module "hono" {
@@ -90,6 +90,9 @@ periodCloseRoutes.get("/", async (c) => {
       data: workspace,
     });
   } catch (error) {
+    if (error instanceof FiscalYearNotFoundError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
     console.error("GET /admin/dashboard/period-close-workspace failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to load period close workspace", 500);
   }
