@@ -76,6 +76,7 @@ type OutletIdResolver = (
 type AccessGuardOptions = {
   roles?: readonly RoleCode[];
   module?: string;
+  resource?: string;
   permission?: ModulePermission;
   outletId?: number | OutletIdResolver;
 };
@@ -187,6 +188,7 @@ export function requireAccess(options: AccessGuardOptions): AuthenticatedRouteGu
   const needsRoleCheck = options.roles !== undefined;
   const needsModuleCheck = Boolean(options.module && options.permission);
   const needsOutletCheck = options.outletId !== undefined;
+  const needsResourceCheck = Boolean(options.resource);
 
   return async (request, auth) => {
     if (needsRoleCheck && uniqueAllowedRoles.length === 0) {
@@ -226,6 +228,7 @@ export function requireAccess(options: AccessGuardOptions): AuthenticatedRouteGu
       companyId: auth.companyId,
       allowedRoles: needsRoleCheck ? uniqueAllowedRoles : undefined,
       module: needsModuleCheck ? options.module : undefined,
+      resource: needsResourceCheck ? options.resource : undefined,
       permission: needsModuleCheck ? options.permission : undefined,
       outletId: shouldCheckOutlet ? outletId : undefined
     });

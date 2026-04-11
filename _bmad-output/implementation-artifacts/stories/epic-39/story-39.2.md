@@ -1,7 +1,7 @@
 # Story 39.2: Phase 1B — Auth Package Updates
 
 **Epic:** [Epic 39 - ACL Reorganization](../../epic-39.md)
-**Status:** todo
+**Status:** done
 **Priority:** High
 
 ## Objective
@@ -15,19 +15,19 @@ Building on the shared package foundation (Story 39.1), the auth package needs t
 ## Acceptance Criteria
 
 ### Auth Package Updates
-- [ ] ModulePermission type updated: `report` → `analyze`
-- [ ] Permission type updated: `canReport` → `canAnalyze`
-- [ ] buildPermissionMask updated to accept optional `resource` parameter
-- [ ] Permission checking functions support `module.resource` format
-- [ ] Backward compatibility maintained for module-level checks (resource = null)
-- [ ] npm run build -w @jurnapod/auth passes
-- [ ] npm run typecheck -w @jurnapod/auth passes
+- [x] ModulePermission type updated: `report` → `analyze`
+- [x] Permission type updated: `canReport` → `canAnalyze`
+- [x] buildPermissionMask updated to accept optional `resource` parameter
+- [x] Permission checking functions support `module.resource` format
+- [x] Backward compatibility maintained for module-level checks (resource = null)
+- [x] npm run build -w @jurnapod/auth passes
+- [x] npm run typecheck -w @jurnapod/auth passes
 
 ### API Auth-Guard Updates
-- [ ] `resource?: string` parameter added to `AccessGuardOptions` in apps/api/src/lib/auth-guard.ts
-- [ ] `checkUserAccess` function updated to accept and pass `resource` parameter
-- [ ] `requireAccess` helper updated to include resource in access check call
-- [ ] MANAGE permission bit (32) added to MODULE_PERMISSION_BITS
+- [x] `resource?: string` parameter added to `AccessGuardOptions` in apps/api/src/lib/auth-guard.ts
+- [x] `checkUserAccess` function updated to accept and pass `resource` parameter
+- [x] `requireAccess` helper updated to include resource in access check call
+- [x] MANAGE permission bit (32) added to MODULE_PERMISSION_BITS
 
 ## Technical Details
 
@@ -145,4 +145,32 @@ Building on the shared package foundation (Story 39.1), the auth package needs t
 
 ## Dev Notes
 
-[To be filled during implementation]
+### Implementation Summary (2026-04-12)
+
+**Files Modified:**
+
+1. **`packages/auth/src/types.ts`**
+   - `ModulePermission`: Changed `"report"` → `"analyze"`
+   - `MODULE_PERMISSION_BITS`: Added `analyze: 16` (was report), `manage: 32` (new)
+
+2. **`packages/auth/src/rbac/permissions.ts`**
+   - Updated `buildPermissionMask` to use `canAnalyze` (was `canReport`)
+   - Updated JSDoc comments to reflect naming change
+
+3. **`apps/api/src/lib/auth-guard.ts`**
+   - `AccessGuardOptions`: Added `resource?: string` field
+   - `requireAccess()`: Now passes `resource` to `checkUserAccess` via `needsResourceCheck`
+
+4. **`apps/api/src/lib/auth.ts`**
+   - `AccessCheckOptions`: Added `resource?: string` field
+   - `checkUserAccess()`: Passes `resource` parameter to auth client
+
+**Verification:**
+- ✅ `npm run build -w @jurnapod/auth` passes
+- ✅ `npm run typecheck -w @jurnapod/auth` passes
+- ✅ `npm run build -w @jurnapod/api` passes
+- ✅ `npm run typecheck -w @jurnapod/api` passes
+
+**Notes:**
+- Backward compatibility maintained - resource parameter is optional
+- When resource is undefined/null, behavior is module-level (existing code works unchanged)

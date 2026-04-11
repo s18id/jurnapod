@@ -289,6 +289,7 @@ export type AccessCheckOptions = {
   companyId: number;
   allowedRoles?: readonly RoleCode[];
   module?: string;
+  resource?: string;
   permission?: ModulePermission;
   outletId?: number;
 };
