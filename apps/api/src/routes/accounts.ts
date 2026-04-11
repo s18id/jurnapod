@@ -134,10 +134,11 @@ accountRoutes.get("/", async (c) => {
   const auth = c.get("auth");
 
     // Check access permission
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "read"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "read"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -178,10 +179,11 @@ accountRoutes.get("/tree", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "read"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "read"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -207,10 +209,11 @@ accountRoutes.get("/tree", async (c) => {
 accountRoutes.get("/fixed-asset-categories", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "read"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "read"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -236,10 +239,11 @@ accountRoutes.get("/fixed-asset-categories", async (c) => {
 accountRoutes.post("/fixed-asset-categories", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "create"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "create"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -274,10 +278,11 @@ accountRoutes.post("/fixed-asset-categories", async (c) => {
 accountRoutes.get("/fixed-asset-categories/:id", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "read"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "read"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -307,10 +312,11 @@ accountRoutes.get("/fixed-asset-categories/:id", async (c) => {
 accountRoutes.patch("/fixed-asset-categories/:id", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "update"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "update"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -349,10 +355,11 @@ accountRoutes.patch("/fixed-asset-categories/:id", async (c) => {
 accountRoutes.delete("/fixed-asset-categories/:id", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "delete"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "delete"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -392,10 +399,11 @@ accountRoutes.delete("/fixed-asset-categories/:id", async (c) => {
 accountRoutes.get("/fixed-assets", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "read"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "read"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -431,10 +439,11 @@ accountRoutes.get("/fixed-assets", async (c) => {
 accountRoutes.post("/fixed-assets", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "create"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "create"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -469,10 +478,11 @@ accountRoutes.post("/fixed-assets", async (c) => {
 accountRoutes.get("/fixed-assets/:id", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "read"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "read"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -516,10 +526,11 @@ accountRoutes.get("/fixed-assets/:id", async (c) => {
 accountRoutes.patch("/fixed-assets/:id", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "update"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "update"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -558,10 +569,11 @@ accountRoutes.patch("/fixed-assets/:id", async (c) => {
 accountRoutes.delete("/fixed-assets/:id", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "delete"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "delete"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -600,10 +612,11 @@ accountRoutes.delete("/fixed-assets/:id", async (c) => {
 accountRoutes.post("/fixed-assets/:id/depreciation-plan", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "create"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "create"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -652,10 +665,11 @@ accountRoutes.post("/fixed-assets/:id/depreciation-plan", async (c) => {
 accountRoutes.patch("/fixed-assets/:id/depreciation-plan", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "update"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "update"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -720,10 +734,11 @@ accountRoutes.patch("/fixed-assets/:id/depreciation-plan", async (c) => {
 accountRoutes.post("/depreciation/run", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "update"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "update"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -772,10 +787,11 @@ accountRoutes.get("/:id", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "read"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "read"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -808,10 +824,11 @@ accountRoutes.post("/", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "create"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "create"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -860,10 +877,11 @@ accountRoutes.put("/:id", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "update"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "update"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -914,7 +932,8 @@ accountRoutes.post("/fiscal-years", async (c) => {
 
     // Check access permission using bitmask
     const accessResult = await requireAccess({
-      module: "accounts",
+      module: "accounting",
+      resource: "fiscal_years",
       permission: "create"
     })(c.req.raw, auth);
 
@@ -980,7 +999,8 @@ accountRoutes.get("/fiscal-years", async (c) => {
 
     // Check access permission using bitmask
     const accessResult = await requireAccess({
-      module: "accounts",
+      module: "accounting",
+      resource: "fiscal_years",
       permission: "read"
     })(c.req.raw, auth);
 
@@ -1021,7 +1041,8 @@ accountRoutes.get("/fiscal-years/:id/status", async (c) => {
 
     // Check access permission using bitmask
     const accessResult = await requireAccess({
-      module: "accounts",
+      module: "accounting",
+      resource: "fiscal_years",
       permission: "read"
     })(c.req.raw, auth);
 
@@ -1056,7 +1077,8 @@ accountRoutes.get("/fiscal-years/:id/close-preview", async (c) => {
 
     // Check access permission using bitmask
     const accessResult = await requireAccess({
-      module: "accounts",
+      module: "accounting",
+      resource: "fiscal_years",
       permission: "read"
     })(c.req.raw, auth);
 
@@ -1099,7 +1121,8 @@ accountRoutes.post("/fiscal-years/:id/close", async (c) => {
 
     // Check access permission using bitmask
     const accessResult = await requireAccess({
-      module: "accounts",
+      module: "accounting",
+      resource: "fiscal_years",
       permission: "update"
     })(c.req.raw, auth);
 
@@ -1201,7 +1224,8 @@ accountRoutes.post("/fiscal-years/:id/close/approve", async (c) => {
 
     // Check access permission using bitmask
     const accessResult = await requireAccess({
-      module: "accounts",
+      module: "accounting",
+      resource: "fiscal_years",
       permission: "update"
     })(c.req.raw, auth);
 
@@ -1279,10 +1303,11 @@ accountRoutes.get("/types", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "read"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "read"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -1306,10 +1331,11 @@ accountRoutes.get("/types", async (c) => {
 accountRoutes.post("/fixed-assets/:id/acquisition", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "update"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "update"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -1359,10 +1385,11 @@ accountRoutes.post("/fixed-assets/:id/acquisition", async (c) => {
 accountRoutes.post("/fixed-assets/:id/transfer", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "update"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "update"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -1409,10 +1436,11 @@ accountRoutes.post("/fixed-assets/:id/transfer", async (c) => {
 accountRoutes.post("/fixed-assets/:id/impairment", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "update"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "update"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -1462,10 +1490,11 @@ accountRoutes.post("/fixed-assets/:id/impairment", async (c) => {
 accountRoutes.post("/fixed-assets/:id/disposal", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "update"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "update"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -1519,10 +1548,11 @@ accountRoutes.post("/fixed-assets/:id/disposal", async (c) => {
 accountRoutes.get("/fixed-assets/:id/ledger", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "read"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "read"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -1554,10 +1584,11 @@ accountRoutes.get("/fixed-assets/:id/ledger", async (c) => {
 accountRoutes.get("/fixed-assets/:id/book", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "read"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "read"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;
@@ -1589,10 +1620,11 @@ accountRoutes.get("/fixed-assets/:id/book", async (c) => {
 accountRoutes.post("/fixed-assets/events/:id/void", async (c) => {
   const auth = c.get("auth");
 
-  const accessResult = await requireAccess({
-    module: "accounts",
-    permission: "update"
-  })(c.req.raw, auth);
+    const accessResult = await requireAccess({
+      module: "accounting",
+      resource: "accounts",
+      permission: "update"
+    })(c.req.raw, auth);
 
   if (accessResult !== null) {
     return accessResult;

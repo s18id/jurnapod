@@ -125,82 +125,11 @@ const JournalErrorResponseSchema = zodOpenApi.object({
 journalRoutes.get("/", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
-  try {
+    try {
     // Check module permission using bitmask
     const accessResult = await requireAccess({
-      module: "journals",
-      permission: "read"
-    })(c.req.raw, auth);
-
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
-    const url = new URL(c.req.raw.url);
-
-    const query = listQuerySchema.parse({
-      outlet_id: url.searchParams.get("outlet_id") ?? undefined,
-      start_date: url.searchParams.get("start_date") ?? undefined,
-      end_date: url.searchParams.get("end_date") ?? undefined,
-      doc_type: url.searchParams.get("doc_type") ?? undefined,
-      account_id: url.searchParams.get("account_id") ?? undefined,
-      limit: url.searchParams.get("limit") ?? undefined,
-      offset: url.searchParams.get("offset") ?? undefined,
-    });
-
-    // Build query for listJournalBatches
-    const listQuery = {
-      company_id: auth.companyId,
-      outlet_id: query.outlet_id,
-      start_date: query.start_date,
-      end_date: query.end_date,
-      doc_type: query.doc_type,
-      account_id: query.account_id,
-      limit: query.limit ?? 100,
-      offset: query.offset ?? 0,
-    };
-
-    const batches = await listJournalBatches(listQuery);
-
-    return successResponse(batches);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return errorResponse("INVALID_REQUEST", "Invalid request parameters: " + error.errors.map(e => e.message).join(", "), 400);
-    }
-
-    console.error("GET /journals failed:", error);
-    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to list journals", 500);
-  }
-});
-
-/**
- * POST /journals
- * Create a manual journal entry
- *
- * Body: ManualJournalEntryCreateRequest
- * {
- *   company_id: number,
- *   outlet_id?: number | null,
- *   entry_date: string (ISO date),
- *   reference?: string,
- *   description: string,
- *   lines: [
- *     {
- *       account_id: number,
- *       debit: number,
- *       credit: number,
- *       description: string
- *     }
- *   ]
- * }
- */
-journalRoutes.post("/", async (c) => {
-  const auth = c.get("auth") as AuthContext;
-
-  try {
-    // Check module permission using bitmask
-    const accessResult = await requireAccess({
-      module: "journals",
+      module: "accounting",
+      resource: "journals",
       permission: "create"
     })(c.req.raw, auth);
 
@@ -251,7 +180,8 @@ journalRoutes.get("/:id", async (c) => {
   try {
     // Check module permission using bitmask
     const accessResult = await requireAccess({
-      module: "journals",
+      module: "accounting",
+      resource: "journals",
       permission: "read"
     })(c.req.raw, auth);
 
@@ -332,7 +262,8 @@ export function registerJournalRoutes(app: { openapi: OpenAPIHonoType["openapi"]
 
     try {
       const accessResult = await requireAccess({
-        module: "journals",
+        module: "accounting",
+        resource: "journals",
         permission: "read"
       })(c.req.raw, auth);
 
@@ -420,7 +351,8 @@ export function registerJournalRoutes(app: { openapi: OpenAPIHonoType["openapi"]
 
     try {
       const accessResult = await requireAccess({
-        module: "journals",
+        module: "accounting",
+        resource: "journals",
         permission: "create"
       })(c.req.raw, auth);
 
@@ -502,7 +434,8 @@ export function registerJournalRoutes(app: { openapi: OpenAPIHonoType["openapi"]
 
     try {
       const accessResult = await requireAccess({
-        module: "journals",
+        module: "accounting",
+        resource: "journals",
         permission: "read"
       })(c.req.raw, auth);
 
