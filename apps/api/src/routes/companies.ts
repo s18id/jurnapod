@@ -142,6 +142,12 @@ companyRoutes.post("/", async (c) => {
   try {
     const auth = c.get("auth");
     
+    // Platform-level operation: only SUPER_ADMIN can create companies
+    // This is a platform administration capability, not company-scoped
+    if (auth.role !== "SUPER_ADMIN") {
+      return errorResponse("FORBIDDEN", "Only SUPER_ADMIN can create companies", 403);
+    }
+
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
       module: "companies",
