@@ -270,6 +270,7 @@ exportRoutes.post("/:entityType", async (c) => {
   // Check access permission
   const accessResult = await requireAccess({
     module: "inventory",
+    resource: "items",
     permission: "read"
   })(c.req.raw, auth);
 
@@ -403,6 +404,7 @@ exportRoutes.get("/:entityType/columns", async (c) => {
   // Check access permission
   const accessResult = await requireAccess({
     module: "inventory",
+    resource: "items",
     permission: "read"
   })(c.req.raw, auth);
 
@@ -495,7 +497,7 @@ export function registerExportRoutes(app: OpenAPIHono): void {
     }),
     async (c): Promise<any> => {
       const auth = c.get("auth");
-      const accessResult = await requireAccess({ module: "inventory", permission: "read" })(c.req.raw, auth);
+      const accessResult = await requireAccess({ module: "inventory", resource: "items", permission: "read" })(c.req.raw, auth);
       if (accessResult !== null) return accessResult;
 
       try {
@@ -603,7 +605,7 @@ export function registerExportRoutes(app: OpenAPIHono): void {
     }),
     async (c): Promise<any> => {
       const auth = c.get("auth");
-      const accessResult = await requireAccess({ module: "inventory", permission: "read" })(c.req.raw, auth);
+      const accessResult = await requireAccess({ module: "inventory", resource: "items", permission: "read" })(c.req.raw, auth);
       if (accessResult !== null) return accessResult;
 
       const entityType = c.req.param("entityType") as EntityType;

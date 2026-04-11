@@ -101,6 +101,7 @@ function requireStockAccess(roles: readonly string[], permission: "read" | "crea
     const authGuard = requireAccess({
       roles: roles as RoleCode[],
       module: "inventory",
+      resource: "stock",
       permission: permission,
       outletId: outletId
     });

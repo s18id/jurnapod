@@ -87,10 +87,12 @@ function parseOptionalIsActive(value: string | null): boolean | undefined {
 /**
  * Creates a reusable access check guard for inventory module permissions.
  * Reduces repeated auth pattern in routes.
+ * Uses resource-level permission check for inventory.items
  */
 function requireInventoryAccess(permission: ModulePermission): AuthenticatedRouteGuard {
   return requireAccess({
     module: "inventory",
+    resource: "items",
     permission
   });
 }
