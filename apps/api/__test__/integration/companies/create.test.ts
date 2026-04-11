@@ -120,35 +120,37 @@ describe('companies.create', { timeout: 30000 }, () => {
   });
 
   it('returns 400 for missing required fields', async () => {
+    // Use SUPER_ADMIN credentials - endpoint requires SUPER_ADMIN role
     const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
+        email: process.env.JP_SUPER_ADMIN_EMAIL,
+        password: process.env.JP_SUPER_ADMIN_PASSWORD
       })
     });
 
     if (!loginRes.ok) {
+      // SUPER_ADMIN may not exist in test DB - skip if login fails
       expect(true).toBe(true);
       return;
     }
 
     const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const adminToken = loginBody.data?.access_token;
 
     const res = await fetch(`${baseUrl}/api/companies`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${ownerToken}`,
+        'Authorization': `Bearer ${adminToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({})
     });
 
-    // With SUPER_ADMIN-only enforcement, OWNER gets 403 before validation
-    expect([400, 403]).toContain(res.status);
+    // SUPER_ADMIN passes auth check, reaches validation which returns 400
+    expect(res.status).toBe(400);
   });
 
   it('returns 400 for invalid email format', async () => {
