@@ -29,7 +29,7 @@ export const dbConfig = {
   port: getEnvInt('AUTH_TEST_DB_PORT', 3306),
   user: getEnv('AUTH_TEST_DB_USER', 'root'),
   password: getEnv('AUTH_TEST_DB_PASSWORD', ''),
-  database: getEnv('AUTH_TEST_DB_DATABASE', 'jurnapod_test'),
+  database: getEnv('AUTH_TEST_DB_DATABASE', 'jurnapod'),
   connectionLimit: getEnvInt('AUTH_TEST_DB_CONNECTION_LIMIT', 5),
 };
 

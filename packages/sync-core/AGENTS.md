@@ -368,7 +368,7 @@ DB_HOST=172.18.0.2
 DB_PORT=3306
 DB_USER=root
 DB_PASSWORD=mariadb
-DB_NAME=jurnapod_test
+DB_NAME=jurnapod
 ```
 
 **Critical**: Integration tests require seed data (company, outlet fixtures from `JP_COMPANY_CODE`, `JP_OUTLET_CODE`, `JP_OWNER_EMAIL`).

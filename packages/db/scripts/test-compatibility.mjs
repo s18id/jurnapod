@@ -29,7 +29,7 @@ const testConfigs = [
     port: 3307,
     env: {
       MYSQL_ROOT_PASSWORD: "test",
-      MYSQL_DATABASE: "jurnapod_test"
+      MYSQL_DATABASE: "jurnapod"
     }
   },
   {
@@ -38,7 +38,7 @@ const testConfigs = [
     port: 3308,
     env: {
       MARIADB_ROOT_PASSWORD: "test",
-      MARIADB_DATABASE: "jurnapod_test"
+      MARIADB_DATABASE: "jurnapod"
     }
   }
 ];
@@ -95,7 +95,7 @@ async function startContainer(config) {
         port: config.port,
         user: "root",
         password: "test",
-        database: "jurnapod_test"
+        database: "jurnapod"
       });
       await connection.query("SELECT 1");
       await connection.end();
@@ -143,7 +143,7 @@ async function testMigrations(config, containerName) {
     port: config.port,
     user: "root",
     password: "test",
-    database: "jurnapod_test",
+    database: "jurnapod",
     multipleStatements: true
   });
   
@@ -170,13 +170,13 @@ async function testMigrations(config, containerName) {
   // Check tables
   const [tables] = await connection.query(
     "SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_type = 'BASE TABLE'",
-    ["jurnapod_test"]
+    ["jurnapod"]
   );
   
   // Check views
   const [views] = await connection.query(
     "SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_type = 'VIEW'",
-    ["jurnapod_test"]
+    ["jurnapod"]
   );
   
   // Check foreign keys
@@ -184,7 +184,7 @@ async function testMigrations(config, containerName) {
     `SELECT table_name, column_name, referenced_table_name 
      FROM information_schema.key_column_usage 
      WHERE table_schema = ? AND referenced_table_name IS NOT NULL`,
-    ["jurnapod_test"]
+    ["jurnapod"]
   );
   
   console.log(`  ✓ Tables created: ${tables.length}`);
