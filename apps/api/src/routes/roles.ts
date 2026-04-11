@@ -77,7 +77,8 @@ rolesRoutes.get("/", async (c) => {
 
   // Check access permission using bitmask
   const accessResult = await requireAccess({
-    module: "roles",
+    module: "platform",
+    resource: "roles",
     permission: "read"
   })(c.req.raw, auth);
 
@@ -101,7 +102,8 @@ rolesRoutes.post("/", async (c) => {
 
   // Check access permission using bitmask
   const accessResult = await requireAccess({
-    module: "roles",
+    module: "platform",
+    resource: "roles",
     permission: "create"
   })(c.req.raw, auth);
 
@@ -141,7 +143,8 @@ rolesRoutes.get("/:id", async (c) => {
 
   // Check access permission using bitmask
   const accessResult = await requireAccess({
-    module: "roles",
+    module: "platform",
+    resource: "roles",
     permission: "read"
   })(c.req.raw, auth);
 
@@ -177,7 +180,8 @@ rolesRoutes.patch("/:id", async (c) => {
 
   // Check access permission using bitmask
   const accessResult = await requireAccess({
-    module: "roles",
+    module: "platform",
+    resource: "roles",
     permission: "update"
   })(c.req.raw, auth);
 
@@ -221,7 +225,8 @@ rolesRoutes.delete("/:id", async (c) => {
 
   // Check access permission using bitmask
   const accessResult = await requireAccess({
-    module: "roles",
+    module: "platform",
+    resource: "roles",
     permission: "delete"
   })(c.req.raw, auth);
 
@@ -315,7 +320,7 @@ export function registerRoleRoutes(app: OpenAPIHono): void {
     }),
     async (c): Promise<any> => {
       const auth = c.get("auth");
-      const accessResult = await requireAccess({ module: "roles", permission: "read" })(c.req.raw, auth);
+      const accessResult = await requireAccess({ module: "platform", resource: "roles", permission: "read" })(c.req.raw, auth);
       if (accessResult !== null) return accessResult;
 
       const roles = await listRoles(auth.companyId);
@@ -364,7 +369,7 @@ export function registerRoleRoutes(app: OpenAPIHono): void {
     }),
     async (c): Promise<any> => {
       const auth = c.get("auth");
-      const accessResult = await requireAccess({ module: "roles", permission: "create" })(c.req.raw, auth);
+      const accessResult = await requireAccess({ module: "platform", resource: "roles", permission: "create" })(c.req.raw, auth);
       if (accessResult !== null) return accessResult;
 
       const payload = await c.req.json();
@@ -414,7 +419,7 @@ export function registerRoleRoutes(app: OpenAPIHono): void {
     }),
     async (c): Promise<any> => {
       const auth = c.get("auth");
-      const accessResult = await requireAccess({ module: "roles", permission: "read" })(c.req.raw, auth);
+      const accessResult = await requireAccess({ module: "platform", resource: "roles", permission: "read" })(c.req.raw, auth);
       if (accessResult !== null) return accessResult;
 
       const roleId = NumericIdSchema.parse(c.req.param("id"));
@@ -466,7 +471,7 @@ export function registerRoleRoutes(app: OpenAPIHono): void {
     }),
     async (c): Promise<any> => {
       const auth = c.get("auth");
-      const accessResult = await requireAccess({ module: "roles", permission: "update" })(c.req.raw, auth);
+      const accessResult = await requireAccess({ module: "platform", resource: "roles", permission: "update" })(c.req.raw, auth);
       if (accessResult !== null) return accessResult;
 
       const roleId = NumericIdSchema.parse(c.req.param("id"));
@@ -515,7 +520,7 @@ export function registerRoleRoutes(app: OpenAPIHono): void {
     }),
     async (c): Promise<any> => {
       const auth = c.get("auth");
-      const accessResult = await requireAccess({ module: "roles", permission: "delete" })(c.req.raw, auth);
+      const accessResult = await requireAccess({ module: "platform", resource: "roles", permission: "delete" })(c.req.raw, auth);
       if (accessResult !== null) return accessResult;
 
       const roleId = NumericIdSchema.parse(c.req.param("id"));

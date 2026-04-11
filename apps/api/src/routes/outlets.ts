@@ -80,7 +80,8 @@ outletsRoutes.get("/", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "outlets",
+      module: "platform",
+      resource: "outlets",
       permission: "read"
     })(c.req.raw, auth);
 
@@ -124,7 +125,8 @@ outletsRoutes.post("/", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "outlets", 
+      module: "platform",
+      resource: "outlets",
       permission: "create"
     })(c.req.raw, auth);
 
@@ -231,7 +233,8 @@ outletsRoutes.get("/:id", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "outlets",
+      module: "platform",
+      resource: "outlets",
       permission: "read"
     })(c.req.raw, auth);
 
@@ -271,7 +274,8 @@ outletsRoutes.patch("/:id", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "outlets",
+      module: "platform",
+      resource: "outlets",
       permission: "update"
     })(c.req.raw, auth);
 
@@ -368,7 +372,8 @@ outletsRoutes.delete("/:id", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "outlets",
+      module: "platform",
+      resource: "outlets",
       permission: "delete"
     })(c.req.raw, auth);
 
@@ -475,7 +480,7 @@ export const registerOutletRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "outlets", permission: "read" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "outlets", permission: "read" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const outlets = await listOutletsByCompany(auth.companyId);
@@ -514,7 +519,7 @@ export const registerOutletRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "outlets", permission: "create" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "outlets", permission: "create" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const payload = await c.req.json();
@@ -614,7 +619,7 @@ export const registerOutletRoutes = (app: OpenAPIHonoInterface): void => {
         const auth = c.get("auth");
         const outletId = NumericIdSchema.parse(c.req.param("id"));
 
-        const accessResult = await requireAccess({ module: "outlets", permission: "read" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "outlets", permission: "read" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const outlet = await getOutlet(auth.companyId, outletId);
@@ -667,7 +672,7 @@ export const registerOutletRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "outlets", permission: "update" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "outlets", permission: "update" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const outletId = NumericIdSchema.parse(c.req.param("id"));
@@ -723,7 +728,7 @@ export const registerOutletRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "outlets", permission: "delete" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "outlets", permission: "delete" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const outletId = NumericIdSchema.parse(c.req.param("id"));

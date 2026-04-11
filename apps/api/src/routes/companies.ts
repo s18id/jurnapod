@@ -109,7 +109,8 @@ companyRoutes.get("/", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "companies",
+      module: "platform",
+      resource: "companies",
       permission: "read"
     })(c.req.raw, auth);
 
@@ -144,7 +145,8 @@ companyRoutes.post("/", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "companies",
+      module: "platform",
+      resource: "companies",
       permission: "create"
     })(c.req.raw, auth);
 
@@ -198,7 +200,8 @@ companyRoutes.get("/:id", async (c) => {
     // Users can only access their own company unless they have cross-company permissions
     if (companyId !== auth.companyId) {
       const accessResult = await requireAccess({
-        module: "companies",
+        module: "platform",
+        resource: "companies",
         permission: "read"
       })(c.req.raw, auth);
 
@@ -231,7 +234,8 @@ companyRoutes.patch("/:id", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "companies",
+      module: "platform",
+      resource: "companies",
       permission: "update"
     })(c.req.raw, auth);
 
@@ -336,7 +340,7 @@ export function registerCompanyRoutes(app: OpenAPIHono): void {
     }),
     async (c): Promise<any> => {
       const auth = c.get("auth");
-      const accessResult = await requireAccess({ module: "companies", permission: "read" })(c.req.raw, auth);
+      const accessResult = await requireAccess({ module: "platform", resource: "companies", permission: "read" })(c.req.raw, auth);
       if (accessResult !== null) return accessResult;
 
       const url = new URL(c.req.raw.url);
@@ -404,7 +408,7 @@ export function registerCompanyRoutes(app: OpenAPIHono): void {
     }),
     async (c): Promise<any> => {
       const auth = c.get("auth");
-      const accessResult = await requireAccess({ module: "companies", permission: "create" })(c.req.raw, auth);
+      const accessResult = await requireAccess({ module: "platform", resource: "companies", permission: "create" })(c.req.raw, auth);
       if (accessResult !== null) return accessResult;
 
       const payload = await c.req.json();
@@ -467,7 +471,7 @@ export function registerCompanyRoutes(app: OpenAPIHono): void {
       const companyId = NumericIdSchema.parse(c.req.param("id"));
 
       if (companyId !== auth.companyId) {
-        const accessResult = await requireAccess({ module: "companies", permission: "read" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "companies", permission: "read" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
       }
 
@@ -531,7 +535,7 @@ export function registerCompanyRoutes(app: OpenAPIHono): void {
     async (c): Promise<any> => {
       const auth = c.get("auth");
       const companyId = NumericIdSchema.parse(c.req.param("id"));
-      const accessResult = await requireAccess({ module: "companies", permission: "update" })(c.req.raw, auth);
+      const accessResult = await requireAccess({ module: "platform", resource: "companies", permission: "update" })(c.req.raw, auth);
       if (accessResult !== null) return accessResult;
 
       const payload = await c.req.json();

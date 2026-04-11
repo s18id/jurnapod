@@ -124,7 +124,8 @@ usersRoutes.get("/", async (c) => {
     
     // Check access permission using bitmask
     const accessResult = await requireAccess({
-      module: "users",
+      module: "platform",
+      resource: "users",
       permission: "read"
     })(c.req.raw, auth);
 
@@ -155,7 +156,8 @@ usersRoutes.post("/", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "users",
+      module: "platform",
+      resource: "users",
       permission: "create"
     })(c.req.raw, auth);
 
@@ -207,7 +209,8 @@ usersRoutes.post("/:id/roles", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "users",
+      module: "platform",
+      resource: "users",
       permission: "update"
     })(c.req.raw, auth);
 
@@ -287,7 +290,8 @@ usersRoutes.patch("/:id", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "users",
+      module: "platform",
+      resource: "users",
       permission: "update"
     })(c.req.raw, auth);
 
@@ -331,7 +335,8 @@ usersRoutes.post("/:id/outlets", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "users",
+      module: "platform",
+      resource: "users",
       permission: "update"
     })(c.req.raw, auth);
 
@@ -370,7 +375,8 @@ usersRoutes.post("/:id/password", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "users",
+      module: "platform",
+      resource: "users",
       permission: "update"
     })(c.req.raw, auth);
 
@@ -413,7 +419,8 @@ usersRoutes.post("/:id/deactivate", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "users",
+      module: "platform",
+      resource: "users",
       permission: "delete"
     })(c.req.raw, auth);
 
@@ -451,7 +458,8 @@ usersRoutes.post("/:id/reactivate", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "users",
+      module: "platform",
+      resource: "users",
       permission: "delete"
     })(c.req.raw, auth);
 
@@ -489,7 +497,8 @@ usersRoutes.get("/roles", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "users",
+      module: "platform",
+      resource: "users",
       permission: "read"
     })(c.req.raw, auth);
 
@@ -512,7 +521,8 @@ usersRoutes.get("/outlets", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "users",
+      module: "platform",
+      resource: "users",
       permission: "read"
     })(c.req.raw, auth);
 
@@ -611,7 +621,7 @@ export function registerUserRoutes(app: OpenAPIHono): void {
     }),
     async (c): Promise<any> => {
       const auth = c.get("auth");
-      const accessResult = await requireAccess({ module: "users", permission: "read" })(c.req.raw, auth);
+      const accessResult = await requireAccess({ module: "platform", resource: "users", permission: "read" })(c.req.raw, auth);
       if (accessResult !== null) return accessResult;
 
       const url = new URL(c.req.raw.url);
@@ -665,7 +675,7 @@ export function registerUserRoutes(app: OpenAPIHono): void {
     }),
     async (c): Promise<any> => {
       const auth = c.get("auth");
-      const accessResult = await requireAccess({ module: "users", permission: "create" })(c.req.raw, auth);
+      const accessResult = await requireAccess({ module: "platform", resource: "users", permission: "create" })(c.req.raw, auth);
       if (accessResult !== null) return accessResult;
 
       const payload = await c.req.json();
@@ -772,7 +782,7 @@ export function registerUserRoutes(app: OpenAPIHono): void {
     }),
     async (c): Promise<any> => {
       const auth = c.get("auth");
-      const accessResult = await requireAccess({ module: "users", permission: "update" })(c.req.raw, auth);
+      const accessResult = await requireAccess({ module: "platform", resource: "users", permission: "update" })(c.req.raw, auth);
       if (accessResult !== null) return accessResult;
 
       const userId = NumericIdSchema.parse(c.req.param("id"));
