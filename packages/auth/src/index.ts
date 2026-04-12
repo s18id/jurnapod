@@ -52,3 +52,18 @@ export {
 
 // Re-export createAuthClient
 export { createAuthClient } from './lib/client.js';
+
+// Re-export validation utilities
+export {
+  validatePermissionBits,
+  validateRolePermissions,
+  validateAllRoles,
+  formatValidationReport,
+  CANONICAL_BITS,
+  MASKS,
+} from './validation/permission-validator.js';
+export type {
+  PermissionValidationResult,
+  RolePermissionValidationResult,
+  FullValidationReport,
+} from './validation/permission-validator.js';

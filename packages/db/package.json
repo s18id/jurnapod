@@ -40,7 +40,8 @@
     "db:backfill:reservation-ts": "node ./scripts/backfill-reservation-start-end-ts.mjs",
     "db:reconcile:pos-journals": "node ./scripts/reconcile-pos-journals.mjs",
     "db:audit:system-roles": "node ./scripts/audit-system-roles.mjs",
-    "db:consolidate:system-roles": "node ./scripts/consolidate-system-role-duplicates.mjs"
+    "db:consolidate:system-roles": "node ./scripts/consolidate-system-role-duplicates.mjs",
+    "validate:permissions": "node scripts/validate-permissions.js"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",

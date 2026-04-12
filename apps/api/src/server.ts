@@ -8,6 +8,7 @@ import { initWebSocketManager } from "./lib/websocket/index.js";
 import { cleanupStaleOperations } from "./lib/progress/progress-store.js";
 import { initializeDefaultMetrics } from "./lib/metrics/index.js";
 import { alertEvaluationService } from "./lib/alerts/alert-evaluation.js";
+import { validatePermissionsOnStartup } from "./startup/validate-permissions.js";
 import { app } from "./app.js";
 
 // Validate environment configuration before starting server
@@ -122,6 +123,14 @@ cleanupStaleOperations()
 // Initialize WebSocket manager
 const wsManager = initWebSocketManager(server);
 wsManager.start();
+
+// Run permission validation before accepting requests (in non-production only)
+// Production will log warnings but continue
+if (process.env.NODE_ENV !== "production") {
+  validatePermissionsOnStartup().catch((error) => {
+    console.error("Failed to validate permissions on startup:", error);
+  });
+}
 
 server.listen(PORT, HOST, () => {
   console.log(`API server running on http://${HOST}:${PORT}`);

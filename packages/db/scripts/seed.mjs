@@ -6,6 +6,24 @@ import { hash as argon2Hash } from "@node-rs/argon2";
 import bcrypt from "bcryptjs";
 import mysql from "mysql2/promise";
 
+// Epic 39 canonical permission bits (from @jurnapod/shared)
+// Bit layout: READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32
+const PERMISSION_BITS = {
+  read: 1,     // 0b000001
+  create: 2,   // 0b000010
+  update: 4,   // 0b000100
+  delete: 8,   // 0b001000
+  analyze: 16, // 0b010000
+  manage: 32   // 0b100000
+};
+
+// Composite masks
+const MASKS = {
+  CRUD: 15,      // 1+2+4+8 - read+create+update+delete
+  CRUDA: 31,     // +16 - CRUD+analyze
+  CRUDAM: 63     // +32 - CRUDA+manage
+};
+
 const DEFAULT_PASSWORD_ALGO = "argon2id";
 const DEFAULT_BCRYPT_ROUNDS = 12;
 const DEFAULT_ARGON2_MEMORY_KB = 65536;
@@ -94,13 +112,6 @@ function passwordPolicyFromEnv() {
     )
   };
 }
-
-const PERMISSION_BITS = {
-  create: 1,
-  read: 2,
-  update: 4,
-  delete: 8
-};
 
 async function hashOwnerPassword(password, policy) {
   if (policy.defaultAlgorithm === "bcrypt") {
@@ -196,15 +207,16 @@ async function upsertModuleRolePermission(
   companyId,
   roleId,
   module,
-  permissionMask
+  permissionMask,
+  resource = null
 ) {
   await connection.execute(
-    `INSERT INTO module_roles (company_id, role_id, module, permission_mask)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO module_roles (company_id, role_id, module, resource, permission_mask)
+     VALUES (?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        permission_mask = VALUES(permission_mask),
        updated_at = CURRENT_TIMESTAMP`,
-    [companyId, roleId, module, permissionMask]
+    [companyId, roleId, module, resource, permissionMask]
   );
 }
 
@@ -321,107 +333,160 @@ async function main() {
       throw new Error("OWNER role id not found after seed upsert");
     }
 
-    // Seed default module permissions
+    // Seed default module permissions (Epic 39 resource-level ACL format)
+    // Format: module.resource (e.g., "platform.users")
+    // Masks use canonical bits: READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32
     const modulePermissions = [
-      // SUPER_ADMIN - full access to all modules
-      { roleCode: "SUPER_ADMIN", module: "companies", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "SUPER_ADMIN", module: "users", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "SUPER_ADMIN", module: "roles", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "SUPER_ADMIN", module: "outlets", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "SUPER_ADMIN", module: "accounts", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "SUPER_ADMIN", module: "journals", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "SUPER_ADMIN", module: "sales", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "SUPER_ADMIN", module: "pos", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "SUPER_ADMIN", module: "inventory", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "SUPER_ADMIN", module: "purchasing", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "SUPER_ADMIN", module: "reports", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "SUPER_ADMIN", module: "settings", create: 1, read: 1, update: 1, delete: 1 },
-      // OWNER - full access
-      { roleCode: "OWNER", module: "companies", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "OWNER", module: "users", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "OWNER", module: "roles", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "OWNER", module: "outlets", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "OWNER", module: "accounts", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "OWNER", module: "journals", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "OWNER", module: "cash_bank", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "OWNER", module: "sales", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "OWNER", module: "pos", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "OWNER", module: "inventory", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "OWNER", module: "purchasing", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "OWNER", module: "reports", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "OWNER", module: "settings", create: 1, read: 1, update: 1, delete: 1 },
-      // COMPANY_ADMIN - scoped admin defaults (match API bootstrap defaults)
-      { roleCode: "COMPANY_ADMIN", module: "companies", create: 0, read: 0, update: 0, delete: 0 },
-      { roleCode: "COMPANY_ADMIN", module: "users", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "COMPANY_ADMIN", module: "roles", create: 0, read: 0, update: 0, delete: 0 },
-      { roleCode: "COMPANY_ADMIN", module: "outlets", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "COMPANY_ADMIN", module: "accounts", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "COMPANY_ADMIN", module: "journals", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "COMPANY_ADMIN", module: "cash_bank", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "COMPANY_ADMIN", module: "sales", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "COMPANY_ADMIN", module: "pos", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "COMPANY_ADMIN", module: "inventory", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "COMPANY_ADMIN", module: "purchasing", create: 0, read: 0, update: 0, delete: 0 },
-      { roleCode: "COMPANY_ADMIN", module: "reports", create: 0, read: 1, update: 0, delete: 0 },
-      { roleCode: "COMPANY_ADMIN", module: "settings", create: 0, read: 1, update: 1, delete: 0 },
-      // ADMIN - same as owner
-      { roleCode: "ADMIN", module: "companies", create: 0, read: 1, update: 0, delete: 0 },
-      { roleCode: "ADMIN", module: "users", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "ADMIN", module: "roles", create: 0, read: 1, update: 0, delete: 0 },
-      { roleCode: "ADMIN", module: "outlets", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "ADMIN", module: "accounts", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "ADMIN", module: "journals", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "ADMIN", module: "cash_bank", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "ADMIN", module: "sales", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "ADMIN", module: "pos", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "ADMIN", module: "inventory", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "ADMIN", module: "purchasing", create: 1, read: 1, update: 1, delete: 1 },
-      { roleCode: "ADMIN", module: "reports", create: 0, read: 1, update: 0, delete: 0 },
-      { roleCode: "ADMIN", module: "settings", create: 0, read: 1, update: 1, delete: 0 },
-      // CASHIER - limited access
-      { roleCode: "CASHIER", module: "companies", create: 0, read: 0, update: 0, delete: 0 },
-      { roleCode: "CASHIER", module: "users", create: 0, read: 0, update: 0, delete: 0 },
-      { roleCode: "CASHIER", module: "roles", create: 0, read: 0, update: 0, delete: 0 },
-      { roleCode: "CASHIER", module: "outlets", create: 0, read: 1, update: 0, delete: 0 },
-      { roleCode: "CASHIER", module: "accounts", create: 0, read: 0, update: 0, delete: 0 },
-      { roleCode: "CASHIER", module: "journals", create: 0, read: 0, update: 0, delete: 0 },
-      { roleCode: "CASHIER", module: "cash_bank", create: 0, read: 0, update: 0, delete: 0 },
-      { roleCode: "CASHIER", module: "sales", create: 1, read: 1, update: 0, delete: 0 },
-      { roleCode: "CASHIER", module: "pos", create: 1, read: 1, update: 0, delete: 0 },
-      { roleCode: "CASHIER", module: "inventory", create: 0, read: 1, update: 0, delete: 0 },
-      { roleCode: "CASHIER", module: "purchasing", create: 0, read: 0, update: 0, delete: 0 },
-      { roleCode: "CASHIER", module: "reports", create: 0, read: 1, update: 0, delete: 0 },
-      { roleCode: "CASHIER", module: "settings", create: 0, read: 0, update: 0, delete: 0 },
-      // ACCOUNTANT - read mostly
-      { roleCode: "ACCOUNTANT", module: "companies", create: 0, read: 0, update: 0, delete: 0 },
-      { roleCode: "ACCOUNTANT", module: "users", create: 0, read: 0, update: 0, delete: 0 },
-      { roleCode: "ACCOUNTANT", module: "roles", create: 0, read: 0, update: 0, delete: 0 },
-      { roleCode: "ACCOUNTANT", module: "outlets", create: 0, read: 1, update: 0, delete: 0 },
-      { roleCode: "ACCOUNTANT", module: "accounts", create: 0, read: 1, update: 0, delete: 0 },
-      { roleCode: "ACCOUNTANT", module: "journals", create: 0, read: 1, update: 0, delete: 0 },
-      { roleCode: "ACCOUNTANT", module: "cash_bank", create: 1, read: 1, update: 0, delete: 0 },
-      { roleCode: "ACCOUNTANT", module: "sales", create: 0, read: 1, update: 0, delete: 0 },
-      { roleCode: "ACCOUNTANT", module: "pos", create: 0, read: 1, update: 0, delete: 0 },
-      { roleCode: "ACCOUNTANT", module: "inventory", create: 0, read: 0, update: 0, delete: 0 },
-      { roleCode: "ACCOUNTANT", module: "purchasing", create: 0, read: 1, update: 0, delete: 0 },
-      { roleCode: "ACCOUNTANT", module: "reports", create: 0, read: 1, update: 0, delete: 0 },
-      { roleCode: "ACCOUNTANT", module: "settings", create: 0, read: 0, update: 0, delete: 0 }
+      // SUPER_ADMIN - full CRUDAM access to all modules/resources
+      { roleCode: "SUPER_ADMIN", module: "platform.companies", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "platform.users", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "platform.roles", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "platform.outlets", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "platform.settings", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "accounting.accounts", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "accounting.journals", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "accounting.fiscal_years", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "accounting.reports", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "treasury.transactions", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "treasury.accounts", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "sales.invoices", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "sales.orders", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "sales.payments", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "inventory.items", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "inventory.stock", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "inventory.costing", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "pos.transactions", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "pos.config", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "reservations.bookings", mask: MASKS.CRUDAM },
+      { roleCode: "SUPER_ADMIN", module: "reservations.tables", mask: MASKS.CRUDAM },
+
+      // OWNER - full CRUDAM access to all modules/resources
+      { roleCode: "OWNER", module: "platform.companies", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "platform.users", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "platform.roles", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "platform.outlets", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "platform.settings", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "accounting.accounts", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "accounting.journals", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "accounting.fiscal_years", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "accounting.reports", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "treasury.transactions", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "treasury.accounts", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "sales.invoices", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "sales.orders", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "sales.payments", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "inventory.items", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "inventory.stock", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "inventory.costing", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "pos.transactions", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "pos.config", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "reservations.bookings", mask: MASKS.CRUDAM },
+      { roleCode: "OWNER", module: "reservations.tables", mask: MASKS.CRUDAM },
+
+      // COMPANY_ADMIN - module-specific permissions per permission matrix
+      { roleCode: "COMPANY_ADMIN", module: "platform.companies", mask: 0 },
+      { roleCode: "COMPANY_ADMIN", module: "platform.users", mask: MASKS.CRUDA },
+      { roleCode: "COMPANY_ADMIN", module: "platform.roles", mask: 0 },
+      { roleCode: "COMPANY_ADMIN", module: "platform.outlets", mask: MASKS.CRUDA },
+      { roleCode: "COMPANY_ADMIN", module: "platform.settings", mask: MASKS.CRUDA },
+      { roleCode: "COMPANY_ADMIN", module: "accounting.accounts", mask: PERMISSION_BITS.read | PERMISSION_BITS.manage }, // 33 - Structural: manage+read
+      { roleCode: "COMPANY_ADMIN", module: "accounting.journals", mask: MASKS.CRUDA },
+      { roleCode: "COMPANY_ADMIN", module: "accounting.fiscal_years", mask: PERMISSION_BITS.read | PERMISSION_BITS.manage }, // 33 - Structural: manage+read
+      { roleCode: "COMPANY_ADMIN", module: "accounting.reports", mask: MASKS.CRUDA },
+      { roleCode: "COMPANY_ADMIN", module: "treasury.transactions", mask: MASKS.CRUDA },
+      { roleCode: "COMPANY_ADMIN", module: "treasury.accounts", mask: PERMISSION_BITS.read | PERMISSION_BITS.manage }, // 33 - Structural: manage+read
+      { roleCode: "COMPANY_ADMIN", module: "sales.invoices", mask: MASKS.CRUDA },
+      { roleCode: "COMPANY_ADMIN", module: "sales.orders", mask: MASKS.CRUDA },
+      { roleCode: "COMPANY_ADMIN", module: "sales.payments", mask: MASKS.CRUDA },
+      { roleCode: "COMPANY_ADMIN", module: "inventory.items", mask: MASKS.CRUD },
+      { roleCode: "COMPANY_ADMIN", module: "inventory.stock", mask: MASKS.CRUD },
+      { roleCode: "COMPANY_ADMIN", module: "inventory.costing", mask: PERMISSION_BITS.read | PERMISSION_BITS.manage }, // 33 - Structural: manage+read
+      { roleCode: "COMPANY_ADMIN", module: "pos.transactions", mask: MASKS.CRUDA },
+      { roleCode: "COMPANY_ADMIN", module: "pos.config", mask: MASKS.CRUDA },
+      { roleCode: "COMPANY_ADMIN", module: "reservations.bookings", mask: MASKS.CRUDA },
+      { roleCode: "COMPANY_ADMIN", module: "reservations.tables", mask: MASKS.CRUDA },
+
+      // ADMIN - moderate access
+      { roleCode: "ADMIN", module: "platform.companies", mask: 0 },
+      { roleCode: "ADMIN", module: "platform.users", mask: PERMISSION_BITS.read },
+      { roleCode: "ADMIN", module: "platform.roles", mask: PERMISSION_BITS.read },
+      { roleCode: "ADMIN", module: "platform.outlets", mask: PERMISSION_BITS.read },
+      { roleCode: "ADMIN", module: "platform.settings", mask: PERMISSION_BITS.read },
+      { roleCode: "ADMIN", module: "accounting.accounts", mask: PERMISSION_BITS.read }, // Structural: read only
+      { roleCode: "ADMIN", module: "accounting.journals", mask: MASKS.CRUDA },
+      { roleCode: "ADMIN", module: "accounting.fiscal_years", mask: PERMISSION_BITS.read }, // Structural: read only
+      { roleCode: "ADMIN", module: "accounting.reports", mask: PERMISSION_BITS.read }, // Analytical: read only
+      { roleCode: "ADMIN", module: "treasury.transactions", mask: MASKS.CRUDA },
+      { roleCode: "ADMIN", module: "treasury.accounts", mask: PERMISSION_BITS.read }, // Structural: read only
+      { roleCode: "ADMIN", module: "sales.invoices", mask: MASKS.CRUDA },
+      { roleCode: "ADMIN", module: "sales.orders", mask: MASKS.CRUDA },
+      { roleCode: "ADMIN", module: "sales.payments", mask: MASKS.CRUDA },
+      { roleCode: "ADMIN", module: "inventory.items", mask: MASKS.CRUDA },
+      { roleCode: "ADMIN", module: "inventory.stock", mask: MASKS.CRUDA },
+      { roleCode: "ADMIN", module: "inventory.costing", mask: PERMISSION_BITS.read }, // Structural: read only
+      { roleCode: "ADMIN", module: "pos.transactions", mask: MASKS.CRUDA },
+      { roleCode: "ADMIN", module: "pos.config", mask: MASKS.CRUDA },
+      { roleCode: "ADMIN", module: "reservations.bookings", mask: MASKS.CRUDA },
+      { roleCode: "ADMIN", module: "reservations.tables", mask: PERMISSION_BITS.read }, // Structural: read only
+
+      // CASHIER - minimal access (POS and reservations only)
+      { roleCode: "CASHIER", module: "platform.companies", mask: 0 },
+      { roleCode: "CASHIER", module: "platform.users", mask: 0 },
+      { roleCode: "CASHIER", module: "platform.roles", mask: 0 },
+      { roleCode: "CASHIER", module: "platform.outlets", mask: PERMISSION_BITS.read },
+      { roleCode: "CASHIER", module: "platform.settings", mask: 0 },
+      { roleCode: "CASHIER", module: "accounting.accounts", mask: 0 },
+      { roleCode: "CASHIER", module: "accounting.journals", mask: 0 },
+      { roleCode: "CASHIER", module: "accounting.fiscal_years", mask: 0 },
+      { roleCode: "CASHIER", module: "accounting.reports", mask: 0 },
+      { roleCode: "CASHIER", module: "treasury.transactions", mask: 0 },
+      { roleCode: "CASHIER", module: "treasury.accounts", mask: PERMISSION_BITS.read }, // Structural: read only
+      { roleCode: "CASHIER", module: "sales.invoices", mask: MASKS.CRUDA },
+      { roleCode: "CASHIER", module: "sales.orders", mask: MASKS.CRUDA },
+      { roleCode: "CASHIER", module: "sales.payments", mask: MASKS.CRUDA },
+      { roleCode: "CASHIER", module: "inventory.items", mask: PERMISSION_BITS.read },
+      { roleCode: "CASHIER", module: "inventory.stock", mask: 0 },
+      { roleCode: "CASHIER", module: "pos.transactions", mask: MASKS.CRUDA },
+      { roleCode: "CASHIER", module: "pos.config", mask: 0 },
+      { roleCode: "CASHIER", module: "reservations.bookings", mask: MASKS.CRUDA },
+      { roleCode: "CASHIER", module: "reservations.tables", mask: MASKS.CRUDA },
+
+      // ACCOUNTANT - accounting-focused access
+      { roleCode: "ACCOUNTANT", module: "platform.companies", mask: 0 },
+      { roleCode: "ACCOUNTANT", module: "platform.users", mask: PERMISSION_BITS.read },
+      { roleCode: "ACCOUNTANT", module: "platform.roles", mask: 0 },
+      { roleCode: "ACCOUNTANT", module: "platform.outlets", mask: PERMISSION_BITS.read },
+      { roleCode: "ACCOUNTANT", module: "platform.settings", mask: 0 },
+      { roleCode: "ACCOUNTANT", module: "accounting.accounts", mask: PERMISSION_BITS.read }, // Structural: read only
+      { roleCode: "ACCOUNTANT", module: "accounting.journals", mask: MASKS.CRUDA },
+      { roleCode: "ACCOUNTANT", module: "accounting.fiscal_years", mask: PERMISSION_BITS.read }, // Structural: read only
+      { roleCode: "ACCOUNTANT", module: "accounting.reports", mask: MASKS.CRUDA }, // Analytical: analyze allowed
+      { roleCode: "ACCOUNTANT", module: "treasury.transactions", mask: PERMISSION_BITS.read },
+      { roleCode: "ACCOUNTANT", module: "treasury.accounts", mask: PERMISSION_BITS.read }, // Structural: read only
+      { roleCode: "ACCOUNTANT", module: "sales.invoices", mask: PERMISSION_BITS.read },
+      { roleCode: "ACCOUNTANT", module: "sales.orders", mask: PERMISSION_BITS.read },
+      { roleCode: "ACCOUNTANT", module: "sales.payments", mask: PERMISSION_BITS.read },
+      { roleCode: "ACCOUNTANT", module: "inventory.items", mask: PERMISSION_BITS.read },
+      { roleCode: "ACCOUNTANT", module: "inventory.stock", mask: PERMISSION_BITS.read },
+      { roleCode: "ACCOUNTANT", module: "inventory.costing", mask: PERMISSION_BITS.read }, // Structural: read only
+      { roleCode: "ACCOUNTANT", module: "pos.transactions", mask: 0 },
+      { roleCode: "ACCOUNTANT", module: "pos.config", mask: 0 },
+      { roleCode: "ACCOUNTANT", module: "reservations.bookings", mask: 0 },
+      { roleCode: "ACCOUNTANT", module: "reservations.tables", mask: 0 }
     ];
 
     for (const perm of modulePermissions) {
       const roleId = roleIds[perm.roleCode];
       if (roleId) {
-        const permissionMask =
-          (perm.create ? PERMISSION_BITS.create : 0) |
-          (perm.read ? PERMISSION_BITS.read : 0) |
-          (perm.update ? PERMISSION_BITS.update : 0) |
-          (perm.delete ? PERMISSION_BITS.delete : 0);
+        // Parse module.resource format
+        const [mod, resource] = perm.module.split('.');
         await upsertModuleRolePermission(
           connection,
           companyId,
           roleId,
-          perm.module,
-          permissionMask
+          mod,
+          perm.mask,
+          resource
         );
       }
     }
