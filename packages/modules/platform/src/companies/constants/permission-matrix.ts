@@ -49,7 +49,7 @@ export const MODULE_ROLE_DEFAULTS = [
   { roleCode: "SUPER_ADMIN", module: "reservations.tables", permissionMask: PERMISSION_MASK.CRUDAM },
 
   // OWNER has full access to their company resources
-  { roleCode: "OWNER", module: "platform.companies", permissionMask: PERMISSION_MASK.CRUDAM },
+  { roleCode: "OWNER", module: "platform.companies", permissionMask: PERMISSION_BITS.READ | PERMISSION_BITS.UPDATE },
   { roleCode: "OWNER", module: "platform.users", permissionMask: PERMISSION_MASK.CRUDAM },
   { roleCode: "OWNER", module: "platform.roles", permissionMask: PERMISSION_MASK.CRUDAM },
   { roleCode: "OWNER", module: "platform.outlets", permissionMask: PERMISSION_MASK.CRUDAM },

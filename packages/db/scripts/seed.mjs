@@ -360,8 +360,8 @@ async function main() {
       { roleCode: "SUPER_ADMIN", module: "reservations.bookings", mask: MASKS.CRUDAM },
       { roleCode: "SUPER_ADMIN", module: "reservations.tables", mask: MASKS.CRUDAM },
 
-      // OWNER - full CRUDAM access to all modules/resources
-      { roleCode: "OWNER", module: "platform.companies", mask: MASKS.CRUDAM },
+      // OWNER - full CRUDAM access to all modules/resources except companies (create/delete reserved for SUPER_ADMIN)
+      { roleCode: "OWNER", module: "platform.companies", mask: PERMISSION_BITS.read | PERMISSION_BITS.update }, // 5 - read + update only
       { roleCode: "OWNER", module: "platform.users", mask: MASKS.CRUDAM },
       { roleCode: "OWNER", module: "platform.roles", mask: MASKS.CRUDAM },
       { roleCode: "OWNER", module: "platform.outlets", mask: MASKS.CRUDAM },
