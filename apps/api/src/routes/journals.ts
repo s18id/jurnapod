@@ -4,32 +4,37 @@
 /**
  * Journal Routes
  *
- * Routes for journal management:
- * GET /journals - List journal entries
- * POST /journals - Create manual journal entry
- * GET /journals/:id - Get single journal batch
+ * Thin HTTP adapters that delegate to shared handlers in journal-handlers.ts.
+ * All business logic (permission checks, service calls, error handling) is
+ * centralized in the handler layer for reuse by both Hono and OpenAPI routes.
+ *
+ * Routes:
+ * GET  /journals     - List journal entries
+ * POST /journals     - Create manual journal entry
+ * GET  /journals/:id - Get single journal batch
  */
 
 import { Hono } from "hono";
 import { z } from "zod";
 import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
-import { authenticateRequest, requireAccess } from "@/lib/auth-guard";
+import { authenticateRequest } from "@/lib/auth-guard";
 import { errorResponse, successResponse } from "@/lib/response";
 import {
-  createManualJournalEntry,
-  listJournalBatches,
-  getJournalBatch,
-  JournalNotBalancedError,
-  JournalNotFoundError,
-  InvalidJournalLineError
-} from "@/lib/journals";
-import { ManualJournalEntryCreateRequestSchema, NumericIdSchema } from "@jurnapod/shared";
+  handleListJournals,
+  handleCreateJournal,
+  handleGetJournal,
+  listQuerySchema
+} from "@/lib/journal-handlers";
+import { NumericIdSchema } from "@jurnapod/shared";
 import type { AuthContext } from "@/lib/auth-guard";
 
 const journalRoutes = new Hono();
 
-// Auth middleware
+// ============================================================================
+// Auth Middleware
+// ============================================================================
+
 journalRoutes.use("/*", async (c, next) => {
   const authResult = await authenticateRequest(c.req.raw);
   if (!authResult.success) {
@@ -39,19 +44,67 @@ journalRoutes.use("/*", async (c, next) => {
   await next();
 });
 
-// Query schema for list endpoint
-const listQuerySchema = z.object({
-  outlet_id: z.coerce.number().int().positive().optional(),
-  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  doc_type: z.string().optional(),
-  account_id: z.coerce.number().int().positive().optional(),
-  limit: z.coerce.number().int().positive().max(1000).optional(),
-  offset: z.coerce.number().int().min(0).optional(),
+// ============================================================================
+// Hono Routes (Runtime - Used by app.ts)
+// ============================================================================
+
+/**
+ * GET /journals - List journal entries with optional filtering
+ *
+ * Query params:
+ * - outlet_id (optional): Outlet ID filter
+ * - start_date (optional): Start date (YYYY-MM-DD)
+ * - end_date (optional): End date (YYYY-MM-DD)
+ * - doc_type (optional): Document type filter
+ * - account_id (optional): Account ID filter
+ * - limit (optional): Results limit (default 100, max 1000)
+ * - offset (optional): Results offset (default 0)
+ */
+journalRoutes.get("/", async (c) => {
+  const auth = c.get("auth") as AuthContext;
+
+  const url = new URL(c.req.raw.url);
+  const query = listQuerySchema.parse({
+    outlet_id: url.searchParams.get("outlet_id") ?? undefined,
+    start_date: url.searchParams.get("start_date") ?? undefined,
+    end_date: url.searchParams.get("end_date") ?? undefined,
+    doc_type: url.searchParams.get("doc_type") ?? undefined,
+    account_id: url.searchParams.get("account_id") ?? undefined,
+    limit: url.searchParams.get("limit") ?? undefined,
+    offset: url.searchParams.get("offset") ?? undefined,
+  });
+
+  return handleListJournals(auth, c.req.raw, query);
+});
+
+/**
+ * POST /journals - Create manual journal entry
+ *
+ * Creates a new journal batch with debit/credit lines that must balance.
+ */
+journalRoutes.post("/", async (c) => {
+  const auth = c.get("auth") as AuthContext;
+
+  const body = await c.req.json();
+  const input = body;
+
+  return handleCreateJournal(auth, c.req.raw, input);
+});
+
+/**
+ * GET /journals/:id - Get single journal batch by ID
+ */
+journalRoutes.get("/:id", async (c) => {
+  const auth = c.get("auth") as AuthContext;
+
+  const idParam = c.req.param("id");
+  const batchId = NumericIdSchema.parse(Number(idParam));
+
+  return handleGetJournal(auth, c.req.raw, batchId);
 });
 
 // ============================================================================
-// OpenAPI Schemas
+// OpenAPI Schemas (for spec generation)
 // ============================================================================
 
 /**
@@ -109,112 +162,13 @@ const JournalErrorResponseSchema = zodOpenApi.object({
   }).openapi("JournalErrorDetail"),
 }).openapi("JournalErrorResponse");
 
-/**
- * GET /journals
- * List journal entries with optional filtering
- *
- * Query params:
- * - outlet_id (optional): Outlet ID filter
- * - start_date (optional): Start date (YYYY-MM-DD)
- * - end_date (optional): End date (YYYY-MM-DD)
- * - doc_type (optional): Document type filter
- * - account_id (optional): Account ID filter
- * - limit (optional): Results limit (default 100, max 1000)
- * - offset (optional): Results offset (default 0)
- */
-journalRoutes.get("/", async (c) => {
-  const auth = c.get("auth") as AuthContext;
-
-    try {
-    // Check module permission using bitmask
-    const accessResult = await requireAccess({
-      module: "accounting",
-      resource: "journals",
-      permission: "create"
-    })(c.req.raw, auth);
-
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
-    const body = await c.req.json();
-    const input = ManualJournalEntryCreateRequestSchema.parse(body);
-
-    // Verify company_id matches authenticated user
-    if (input.company_id !== auth.companyId) {
-      return errorResponse("COMPANY_MISMATCH", "Company ID mismatch", 400);
-    }
-
-    const batch = await createManualJournalEntry(input, auth.userId);
-
-    return successResponse(batch, 201);
-  } catch (error) {
-    if (error instanceof z.ZodError || error instanceof SyntaxError) {
-      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
-    }
-
-    if (error instanceof JournalNotBalancedError) {
-      return errorResponse("NOT_BALANCED", "Journal entry debits and credits must balance", 400);
-    }
-
-    if (error instanceof InvalidJournalLineError) {
-      return errorResponse("INVALID_LINE", error.message, 400);
-    }
-
-    if (error instanceof Error && error.name === "JournalOutsideFiscalYearError") {
-      return errorResponse("FISCAL_YEAR_CLOSED", "Entry date is outside any open fiscal year", 400);
-    }
-
-    console.error("POST /journals failed:", error);
-    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to create journal entry", 500);
-  }
-});
-
-/**
- * GET /journals/:id
- * Get single journal batch by ID
- */
-journalRoutes.get("/:id", async (c) => {
-  const auth = c.get("auth") as AuthContext;
-
-  try {
-    // Check module permission using bitmask
-    const accessResult = await requireAccess({
-      module: "accounting",
-      resource: "journals",
-      permission: "read"
-    })(c.req.raw, auth);
-
-    if (accessResult !== null) {
-      return accessResult;
-    }
-
-    const idParam = c.req.param("id");
-    const batchId = NumericIdSchema.parse(Number(idParam));
-
-    const batch = await getJournalBatch(batchId, auth.companyId);
-
-    return successResponse(batch);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return errorResponse("INVALID_ID", "Invalid batch ID", 400);
-    }
-
-    if (error instanceof JournalNotFoundError) {
-      return errorResponse("NOT_FOUND", "Journal batch not found", 404);
-    }
-
-    console.error("GET /journals/:id failed:", error);
-    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to get journal batch", 500);
-  }
-});
-
 // ============================================================================
-// OpenAPI Route Registration
+// OpenAPI Route Registration (Used by openapi-aggregator.ts)
 // ============================================================================
 
 /**
  * Registers journal routes with an OpenAPIHono instance.
+ * Uses the same shared handlers as the Hono routes above.
  */
 export function registerJournalRoutes(app: { openapi: OpenAPIHonoType["openapi"] }): void {
   // GET /journals - List journal entries
@@ -256,52 +210,20 @@ export function registerJournalRoutes(app: { openapi: OpenAPIHonoType["openapi"]
     },
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.openapi(listRoute, (async (c: any) => {
     const auth = c.get("auth") as AuthContext;
 
-    try {
-      const accessResult = await requireAccess({
-        module: "accounting",
-        resource: "journals",
-        permission: "read"
-      })(c.req.raw, auth);
+    const query = {
+      outlet_id: c.req.query("outlet_id"),
+      start_date: c.req.query("start_date"),
+      end_date: c.req.query("end_date"),
+      doc_type: c.req.query("doc_type"),
+      account_id: c.req.query("account_id"),
+      limit: c.req.query("limit"),
+      offset: c.req.query("offset"),
+    };
 
-      if (accessResult !== null) {
-        return accessResult;
-      }
-
-      const url = new URL(c.req.raw.url);
-      const query = listQuerySchema.parse({
-        outlet_id: url.searchParams.get("outlet_id") ?? undefined,
-        start_date: url.searchParams.get("start_date") ?? undefined,
-        end_date: url.searchParams.get("end_date") ?? undefined,
-        doc_type: url.searchParams.get("doc_type") ?? undefined,
-        account_id: url.searchParams.get("account_id") ?? undefined,
-        limit: url.searchParams.get("limit") ?? undefined,
-        offset: url.searchParams.get("offset") ?? undefined,
-      });
-
-      const listQuery = {
-        company_id: auth.companyId,
-        outlet_id: query.outlet_id,
-        start_date: query.start_date,
-        end_date: query.end_date,
-        doc_type: query.doc_type,
-        account_id: query.account_id,
-        limit: query.limit ?? 100,
-        offset: query.offset ?? 0,
-      };
-
-      const batches = await listJournalBatches(listQuery);
-      return successResponse(batches);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return errorResponse("INVALID_REQUEST", "Invalid request parameters: " + error.errors.map(e => e.message).join(", "), 400);
-      }
-      console.error("GET /journals failed:", error);
-      return errorResponse("INTERNAL_SERVER_ERROR", "Failed to list journals", 500);
-    }
+    return handleListJournals(auth, c.req.raw, query);
   }) as any);
 
   // POST /journals - Create manual journal entry
@@ -345,50 +267,10 @@ export function registerJournalRoutes(app: { openapi: OpenAPIHonoType["openapi"]
     },
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.openapi(createJournalRoute, (async (c: any) => {
     const auth = c.get("auth") as AuthContext;
-
-    try {
-      const accessResult = await requireAccess({
-        module: "accounting",
-        resource: "journals",
-        permission: "create"
-      })(c.req.raw, auth);
-
-      if (accessResult !== null) {
-        return accessResult;
-      }
-
-      const body = await c.req.json();
-      const input = ManualJournalEntryCreateRequestSchema.parse(body);
-
-      if (input.company_id !== auth.companyId) {
-        return errorResponse("COMPANY_MISMATCH", "Company ID mismatch", 400);
-      }
-
-      const batch = await createManualJournalEntry(input, auth.userId);
-      return successResponse(batch, 201);
-    } catch (error) {
-      if (error instanceof z.ZodError || error instanceof SyntaxError) {
-        return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
-      }
-
-      if (error instanceof JournalNotBalancedError) {
-        return errorResponse("NOT_BALANCED", "Journal entry debits and credits must balance", 400);
-      }
-
-      if (error instanceof InvalidJournalLineError) {
-        return errorResponse("INVALID_LINE", error.message, 400);
-      }
-
-      if (error instanceof Error && error.name === "JournalOutsideFiscalYearError") {
-        return errorResponse("FISCAL_YEAR_CLOSED", "Entry date is outside any open fiscal year", 400);
-      }
-
-      console.error("POST /journals failed:", error);
-      return errorResponse("INTERNAL_SERVER_ERROR", "Failed to create journal entry", 500);
-    }
+    const body = await c.req.json();
+    return handleCreateJournal(auth, c.req.raw, body);
   }) as any);
 
   // GET /journals/:id - Get single journal batch
@@ -428,37 +310,10 @@ export function registerJournalRoutes(app: { openapi: OpenAPIHonoType["openapi"]
     },
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.openapi(getRoute, (async (c: any) => {
     const auth = c.get("auth") as AuthContext;
-
-    try {
-      const accessResult = await requireAccess({
-        module: "accounting",
-        resource: "journals",
-        permission: "read"
-      })(c.req.raw, auth);
-
-      if (accessResult !== null) {
-        return accessResult;
-      }
-
-      const idParam = c.req.param("id");
-      const batchId = NumericIdSchema.parse(Number(idParam));
-      const batch = await getJournalBatch(batchId, auth.companyId);
-      return successResponse(batch);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return errorResponse("INVALID_ID", "Invalid batch ID", 400);
-      }
-
-      if (error instanceof JournalNotFoundError) {
-        return errorResponse("NOT_FOUND", "Journal batch not found", 404);
-      }
-
-      console.error("GET /journals/:id failed:", error);
-      return errorResponse("INTERNAL_SERVER_ERROR", "Failed to get journal batch", 500);
-    }
+    const batchId = NumericIdSchema.parse(Number(c.req.param("id")));
+    return handleGetJournal(auth, c.req.raw, batchId);
   }) as any);
 }
 

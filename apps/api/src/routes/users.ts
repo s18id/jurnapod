@@ -37,6 +37,7 @@ import {
   setUserPassword,
   setUserActiveState,
   UserNotFoundError,
+  UserEmailExistsError,
   RoleNotFoundError,
   RoleLevelViolationError,
   RoleScopeViolationError,
@@ -321,6 +322,10 @@ usersRoutes.patch("/:id", async (c) => {
   } catch (error) {
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    if (error instanceof UserEmailExistsError) {
+      return errorResponse("CONFLICT", "Email already exists", 409);
     }
 
     console.error("PATCH /users/:id failed", error);
