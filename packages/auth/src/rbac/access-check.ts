@@ -28,7 +28,7 @@ export class RBACManager {
    * SUPER_ADMIN bypasses company deleted_at check — platform-wide access.
    */
   async checkAccess(options: AccessCheckOptions): Promise<AccessCheckResult | null> {
-    const { userId, companyId, allowedRoles, module, permission, outletId } = options;
+    const { userId, companyId, allowedRoles, module, resource, permission, outletId } = options;
 
     // Check SUPER_ADMIN first — global lookup, no company_id filter
     // SUPER_ADMIN bypasses company deleted_at check since they are platform-wide
@@ -119,6 +119,8 @@ export class RBACManager {
 
         if (typeof outletId === 'number') {
           // Check global permission with bitmask check
+          // For resource-level ACL: match specific resource OR module-level (NULL) permission
+          const res = resource ?? null;
           const globalPermMatch = await this.adapter.db
             .selectFrom('user_role_assignments as ura')
             .innerJoin('roles as r', 'r.id', 'ura.role_id')
@@ -128,6 +130,9 @@ export class RBACManager {
             .where('r.is_global', '=', 1)
             .where('ura.outlet_id', 'is', null)
             .where('mr.module', '=', module)
+            .where(res !== null
+              ? sql<boolean>`(${sql`mr.resource`} = ${res} OR ${sql`mr.resource`} IS NULL)`
+              : sql<boolean>`${sql`mr.resource`} IS NULL`)
             .where('mr.company_id', '=', companyId)
             .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
             .select(['mr.id'])
@@ -142,6 +147,9 @@ export class RBACManager {
             .where('ura.company_id', '=', companyId)
             .where('ura.outlet_id', '=', outletId)
             .where('mr.module', '=', module)
+            .where(res !== null
+              ? sql<boolean>`(${sql`mr.resource`} = ${res} OR ${sql`mr.resource`} IS NULL)`
+              : sql<boolean>`${sql`mr.resource`} IS NULL`)
             .where('mr.company_id', '=', companyId)
             .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
             .select(['mr.id'])
@@ -150,6 +158,8 @@ export class RBACManager {
           hasPermission = Boolean(globalPermMatch) || Boolean(outletPermMatch);
         } else {
           // No outletId - check global permissions with bitmask check
+          // For resource-level ACL: match specific resource OR module-level (NULL) permission
+          const res = resource ?? null;
           const globalPermMatch = await this.adapter.db
             .selectFrom('user_role_assignments as ura')
             .innerJoin('roles as r', 'r.id', 'ura.role_id')
@@ -157,6 +167,9 @@ export class RBACManager {
             .where('ura.user_id', '=', userId)
             .where('ura.company_id', '=', companyId)
             .where('mr.module', '=', module)
+            .where(res !== null
+              ? sql<boolean>`(${sql`mr.resource`} = ${res} OR ${sql`mr.resource`} IS NULL)`
+              : sql<boolean>`${sql`mr.resource`} IS NULL`)
             .where('mr.company_id', '=', companyId)
             .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
             .select(['mr.id'])
@@ -414,7 +427,8 @@ export class RBACManager {
     userId: number,
     companyId: number,
     module: string,
-    permission?: ModulePermission
+    permission?: ModulePermission,
+    resource?: string
   ): Promise<boolean> {
     // Check if user is SUPER_ADMIN (global lookup — no company_id filter)
     const superAdmin = await this.isSuperAdminUser(userId);
@@ -423,7 +437,9 @@ export class RBACManager {
     }
 
     // If no specific permission required, just check for any global role with module access
+    // For resource-level ACL: match specific resource OR module-level (NULL) permission
     if (!permission) {
+      const res = resource ?? null;
       const moduleAccess = await this.adapter.db
         .selectFrom('user_role_assignments as ura')
         .innerJoin('roles as r', 'r.id', 'ura.role_id')
@@ -433,6 +449,9 @@ export class RBACManager {
         .where('r.is_global', '=', 1)
         .where('ura.outlet_id', 'is', null)
         .where('mr.module', '=', module)
+        .where(res !== null
+          ? sql<boolean>`(${sql`mr.resource`} = ${res} OR ${sql`mr.resource`} IS NULL)`
+          : sql<boolean>`${sql`mr.resource`} IS NULL`)
         .where('mr.company_id', '=', companyId)
         .select(['mr.id'])
         .executeTakeFirst();
@@ -441,6 +460,8 @@ export class RBACManager {
     }
 
     // Check for specific permission bit
+    // For resource-level ACL: match specific resource OR module-level (NULL) permission
+    const res = resource ?? null;
     const moduleAccess = await this.adapter.db
       .selectFrom('user_role_assignments as ura')
       .innerJoin('roles as r', 'r.id', 'ura.role_id')
@@ -449,9 +470,12 @@ export class RBACManager {
       .where('ura.company_id', '=', companyId)
       .where('r.is_global', '=', 1)
       .where('ura.outlet_id', 'is', null)
-      .where('mr.module', '=', module)
-      .where('mr.company_id', '=', companyId)
-      .select(['mr.permission_mask'])
+        .where('mr.module', '=', module)
+        .where(res !== null
+          ? sql<boolean>`(${sql`mr.resource`} = ${res} OR ${sql`mr.resource`} IS NULL)`
+          : sql<boolean>`${sql`mr.resource`} IS NULL`)
+        .where('mr.company_id', '=', companyId)
+        .select(['mr.permission_mask'])
       .execute();
 
     if (moduleAccess.length === 0) {

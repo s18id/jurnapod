@@ -213,6 +213,7 @@ export interface AccessCheckOptions {
   companyId: number;
   allowedRoles?: readonly RoleCode[];
   module?: string;
+  resource?: string;
   permission?: ModulePermission;
   outletId?: number;
 }
@@ -325,7 +326,8 @@ export interface AuthClient {
       userId: number,
       companyId: number,
       module: string,
-      permission?: ModulePermission
+      permission?: ModulePermission,
+      resource?: string
     ): Promise<boolean>;
     
     /** Build a permission mask from boolean flags */

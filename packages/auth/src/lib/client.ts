@@ -130,9 +130,10 @@ export function createAuthClient(
         userId: number,
         companyId: number,
         module: string,
-        permission?: ModulePermission
+        permission?: ModulePermission,
+        resource?: string
       ): Promise<boolean> {
-        return rbac.canManageCompanyDefaults(userId, companyId, module, permission);
+        return rbac.canManageCompanyDefaults(userId, companyId, module, permission, resource);
       },
 
       buildPermissionMask(params: {

@@ -174,3 +174,50 @@ Building on the shared package foundation (Story 39.1), the auth package needs t
 **Notes:**
 - Backward compatibility maintained - resource parameter is optional
 - When resource is undefined/null, behavior is module-level (existing code works unchanged)
+
+**5. `packages/auth/src/rbac/access-check.ts` — Resource-Level ACL Implementation (Completed 2026-04-12)**
+
+Updated `RBACManager.checkAccess()` method to properly enforce resource-level permissions:
+- Added SQL filtering by `mr.resource` column with flexible matching logic
+- When `resource` is specified: checks `(mr.resource = ${res} OR mr.resource IS NULL)`
+  - This allows resource-specific permissions to match, OR falls back to module-level permissions
+- When `resource` is null: checks `mr.resource IS NULL` only (module-level permissions)
+- Applied to three permission check paths:
+  1. Global permission check with bitmask (line 122-139)
+  2. Outlet-specific permission check (line 141-156)
+  3. Module-level fallback check (line 159-178)
+
+Updated `canManageCompanyDefaults()` method:
+- Added `resource?: string` parameter to method signature
+- Applied same resource filtering logic for company defaults management
+- Both with-permission and without-permission code paths updated
+
+**Key SQL Pattern Implemented:**
+```typescript
+const res = resource ?? null;
+.where(res !== null
+  ? sql<boolean>`(${sql`mr.resource`} = ${res} OR ${sql`mr.resource`} IS NULL)`
+  : sql<boolean>`${sql`mr.resource`} IS NULL`)
+```
+
+**6. `packages/auth/__test__/integration/resource-level-acl.integration.test.ts` — NEW TEST SUITE**
+
+Created comprehensive integration tests verifying resource-level ACL behavior:
+
+| Test | Description | Result |
+|------|-------------|--------|
+| Test 1 | User with `platform.users` permission CAN access `platform` + `resource: "users"` | ✅ Pass |
+| Test 2 | User with `platform.users` permission CANNOT access `platform` + `resource: "roles"` | ✅ Pass |
+| Test 3 | Module-level permission (`resource: null`) grants access to ALL resources | ✅ Pass |
+| Test 4 | SUPER_ADMIN bypasses all resource checks | ✅ Pass |
+| Test 5 | Multiple resource permissions work independently | ✅ Pass |
+| Test 6 | `canManageCompanyDefaults()` respects resource parameter | ✅ Pass |
+
+**Final Verification:**
+- ✅ `npm run typecheck -w @jurnapod/auth` passes
+- ✅ `npm run build -w @jurnapod/auth` passes  
+- ✅ `npm run test:integration -w @jurnapod/auth` passes (6/6 resource-level ACL tests)
+- ✅ All existing auth package tests continue to pass
+
+**Architecture Note:**
+The implementation maintains backward compatibility by treating `resource = undefined/null` as module-level permission check. This allows gradual migration of routes to resource-level ACL without breaking existing functionality.
