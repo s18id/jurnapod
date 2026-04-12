@@ -82,8 +82,9 @@ cashBankTransactionsRoutes.get("/", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "cash_bank",
-      permission: "read"
+      module: "treasury",
+      permission: "read",
+      resource: "transactions"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -121,8 +122,9 @@ cashBankTransactionsRoutes.post("/", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "cash_bank",
-      permission: "create"
+      module: "treasury",
+      permission: "create",
+      resource: "transactions"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -182,8 +184,9 @@ cashBankTransactionsRoutes.post("/:id/post", async (c) => {
     
     // Check access permission - posting requires create permission (not update)
     const accessResult = await requireAccess({
-      module: "cash_bank",
-      permission: "create"
+      module: "treasury",
+      permission: "create",
+      resource: "transactions"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -229,8 +232,9 @@ cashBankTransactionsRoutes.post("/:id/void", async (c) => {
     
     // Check access permission - voiding requires create permission (not delete)
     const accessResult = await requireAccess({
-      module: "cash_bank",
-      permission: "create"
+      module: "treasury",
+      permission: "create",
+      resource: "transactions"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
