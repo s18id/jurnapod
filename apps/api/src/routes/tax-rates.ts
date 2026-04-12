@@ -95,7 +95,7 @@ taxRatesRoutes.get("/", async (c) => {
   // Check access permission
   const accessResult = await requireAccess({
     roles: [...TAX_RATES_ROLES],
-    module: "settings",
+    module: "platform", resource: "settings",
     permission: "read"
   })(c.req.raw, auth);
 
@@ -120,7 +120,7 @@ taxRatesRoutes.get("/default", async (c) => {
   // Check access permission
   const accessResult = await requireAccess({
     roles: [...TAX_RATES_ROLES],
-    module: "settings",
+    module: "platform", resource: "settings",
     permission: "read"
   })(c.req.raw, auth);
 
@@ -145,7 +145,7 @@ taxRatesRoutes.post("/", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "settings",
+      module: "platform", resource: "settings",
       permission: "create"
     })(c.req.raw, auth);
 
@@ -196,7 +196,7 @@ taxRatesRoutes.get("/defaults", async (c) => {
   // Check access permission
   const accessResult = await requireAccess({
     roles: [...TAX_RATES_ROLES],
-    module: "settings",
+    module: "platform", resource: "settings",
     permission: "read"
   })(c.req.raw, auth);
 
@@ -220,7 +220,7 @@ taxRatesRoutes.put("/defaults", async (c) => {
 
   // Check access permission using bitmask system
   const accessResult = await requireAccess({
-    module: "settings",
+    module: "platform", resource: "settings",
     permission: "update"
   })(c.req.raw, auth);
 
@@ -256,7 +256,7 @@ taxRatesRoutes.put("/:id", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "settings",
+      module: "platform", resource: "settings",
       permission: "update"
     })(c.req.raw, auth);
 
@@ -312,7 +312,7 @@ taxRatesRoutes.delete("/:id", async (c) => {
     
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
-      module: "settings",
+      module: "platform", resource: "settings",
       permission: "delete"
     })(c.req.raw, auth);
 
@@ -407,7 +407,7 @@ export const registerTaxRateRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ roles: [...TAX_RATES_ROLES], module: "settings", permission: "read" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ roles: [...TAX_RATES_ROLES], module: "platform", resource: "settings", permission: "read" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const taxRates = await listCompanyTaxRatesKysely(auth.companyId);
@@ -438,7 +438,7 @@ export const registerTaxRateRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ roles: [...TAX_RATES_ROLES], module: "settings", permission: "read" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ roles: [...TAX_RATES_ROLES], module: "platform", resource: "settings", permission: "read" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const defaultTaxRates = await listCompanyDefaultTaxRatesKysely(auth.companyId);
@@ -478,7 +478,7 @@ export const registerTaxRateRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "settings", permission: "create" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "settings", permission: "create" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const payload = await c.req.json();
@@ -531,7 +531,7 @@ export const registerTaxRateRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ roles: [...TAX_RATES_ROLES], module: "settings", permission: "read" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ roles: [...TAX_RATES_ROLES], module: "platform", resource: "settings", permission: "read" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const defaultTaxRateIds = await listCompanyDefaultTaxRateIdsKysely(auth.companyId);
@@ -570,7 +570,7 @@ export const registerTaxRateRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "settings", permission: "update" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "settings", permission: "update" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const payload = await c.req.json();
@@ -618,7 +618,7 @@ export const registerTaxRateRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "settings", permission: "update" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "settings", permission: "update" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const taxRateId = NumericIdSchema.parse(c.req.param("id"));
@@ -681,7 +681,7 @@ export const registerTaxRateRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "settings", permission: "delete" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "settings", permission: "delete" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const taxRateId = NumericIdSchema.parse(c.req.param("id"));

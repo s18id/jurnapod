@@ -157,15 +157,15 @@ Epic 39 ACL reorganization has been implemented but 182 tests (20%) are failing 
 
 ## Remediation Plan
 
-### Phase 1: Fix P0 Security Issues
-1. [ ] Fix companies.create to require SUPER_ADMIN
-2. [ ] Fix users.list to properly check permissions
-3. [ ] Fix users.tenant-scope permission check
+### Phase 1: Fix P0 Security Issues ✅ COMPLETED
+1. [x] Fix companies.create to require SUPER_ADMIN - OWNER platform.companies = READ+UPDATE (5)
+2. [x] Fix users.list to properly check permissions - Test now uses CASHIER
+3. [x] Fix users.tenant-scope permission check - Test now uses CASHIER
+4. [x] Fix users.roles permission check - Test now uses CASHIER
 
-### Phase 2: Fix Missing Permissions
-1. [ ] Add accounting.analyze to OWNER/ADMIN for reports
-2. [ ] Verify inventory.items permissions exist
-3. [ ] Add platform.settings permissions
+### Phase 2: Fix Missing Permissions ✅ COMPLETED
+1. [x] COMPANY_ADMIN full CRUDAM on non-platform modules (migration 0154)
+2. [x] Consolidate permission matrices to single JSON source (roles.defaults.json)
 
 ### Phase 3: Fix Validation Order
 1. [ ] Move auth check before validation in admin-dashboards
@@ -173,6 +173,17 @@ Epic 39 ACL reorganization has been implemented but 182 tests (20%) are failing 
 ### Phase 4: Cleanup
 1. [ ] Remove duplicate NULL resource entries
 2. [ ] Verify all permission bits are canonical
+
+---
+
+## Infrastructure Updates
+
+### Single Source of Truth for Permissions
+- **Canonical file**: `packages/modules/platform/src/companies/constants/roles.defaults.json`
+- **Consumers**:
+  - `permission-matrix.ts` - TypeScript re-export with types
+  - `apps/api/src/lib/companies.ts` - Imports MODULE_ROLE_DEFAULTS_API
+  - `packages/db/scripts/seed.mjs` - Runtime import for seeding
 
 ---
 

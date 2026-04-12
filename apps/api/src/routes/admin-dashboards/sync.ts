@@ -39,7 +39,7 @@ syncDashboardRoutes.use("/*", async (c, next) => {
   const { requireAccess } = await import("../../lib/auth-guard.js");
 
   const accessResult = await requireAccess({
-    module: "settings",
+    module: "platform", resource: "settings",
     permission: "read"
   })(c.req.raw, auth);
 

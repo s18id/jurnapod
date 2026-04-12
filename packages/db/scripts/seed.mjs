@@ -12,7 +12,7 @@ import { dirname, join } from "path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const roleDefaults = await import("../../modules/platform/src/companies/constants/roles.defaults.json", {
-  assert: { type: "json" }
+  with: { type: "json" }
 }).then(m => m.default);
 
 // Epic 39 canonical permission bits (from @jurnapod/shared)

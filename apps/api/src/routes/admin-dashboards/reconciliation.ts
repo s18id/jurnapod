@@ -47,7 +47,7 @@ reconciliationRoutes.use("/*", async (c, next) => {
   const auth = c.get("auth");
 
   const accessResult = await requireAccess({
-    module: "settings",
+    module: "platform", resource: "settings",
     permission: "read"
   })(c.req.raw, auth);
 

@@ -79,7 +79,7 @@ settingsConfigRoutes.get("/", async (c) => {
   const auth = c.get("auth");
 
   const accessResult = await requireAccess({
-    module: "settings",
+    module: "platform", resource: "settings",
     permission: "read"
   })(c.req.raw, auth);
 
@@ -167,7 +167,7 @@ settingsConfigRoutes.patch("/", async (c) => {
   const auth = c.get("auth");
 
   const accessResult = await requireAccess({
-    module: "settings",
+    module: "platform", resource: "settings",
     permission: "update"
   })(c.req.raw, auth);
 
@@ -247,7 +247,7 @@ settingsConfigRoutes.put("/", async (c) => {
   const auth = c.get("auth");
 
   const accessResult = await requireAccess({
-    module: "settings",
+    module: "platform", resource: "settings",
     permission: "update"
   })(c.req.raw, auth);
 
@@ -391,7 +391,7 @@ export const registerSettingsConfigRoutes = (app: OpenAPIHonoInterface): void =>
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "settings", permission: "read" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "settings", permission: "read" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const url = new URL(c.req.raw.url);
@@ -469,7 +469,7 @@ export const registerSettingsConfigRoutes = (app: OpenAPIHonoInterface): void =>
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "settings", permission: "update" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "settings", permission: "update" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const payload = await c.req.json();
@@ -541,7 +541,7 @@ export const registerSettingsConfigRoutes = (app: OpenAPIHonoInterface): void =>
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "settings", permission: "update" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "settings", permission: "update" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const payload = await c.req.json();

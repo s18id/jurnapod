@@ -82,7 +82,7 @@ featureFlagsRoutes.get("/", async (c) => {
   const auth = c.get("auth");
 
   const accessResult = await requireAccess({
-    module: "settings",
+    module: "platform", resource: "settings",
     permission: "read"
   })(c.req.raw, auth);
 
@@ -113,7 +113,7 @@ featureFlagsRoutes.get("/:key", async (c) => {
   const auth = c.get("auth");
 
   const accessResult = await requireAccess({
-    module: "settings",
+    module: "platform", resource: "settings",
     permission: "read"
   })(c.req.raw, auth);
 
@@ -154,7 +154,7 @@ featureFlagsRoutes.post("/", async (c) => {
   const auth = c.get("auth");
 
   const accessResult = await requireAccess({
-    module: "settings",
+    module: "platform", resource: "settings",
     permission: "create"
   })(c.req.raw, auth);
 
@@ -207,7 +207,7 @@ featureFlagsRoutes.put("/:key", async (c) => {
   const auth = c.get("auth");
 
   const accessResult = await requireAccess({
-    module: "settings",
+    module: "platform", resource: "settings",
     permission: "update"
   })(c.req.raw, auth);
 
@@ -259,7 +259,7 @@ featureFlagsRoutes.delete("/:key", async (c) => {
   const auth = c.get("auth");
 
   const accessResult = await requireAccess({
-    module: "settings",
+    module: "platform", resource: "settings",
     permission: "delete"
   })(c.req.raw, auth);
 

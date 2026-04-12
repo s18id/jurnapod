@@ -119,7 +119,7 @@ export class RBACManager {
 
         if (typeof outletId === 'number') {
           // Check global permission with bitmask check
-          // For resource-level ACL: match specific resource OR module-level (NULL) permission
+          // For resource-level ACL: ONLY match specific resource (no fallback to module-level NULL)
           const res = resource ?? null;
           const globalPermMatch = await this.adapter.db
             .selectFrom('user_role_assignments as ura')
@@ -131,7 +131,7 @@ export class RBACManager {
             .where('ura.outlet_id', 'is', null)
             .where('mr.module', '=', module)
             .where(res !== null
-              ? sql<boolean>`(${sql`mr.resource`} = ${res} OR ${sql`mr.resource`} IS NULL)`
+              ? sql<boolean>`${sql`mr.resource`} = ${res}`
               : sql<boolean>`${sql`mr.resource`} IS NULL`)
             .where('mr.company_id', '=', companyId)
             .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
@@ -148,7 +148,7 @@ export class RBACManager {
             .where('ura.outlet_id', '=', outletId)
             .where('mr.module', '=', module)
             .where(res !== null
-              ? sql<boolean>`(${sql`mr.resource`} = ${res} OR ${sql`mr.resource`} IS NULL)`
+              ? sql<boolean>`${sql`mr.resource`} = ${res}`
               : sql<boolean>`${sql`mr.resource`} IS NULL`)
             .where('mr.company_id', '=', companyId)
             .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
@@ -158,7 +158,7 @@ export class RBACManager {
           hasPermission = Boolean(globalPermMatch) || Boolean(outletPermMatch);
         } else {
           // No outletId - check global permissions with bitmask check
-          // For resource-level ACL: match specific resource OR module-level (NULL) permission
+          // For resource-level ACL: ONLY match specific resource (no fallback to module-level NULL)
           const res = resource ?? null;
           const globalPermMatch = await this.adapter.db
             .selectFrom('user_role_assignments as ura')
@@ -168,7 +168,7 @@ export class RBACManager {
             .where('ura.company_id', '=', companyId)
             .where('mr.module', '=', module)
             .where(res !== null
-              ? sql<boolean>`(${sql`mr.resource`} = ${res} OR ${sql`mr.resource`} IS NULL)`
+              ? sql<boolean>`${sql`mr.resource`} = ${res}`
               : sql<boolean>`${sql`mr.resource`} IS NULL`)
             .where('mr.company_id', '=', companyId)
             .where(sql`(${sql`mr.permission_mask`} & ${sql`${permissionBit}`})`, '<>', 0)
@@ -437,7 +437,7 @@ export class RBACManager {
     }
 
     // If no specific permission required, just check for any global role with module access
-    // For resource-level ACL: match specific resource OR module-level (NULL) permission
+    // For resource-level ACL: ONLY match specific resource (no fallback to module-level NULL)
     if (!permission) {
       const res = resource ?? null;
       const moduleAccess = await this.adapter.db
@@ -450,7 +450,7 @@ export class RBACManager {
         .where('ura.outlet_id', 'is', null)
         .where('mr.module', '=', module)
         .where(res !== null
-          ? sql<boolean>`(${sql`mr.resource`} = ${res} OR ${sql`mr.resource`} IS NULL)`
+          ? sql<boolean>`${sql`mr.resource`} = ${res}`
           : sql<boolean>`${sql`mr.resource`} IS NULL`)
         .where('mr.company_id', '=', companyId)
         .select(['mr.id'])
@@ -460,7 +460,7 @@ export class RBACManager {
     }
 
     // Check for specific permission bit
-    // For resource-level ACL: match specific resource OR module-level (NULL) permission
+    // For resource-level ACL: ONLY match specific resource (no fallback to module-level NULL)
     const res = resource ?? null;
     const moduleAccess = await this.adapter.db
       .selectFrom('user_role_assignments as ura')
@@ -472,7 +472,7 @@ export class RBACManager {
       .where('ura.outlet_id', 'is', null)
         .where('mr.module', '=', module)
         .where(res !== null
-          ? sql<boolean>`(${sql`mr.resource`} = ${res} OR ${sql`mr.resource`} IS NULL)`
+          ? sql<boolean>`${sql`mr.resource`} = ${res}`
           : sql<boolean>`${sql`mr.resource`} IS NULL`)
         .where('mr.company_id', '=', companyId)
         .select(['mr.permission_mask'])

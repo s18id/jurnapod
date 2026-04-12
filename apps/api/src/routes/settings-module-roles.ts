@@ -51,7 +51,7 @@ moduleRolesRoutes.put("/:roleId/:module", async (c) => {
 
     // Check access permission using bitmask
     const accessResult = await requireAccess({
-      module: "settings",
+      module: "platform", resource: "settings",
       permission: "update"
     })(c.req.raw, auth);
 
@@ -144,7 +144,7 @@ export const registerSettingsModuleRoleRoutes = (app: OpenAPIHonoInterface): voi
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "settings", permission: "update" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "settings", permission: "update" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const roleId = NumericIdSchema.parse(c.req.param("roleId"));

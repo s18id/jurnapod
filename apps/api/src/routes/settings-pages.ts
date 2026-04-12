@@ -85,7 +85,7 @@ adminPagesRoutes.get("/", async (c) => {
 
     // Check access permission using bitmask
     const accessResult = await requireAccess({
-      module: "settings",
+      module: "platform", resource: "settings",
       permission: "read"
     })(c.req.raw, auth);
 
@@ -111,7 +111,7 @@ adminPagesRoutes.post("/", async (c) => {
 
     // Check access permission using bitmask
     const accessResult = await requireAccess({
-      module: "settings",
+      module: "platform", resource: "settings",
       permission: "create"
     })(c.req.raw, auth);
 
@@ -160,7 +160,7 @@ adminPagesRoutes.patch("/:id", async (c) => {
 
     // Check access permission using bitmask
     const accessResult = await requireAccess({
-      module: "settings",
+      module: "platform", resource: "settings",
       permission: "update"
     })(c.req.raw, auth);
 
@@ -215,7 +215,7 @@ adminPagesRoutes.post("/:id/publish", async (c) => {
 
     // Check access permission using bitmask
     const accessResult = await requireAccess({
-      module: "settings",
+      module: "platform", resource: "settings",
       permission: "update"
     })(c.req.raw, auth);
 
@@ -255,7 +255,7 @@ adminPagesRoutes.post("/:id/unpublish", async (c) => {
 
     // Check access permission using bitmask
     const accessResult = await requireAccess({
-      module: "settings",
+      module: "platform", resource: "settings",
       permission: "update"
     })(c.req.raw, auth);
 
@@ -374,7 +374,7 @@ export const registerSettingsPageRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "settings", permission: "read" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "settings", permission: "read" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const url = new URL(c.req.raw.url);
@@ -417,7 +417,7 @@ export const registerSettingsPageRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "settings", permission: "create" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "settings", permission: "create" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const payload = await c.req.json();
@@ -479,7 +479,7 @@ export const registerSettingsPageRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "settings", permission: "update" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "settings", permission: "update" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const pageId = NumericIdSchema.parse(c.req.param("id"));
@@ -540,7 +540,7 @@ export const registerSettingsPageRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "settings", permission: "update" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "settings", permission: "update" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const pageId = NumericIdSchema.parse(c.req.param("id"));
@@ -589,7 +589,7 @@ export const registerSettingsPageRoutes = (app: OpenAPIHonoInterface): void => {
     async (c: any) => {
       try {
         const auth = c.get("auth");
-        const accessResult = await requireAccess({ module: "settings", permission: "update" })(c.req.raw, auth);
+        const accessResult = await requireAccess({ module: "platform", resource: "settings", permission: "update" })(c.req.raw, auth);
         if (accessResult !== null) return accessResult;
 
         const pageId = NumericIdSchema.parse(c.req.param("id"));

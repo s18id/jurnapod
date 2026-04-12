@@ -48,7 +48,7 @@ auditRoutes.use("/*", async (c, next) => {
 
   // Check access permission using bitmask
   const accessResult = await requireAccess({
-    module: "settings",
+    module: "platform", resource: "settings",
     permission: "read"
   })(c.req.raw, auth);
 
