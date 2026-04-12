@@ -30,6 +30,12 @@ export default defineConfig({
     testTimeout: 30000,
     hookTimeout: 30000,
     teardownTimeout: 10000,
+    // Use threads pool — max 2 workers prevents memory exhaustion
+    pool: 'threads',
+    maxWorkers: 4,
+    minWorkers: 1,
+    // forceExit kills workers after tests — prevents zombie processes
+    forceExit: true,
     // Output JSON results to file for CI/CD
     outputFile: {
       json: path.resolve(logsDir, 'test-results.json'),

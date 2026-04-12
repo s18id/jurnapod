@@ -15,5 +15,12 @@ export default defineConfig({
     testTimeout: 30000,
     hookTimeout: 30000,
     teardownTimeout: 10000,
+    pool: 'threads',
+    maxWorkers: 1,
+    minWorkers: 1,
+    poolOptions: {
+      threads: { singleThread: true },
+    },
+    forceExit: true,
   },
 });
