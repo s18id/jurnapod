@@ -10,13 +10,16 @@ import { closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
-  getSeedSyncContext
+  getSeedSyncContext,
+  getOrCreateTestCashierForPermission
 } from '../../fixtures';
 
 let baseUrl: string;
 let accessToken: string;
 let companyId: number;
 let cashierUserId: number;
+let cashierToken: string;
+let companyCode: string;
 
 describe('users.update', { timeout: 30000 }, () => {
   beforeAll(async () => {
@@ -25,6 +28,15 @@ describe('users.update', { timeout: 30000 }, () => {
     const context = await getSeedSyncContext();
     companyId = context.companyId;
     cashierUserId = context.cashierUserId;
+    companyCode = process.env.JP_COMPANY_CODE || 'JP';
+
+    // Get cashier token for permission denial tests
+    const cashierAuth = await getOrCreateTestCashierForPermission(
+      companyId,
+      companyCode,
+      baseUrl
+    );
+    cashierToken = cashierAuth.accessToken;
   });
 
   afterAll(async () => {
@@ -42,17 +54,16 @@ describe('users.update', { timeout: 30000 }, () => {
   });
 
   it('returns 403 when user lacks users module update permission', async () => {
-    // Note: OWNER/SUPER_ADMIN role bypasses module permission checks.
-    // If this returns 200, the token has role-level bypass.
+    // Use CASHIER token which lacks platform.users UPDATE permission
     const res = await fetch(`${baseUrl}/api/users/${cashierUserId}`, {
       method: 'PATCH',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        'Authorization': `Bearer ${cashierToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ email: 'new@example.com' })
     });
-    expect([200, 403]).toContain(res.status);
+    expect(res.status).toBe(403);
   });
 
   it('returns 400 or 403 depending on permission check order', async () => {

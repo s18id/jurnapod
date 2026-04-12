@@ -82,6 +82,7 @@ recipesRoutes.get("/:id/ingredients", async (c) => {
     // Check access permission using bitmask
     const accessResult = await requireAccess({
       module: "inventory",
+      resource: "items",
       permission: "read"
     })(c.req.raw, auth);
 

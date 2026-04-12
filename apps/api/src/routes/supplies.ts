@@ -86,6 +86,7 @@ suppliesRoutes.get("/", async (c) => {
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
       module: "inventory",
+      resource: "items",
       permission: "read"
     })(c.req.raw, auth);
 
