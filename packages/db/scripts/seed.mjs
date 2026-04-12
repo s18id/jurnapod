@@ -348,20 +348,18 @@ async function main() {
     }
 
     // Seed default module permissions (Epic 39 resource-level ACL format)
-    // modulePermissions is now built from JSON at top of file (MODULE_ROLE_DEFAULTS)
-    // Source of truth: ../../modules/platform/src/companies/constants/roles.defaults.json
+    // Source of truth: @jurnapod/shared/src/constants/roles.defaults.json
     for (const perm of MODULE_ROLE_DEFAULTS) {
       const roleId = roleIds[perm.roleCode];
       if (roleId) {
-        // Parse module.resource format
-        const [mod, resource] = perm.module.split('.');
+        // MODULE_ROLE_DEFAULTS_API has module and resource as separate fields
         await upsertModuleRolePermission(
           connection,
           companyId,
           roleId,
-          mod,
-          perm.mask,
-          resource
+          perm.module,
+          perm.permissionMask,
+          perm.resource || null
         );
       }
     }
