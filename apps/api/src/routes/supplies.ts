@@ -131,7 +131,8 @@ suppliesRoutes.post("/", async (c) => {
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
       module: "inventory",
-      permission: "create"
+      resource: "items",
+      permission: "read"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -177,6 +178,7 @@ suppliesRoutes.get("/:id", async (c) => {
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
       module: "inventory",
+      resource: "items",
       permission: "read"
     })(c.req.raw, auth);
 
@@ -210,6 +212,7 @@ suppliesRoutes.patch("/:id", async (c) => {
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
       module: "inventory",
+      resource: "items",
       permission: "update"
     })(c.req.raw, auth);
 
@@ -272,6 +275,7 @@ suppliesRoutes.delete("/:id", async (c) => {
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
       module: "inventory",
+      resource: "items",
       permission: "delete"
     })(c.req.raw, auth);
 

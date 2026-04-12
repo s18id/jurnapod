@@ -115,7 +115,8 @@ recipesRoutes.post("/:id/ingredients", async (c) => {
     // Check access permission using bitmask
     const accessResult = await requireAccess({
       module: "inventory",
-      permission: "create"
+      resource: "items",
+      permission: "read"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -168,7 +169,8 @@ recipesRoutes.patch("/ingredients/:id", async (c) => {
     // Check access permission using bitmask
     const accessResult = await requireAccess({
       module: "inventory",
-      permission: "update"
+      resource: "items",
+      permission: "create"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -216,6 +218,7 @@ recipesRoutes.delete("/ingredients/:id", async (c) => {
     // Check access permission using bitmask
     const accessResult = await requireAccess({
       module: "inventory",
+      resource: "items",
       permission: "delete"
     })(c.req.raw, auth);
 
@@ -254,6 +257,7 @@ recipesRoutes.get("/:id/cost", async (c) => {
     // Check access permission using bitmask
     const accessResult = await requireAccess({
       module: "inventory",
+      resource: "items",
       permission: "read"
     })(c.req.raw, auth);
 

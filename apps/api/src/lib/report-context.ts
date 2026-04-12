@@ -158,9 +158,14 @@ export async function buildReportContext(
 ): Promise<{ error: Response | null; context: ReportContext | null }> {
   const auth = c.get("auth");
 
+  // Map module to resource for Epic 39 ACL format
+  // accounting reports use "accounting.reports", pos reports use "pos.transactions"
+  const resource = module === "accounting" ? "reports" : "transactions";
+
   // Check module permission - get guard function and call it
   const accessGuard = requireAccess({
     module,
+    resource,
     permission: "analyze"
   });
   const accessResult = await accessGuard(c.req.raw, auth);
