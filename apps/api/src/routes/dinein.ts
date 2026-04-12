@@ -49,11 +49,11 @@ dineinRoutes.use("/*", dineinAuthMiddleware);
 dineinRoutes.get("/sessions", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
-  // Guard: check roles and POS module permission
+  // Guard: check roles and reservations.bookings permission for sessions
   const guardResult = await requireAccess({
     roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN", "CASHIER"],
-    module: "pos",
-    resource: "transactions",
+    module: "reservations",
+    resource: "bookings",
     permission: "read"
   })(c.req.raw, auth);
   if (guardResult) return guardResult;
@@ -153,11 +153,11 @@ dineinRoutes.get("/sessions", async (c) => {
 dineinRoutes.get("/tables", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
-  // Guard: check roles and POS module permission
+  // Guard: check roles and reservations.tables permission for tables
   const guardResult = await requireAccess({
     roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN", "CASHIER"],
-    module: "pos",
-    resource: "config",
+    module: "reservations",
+    resource: "tables",
     permission: "read"
   })(c.req.raw, auth);
   if (guardResult) return guardResult;
@@ -302,8 +302,8 @@ export function registerDineInRoutes(app: OpenAPIHono): void {
       const auth = c.get("auth") as AuthContext;
       const guardResult = await requireAccess({
         roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN", "CASHIER"],
-        module: "pos",
-        resource: "transactions",
+        module: "reservations",
+        resource: "bookings",
         permission: "read"
       })(c.req.raw, auth);
       if (guardResult) return guardResult;
@@ -389,8 +389,8 @@ export function registerDineInRoutes(app: OpenAPIHono): void {
       const auth = c.get("auth") as AuthContext;
       const guardResult = await requireAccess({
         roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN", "CASHIER"],
-        module: "pos",
-        resource: "config",
+        module: "reservations",
+        resource: "tables",
         permission: "read"
       })(c.req.raw, auth);
       if (guardResult) return guardResult;

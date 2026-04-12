@@ -115,7 +115,7 @@ export const MODULE_ROLE_DEFAULTS = [
   { roleCode: "ADMIN", module: "pos.transactions", permissionMask: PERMISSION_MASK.CRUDA },
   { roleCode: "ADMIN", module: "pos.config", permissionMask: PERMISSION_MASK.CRUDA },
   { roleCode: "ADMIN", module: "reservations.bookings", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "ADMIN", module: "reservations.tables", permissionMask: PERMISSION_MASK.CRUDA },
+  { roleCode: "ADMIN", module: "reservations.tables", permissionMask: PERMISSION_MASK.READ }, // Structural: read only
 
   // CASHIER has minimal access (POS and reservations only)
   { roleCode: "CASHIER", module: "platform.companies", permissionMask: 0 },
