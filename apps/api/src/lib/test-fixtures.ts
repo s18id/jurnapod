@@ -1107,6 +1107,49 @@ export async function loginForTest(
 }
 
 // ============================================================================
+// Role Creation Helpers
+// ============================================================================
+
+/**
+ * Create a test role via API.
+ * Uses a unique code based on timestamp to avoid conflicts.
+ * 
+ * @param baseUrl - The base URL of the test server
+ * @param accessToken - Valid access token for authentication
+ * @param name - Role name (code will be generated from this)
+ * @returns Object with role ID
+ */
+export async function createTestRole(
+  baseUrl: string,
+  accessToken: string,
+  name: string = "Test Role"
+): Promise<{ id: number; code: string }> {
+  const timestamp = Date.now();
+  const code = `TEST_ROLE_${timestamp}`;
+
+  const res = await fetch(`${baseUrl}/api/roles`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${accessToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      code,
+      name: `${name} ${timestamp}`,
+      role_level: 0
+    })
+  });
+
+  if (!res.ok) {
+    const errorBody = await res.text();
+    throw new Error(`Failed to create test role: ${res.status} ${errorBody}`);
+  }
+
+  const data = await res.json();
+  return { id: data.data.id, code };
+}
+
+// ============================================================================
 // Authentication Helpers
 // ============================================================================
 

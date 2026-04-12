@@ -348,19 +348,6 @@ export interface CompanyPaymentMethodMappingsView {
   updated_at: Generated<Date>;
 }
 
-export interface CompanySettings {
-  company_id: number;
-  created_at: Generated<Date>;
-  created_by_user_id: Generated<number | null>;
-  id: Generated<number>;
-  key: string;
-  outlet_id: Generated<number | null>;
-  updated_at: Generated<Date>;
-  updated_by_user_id: Generated<number | null>;
-  value_json: string;
-  value_type: string;
-}
-
 export interface CompanyTaxDefaults {
   company_id: number;
   created_at: Generated<Date>;
@@ -1611,7 +1598,6 @@ export interface DB {
   company_modules: CompanyModules;
   company_payment_method_mappings: CompanyPaymentMethodMappings;
   company_payment_method_mappings_view: CompanyPaymentMethodMappingsView;
-  company_settings: CompanySettings;
   company_tax_defaults: CompanyTaxDefaults;
   cost_layer_consumption: CostLayerConsumption;
   data_imports: DataImports;

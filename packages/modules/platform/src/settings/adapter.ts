@@ -9,8 +9,6 @@ import {
   getSettingDefault,
   type SettingKey,
   type SettingValue,
-  type SettingsRegistryEntry,
-  InventoryCostingMethodSchema,
 } from "@jurnapod/shared";
 
 import type { SettingsPort } from "./port.js";
@@ -20,11 +18,12 @@ import { settingsCache } from "./cache.js";
 /**
  * Kysely-based implementation of SettingsPort.
  * 
- * Dual-read pattern:
- * 1. Try typed tables (settings_strings, settings_numbers, settings_booleans)
- * 2. Fall back to legacy company_settings table
- * 3. On legacy read, lazy-migrate to typed table
- * 4. Return registry default if not found anywhere
+ * Uses typed settings tables only:
+ * - settings_strings (string values)
+ * - settings_numbers (numeric values)
+ * - settings_booleans (boolean values)
+ * 
+ * Falls back to registry defaults if not found in typed tables.
  */
 export class KyselySettingsAdapter implements SettingsPort {
   constructor(private readonly db: KyselySchema) {}
@@ -70,7 +69,7 @@ export class KyselySettingsAdapter implements SettingsPort {
       return value as T;
     }
 
-    // Unknown key - try to resolve from legacy/typed tables, return default or provided default
+    // Unknown key - try to resolve from typed tables, return default or provided default
     const rawValue = await this.getRawValue(companyId, key, options?.outletId);
     if (rawValue !== undefined) {
       return rawValue as T;
@@ -112,20 +111,11 @@ export class KyselySettingsAdapter implements SettingsPort {
       return cached;
     }
 
-    // Try typed tables first
+    // Try typed tables
     const typedValue = await this.getFromTypedTables<T>(companyId, key, outletId);
     if (typedValue !== undefined) {
       settingsCache.set(companyId, outletId, key, typedValue);
       return typedValue;
-    }
-
-    // Fall back to legacy company_settings
-    const legacyValue = await this.getFromLegacyTable<T>(companyId, key, outletId);
-    if (legacyValue !== undefined) {
-      // Lazy migration: write to typed table
-      await this.migrateToTypedTable(companyId, key, legacyValue, outletId);
-      settingsCache.set(companyId, outletId, key, legacyValue);
-      return legacyValue;
     }
 
     // Return registry default
@@ -245,56 +235,12 @@ export class KyselySettingsAdapter implements SettingsPort {
     return rows.rows[0].setting_value;
   }
 
-  private async getFromLegacyTable<T>(
-    companyId: number,
-    key: SettingKey,
-    outletId?: number
-  ): Promise<T | undefined> {
-    // Query legacy company_settings table
-    const query = outletId !== undefined
-      ? sql<{ value_json: string; value_type: string }>`
-          SELECT value_json, value_type FROM company_settings
-          WHERE company_id = ${companyId} AND \`key\` = ${key} AND outlet_id = ${outletId}
-          LIMIT 1
-        `
-      : sql<{ value_json: string; value_type: string }>`
-          SELECT value_json, value_type FROM company_settings
-          WHERE company_id = ${companyId} AND \`key\` = ${key} AND outlet_id IS NULL
-          LIMIT 1
-        `;
-
-    const rows = await query.execute(this.db);
-    if (rows.rows.length === 0) {
-      return undefined;
-    }
-
-    const row = rows.rows[0];
-    const rawValue = row.value_json;
-
-    // Parse JSON if needed
-    let parsedValue: unknown;
-    try {
-      parsedValue = JSON.parse(rawValue);
-    } catch {
-      // Not JSON - treat as string directly
-      parsedValue = rawValue;
-    }
-
-    // Validate against registry schema
-    try {
-      return parseSettingValue(key, parsedValue) as T;
-    } catch {
-      // Validation failed - return default
-      return undefined;
-    }
-  }
-
   private async getRawValue(
     companyId: number,
     key: string,
     outletId?: number
   ): Promise<unknown | undefined> {
-    // First try typed tables (strings only for unknown keys)
+    // Try typed tables (strings only for unknown keys)
     const stringQuery = outletId !== undefined
       ? sql<{ setting_value: string }>`
           SELECT setting_value FROM settings_strings
@@ -312,70 +258,6 @@ export class KyselySettingsAdapter implements SettingsPort {
       return stringRows.rows[0].setting_value;
     }
 
-    // Fall back to legacy
-    const legacyQuery = outletId !== undefined
-      ? sql<{ value_json: string }>`
-          SELECT value_json FROM company_settings
-          WHERE company_id = ${companyId} AND \`key\` = ${key} AND outlet_id = ${outletId}
-          LIMIT 1
-        `
-      : sql<{ value_json: string }>`
-          SELECT value_json FROM company_settings
-          WHERE company_id = ${companyId} AND \`key\` = ${key} AND outlet_id IS NULL
-          LIMIT 1
-        `;
-
-    const legacyRows = await legacyQuery.execute(this.db);
-    if (legacyRows.rows.length === 0) {
-      return undefined;
-    }
-
-    const rawValue = legacyRows.rows[0].value_json;
-    try {
-      return JSON.parse(rawValue);
-    } catch {
-      return rawValue;
-    }
-  }
-
-  private async migrateToTypedTable(
-    companyId: number,
-    key: SettingKey,
-    value: unknown,
-    outletId?: number
-  ): Promise<void> {
-    const registry = SETTINGS_REGISTRY[key];
-    const { valueType } = registry;
-
-    // Only migrate if value is valid for the type
-    try {
-      parseSettingValue(key, value);
-    } catch {
-      // Skip migration if value doesn't match schema
-      return;
-    }
-
-    const effectiveOutletId = outletId ?? null;
-
-    switch (valueType) {
-      case "boolean":
-        await sql`
-          INSERT IGNORE INTO settings_booleans (company_id, outlet_id, setting_key, setting_value)
-          VALUES (${companyId}, ${effectiveOutletId}, ${key}, ${value ? 1 : 0})
-        `.execute(this.db);
-        break;
-      case "int":
-        await sql`
-          INSERT IGNORE INTO settings_numbers (company_id, outlet_id, setting_key, setting_value)
-          VALUES (${companyId}, ${effectiveOutletId}, ${key}, ${String(value)})
-        `.execute(this.db);
-        break;
-      case "enum":
-        await sql`
-          INSERT IGNORE INTO settings_strings (company_id, outlet_id, setting_key, setting_value)
-          VALUES (${companyId}, ${effectiveOutletId}, ${key}, ${String(value)})
-        `.execute(this.db);
-        break;
-    }
+    return undefined;
   }
 }

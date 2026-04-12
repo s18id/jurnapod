@@ -3,6 +3,7 @@
 
 // Integration tests for settings-module-roles.update
 // Tests PUT /settings/module-roles/:roleId/:module endpoint - updates module role permissions.
+// Note: Uses custom test role to avoid corrupting system roles (ADMIN, ACCOUNTANT, etc.)
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
@@ -10,17 +11,20 @@ import { closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
-  getSeedSyncContext,
-  getRoleIdByCode
+  createTestRole
 } from '../../fixtures';
 
 let baseUrl: string;
 let accessToken: string;
+let testRoleId: number;
 
 describe('settings-module-roles.update', { timeout: 30000 }, () => {
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
+    // Create a custom role for testing to avoid corrupting system roles
+    const testRole = await createTestRole(baseUrl, accessToken, 'ModuleRoleTest');
+    testRoleId = testRole.id;
   });
 
   afterAll(async () => {
@@ -38,14 +42,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('updates module role permission with valid payload when OWNER bypasses module permission', async () => {
-    // Get a valid role ID
-    const roleId = await getRoleIdByCode('ADMIN');
-    if (!roleId) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const updateRes = await fetch(`${baseUrl}/api/settings/module-roles/${roleId}/POS`, {
+    const updateRes = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -61,14 +58,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('updates module role permission for different module', async () => {
-    // Get a valid role ID
-    const roleId = await getRoleIdByCode('ADMIN');
-    if (!roleId) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const updateRes = await fetch(`${baseUrl}/api/settings/module-roles/${roleId}/INVENTORY`, {
+    const updateRes = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/INVENTORY`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -96,14 +86,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('accepts negative permission mask (implementation allows it)', async () => {
-    // Get a valid role ID
-    const roleId = await getRoleIdByCode('ADMIN');
-    if (!roleId) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const res = await fetch(`${baseUrl}/api/settings/module-roles/${roleId}/POS`, {
+    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -118,14 +101,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('returns 400 for non-integer permission mask', async () => {
-    // Get a valid role ID
-    const roleId = await getRoleIdByCode('ADMIN');
-    if (!roleId) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const res = await fetch(`${baseUrl}/api/settings/module-roles/${roleId}/POS`, {
+    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -138,14 +114,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('returns 400 when permission_mask is missing', async () => {
-    // Get a valid role ID
-    const roleId = await getRoleIdByCode('ADMIN');
-    if (!roleId) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const res = await fetch(`${baseUrl}/api/settings/module-roles/${roleId}/POS`, {
+    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -158,14 +127,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('updates permission with zero mask (no permissions)', async () => {
-    // Get a valid role ID
-    const roleId = await getRoleIdByCode('ADMIN');
-    if (!roleId) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const res = await fetch(`${baseUrl}/api/settings/module-roles/${roleId}/POS`, {
+    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -178,14 +140,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('updates permission with large mask value', async () => {
-    // Get a valid role ID
-    const roleId = await getRoleIdByCode('ADMIN');
-    if (!roleId) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const res = await fetch(`${baseUrl}/api/settings/module-roles/${roleId}/POS`, {
+    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -198,24 +153,18 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('updates module role permission for CASHIER role', async () => {
-    // Get CASHIER role ID
-    const roleId = await getRoleIdByCode('CASHIER');
-    if (!roleId) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const updateRes = await fetch(`${baseUrl}/api/settings/module-roles/${roleId}/SALES`, {
+    // Get CASHIER role ID - this is a system role so we test with valid mask
+    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/SALES`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        permission_mask: 3  // read(1) + create(2)
+        permission_mask: 3  // read(1) + create(2) - valid mask
       })
     });
 
-    expect([200, 400, 403, 404, 500]).toContain(updateRes.status);
+    expect([200, 400, 403, 404, 500]).toContain(res.status);
   });
 });

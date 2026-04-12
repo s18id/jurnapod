@@ -36,7 +36,7 @@
  * Database-agnostic: accepts a Kysely DB executor injected from the caller.
  */
 
-import { sql } from "kysely";
+import { sql } from "kysely"; // Still used for cost layer queries
 import type { KyselySchema } from "@jurnapod/db";
 
 import {
@@ -81,12 +81,6 @@ interface InventoryLayerRow {
   original_qty: string;
   acquired_at: Date;
   transaction_reference_id?: number | null;
-}
-
-interface SettingRow {
-  value_json: string;
-  value_type: string;
-  key: string;
 }
 
 // -----------------------------------------------------------------------------
@@ -364,11 +358,9 @@ export function getCostingStrategy(method: CostingMethod): CostingStrategy {
 
 /**
  * Get the costing method configured for a company.
- * Uses SettingsPort for canonical key with fallback to legacy key.
+ * Uses SettingsPort with typed settings tables only.
  * 
- * Priority:
- * 1. 'inventory.costing_method' (canonical key in typed settings tables)
- * 2. 'inventory_costing_method' (legacy key in company_settings)
+ * Canonical key: 'inventory.costing_method'
  * Default: 'AVG'
  */
 export async function getCompanyCostingMethod(
@@ -377,39 +369,10 @@ export async function getCompanyCostingMethod(
 ): Promise<CostingMethod> {
   const settingsPort = new KyselySettingsAdapter(db);
 
-  // Try canonical key first via SettingsPort (handles typed tables + legacy fallback + registry default)
-  const canonicalMethod = await settingsPort.resolve<string>(companyId, "inventory.costing_method", {
+  // Use canonical key via SettingsPort (typed tables only, no legacy fallback)
+  const method = await settingsPort.resolve<string>(companyId, "inventory.costing_method", {
     defaultValue: "AVG"
   });
-
-  // If canonical key returned a non-default value, use it
-  if (canonicalMethod !== "AVG") {
-    return canonicalMethod as CostingMethod;
-  }
-
-  // Canonical returned "AVG" - could be default OR actual value
-  // Check legacy key directly to maintain backward compatibility
-  const legacyRows = await sql<SettingRow>`
-    SELECT value_json, value_type, \`key\`
-    FROM company_settings 
-    WHERE company_id = ${companyId} AND \`key\` = 'inventory_costing_method' AND outlet_id IS NULL
-    LIMIT 1
-  `.execute(db);
-
-  const legacySetting = legacyRows.rows[0];
-
-  if (!legacySetting) {
-    return "AVG"; // No legacy value found, use default
-  }
-
-  // Parse JSON value from legacy
-  let method: string;
-  try {
-    const parsed = JSON.parse(legacySetting.value_json);
-    method = typeof parsed === "string" ? parsed : String(parsed);
-  } catch {
-    method = String(legacySetting.value_json).replace(/^"|"$/g, "");
-  }
 
   // Validate method is one of allowed values
   if (method !== "AVG" && method !== "FIFO" && method !== "LIFO") {

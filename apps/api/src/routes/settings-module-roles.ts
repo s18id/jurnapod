@@ -65,6 +65,11 @@ moduleRolesRoutes.put("/:roleId/:module", async (c) => {
     const payload = await c.req.json();
     const permissionMask = z.number().int().parse(payload.permission_mask);
 
+    // Validate permission mask uses only canonical bits
+    if (!isValidPermissionMask(permissionMask)) {
+      return errorResponse("INVALID_PERMISSION_MASK", `Permission mask ${permissionMask} contains non-canonical bits. Valid bits: READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32`, 400);
+    }
+
     const result = await setModuleRolePermission({
       companyId: auth.companyId,
       roleId,
@@ -111,6 +116,16 @@ const ModuleRolePermissionRequestSchema = z.object({
   permission_mask: z.number().int()
 });
 
+// Canonical permission bits (from @jurnapod/shared)
+// Bits: READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32
+const VALID_PERMISSION_BITS = 1 | 2 | 4 | 8 | 16 | 32; // = 63
+
+function isValidPermissionMask(mask: number): boolean {
+  // Valid masks are composed of canonical bits only
+  // Reject if any bit outside the 6 canonical positions is set
+  return (mask & ~VALID_PERMISSION_BITS) === 0;
+}
+
 export const registerSettingsModuleRoleRoutes = (app: OpenAPIHonoInterface): void => {
   // PUT /settings/module-roles/:roleId/:module - Update module role permission
   app.openapi(
@@ -152,6 +167,11 @@ export const registerSettingsModuleRoleRoutes = (app: OpenAPIHonoInterface): voi
 
         const payload = await c.req.json();
         const permissionMask = z.number().int().parse(payload.permission_mask);
+
+        // Validate permission mask uses only canonical bits
+        if (!isValidPermissionMask(permissionMask)) {
+          return c.json({ success: false, error: { code: "INVALID_PERMISSION_MASK", message: `Permission mask ${permissionMask} contains non-canonical bits. Valid bits: READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32` } }, 400);
+        }
 
         const result = await setModuleRolePermission({
           companyId: auth.companyId,

@@ -81,6 +81,7 @@ export {
   getTestAccessToken,
   getOrCreateTestCashierForPermission,
   loginForTest,
+  createTestRole,
   type CompanyFixture,
   type OutletFixture,
   type UserFixture,
