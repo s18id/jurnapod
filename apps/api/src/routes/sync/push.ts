@@ -78,6 +78,7 @@ syncPushRoutes.post("/", async (c) => {
     const outletAccessGuard = requireAccess({
       roles: ["OWNER", "ADMIN", "CASHIER"],
       module: "pos",
+      resource: "transactions",
       permission: "create",
       outletId: outlet_id
     });
@@ -247,6 +248,7 @@ export function registerSyncPushRoutes(app: { openapi: OpenAPIHonoType["openapi"
       const outletAccessGuard = requireAccess({
         roles: ["OWNER", "ADMIN", "CASHIER"],
         module: "pos",
+        resource: "transactions",
         permission: "create",
         outletId: outlet_id
       });

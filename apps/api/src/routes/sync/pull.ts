@@ -19,7 +19,7 @@ import { z } from "zod";
 import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { NumericIdSchema, SyncPullPayloadSchema } from "@jurnapod/shared";
-import { authenticateRequest, requireAccessForOutletQuery, type AuthContext } from "../../lib/auth-guard.js";
+import { authenticateRequest, requireAccess, requireAccessForOutletQuery, type AuthContext } from "../../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../../lib/response.js";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
 import { getPosSyncModule } from "../../lib/sync-modules.js";
@@ -63,11 +63,30 @@ const syncPullOutletGuard = requireAccessForOutletQuery({
   roles: ["OWNER", "ADMIN", "ACCOUNTANT"]
 });
 
+// Module permission guard - checks pos.transactions READ permission
+const syncPullModuleGuard = requireAccess({
+  roles: ["OWNER", "ADMIN", "ACCOUNTANT", "CASHIER"],
+  module: "pos",
+  resource: "transactions",
+  permission: "read",
+  outletId: (request, auth) => {
+    const url = new URL(request.url);
+    const outletIdParam = url.searchParams.get("outlet_id");
+    if (!outletIdParam) return null;
+    const outletId = Number(outletIdParam);
+    return Number.isSafeInteger(outletId) && outletId > 0 ? outletId : null;
+  }
+});
+
 syncPullRoutes.use("/", async (c, next) => {
   const auth = c.get("auth");
   const guardResponse = await syncPullOutletGuard(c.req.raw, auth);
   if (guardResponse) {
     return guardResponse;
+  }
+  const moduleGuardResponse = await syncPullModuleGuard(c.req.raw, auth);
+  if (moduleGuardResponse) {
+    return moduleGuardResponse;
   }
   await next();
 });

@@ -53,6 +53,7 @@ dineinRoutes.get("/sessions", async (c) => {
   const guardResult = await requireAccess({
     roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN", "CASHIER"],
     module: "pos",
+    resource: "transactions",
     permission: "read"
   })(c.req.raw, auth);
   if (guardResult) return guardResult;
@@ -156,6 +157,7 @@ dineinRoutes.get("/tables", async (c) => {
   const guardResult = await requireAccess({
     roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN", "CASHIER"],
     module: "pos",
+    resource: "config",
     permission: "read"
   })(c.req.raw, auth);
   if (guardResult) return guardResult;
@@ -301,6 +303,7 @@ export function registerDineInRoutes(app: OpenAPIHono): void {
       const guardResult = await requireAccess({
         roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN", "CASHIER"],
         module: "pos",
+        resource: "transactions",
         permission: "read"
       })(c.req.raw, auth);
       if (guardResult) return guardResult;
@@ -387,6 +390,7 @@ export function registerDineInRoutes(app: OpenAPIHono): void {
       const guardResult = await requireAccess({
         roles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "SUPER_ADMIN", "CASHIER"],
         module: "pos",
+        resource: "config",
         permission: "read"
       })(c.req.raw, auth);
       if (guardResult) return guardResult;
