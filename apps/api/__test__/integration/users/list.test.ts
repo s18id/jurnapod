@@ -7,18 +7,30 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
-import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext } from '../../fixtures';
+import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext, getOrCreateTestCashierForPermission } from '../../fixtures';
 
 let baseUrl: string;
-let accessToken: string;
-let companyId: number;
+let ownerToken: string;
+let cashierToken: string;
+let cashierCompanyId: number;
+let companyCode: string;
 
 describe('users.list', { timeout: 30000 }, () => {
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
-    accessToken = await getTestAccessToken(baseUrl);
+    ownerToken = await getTestAccessToken(baseUrl);
     const context = await getSeedSyncContext();
-    companyId = context.companyId;
+    cashierCompanyId = context.companyId;
+    companyCode = process.env.JP_COMPANY_CODE ?? 'JP';
+
+    // Get or create a CASHIER user for permission tests
+    // CASHIER has platform.users = 0 (no permission)
+    const cashier = await getOrCreateTestCashierForPermission(
+      cashierCompanyId,
+      companyCode,
+      baseUrl
+    );
+    cashierToken = cashier.accessToken;
   });
 
   afterAll(async () => {
@@ -31,13 +43,26 @@ describe('users.list', { timeout: 30000 }, () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns 403 when user lacks users module read permission', async () => {
-    // The seeded token (JP_OWNER_EMAIL) has OWNER role but may not have users:read module permission
-    // GET /users requires users module read permission
+  it('returns 200 when user has users module read permission (OWNER)', async () => {
+    // OWNER has platform.users = CRUDAM (63) which includes READ
     const res = await fetch(`${baseUrl}/api/users`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    // With users:read permission, expect 200
+    expect(res.status).toBe(200);
+  });
+
+  it('returns 403 when user lacks users module read permission (CASHIER)', async () => {
+    // CASHIER has platform.users = 0 (no permission)
+    const res = await fetch(`${baseUrl}/api/users`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${cashierToken}`,
         'Content-Type': 'application/json'
       }
     });
@@ -46,11 +71,11 @@ describe('users.list', { timeout: 30000 }, () => {
     expect(res.status).toBe(403);
   });
 
-  it('returns 403 when using company_id query param (requires users:read)', async () => {
-    const res = await fetch(`${baseUrl}/api/users?company_id=${companyId}`, {
+  it('returns 403 when CASHIER uses company_id query param', async () => {
+    const res = await fetch(`${baseUrl}/api/users?company_id=${cashierCompanyId}`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        'Authorization': `Bearer ${cashierToken}`,
         'Content-Type': 'application/json'
       }
     });
@@ -63,7 +88,7 @@ describe('users.list', { timeout: 30000 }, () => {
     const res = await fetch(`${baseUrl}/api/users?company_id=99999`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        'Authorization': `Bearer ${ownerToken}`,
         'Content-Type': 'application/json'
       }
     });

@@ -39,12 +39,12 @@ Epic 39 ACL reorganization has been implemented but 182 tests (20%) are failing 
 
 ### 🔴 P0 - Critical Security Issues
 
-| Test File | Test Case | Expected | Got | Issue |
-|-----------|-----------|----------|-----|-------|
-| companies/create.test.ts | requires SUPER_ADMIN | 403 | 201 | OWNER can create companies |
-| users/list.test.ts | returns 403 without permission | 403 | 200 | Users can list without permission |
-| users/tenant-scope.test.ts | returns 403 for users list | 403 | 200 | Tenant scope bypass |
-| users/roles.test.ts | returns 403 without update permission | 403 | 400 | Wrong error code |
+| Test File | Test Case | Expected | Got | Issue | Status |
+|-----------|-----------|----------|-----|-------|--------|
+| companies/create.test.ts | requires SUPER_ADMIN | 403 | 201 | OWNER can create companies | ✅ FIXED |
+| users/list.test.ts | returns 403 without permission | 403 | 200 | Test was using OWNER (has permission); fixed to use CASHIER | ✅ FIXED |
+| users/tenant-scope.test.ts | returns 403 for users list | 403 | 200 | Test was using OWNER (has permission); fixed to use CASHIER | ✅ FIXED |
+| users/roles.test.ts | returns 403 without update permission | 403 | 400 | Test was using OWNER (has permission); fixed to use CASHIER | ✅ FIXED |
 
 ### 🟠 P1 - Missing Permissions (403 When Should Allow)
 

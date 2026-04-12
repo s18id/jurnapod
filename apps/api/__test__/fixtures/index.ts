@@ -79,6 +79,8 @@ export {
   setupUserPermission,
   getSeedSyncContext,
   getTestAccessToken,
+  getOrCreateTestCashierForPermission,
+  loginForTest,
   type CompanyFixture,
   type OutletFixture,
   type UserFixture,

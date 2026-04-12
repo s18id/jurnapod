@@ -1016,6 +1016,96 @@ export async function getSeedSyncContext(options?: {
   };
 }
 
+/**
+ * Get or create a CASHIER user for permission testing.
+ * Uses a deterministic email to avoid flooding the database.
+ * CASHIER has platform.users = 0 (no permission).
+ * 
+ * @param companyId - Company ID
+ * @param companyCode - Company code for login
+ * @param baseUrl - Base URL of the test server
+ * @param password - Password for the user (default: test password)
+ * @returns Object with user fixture and access token
+ */
+export async function getOrCreateTestCashierForPermission(
+  companyId: number,
+  companyCode: string,
+  baseUrl: string,
+  password: string = "TestCashier123!"
+): Promise<{ user: UserFixture; accessToken: string }> {
+  const db = getDb();
+  const email = `perm-test-cashier+${companyId}@example.com`;
+  const cashierRoleId = await getRoleIdByCode("CASHIER");
+
+  // Check if user already exists
+  const existing = await db
+    .selectFrom("users as u")
+    .innerJoin("user_role_assignments as ura", "ura.user_id", "u.id")
+    .select(["u.id", "u.company_id", "u.email"])
+    .where("u.email", "=", email.toLowerCase())
+    .where("ura.role_id", "=", cashierRoleId)
+    .executeTakeFirst();
+
+  if (existing) {
+    const user: UserFixture = {
+      id: Number(existing.id),
+      company_id: Number(existing.company_id),
+      email: existing.email
+    };
+    // Get token via login
+    const token = await loginForTest(baseUrl, companyCode, email, password);
+    return { user, accessToken: token };
+  }
+
+  // Create new CASHIER user
+  const cashier = await createTestUser(companyId, {
+    email,
+    name: "Permission Test Cashier",
+    password
+  });
+
+  // Assign CASHIER role
+  await assignUserGlobalRole(cashier.id, cashierRoleId);
+
+  // Don't track this user for cleanup - it's reusable
+  createdFixtures.users = createdFixtures.users.filter((u) => u.id !== cashier.id);
+
+  // Get token via login
+  const token = await loginForTest(baseUrl, companyCode, email, password);
+
+  return { user: cashier, accessToken: token };
+}
+
+/**
+ * Login and get access token for any user.
+ * 
+ * @param baseUrl - The base URL of the test server
+ * @param companyCode - Company code
+ * @param email - User email
+ * @param password - User password
+ * @returns Access token string
+ */
+export async function loginForTest(
+  baseUrl: string,
+  companyCode: string,
+  email: string,
+  password: string
+): Promise<string> {
+  const res = await fetch(`${baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ companyCode, email, password })
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Failed to login: ${res.status} ${body}`);
+  }
+
+  const data = await res.json();
+  return data.data.access_token;
+}
+
 // ============================================================================
 // Authentication Helpers
 // ============================================================================
