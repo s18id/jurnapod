@@ -5,7 +5,8 @@
  * Permission matrix defining default module permissions per role.
  * Maps role × module.resource to permission mask (bitmask).
  *
- * Uses canonical PERMISSION_BITS and PERMISSION_MASK from @jurnapod/shared.
+ * SOURCE OF TRUTH: roles.defaults.json
+ * This file imports from JSON and re-exports with TypeScript types.
  *
  * Permission mask bits (CRUDAM):
  * - 1  (0b00001): READ
@@ -21,146 +22,54 @@
  * - CRUDAM = 63 (0b111111) — CRUDA + Manage
  */
 import { PERMISSION_BITS, PERMISSION_MASK } from "@jurnapod/shared";
+import roleDefaultsJson from "./roles.defaults.json";
 
 export { PERMISSION_BITS, PERMISSION_MASK };
 
-export const MODULE_ROLE_DEFAULTS = [
-  // SUPER_ADMIN has full access to everything
-  { roleCode: "SUPER_ADMIN", module: "platform.companies", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "platform.users", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "platform.roles", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "platform.outlets", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "platform.settings", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "accounting.accounts", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "accounting.journals", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "accounting.fiscal_years", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "accounting.reports", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "treasury.transactions", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "treasury.accounts", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "sales.invoices", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "sales.orders", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "sales.payments", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "inventory.items", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "inventory.stock", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "inventory.costing", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "pos.transactions", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "pos.config", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "reservations.bookings", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "SUPER_ADMIN", module: "reservations.tables", permissionMask: PERMISSION_MASK.CRUDAM },
+// Re-export JSON data with TypeScript types
+export type { default as ROLE_DEFAULTS_JSON } from "./roles.defaults.json";
 
-  // OWNER has full access to their company resources
-  { roleCode: "OWNER", module: "platform.companies", permissionMask: PERMISSION_BITS.READ | PERMISSION_BITS.UPDATE },
-  { roleCode: "OWNER", module: "platform.users", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "platform.roles", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "platform.outlets", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "platform.settings", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "accounting.accounts", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "accounting.journals", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "accounting.fiscal_years", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "accounting.reports", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "treasury.transactions", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "treasury.accounts", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "sales.invoices", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "sales.orders", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "sales.payments", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "inventory.items", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "inventory.stock", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "inventory.costing", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "pos.transactions", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "pos.config", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "reservations.bookings", permissionMask: PERMISSION_MASK.CRUDAM },
-  { roleCode: "OWNER", module: "reservations.tables", permissionMask: PERMISSION_MASK.CRUDAM },
-
-  // COMPANY_ADMIN has limited company-level access
-  { roleCode: "COMPANY_ADMIN", module: "platform.companies", permissionMask: 0 },
-  { roleCode: "COMPANY_ADMIN", module: "platform.users", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "COMPANY_ADMIN", module: "platform.roles", permissionMask: 0 },
-  { roleCode: "COMPANY_ADMIN", module: "platform.outlets", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "COMPANY_ADMIN", module: "platform.settings", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "COMPANY_ADMIN", module: "accounting.accounts", permissionMask: PERMISSION_BITS.READ | PERMISSION_BITS.MANAGE }, // 33 - Structural: manage+read
-  { roleCode: "COMPANY_ADMIN", module: "accounting.journals", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "COMPANY_ADMIN", module: "accounting.fiscal_years", permissionMask: PERMISSION_BITS.READ | PERMISSION_BITS.MANAGE }, // 33 - Structural: manage+read
-  { roleCode: "COMPANY_ADMIN", module: "accounting.reports", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "COMPANY_ADMIN", module: "treasury.transactions", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "COMPANY_ADMIN", module: "treasury.accounts", permissionMask: PERMISSION_BITS.READ | PERMISSION_BITS.MANAGE }, // 33 - Structural: manage+read
-  { roleCode: "COMPANY_ADMIN", module: "sales.invoices", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "COMPANY_ADMIN", module: "sales.orders", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "COMPANY_ADMIN", module: "sales.payments", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "COMPANY_ADMIN", module: "inventory.items", permissionMask: PERMISSION_MASK.CRUD },
-  { roleCode: "COMPANY_ADMIN", module: "inventory.stock", permissionMask: PERMISSION_MASK.CRUD },
-  { roleCode: "COMPANY_ADMIN", module: "inventory.costing", permissionMask: PERMISSION_BITS.READ | PERMISSION_BITS.MANAGE }, // 33 - Structural: manage+read
-  { roleCode: "COMPANY_ADMIN", module: "pos.transactions", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "COMPANY_ADMIN", module: "pos.config", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "COMPANY_ADMIN", module: "reservations.bookings", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "COMPANY_ADMIN", module: "reservations.tables", permissionMask: PERMISSION_MASK.CRUDA },
-
-  // ADMIN has moderate access
-  { roleCode: "ADMIN", module: "platform.companies", permissionMask: 0 },
-  { roleCode: "ADMIN", module: "platform.users", permissionMask: PERMISSION_MASK.READ },
-  { roleCode: "ADMIN", module: "platform.roles", permissionMask: PERMISSION_MASK.READ },
-  { roleCode: "ADMIN", module: "platform.outlets", permissionMask: PERMISSION_MASK.READ },
-  { roleCode: "ADMIN", module: "platform.settings", permissionMask: PERMISSION_MASK.READ },
-  { roleCode: "ADMIN", module: "accounting.accounts", permissionMask: PERMISSION_MASK.READ }, // Structural: read only
-  { roleCode: "ADMIN", module: "accounting.journals", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "ADMIN", module: "accounting.fiscal_years", permissionMask: PERMISSION_MASK.READ }, // Structural: read only
-  { roleCode: "ADMIN", module: "accounting.reports", permissionMask: PERMISSION_MASK.READ }, // Analytical: read only
-  { roleCode: "ADMIN", module: "treasury.transactions", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "ADMIN", module: "treasury.accounts", permissionMask: PERMISSION_MASK.READ }, // Structural: read only
-  { roleCode: "ADMIN", module: "sales.invoices", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "ADMIN", module: "sales.orders", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "ADMIN", module: "sales.payments", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "ADMIN", module: "inventory.items", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "ADMIN", module: "inventory.stock", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "ADMIN", module: "inventory.costing", permissionMask: PERMISSION_MASK.READ }, // Structural: read only
-  { roleCode: "ADMIN", module: "pos.transactions", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "ADMIN", module: "pos.config", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "ADMIN", module: "reservations.bookings", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "ADMIN", module: "reservations.tables", permissionMask: PERMISSION_MASK.READ }, // Structural: read only
-
-  // CASHIER has minimal access (POS and reservations only)
-  { roleCode: "CASHIER", module: "platform.companies", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "platform.users", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "platform.roles", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "platform.outlets", permissionMask: PERMISSION_MASK.READ },
-  { roleCode: "CASHIER", module: "platform.settings", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "accounting.accounts", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "accounting.journals", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "accounting.fiscal_years", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "accounting.reports", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "treasury.transactions", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "treasury.accounts", permissionMask: PERMISSION_MASK.READ }, // Structural: read only
-  { roleCode: "CASHIER", module: "sales.invoices", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "CASHIER", module: "sales.orders", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "CASHIER", module: "sales.payments", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "CASHIER", module: "inventory.items", permissionMask: PERMISSION_MASK.READ },
-  { roleCode: "CASHIER", module: "inventory.stock", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "pos.transactions", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "CASHIER", module: "pos.config", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "reservations.bookings", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "CASHIER", module: "reservations.tables", permissionMask: PERMISSION_MASK.CRUDA },
-
-  // ACCOUNTANT has accounting-focused access
-  { roleCode: "ACCOUNTANT", module: "platform.companies", permissionMask: 0 },
-  { roleCode: "ACCOUNTANT", module: "platform.users", permissionMask: PERMISSION_MASK.READ },
-  { roleCode: "ACCOUNTANT", module: "platform.roles", permissionMask: 0 },
-  { roleCode: "ACCOUNTANT", module: "platform.outlets", permissionMask: PERMISSION_MASK.READ },
-  { roleCode: "ACCOUNTANT", module: "platform.settings", permissionMask: 0 },
-  { roleCode: "ACCOUNTANT", module: "accounting.accounts", permissionMask: PERMISSION_MASK.READ }, // Structural: read only
-  { roleCode: "ACCOUNTANT", module: "accounting.journals", permissionMask: PERMISSION_MASK.CRUDA },
-  { roleCode: "ACCOUNTANT", module: "accounting.fiscal_years", permissionMask: PERMISSION_MASK.READ }, // Structural: read only
-  { roleCode: "ACCOUNTANT", module: "accounting.reports", permissionMask: PERMISSION_MASK.CRUDA }, // Analytical: analyze allowed
-  { roleCode: "ACCOUNTANT", module: "treasury.transactions", permissionMask: PERMISSION_MASK.READ },
-  { roleCode: "ACCOUNTANT", module: "treasury.accounts", permissionMask: PERMISSION_MASK.READ }, // Structural: read only
-  { roleCode: "ACCOUNTANT", module: "sales.invoices", permissionMask: PERMISSION_MASK.READ },
-  { roleCode: "ACCOUNTANT", module: "sales.orders", permissionMask: PERMISSION_MASK.READ },
-  { roleCode: "ACCOUNTANT", module: "sales.payments", permissionMask: PERMISSION_MASK.READ },
-  { roleCode: "ACCOUNTANT", module: "inventory.items", permissionMask: PERMISSION_MASK.READ },
-  { roleCode: "ACCOUNTANT", module: "inventory.stock", permissionMask: PERMISSION_MASK.READ },
-  { roleCode: "ACCOUNTANT", module: "inventory.costing", permissionMask: PERMISSION_MASK.READ }, // Structural: read only
-  { roleCode: "ACCOUNTANT", module: "pos.transactions", permissionMask: 0 },
-  { roleCode: "ACCOUNTANT", module: "pos.config", permissionMask: 0 },
-  { roleCode: "ACCOUNTANT", module: "reservations.bookings", permissionMask: 0 },
-  { roleCode: "ACCOUNTANT", module: "reservations.tables", permissionMask: 0 }
-] as const;
+/**
+ * Flat array format for MODULE_ROLE_DEFAULTS (backward compatible)
+ * Derived from roles.defaults.json
+ * Format: module.resource (e.g., "platform.users")
+ */
+export const MODULE_ROLE_DEFAULTS: readonly {
+  roleCode: string;
+  module: string;
+  permissionMask: number;
+}[] = (() => {
+  const result: { roleCode: string; module: string; permissionMask: number }[] = [];
+  const roles = roleDefaultsJson.roles as Record<string, Record<string, number>>;
+  
+  for (const [roleCode, permissions] of Object.entries(roles)) {
+    for (const [module, permissionMask] of Object.entries(permissions)) {
+      result.push({ roleCode, module, permissionMask });
+    }
+  }
+  
+  return result;
+})();
 
 export type ModuleRoleDefault = (typeof MODULE_ROLE_DEFAULTS)[number];
+
+/**
+ * MODULE_ROLE_DEFAULTS with separate module and resource columns
+ * For API consumption (insert into module_roles table)
+ */
+export const MODULE_ROLE_DEFAULTS_API: readonly {
+  roleCode: string;
+  module: string;
+  resource: string;
+  permissionMask: number;
+}[] = MODULE_ROLE_DEFAULTS.map(({ roleCode, module, permissionMask }) => {
+  const [mod, res] = module.split(".");
+  return { roleCode, module: mod, resource: res, permissionMask };
+});
+
+/**
+ * Lookup map for fast permission check
+ */
+export const PERMISSION_MAP: ReadonlyMap<string, number> = new Map(
+  MODULE_ROLE_DEFAULTS.map((r) => [`${r.roleCode}:${r.module}`, r.permissionMask])
+);

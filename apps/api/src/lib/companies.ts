@@ -4,7 +4,7 @@
 import { getDb } from "./db";
 import type { KyselySchema } from "@jurnapod/db";
 import { withTransactionRetry } from "@jurnapod/db";
-import { AuditService, CompanyService } from "@jurnapod/modules-platform";
+import { AuditService, CompanyService, MODULE_ROLE_DEFAULTS_API } from "@jurnapod/modules-platform";
 import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
 import { sql } from "kysely";
 
@@ -149,140 +149,9 @@ const ROLE_DEFINITIONS = [
   { code: "CASHIER", name: "Cashier", isGlobal: false, roleLevel: 20 }
 ] as const;
 
-const MODULE_ROLE_DEFAULTS = [
-  // SUPER_ADMIN - full access to all platform resources
-  { roleCode: "SUPER_ADMIN", module: "platform", resource: "companies", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "platform", resource: "users", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "platform", resource: "roles", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "platform", resource: "outlets", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "platform", resource: "settings", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "accounting", resource: "accounts", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "accounting", resource: "journals", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "accounting", resource: "fiscal_years", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "accounting", resource: "reports", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "treasury", resource: "transactions", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "treasury", resource: "accounts", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "sales", resource: "invoices", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "sales", resource: "orders", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "sales", resource: "payments", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "inventory", resource: "items", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "inventory", resource: "stock", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "inventory", resource: "costing", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "pos", resource: "transactions", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "pos", resource: "config", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "reservations", resource: "bookings", permissionMask: 63 },
-  { roleCode: "SUPER_ADMIN", module: "reservations", resource: "tables", permissionMask: 63 },
-  // OWNER: read + update own company (create/delete reserved for SUPER_ADMIN)
-  { roleCode: "OWNER", module: "platform", resource: "companies", permissionMask: 5 }, // 5 = READ(1) | UPDATE(4)
-  { roleCode: "OWNER", module: "platform", resource: "users", permissionMask: 63 },
-  { roleCode: "OWNER", module: "platform", resource: "roles", permissionMask: 63 },
-  { roleCode: "OWNER", module: "platform", resource: "outlets", permissionMask: 63 },
-  { roleCode: "OWNER", module: "platform", resource: "settings", permissionMask: 63 },
-  { roleCode: "OWNER", module: "accounting", resource: "accounts", permissionMask: 63 },
-  { roleCode: "OWNER", module: "accounting", resource: "journals", permissionMask: 63 },
-  { roleCode: "OWNER", module: "accounting", resource: "fiscal_years", permissionMask: 63 },
-  { roleCode: "OWNER", module: "accounting", resource: "reports", permissionMask: 63 },
-  { roleCode: "OWNER", module: "treasury", resource: "transactions", permissionMask: 63 },
-  { roleCode: "OWNER", module: "treasury", resource: "accounts", permissionMask: 63 },
-  { roleCode: "OWNER", module: "sales", resource: "invoices", permissionMask: 63 },
-  { roleCode: "OWNER", module: "sales", resource: "orders", permissionMask: 63 },
-  { roleCode: "OWNER", module: "sales", resource: "payments", permissionMask: 63 },
-  { roleCode: "OWNER", module: "inventory", resource: "items", permissionMask: 63 },
-  { roleCode: "OWNER", module: "inventory", resource: "stock", permissionMask: 63 },
-  { roleCode: "OWNER", module: "inventory", resource: "costing", permissionMask: 63 },
-  { roleCode: "OWNER", module: "pos", resource: "transactions", permissionMask: 63 },
-  { roleCode: "OWNER", module: "pos", resource: "config", permissionMask: 63 },
-  { roleCode: "OWNER", module: "reservations", resource: "bookings", permissionMask: 63 },
-  { roleCode: "OWNER", module: "reservations", resource: "tables", permissionMask: 63 },
-  // COMPANY_ADMIN - company-level admin
-  { roleCode: "COMPANY_ADMIN", module: "platform", resource: "companies", permissionMask: 0 },
-  { roleCode: "COMPANY_ADMIN", module: "platform", resource: "users", permissionMask: 31 },
-  { roleCode: "COMPANY_ADMIN", module: "platform", resource: "roles", permissionMask: 0 },
-  { roleCode: "COMPANY_ADMIN", module: "platform", resource: "outlets", permissionMask: 31 },
-  { roleCode: "COMPANY_ADMIN", module: "platform", resource: "settings", permissionMask: 31 },
-  { roleCode: "COMPANY_ADMIN", module: "accounting", resource: "accounts", permissionMask: 33 }, // READ + MANAGE
-  { roleCode: "COMPANY_ADMIN", module: "accounting", resource: "journals", permissionMask: 31 },
-  { roleCode: "COMPANY_ADMIN", module: "accounting", resource: "fiscal_years", permissionMask: 33 }, // READ + MANAGE
-  { roleCode: "COMPANY_ADMIN", module: "accounting", resource: "reports", permissionMask: 31 },
-  { roleCode: "COMPANY_ADMIN", module: "treasury", resource: "transactions", permissionMask: 31 },
-  { roleCode: "COMPANY_ADMIN", module: "treasury", resource: "accounts", permissionMask: 33 }, // READ + MANAGE
-  { roleCode: "COMPANY_ADMIN", module: "sales", resource: "invoices", permissionMask: 31 },
-  { roleCode: "COMPANY_ADMIN", module: "sales", resource: "orders", permissionMask: 31 },
-  { roleCode: "COMPANY_ADMIN", module: "sales", resource: "payments", permissionMask: 31 },
-  { roleCode: "COMPANY_ADMIN", module: "inventory", resource: "items", permissionMask: 15 },
-  { roleCode: "COMPANY_ADMIN", module: "inventory", resource: "stock", permissionMask: 15 },
-  { roleCode: "COMPANY_ADMIN", module: "inventory", resource: "costing", permissionMask: 33 }, // READ + MANAGE
-  { roleCode: "COMPANY_ADMIN", module: "pos", resource: "transactions", permissionMask: 31 },
-  { roleCode: "COMPANY_ADMIN", module: "pos", resource: "config", permissionMask: 31 },
-  { roleCode: "COMPANY_ADMIN", module: "reservations", resource: "bookings", permissionMask: 31 },
-  { roleCode: "COMPANY_ADMIN", module: "reservations", resource: "tables", permissionMask: 31 },
-  // ADMIN - operational admin
-  { roleCode: "ADMIN", module: "platform", resource: "companies", permissionMask: 0 },
-  { roleCode: "ADMIN", module: "platform", resource: "users", permissionMask: 1 },
-  { roleCode: "ADMIN", module: "platform", resource: "roles", permissionMask: 1 },
-  { roleCode: "ADMIN", module: "platform", resource: "outlets", permissionMask: 1 },
-  { roleCode: "ADMIN", module: "platform", resource: "settings", permissionMask: 1 },
-  { roleCode: "ADMIN", module: "accounting", resource: "accounts", permissionMask: 1 },
-  { roleCode: "ADMIN", module: "accounting", resource: "journals", permissionMask: 31 },
-  { roleCode: "ADMIN", module: "accounting", resource: "fiscal_years", permissionMask: 1 },
-  { roleCode: "ADMIN", module: "accounting", resource: "reports", permissionMask: 1 },
-  { roleCode: "ADMIN", module: "treasury", resource: "transactions", permissionMask: 31 },
-  { roleCode: "ADMIN", module: "treasury", resource: "accounts", permissionMask: 1 },
-  { roleCode: "ADMIN", module: "sales", resource: "invoices", permissionMask: 31 },
-  { roleCode: "ADMIN", module: "sales", resource: "orders", permissionMask: 31 },
-  { roleCode: "ADMIN", module: "sales", resource: "payments", permissionMask: 31 },
-  { roleCode: "ADMIN", module: "inventory", resource: "items", permissionMask: 31 },
-  { roleCode: "ADMIN", module: "inventory", resource: "stock", permissionMask: 31 },
-  { roleCode: "ADMIN", module: "inventory", resource: "costing", permissionMask: 1 },
-  { roleCode: "ADMIN", module: "pos", resource: "transactions", permissionMask: 31 },
-  { roleCode: "ADMIN", module: "pos", resource: "config", permissionMask: 31 },
-  { roleCode: "ADMIN", module: "reservations", resource: "bookings", permissionMask: 31 },
-  { roleCode: "ADMIN", module: "reservations", resource: "tables", permissionMask: 1 },
-  // CASHIER - POS and reservations only
-  { roleCode: "CASHIER", module: "platform", resource: "companies", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "platform", resource: "users", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "platform", resource: "roles", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "platform", resource: "outlets", permissionMask: 1 },
-  { roleCode: "CASHIER", module: "platform", resource: "settings", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "accounting", resource: "accounts", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "accounting", resource: "journals", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "accounting", resource: "fiscal_years", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "accounting", resource: "reports", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "treasury", resource: "transactions", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "treasury", resource: "accounts", permissionMask: 1 },
-  { roleCode: "CASHIER", module: "sales", resource: "invoices", permissionMask: 31 },
-  { roleCode: "CASHIER", module: "sales", resource: "orders", permissionMask: 31 },
-  { roleCode: "CASHIER", module: "sales", resource: "payments", permissionMask: 31 },
-  { roleCode: "CASHIER", module: "inventory", resource: "items", permissionMask: 1 },
-  { roleCode: "CASHIER", module: "inventory", resource: "stock", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "inventory", resource: "costing", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "pos", resource: "transactions", permissionMask: 31 },
-  { roleCode: "CASHIER", module: "pos", resource: "config", permissionMask: 0 },
-  { roleCode: "CASHIER", module: "reservations", resource: "bookings", permissionMask: 31 },
-  { roleCode: "CASHIER", module: "reservations", resource: "tables", permissionMask: 31 },
-  // ACCOUNTANT - accounting-focused
-  { roleCode: "ACCOUNTANT", module: "platform", resource: "companies", permissionMask: 0 },
-  { roleCode: "ACCOUNTANT", module: "platform", resource: "users", permissionMask: 1 },
-  { roleCode: "ACCOUNTANT", module: "platform", resource: "roles", permissionMask: 0 },
-  { roleCode: "ACCOUNTANT", module: "platform", resource: "outlets", permissionMask: 1 },
-  { roleCode: "ACCOUNTANT", module: "platform", resource: "settings", permissionMask: 0 },
-  { roleCode: "ACCOUNTANT", module: "accounting", resource: "accounts", permissionMask: 1 },
-  { roleCode: "ACCOUNTANT", module: "accounting", resource: "journals", permissionMask: 31 },
-  { roleCode: "ACCOUNTANT", module: "accounting", resource: "fiscal_years", permissionMask: 1 },
-  { roleCode: "ACCOUNTANT", module: "accounting", resource: "reports", permissionMask: 31 },
-  { roleCode: "ACCOUNTANT", module: "treasury", resource: "transactions", permissionMask: 1 },
-  { roleCode: "ACCOUNTANT", module: "treasury", resource: "accounts", permissionMask: 1 },
-  { roleCode: "ACCOUNTANT", module: "sales", resource: "invoices", permissionMask: 1 },
-  { roleCode: "ACCOUNTANT", module: "sales", resource: "orders", permissionMask: 1 },
-  { roleCode: "ACCOUNTANT", module: "sales", resource: "payments", permissionMask: 1 },
-  { roleCode: "ACCOUNTANT", module: "inventory", resource: "items", permissionMask: 1 },
-  { roleCode: "ACCOUNTANT", module: "inventory", resource: "stock", permissionMask: 1 },
-  { roleCode: "ACCOUNTANT", module: "inventory", resource: "costing", permissionMask: 1 },
-  { roleCode: "ACCOUNTANT", module: "pos", resource: "transactions", permissionMask: 0 },
-  { roleCode: "ACCOUNTANT", module: "pos", resource: "config", permissionMask: 0 },
-  { roleCode: "ACCOUNTANT", module: "reservations", resource: "bookings", permissionMask: 0 },
-  { roleCode: "ACCOUNTANT", module: "reservations", resource: "tables", permissionMask: 0 }
-] as const;
+// MODULE_ROLE_DEFAULTS imported from @jurnapod/modules-platform (source of truth: roles.defaults.json)
+// This replaces the hardcoded array - see permission-matrix.ts
+const MODULE_ROLE_DEFAULTS = MODULE_ROLE_DEFAULTS_API;
 
 const SETTINGS_DEFINITIONS = [
   {
