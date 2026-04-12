@@ -38,6 +38,7 @@ export const MODULE_ROLE_DEFAULTS = [
   { roleCode: "SUPER_ADMIN", module: "treasury.transactions", permissionMask: PERMISSION_MASK.CRUDAM },
   { roleCode: "SUPER_ADMIN", module: "treasury.accounts", permissionMask: PERMISSION_MASK.CRUDAM },
   { roleCode: "SUPER_ADMIN", module: "sales.invoices", permissionMask: PERMISSION_MASK.CRUDAM },
+  { roleCode: "SUPER_ADMIN", module: "sales.orders", permissionMask: PERMISSION_MASK.CRUDAM },
   { roleCode: "SUPER_ADMIN", module: "sales.payments", permissionMask: PERMISSION_MASK.CRUDAM },
   { roleCode: "SUPER_ADMIN", module: "inventory.items", permissionMask: PERMISSION_MASK.CRUDAM },
   { roleCode: "SUPER_ADMIN", module: "inventory.stock", permissionMask: PERMISSION_MASK.CRUDAM },
@@ -60,6 +61,7 @@ export const MODULE_ROLE_DEFAULTS = [
   { roleCode: "OWNER", module: "treasury.transactions", permissionMask: PERMISSION_MASK.CRUDAM },
   { roleCode: "OWNER", module: "treasury.accounts", permissionMask: PERMISSION_MASK.CRUDAM },
   { roleCode: "OWNER", module: "sales.invoices", permissionMask: PERMISSION_MASK.CRUDAM },
+  { roleCode: "OWNER", module: "sales.orders", permissionMask: PERMISSION_MASK.CRUDAM },
   { roleCode: "OWNER", module: "sales.payments", permissionMask: PERMISSION_MASK.CRUDAM },
   { roleCode: "OWNER", module: "inventory.items", permissionMask: PERMISSION_MASK.CRUDAM },
   { roleCode: "OWNER", module: "inventory.stock", permissionMask: PERMISSION_MASK.CRUDAM },
@@ -82,6 +84,7 @@ export const MODULE_ROLE_DEFAULTS = [
   { roleCode: "COMPANY_ADMIN", module: "treasury.transactions", permissionMask: PERMISSION_MASK.CRUDA },
   { roleCode: "COMPANY_ADMIN", module: "treasury.accounts", permissionMask: PERMISSION_BITS.READ | PERMISSION_BITS.MANAGE }, // 33 - Structural: manage+read
   { roleCode: "COMPANY_ADMIN", module: "sales.invoices", permissionMask: PERMISSION_MASK.CRUDA },
+  { roleCode: "COMPANY_ADMIN", module: "sales.orders", permissionMask: PERMISSION_MASK.CRUDA },
   { roleCode: "COMPANY_ADMIN", module: "sales.payments", permissionMask: PERMISSION_MASK.CRUDA },
   { roleCode: "COMPANY_ADMIN", module: "inventory.items", permissionMask: PERMISSION_MASK.CRUD },
   { roleCode: "COMPANY_ADMIN", module: "inventory.stock", permissionMask: PERMISSION_MASK.CRUD },
@@ -104,6 +107,7 @@ export const MODULE_ROLE_DEFAULTS = [
   { roleCode: "ADMIN", module: "treasury.transactions", permissionMask: PERMISSION_MASK.CRUDA },
   { roleCode: "ADMIN", module: "treasury.accounts", permissionMask: PERMISSION_MASK.READ }, // Structural: read only
   { roleCode: "ADMIN", module: "sales.invoices", permissionMask: PERMISSION_MASK.CRUDA },
+  { roleCode: "ADMIN", module: "sales.orders", permissionMask: PERMISSION_MASK.CRUDA },
   { roleCode: "ADMIN", module: "sales.payments", permissionMask: PERMISSION_MASK.CRUDA },
   { roleCode: "ADMIN", module: "inventory.items", permissionMask: PERMISSION_MASK.CRUDA },
   { roleCode: "ADMIN", module: "inventory.stock", permissionMask: PERMISSION_MASK.CRUDA },
@@ -125,8 +129,9 @@ export const MODULE_ROLE_DEFAULTS = [
   { roleCode: "CASHIER", module: "accounting.reports", permissionMask: 0 },
   { roleCode: "CASHIER", module: "treasury.transactions", permissionMask: 0 },
   { roleCode: "CASHIER", module: "treasury.accounts", permissionMask: PERMISSION_MASK.READ }, // Structural: read only
-  { roleCode: "CASHIER", module: "sales.invoices", permissionMask: PERMISSION_MASK.READ },
-  { roleCode: "CASHIER", module: "sales.payments", permissionMask: PERMISSION_MASK.READ },
+  { roleCode: "CASHIER", module: "sales.invoices", permissionMask: PERMISSION_MASK.CRUDA },
+  { roleCode: "CASHIER", module: "sales.orders", permissionMask: PERMISSION_MASK.CRUDA },
+  { roleCode: "CASHIER", module: "sales.payments", permissionMask: PERMISSION_MASK.CRUDA },
   { roleCode: "CASHIER", module: "inventory.items", permissionMask: PERMISSION_MASK.READ },
   { roleCode: "CASHIER", module: "inventory.stock", permissionMask: 0 },
   { roleCode: "CASHIER", module: "pos.transactions", permissionMask: PERMISSION_MASK.CRUDA },
@@ -147,6 +152,7 @@ export const MODULE_ROLE_DEFAULTS = [
   { roleCode: "ACCOUNTANT", module: "treasury.transactions", permissionMask: PERMISSION_MASK.READ },
   { roleCode: "ACCOUNTANT", module: "treasury.accounts", permissionMask: PERMISSION_MASK.READ }, // Structural: read only
   { roleCode: "ACCOUNTANT", module: "sales.invoices", permissionMask: PERMISSION_MASK.READ },
+  { roleCode: "ACCOUNTANT", module: "sales.orders", permissionMask: PERMISSION_MASK.READ },
   { roleCode: "ACCOUNTANT", module: "sales.payments", permissionMask: PERMISSION_MASK.READ },
   { roleCode: "ACCOUNTANT", module: "inventory.items", permissionMask: PERMISSION_MASK.READ },
   { roleCode: "ACCOUNTANT", module: "inventory.stock", permissionMask: PERMISSION_MASK.READ },

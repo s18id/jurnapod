@@ -76,10 +76,11 @@ invoiceRoutes.get("/", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
-    // Check module permission using bitmask
+    // Check resource permission using bitmask
     const accessResult = await requireAccess({
       module: "sales",
-      permission: "read"
+      permission: "read",
+      resource: "invoices"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -145,10 +146,11 @@ invoiceRoutes.post("/", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
-    // Check module permission using bitmask
+    // Check resource permission using bitmask
     const accessResult = await requireAccess({
       module: "sales",
-      permission: "create"
+      permission: "create",
+      resource: "invoices"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -495,7 +497,8 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
     try {
       const accessResult = await requireAccess({
         module: "sales",
-        permission: "read"
+        permission: "read",
+        resource: "invoices"
       })(c.req.raw, auth);
 
       if (accessResult !== null) {
@@ -600,7 +603,8 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
     try {
       const accessResult = await requireAccess({
         module: "sales",
-        permission: "create"
+        permission: "create",
+        resource: "invoices"
       })(c.req.raw, auth);
 
       if (accessResult !== null) {

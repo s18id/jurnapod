@@ -52,7 +52,8 @@ paymentRoutes.get("/", async (c) => {
     // Check module permission using bitmask
     const accessResult = await requireAccess({
       module: "sales",
-      permission: "read"
+      permission: "read",
+      resource: "payments"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -119,7 +120,8 @@ paymentRoutes.get("/:id", async (c) => {
     // Check module permission using bitmask
     const accessResult = await requireAccess({
       module: "sales",
-      permission: "read"
+      permission: "read",
+      resource: "payments"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -231,7 +233,8 @@ paymentRoutes.post("/:id/post", async (c) => {
     // Check module permission - posting requires update permission
     const accessResult = await requireAccess({
       module: "sales",
-      permission: "update"
+      permission: "update",
+      resource: "payments"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -317,7 +320,8 @@ paymentRoutes.post("/", async (c) => {
     // Check module permission using bitmask
     const accessResult = await requireAccess({
       module: "sales",
-      permission: "create"
+      permission: "create",
+      resource: "payments"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -740,7 +744,8 @@ export function registerSalesPaymentRoutes(app: { openapi: OpenAPIHonoType["open
     try {
       const accessResult = await requireAccess({
         module: "sales",
-        permission: "update"
+        permission: "update",
+        resource: "payments"
       })(c.req.raw, auth);
 
       if (accessResult !== null) {
@@ -863,7 +868,8 @@ export function registerSalesPaymentRoutes(app: { openapi: OpenAPIHonoType["open
     try {
       const accessResult = await requireAccess({
         module: "sales",
-        permission: "create"
+        permission: "create",
+        resource: "payments"
       })(c.req.raw, auth);
 
       if (accessResult !== null) {

@@ -61,7 +61,8 @@ orderRoutes.get("/", async (c) => {
   try {
     const accessResult = await requireAccess({
       module: "sales",
-      permission: "read"
+      permission: "read",
+      resource: "orders"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -127,7 +128,8 @@ orderRoutes.post("/", async (c) => {
   try {
     const accessResult = await requireAccess({
       module: "sales",
-      permission: "create"
+      permission: "create",
+      resource: "orders"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
