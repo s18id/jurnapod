@@ -368,8 +368,8 @@ export async function updateCompanyModuleExplicit(
   const updateClause = updates.join(", ");
 
   await sql`
-    INSERT INTO company_modules (company_id, module_id, enabled, updated_at)
-    VALUES (${companyId}, ${moduleId}, ${settings.enabled ? 1 : 0}, CURRENT_TIMESTAMP)
+    INSERT INTO company_modules (company_id, module_id, enabled, config_json, updated_at)
+    VALUES (${companyId}, ${moduleId}, ${settings.enabled ? 1 : 0}, '{}', CURRENT_TIMESTAMP)
     ON DUPLICATE KEY UPDATE
       ${sql.raw(updateClause)}
   `.execute(db);
