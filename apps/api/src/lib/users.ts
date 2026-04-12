@@ -171,9 +171,9 @@ async function getUserMaxRoleLevelForConnection(
     .innerJoin('roles as r', 'r.id', 'ura.role_id')
     .innerJoin('users as u', 'u.id', 'ura.user_id')
     .where('u.id', '=', userId)
+    .where('ura.company_id', '=', companyId)
     .where('u.company_id', '=', companyId)
     .where('u.is_active', '=', 1)
-    .where('ura.outlet_id', 'is', null)
     .select((eb) => [eb.fn.max('r.role_level').as('max_level')])
     .executeTakeFirst();
 

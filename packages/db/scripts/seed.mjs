@@ -12,10 +12,8 @@ import { dirname, join } from "path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Note: In Node.js ESM, we can't directly import JSON from node_modules
-// So we import from the source file which has the JSON built-in
-// The shared package exports the matrix at build time
-import { MODULE_ROLE_DEFAULTS_API } from "../../../modules/platform/src/companies/constants/permission-matrix.js";
+// Import JSON directly - Node.js ESM supports JSON imports
+import roleDefaults from "../../shared/src/constants/roles.defaults.json" with { type: "json" };
 
 // Epic 39 canonical permission bits (from @jurnapod/shared)
 // Bit layout: READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32
@@ -35,8 +33,20 @@ const MASKS = {
   CRUDAM: 63     // +32 - CRUDA+manage
 };
 
-// MODULE_ROLE_DEFAULTS is now imported from modules-platform (which re-exports from @jurnapod/shared)
-const MODULE_ROLE_DEFAULTS = MODULE_ROLE_DEFAULTS_API;
+// Transform JSON to API format (same as MODULE_ROLE_DEFAULTS_API in @jurnapod/shared)
+function buildModuleRoleDefaultsApi() {
+  const result = [];
+  const roles = roleDefaults.roles;
+  for (const [roleCode, permissions] of Object.entries(roles)) {
+    for (const [moduleResource, permissionMask] of Object.entries(permissions)) {
+      const [module, resource] = moduleResource.split('.');
+      result.push({ roleCode, module, resource, permissionMask });
+    }
+  }
+  return result;
+}
+
+const MODULE_ROLE_DEFAULTS_API = buildModuleRoleDefaultsApi();
 
 const DEFAULT_PASSWORD_ALGO = "argon2id";
 const DEFAULT_BCRYPT_ROUNDS = 12;
@@ -349,10 +359,9 @@ async function main() {
 
     // Seed default module permissions (Epic 39 resource-level ACL format)
     // Source of truth: @jurnapod/shared/src/constants/roles.defaults.json
-    for (const perm of MODULE_ROLE_DEFAULTS) {
+    for (const perm of MODULE_ROLE_DEFAULTS_API) {
       const roleId = roleIds[perm.roleCode];
       if (roleId) {
-        // MODULE_ROLE_DEFAULTS_API has module and resource as separate fields
         await upsertModuleRolePermission(
           connection,
           companyId,

@@ -36,7 +36,17 @@ declare module "hono" {
 // =============================================================================
 
 // Note: We use module permissions (bitmask) for access control
-// Permission bitmask: create=1, read=2, update=4, delete=8
+// Canonical permission bits: read=1, create=2, update=4, delete=8, analyze=16, manage=32
+
+function normalizeSettingValueType(valueType: string): "string" | "number" | "boolean" {
+  if (valueType === "int" || valueType === "number") {
+    return "number";
+  }
+  if (valueType === "boolean") {
+    return "boolean";
+  }
+  return "string";
+}
 
 // =============================================================================
 // Request Schemas
@@ -134,10 +144,19 @@ settingsConfigRoutes.get("/", async (c) => {
       // Fall back to default from registry
       const registryEntry = SETTINGS_REGISTRY[key];
       if (!setting) {
+        // Map registry value types to API value types (same mapping as PATCH/UPDATE)
+        let defaultValueType: "string" | "number" | "boolean" = "string";
+        if (registryEntry.valueType === "boolean") {
+          defaultValueType = "boolean";
+        } else if (registryEntry.valueType === "int") {
+          defaultValueType = "number";
+        } else if (registryEntry.valueType === "enum") {
+          defaultValueType = "string";
+        }
         settings.push({
           key,
           value: registryEntry.defaultValue,
-          value_type: registryEntry.valueType
+          value_type: defaultValueType
         });
       } else {
         settings.push({
@@ -224,7 +243,7 @@ settingsConfigRoutes.patch("/", async (c) => {
       results.push({
         key: setting.key,
         value: setting.value,
-        value_type: setting.value_type
+        value_type: normalizeSettingValueType(setting.value_type)
       });
     }
 
@@ -304,7 +323,7 @@ settingsConfigRoutes.put("/", async (c) => {
       results.push({
         key: setting.key,
         value: setting.value,
-        value_type: setting.value_type
+        value_type: normalizeSettingValueType(setting.value_type)
       });
     }
 
@@ -425,9 +444,18 @@ export const registerSettingsConfigRoutes = (app: OpenAPIHonoInterface): void =>
           }
           const registryEntry = SETTINGS_REGISTRY[key];
           if (!setting) {
-            settings.push({ key, value: registryEntry.defaultValue, value_type: registryEntry.valueType });
+            // Map registry value types to API value types (same mapping as PATCH/UPDATE)
+            let defaultValueType: "string" | "number" | "boolean" = "string";
+            if (registryEntry.valueType === "boolean") {
+              defaultValueType = "boolean";
+            } else if (registryEntry.valueType === "int") {
+              defaultValueType = "number";
+            } else if (registryEntry.valueType === "enum") {
+              defaultValueType = "string";
+            }
+            settings.push({ key, value: registryEntry.defaultValue, value_type: defaultValueType });
           } else {
-            settings.push({ key: setting.key, value: setting.value, value_type: setting.value_type });
+            settings.push({ key: setting.key, value: setting.value, value_type: normalizeSettingValueType(setting.value_type) });
           }
         }
 
@@ -500,7 +528,7 @@ export const registerSettingsConfigRoutes = (app: OpenAPIHonoInterface): void =>
           }
 
           const setting = await setSetting({ companyId: auth.companyId, key: item.key, value: validatedValue, valueType, outletId: input.outlet_id });
-          results.push({ key: setting.key, value: setting.value, value_type: setting.value_type });
+          results.push({ key: setting.key, value: setting.value, value_type: normalizeSettingValueType(setting.value_type) });
         }
 
         return c.json({ success: true, data: { outlet_id: input.outlet_id, settings: results } });
@@ -572,7 +600,7 @@ export const registerSettingsConfigRoutes = (app: OpenAPIHonoInterface): void =>
           }
 
           const setting = await setSetting({ companyId: auth.companyId, key: item.key, value: validatedValue, valueType, outletId: input.outlet_id });
-          results.push({ key: setting.key, value: setting.value, value_type: setting.value_type });
+          results.push({ key: setting.key, value: setting.value, value_type: normalizeSettingValueType(setting.value_type) });
         }
 
         return c.json({ success: true, data: { outlet_id: input.outlet_id, settings: results } });
