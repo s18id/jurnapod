@@ -6,7 +6,11 @@
     "composite": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "paths": {
+      "@jurnapod/shared": ["../shared/dist/index.js"],
+      "@jurnapod/shared/*": ["../shared/dist/*"]
+    }
   },
   "include": ["src/**/*"],
   "references": [

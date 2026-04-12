@@ -34,3 +34,72 @@ export const PERMISSION_MASK = {
   CRUDA:   PERMISSION_BITS.READ | PERMISSION_BITS.CREATE | PERMISSION_BITS.UPDATE | PERMISSION_BITS.DELETE | PERMISSION_BITS.ANALYZE,
   CRUDAM:  PERMISSION_BITS.READ | PERMISSION_BITS.CREATE | PERMISSION_BITS.UPDATE | PERMISSION_BITS.DELETE | PERMISSION_BITS.ANALYZE | PERMISSION_BITS.MANAGE, // 0b111111
 } as const;
+
+/**
+ * Role codes enum
+ */
+export const ROLE_CODES = ['SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'CASHIER', 'ACCOUNTANT'] as const;
+export type RoleCode = typeof ROLE_CODES[number];
+
+// Import JSON data synchronously
+import roleDefaults from './roles.defaults.json';
+
+/**
+ * Role permission matrix - maps role × module.resource to permission mask.
+ * SOURCE OF TRUTH: roles.defaults.json
+ * 
+ * Format: module.resource (e.g., "platform.users", "accounting.journals")
+ */
+function buildRolePermissionMatrix() {
+  const result: { roleCode: string; moduleResource: string; permissionMask: number }[] = [];
+  
+  const roles = roleDefaults.roles as Record<string, Record<string, number>>;
+  for (const [roleCode, permissions] of Object.entries(roles)) {
+    for (const [moduleResource, permissionMask] of Object.entries(permissions)) {
+      result.push({ roleCode, moduleResource, permissionMask });
+    }
+  }
+  
+  return result;
+}
+
+export const ROLE_PERMISSION_MATRIX: readonly {
+  roleCode: string;
+  moduleResource: string;
+  permissionMask: number;
+}[] = buildRolePermissionMatrix();
+
+/**
+ * Flat array format for MODULE_ROLE_DEFAULTS (backward compatible)
+ * Format: module.resource (e.g., "platform.users")
+ */
+export const MODULE_ROLE_DEFAULTS: readonly {
+  roleCode: string;
+  module: string;
+  permissionMask: number;
+}[] = ROLE_PERMISSION_MATRIX.map(({ roleCode, moduleResource, permissionMask }) => {
+  const [module] = moduleResource.split('.');
+  return { roleCode, module, permissionMask };
+});
+
+/**
+ * MODULE_ROLE_DEFAULTS with separate module and resource columns
+ * For API consumption (insert into module_roles table)
+ */
+export const MODULE_ROLE_DEFAULTS_API: readonly {
+  roleCode: string;
+  module: string;
+  resource: string;
+  permissionMask: number;
+}[] = ROLE_PERMISSION_MATRIX.map(({ roleCode, moduleResource, permissionMask }) => {
+  const [module, resource] = moduleResource.split('.');
+  return { roleCode, module, resource, permissionMask };
+});
+
+/**
+ * Lookup map for fast permission check
+ * Key: roleCode:module (e.g., "OWNER:platform.users")
+ */
+export const PERMISSION_MAP: ReadonlyMap<string, number> = new Map(
+  MODULE_ROLE_DEFAULTS.map((r) => [`${r.roleCode}:${r.module}`, r.permissionMask])
+);

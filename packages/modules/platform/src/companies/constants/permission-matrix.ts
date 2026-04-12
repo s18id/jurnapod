@@ -5,8 +5,8 @@
  * Permission matrix defining default module permissions per role.
  * Maps role × module.resource to permission mask (bitmask).
  *
- * SOURCE OF TRUTH: roles.defaults.json
- * This file imports from JSON and re-exports with TypeScript types.
+ * SOURCE OF TRUTH: @jurnapod/shared/constants/roles.defaults.json
+ * This file re-exports from @jurnapod/shared for backward compatibility.
  *
  * Permission mask bits (CRUDAM):
  * - 1  (0b00001): READ
@@ -21,55 +21,15 @@
  * - CRUDA  = 31 (0b11111)  — CRUD + Analyze
  * - CRUDAM = 63 (0b111111) — CRUDA + Manage
  */
-import { PERMISSION_BITS, PERMISSION_MASK } from "@jurnapod/shared";
-import roleDefaultsJson from "./roles.defaults.json";
 
-export { PERMISSION_BITS, PERMISSION_MASK };
-
-// Re-export JSON data with TypeScript types
-export type { default as ROLE_DEFAULTS_JSON } from "./roles.defaults.json";
-
-/**
- * Flat array format for MODULE_ROLE_DEFAULTS (backward compatible)
- * Derived from roles.defaults.json
- * Format: module.resource (e.g., "platform.users")
- */
-export const MODULE_ROLE_DEFAULTS: readonly {
-  roleCode: string;
-  module: string;
-  permissionMask: number;
-}[] = (() => {
-  const result: { roleCode: string; module: string; permissionMask: number }[] = [];
-  const roles = roleDefaultsJson.roles as Record<string, Record<string, number>>;
-  
-  for (const [roleCode, permissions] of Object.entries(roles)) {
-    for (const [module, permissionMask] of Object.entries(permissions)) {
-      result.push({ roleCode, module, permissionMask });
-    }
-  }
-  
-  return result;
-})();
-
-export type ModuleRoleDefault = (typeof MODULE_ROLE_DEFAULTS)[number];
-
-/**
- * MODULE_ROLE_DEFAULTS with separate module and resource columns
- * For API consumption (insert into module_roles table)
- */
-export const MODULE_ROLE_DEFAULTS_API: readonly {
-  roleCode: string;
-  module: string;
-  resource: string;
-  permissionMask: number;
-}[] = MODULE_ROLE_DEFAULTS.map(({ roleCode, module, permissionMask }) => {
-  const [mod, res] = module.split(".");
-  return { roleCode, module: mod, resource: res, permissionMask };
-});
-
-/**
- * Lookup map for fast permission check
- */
-export const PERMISSION_MAP: ReadonlyMap<string, number> = new Map(
-  MODULE_ROLE_DEFAULTS.map((r) => [`${r.roleCode}:${r.module}`, r.permissionMask])
-);
+// Re-export everything from @jurnapod/shared
+// Note: RoleCode is exported from role-definitions.ts, not from here
+export {
+  PERMISSION_BITS,
+  PERMISSION_MASK,
+  ROLE_CODES,
+  ROLE_PERMISSION_MATRIX,
+  MODULE_ROLE_DEFAULTS,
+  MODULE_ROLE_DEFAULTS_API,
+  PERMISSION_MAP,
+} from "@jurnapod/shared";

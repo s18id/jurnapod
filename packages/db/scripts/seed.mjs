@@ -8,12 +8,14 @@ import mysql from "mysql2/promise";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
-// Import role defaults from canonical JSON (source of truth)
+// Import role defaults from canonical JSON (source of truth: @jurnapod/shared)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const roleDefaults = await import("../../modules/platform/src/companies/constants/roles.defaults.json", {
-  with: { type: "json" }
-}).then(m => m.default);
+
+// Note: In Node.js ESM, we can't directly import JSON from node_modules
+// So we import from the source file which has the JSON built-in
+// The shared package exports the matrix at build time
+import { MODULE_ROLE_DEFAULTS_API } from "../../../modules/platform/src/companies/constants/permission-matrix.js";
 
 // Epic 39 canonical permission bits (from @jurnapod/shared)
 // Bit layout: READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32
@@ -33,14 +35,8 @@ const MASKS = {
   CRUDAM: 63     // +32 - CRUDA+manage
 };
 
-// Build MODULE_ROLE_DEFAULTS from JSON (convert module.resource format to module/resource columns)
-const MODULE_ROLE_DEFAULTS = [];
-for (const [roleCode, permissions] of Object.entries(roleDefaults.roles)) {
-  for (const [moduleResource, mask] of Object.entries(permissions)) {
-    const [module, resource] = moduleResource.split(".");
-    MODULE_ROLE_DEFAULTS.push({ roleCode, module, resource, mask });
-  }
-}
+// MODULE_ROLE_DEFAULTS is now imported from modules-platform (which re-exports from @jurnapod/shared)
+const MODULE_ROLE_DEFAULTS = MODULE_ROLE_DEFAULTS_API;
 
 const DEFAULT_PASSWORD_ALGO = "argon2id";
 const DEFAULT_BCRYPT_ROUNDS = 12;
