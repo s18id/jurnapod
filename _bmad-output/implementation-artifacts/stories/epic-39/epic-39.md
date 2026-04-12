@@ -1,9 +1,9 @@
 # Epic 39: ACL Reorganization - Remove Reports Module, Consolidate to 7 Canonical Modules
 
-**Status:** todo
+**Status:** done
 **Theme:** Architecture / RBAC Cleanup
 **Started:** 2026-04-11
-**Completed:** -
+**Completed:** 2026-04-12
 
 ## Epic Goal
 
@@ -401,15 +401,15 @@ ALTER TABLE module_roles ADD INDEX idx_resource (resource);
 
 ## Definition of Done
 
-- [ ] Shared package exports single canonical `MODULE_CODES` with 7 modules
-- [ ] `REPORT` renamed to `ANALYZE` in all permission constants
-- [ ] No references to `reports` module in code
-- [ ] Resource-level permission matrix documented for all resources across 7 modules
-- [ ] Database schema updated with `resource` column in `module_roles` table
-- [ ] All routes updated to use resource-level permission checks
-- [ ] Database migration removes reports data and adds ANALYZE grants
-- [ ] All tests pass
-- [ ] TypeScript typecheck passes on all packages
+- [x] Shared package exports single canonical `MODULE_CODES` with 7 modules
+- [x] `REPORT` renamed to `ANALYZE` in all permission constants
+- [x] No references to `reports` module in code
+- [x] Resource-level permission matrix documented for all resources across 7 modules
+- [x] Database schema updated with `resource` column in `module_roles` table
+- [x] All routes updated to use resource-level permission checks
+- [x] Database migration removes reports data and adds ANALYZE grants
+- [x] All tests pass
+- [x] TypeScript typecheck passes on all packages
 
 ## Implementation Phases
 

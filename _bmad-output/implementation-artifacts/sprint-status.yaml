@@ -1,8 +1,15 @@
-last_updated: 2026-04-11T00:30:00Z
+last_updated: 2026-04-12T00:00:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
 story_location: _bmad-output/implementation-artifacts/stories
+
+# State Definitions
+# - backlog: Not yet ready to start
+# - ready-for-dev: Prepared, can be picked up
+# - in-progress: Actively being worked on
+# - review: Awaiting code review/testing
+# - done: Complete
 
 development_status:
 
@@ -220,7 +227,7 @@ development_status:
   19-10-migrate-api-lib-cost-recipe: done
   19-11-migrate-api-lib-reports: done
   19-12-migrate-api-routes: done
-  19-13-final-verification: backlog
+  19-13-final-verification: done
   epic-19-retrospective: done
 
   # Epic 20: Schema Consolidation & JSON Normalization
@@ -447,4 +454,21 @@ development_status:
   38-3-company-service-audit-boundary: done
   38-4-accounting-atomicity: done
   epic-38-retrospective: done
-  
+
+  # Epic 39: ACL Reorganization - Remove Reports Module, Consolidate to 7 Canonical Modules
+  epic-39: done
+  # Phase 1: Foundation
+  39-1-shared-package-foundation: done
+  39-2-auth-package-updates: done
+  39-3-database-schema-migration: done
+  39-3-5-data-migration: done
+  # Phase 2: Module Implementation (Incremental)
+  39-4-platform-module: done
+  39-5-accounting-module: done
+  39-6-inventory-module: done
+  39-7-treasury-module: done
+  39-8-sales-module: done
+  39-9-pos-module: done
+  39-10-reservations-module: done
+  # Phase 3: Final
+  39-11-verification-cleanup: done
