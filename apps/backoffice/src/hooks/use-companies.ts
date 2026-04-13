@@ -73,7 +73,7 @@ function buildQueryString(
  * Hook: useCompanies
  * Fetches list of companies with server-side pagination and sorting
  */
-export function useCompanies(accessToken: string, options?: UseCompaniesOptions) {
+export function useCompanies(options?: UseCompaniesOptions) {
   const enabled = options?.enabled ?? true;
   const includeDeleted = options?.includeDeleted ?? false;
   const pagination = options?.pagination;
@@ -108,8 +108,7 @@ export function useCompanies(accessToken: string, options?: UseCompaniesOptions)
       const query = buildQueryString(includeDeleted, pagination, sort);
       const response = await apiRequest<SuccessResponse<CompanyResponse[]>>(
         `/companies${query}`,
-        { signal: controller.signal },
-        accessToken
+        { signal: controller.signal }
       );
       setData(response.data);
       setTotalCount(response.total ?? response.data.length);
@@ -130,7 +129,7 @@ export function useCompanies(accessToken: string, options?: UseCompaniesOptions)
         setLoading(false);
       }
     }
-  }, [accessToken, enabled, includeDeleted, pagination, sort]);
+  }, [enabled, includeDeleted, pagination, sort]);
 
   useEffect(() => {
     if (!enabled) {
@@ -157,8 +156,7 @@ export function useCompanies(accessToken: string, options?: UseCompaniesOptions)
  * Fetches a single company by ID
  */
 export function useCompany(
-  companyId: number | null,
-  accessToken: string
+  companyId: number | null
 ) {
   const [data, setData] = useState<CompanyResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -176,9 +174,7 @@ export function useCompany(
     setError(null);
     try {
       const response = await apiRequest<SuccessResponse<CompanyResponse>>(
-        `/companies/${companyId}`,
-        {},
-        accessToken
+        `/companies/${companyId}`
       );
       setData(response.data);
     } catch (fetchError) {
@@ -191,7 +187,7 @@ export function useCompany(
     } finally {
       setLoading(false);
     }
-  }, [companyId, accessToken]);
+  }, [companyId]);
 
   useEffect(() => {
     refetch();
@@ -217,16 +213,14 @@ export async function createCompany(
     address_line2?: string;
     city?: string;
     postal_code?: string;
-  },
-  accessToken: string
+  }
 ): Promise<CompanyResponse> {
   const response = await apiRequest<SuccessResponse<CompanyResponse>>(
     "/companies",
     {
       method: "POST",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -248,16 +242,14 @@ export async function updateCompany(
     address_line2?: string | null;
     city?: string | null;
     postal_code?: string | null;
-  },
-  accessToken: string
+  }
 ): Promise<CompanyResponse> {
   const response = await apiRequest<SuccessResponse<CompanyResponse>>(
     `/companies/${companyId}`,
     {
       method: "PATCH",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -267,28 +259,24 @@ export async function updateCompany(
  * Deletes a company
  */
 export async function deleteCompany(
-  companyId: number,
-  accessToken: string
+  companyId: number
 ): Promise<void> {
   await apiRequest<{ success: true; data: null }>(
     `/companies/${companyId}`,
     {
       method: "DELETE"
-    },
-    accessToken
+    }
   );
 }
 
 export async function reactivateCompany(
-  companyId: number,
-  accessToken: string
+  companyId: number
 ): Promise<CompanyResponse> {
   const response = await apiRequest<SuccessResponse<CompanyResponse>>(
     `/companies/${companyId}/reactivate`,
     {
       method: "POST"
-    },
-    accessToken
+    }
   );
   return response.data;
 }

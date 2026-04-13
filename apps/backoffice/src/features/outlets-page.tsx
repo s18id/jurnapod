@@ -65,7 +65,6 @@ import {
 
 type OutletsPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type DialogMode = "create" | "view" | "edit" | null;
@@ -99,7 +98,7 @@ const emptyForm: OutletFormData = {
 };
 
 export function OutletsPage(props: OutletsPageProps) {
-  const { user, accessToken } = props;
+  const { user } = props;
   const isOwner = user.roles.includes("OWNER");
   const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
   const canManageCompanies = isOwner || isSuperAdmin;
@@ -112,10 +111,9 @@ export function OutletsPage(props: OutletsPageProps) {
   const isMobile = useMediaQuery("(max-width: 48em)");
 
   const outletsQuery = useOutletsFull(
-    canManageCompanies ? selectedCompanyId : user.company_id,
-    accessToken
+    canManageCompanies ? selectedCompanyId : user.company_id
   );
-  const companiesQuery = useCompanies(accessToken, { enabled: canManageCompanies });
+  const companiesQuery = useCompanies({ enabled: canManageCompanies });
 
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingOutlet, setEditingOutlet] = useState<OutletFullResponse | null>(null);
@@ -384,7 +382,7 @@ export function OutletsPage(props: OutletsPageProps) {
         if (formData.email.trim()) createData.email = formData.email.trim();
         if (formData.timezone) createData.timezone = formData.timezone;
 
-        await createOutlet(createData, accessToken);
+        await createOutlet(createData);
         setSuccessMessage("Branch created successfully");
         await outletsQuery.refetch();
         closeDialog();
@@ -428,7 +426,7 @@ export function OutletsPage(props: OutletsPageProps) {
           return;
         }
 
-        await updateOutlet(editingOutlet.id, updateData, accessToken);
+        await updateOutlet(editingOutlet.id, updateData);
         setSuccessMessage("Branch updated successfully");
         await outletsQuery.refetch();
         closeDialog();
@@ -570,7 +568,7 @@ export function OutletsPage(props: OutletsPageProps) {
     setDeleting(true);
 
     try {
-      await deleteOutlet(confirmState.id, accessToken);
+      await deleteOutlet(confirmState.id);
       setSuccessMessage(`Branch "${confirmState.name}" deleted successfully`);
       await outletsQuery.refetch();
     } catch (deleteError) {
@@ -649,7 +647,7 @@ export function OutletsPage(props: OutletsPageProps) {
       if (row.original.timezone) createData.timezone = row.original.timezone.trim();
 
       try {
-        await createOutlet(createData, accessToken);
+        await createOutlet(createData);
         success++;
         results.push({ rowIndex: row.rowIndex, code: row.original.code, name: row.original.name, status: "SUCCESS" });
       } catch (err) {

@@ -458,7 +458,6 @@ export function useReservationCalendar(input: {
   timeZone?: string | null;
   defaultDurationMinutes?: number | null;
   status?: ReservationStatus | null;
-  accessToken: string;
 }) {
   const query = useMemo(
     () =>
@@ -472,7 +471,7 @@ export function useReservationCalendar(input: {
     [input.outletId, input.viewMode, input.anchorDate, input.timeZone, input.status]
   );
 
-  const reservations = useReservations(query, input.accessToken);
+  const reservations = useReservations(query);
 
   const days = useMemo(
     () => createCalendarDaysInTimeZone(input.anchorDate, input.viewMode, input.timeZone),

@@ -23,7 +23,7 @@ type OutletSingleResponse = {
  * Hook: useOutletsFull
  * Fetches list of outlets for a company with full details
  */
-export function useOutletsFull(companyId: number | null, accessToken: string) {
+export function useOutletsFull(companyId: number | null) {
   const [data, setData] = useState<OutletFullResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,9 +41,7 @@ export function useOutletsFull(companyId: number | null, accessToken: string) {
     try {
       const params = new URLSearchParams({ company_id: String(companyId) });
       const response = await apiRequest<OutletsListResponse>(
-        `/outlets?${params.toString()}`,
-        {},
-        accessToken
+        `/outlets?${params.toString()}`
       );
       setData(response.data);
     } catch (fetchError) {
@@ -56,7 +54,7 @@ export function useOutletsFull(companyId: number | null, accessToken: string) {
     } finally {
       setLoading(false);
     }
-  }, [companyId, accessToken]);
+  }, [companyId]);
 
   useEffect(() => {
     refetch();
@@ -70,8 +68,7 @@ export function useOutletsFull(companyId: number | null, accessToken: string) {
  * Fetches a single outlet by ID with full details
  */
 export function useOutletFull(
-  outletId: number | null,
-  accessToken: string
+  outletId: number | null
 ) {
   const [data, setData] = useState<OutletFullResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -89,9 +86,7 @@ export function useOutletFull(
     setError(null);
     try {
       const response = await apiRequest<OutletSingleResponse>(
-        `/outlets/${outletId}`,
-        {},
-        accessToken
+        `/outlets/${outletId}`
       );
       setData(response.data);
     } catch (fetchError) {
@@ -104,7 +99,7 @@ export function useOutletFull(
     } finally {
       setLoading(false);
     }
-  }, [outletId, accessToken]);
+  }, [outletId]);
 
   useEffect(() => {
     refetch();
@@ -143,16 +138,14 @@ export type OutletUpdateInput = {
  * Creates a new outlet
  */
 export async function createOutlet(
-  data: OutletCreateInput,
-  accessToken: string
+  data: OutletCreateInput
 ): Promise<OutletFullResponse> {
   const response = await apiRequest<OutletSingleResponse>(
     "/outlets",
     {
       method: "POST",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -163,16 +156,14 @@ export async function createOutlet(
  */
 export async function updateOutlet(
   outletId: number,
-  data: OutletUpdateInput,
-  accessToken: string
+  data: OutletUpdateInput
 ): Promise<OutletFullResponse> {
   const response = await apiRequest<OutletSingleResponse>(
     `/outlets/${outletId}`,
     {
       method: "PATCH",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -182,14 +173,12 @@ export async function updateOutlet(
  * Deletes an outlet
  */
 export async function deleteOutlet(
-  outletId: number,
-  accessToken: string
+  outletId: number
 ): Promise<void> {
   await apiRequest<{ success: true; data: null }>(
     `/outlets/${outletId}`,
     {
       method: "DELETE"
-    },
-    accessToken
+    }
   );
 }

@@ -54,7 +54,6 @@ type ListResponse = {
 
 type CashBankPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 function formatMoney(value: number): string {
@@ -97,7 +96,7 @@ export function CashBankPage(props: CashBankPageProps) {
   const [baseAmount, setBaseAmount] = useState<number | "">("");
   const [fxAccountId, setFxAccountId] = useState<string | null>(null);
 
-  const accountsQuery = useAccounts(props.user.company_id, props.accessToken, {
+  const accountsQuery = useAccounts(props.user.company_id, {
     is_active: true
   });
 
@@ -137,8 +136,7 @@ export function CashBankPage(props: CashBankPageProps) {
       }
       const response = await apiRequest<ListResponse>(
         `/cash-bank-transactions?${params.toString()}`,
-        {},
-        props.accessToken
+        {}
       );
       setItems(response.data.transactions);
     } catch (loadError) {
@@ -192,8 +190,7 @@ export function CashBankPage(props: CashBankPageProps) {
 
       await apiRequest(
         "/cash-bank-transactions",
-        { method: "POST", body: JSON.stringify(payload) },
-        props.accessToken
+        { method: "POST", body: JSON.stringify(payload) }
       );
 
       setReference("");
@@ -219,7 +216,7 @@ export function CashBankPage(props: CashBankPageProps) {
     setSubmitting(true);
     setError(null);
     try {
-      await apiRequest(`/cash-bank-transactions/${id}/post`, { method: "POST" }, props.accessToken);
+      await apiRequest(`/cash-bank-transactions/${id}/post`, { method: "POST" });
       await loadTransactions();
     } catch (postError) {
       setError(postError instanceof ApiError ? postError.message : "Failed to post transaction");
@@ -232,7 +229,7 @@ export function CashBankPage(props: CashBankPageProps) {
     setSubmitting(true);
     setError(null);
     try {
-      await apiRequest(`/cash-bank-transactions/${id}/void`, { method: "POST" }, props.accessToken);
+      await apiRequest(`/cash-bank-transactions/${id}/void`, { method: "POST" });
       await loadTransactions();
     } catch (voidError) {
       setError(voidError instanceof ApiError ? voidError.message : "Failed to void transaction");

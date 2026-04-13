@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useState, useCallback, useRef } from "react";
-import { apiRequest, getApiBaseUrl } from "../lib/api-client";
+import { apiRequest, apiStreamingRequest, uploadWithProgress, applyWithProgress } from "../lib/api-client";
 
 // ============================================================================
 // Types
@@ -68,7 +68,6 @@ export interface TemplateInfo {
 
 interface UseUploadProps {
   entityType: ImportEntityType;
-  accessToken: string;
 }
 
 interface UseUploadReturn {
@@ -79,7 +78,7 @@ interface UseUploadReturn {
   reset: () => void;
 }
 
-export function useUpload({ entityType, accessToken }: UseUploadProps): UseUploadReturn {
+export function useUpload({ entityType }: UseUploadProps): UseUploadReturn {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
@@ -107,46 +106,11 @@ export function useUpload({ entityType, accessToken }: UseUploadProps): UseUploa
         const formData = new FormData();
         formData.append("file", file);
 
-        // Use XMLHttpRequest for progress tracking
-        const result = await new Promise<UploadResponse>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-
-          xhr.upload.addEventListener("progress", (event) => {
-            if (event.lengthComputable) {
-              setProgress(Math.round((event.loaded / event.total) * 100));
-            }
-          });
-
-          xhr.addEventListener("load", () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              try {
-                const response = JSON.parse(xhr.responseText);
-                resolve(response);
-              } catch {
-                reject(new Error("Invalid response format"));
-              }
-            } else {
-              try {
-                const errorResp = JSON.parse(xhr.responseText);
-                reject(new Error(errorResp.message || `Upload failed with status ${xhr.status}`));
-              } catch {
-                reject(new Error(`Upload failed with status ${xhr.status}`));
-              }
-            }
-          });
-
-          xhr.addEventListener("error", () => {
-            reject(new Error("Network error during upload"));
-          });
-
-          xhr.addEventListener("abort", () => {
-            reject(new Error("Upload cancelled"));
-          });
-
-          xhr.open("POST", `${getApiBaseUrl()}/import/${entityType}/upload`);
-          xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
-          xhr.send(formData);
-        });
+        const result = await uploadWithProgress<UploadResponse>(
+          `/import/${entityType}/upload`,
+          formData,
+          (percentage) => setProgress(percentage)
+        );
 
         setProgress(100);
         return result;
@@ -158,7 +122,7 @@ export function useUpload({ entityType, accessToken }: UseUploadProps): UseUploa
         setLoading(false);
       }
     },
-    [entityType, accessToken, reset]
+    [entityType, reset]
   );
 
   return { upload, loading, error, progress, reset };
@@ -170,7 +134,6 @@ export function useUpload({ entityType, accessToken }: UseUploadProps): UseUploa
 
 interface UseValidateProps {
   entityType: ImportEntityType;
-  accessToken: string;
 }
 
 interface UseValidateReturn {
@@ -180,7 +143,7 @@ interface UseValidateReturn {
   reset: () => void;
 }
 
-export function useValidate({ entityType, accessToken }: UseValidateProps): UseValidateReturn {
+export function useValidate({ entityType }: UseValidateProps): UseValidateReturn {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -201,8 +164,7 @@ export function useValidate({ entityType, accessToken }: UseValidateProps): UseV
           {
             method: "POST",
             body: JSON.stringify({ uploadId, mappings }),
-          },
-          accessToken
+          }
         );
         return result;
       } catch (err) {
@@ -213,7 +175,7 @@ export function useValidate({ entityType, accessToken }: UseValidateProps): UseV
         setLoading(false);
       }
     },
-    [entityType, accessToken, reset]
+    [entityType, reset]
   );
 
   return { validate, loading, error, reset };
@@ -225,7 +187,6 @@ export function useValidate({ entityType, accessToken }: UseValidateProps): UseV
 
 interface UseApplyProps {
   entityType: ImportEntityType;
-  accessToken: string;
   onProgress?: (progress: ApplyProgress) => void;
 }
 
@@ -237,7 +198,7 @@ interface UseApplyReturn {
   cancel: () => void;
 }
 
-export function useApply({ entityType, accessToken, onProgress }: UseApplyProps): UseApplyReturn {
+export function useApply({ entityType, onProgress }: UseApplyProps): UseApplyReturn {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<ApplyProgress | null>(null);
@@ -266,69 +227,14 @@ export function useApply({ entityType, accessToken, onProgress }: UseApplyProps)
       abortControllerRef.current = new AbortController();
 
       try {
-        // Use EventSource for progress updates (Server-Sent Events)
-        // Fallback to polling if SSE not available
-        const result = await new Promise<ApplyResult>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-
-          xhr.upload.addEventListener("progress", (event) => {
-            if (event.lengthComputable) {
-              const prog: ApplyProgress = {
-                current: 0,
-                total: 100,
-                currentRow: 0,
-                percentage: Math.round((event.loaded / event.total) * 100),
-              };
-              setProgress(prog);
-              onProgress?.(prog);
-            }
-          });
-
-          xhr.addEventListener("progress", (event) => {
-            if (event.lengthComputable) {
-              // Download progress (for response)
-              const prog: ApplyProgress = {
-                current: 0,
-                total: 100,
-                currentRow: 0,
-                percentage: 50 + Math.round((event.loaded / event.total) * 50),
-              };
-              setProgress(prog);
-              onProgress?.(prog);
-            }
-          });
-
-          xhr.addEventListener("load", () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              try {
-                const response = JSON.parse(xhr.responseText);
-                resolve(response);
-              } catch {
-                reject(new Error("Invalid response format"));
-              }
-            } else {
-              try {
-                const errorResp = JSON.parse(xhr.responseText);
-                reject(new Error(errorResp.message || `Import failed with status ${xhr.status}`));
-              } catch {
-                reject(new Error(`Import failed with status ${xhr.status}`));
-              }
-            }
-          });
-
-          xhr.addEventListener("error", () => {
-            reject(new Error("Network error during import"));
-          });
-
-          xhr.addEventListener("abort", () => {
-            reject(new Error("Import cancelled"));
-          });
-
-          xhr.open("POST", `${getApiBaseUrl()}/import/${entityType}/apply`);
-          xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
-          xhr.setRequestHeader("Content-Type", "application/json");
-          xhr.send(JSON.stringify({ uploadId }));
-        });
+        const result = await applyWithProgress<ApplyResult>(
+          `/import/${entityType}/apply`,
+          { uploadId },
+          (prog) => {
+            setProgress(prog);
+            onProgress?.(prog);
+          }
+        );
 
         setProgress({
           current: result.success + result.failed,
@@ -347,7 +253,7 @@ export function useApply({ entityType, accessToken, onProgress }: UseApplyProps)
         setLoading(false);
       }
     },
-    [entityType, accessToken, reset, onProgress]
+    [entityType, reset, onProgress]
   );
 
   return { apply, loading, error, progress, cancel };
@@ -359,7 +265,6 @@ export function useApply({ entityType, accessToken, onProgress }: UseApplyProps)
 
 interface UseGetTemplateProps {
   entityType: ImportEntityType;
-  accessToken: string;
 }
 
 interface UseGetTemplateReturn {
@@ -368,7 +273,7 @@ interface UseGetTemplateReturn {
   error: string | null;
 }
 
-export function useGetTemplate({ entityType, accessToken }: UseGetTemplateProps): UseGetTemplateReturn {
+export function useGetTemplate({ entityType }: UseGetTemplateProps): UseGetTemplateReturn {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -377,12 +282,8 @@ export function useGetTemplate({ entityType, accessToken }: UseGetTemplateProps)
     setError(null);
 
     try {
-      const response = await fetch(`${getApiBaseUrl()}/import/${entityType}/template`, {
+      const response = await apiStreamingRequest(`/import/${entityType}/template`, {
         method: "GET",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        credentials: "include",
       });
 
       if (!response.ok) {
@@ -415,7 +316,7 @@ export function useGetTemplate({ entityType, accessToken }: UseGetTemplateProps)
     } finally {
       setLoading(false);
     }
-  }, [entityType, accessToken]);
+  }, [entityType]);
 
   return { getTemplate, loading, error };
 }
@@ -440,7 +341,6 @@ export interface ImportWizardState {
 
 interface UseImportWizardProps {
   entityType: ImportEntityType;
-  accessToken: string;
 }
 
 interface UseImportWizardReturn {
@@ -477,12 +377,12 @@ interface UseImportWizardReturn {
 
 const STEP_ORDER: ImportWizardStep[] = ["upload", "mapping", "validation", "apply", "results"];
 
-export function useImportWizard({ entityType, accessToken }: UseImportWizardProps): UseImportWizardReturn {
+export function useImportWizard({ entityType }: UseImportWizardProps): UseImportWizardReturn {
   // Individual hooks
-  const uploadHook = useUpload({ entityType, accessToken });
-  const validateHook = useValidate({ entityType, accessToken });
-  const applyHook = useApply({ entityType, accessToken, onProgress: () => {} });
-  const templateHook = useGetTemplate({ entityType, accessToken });
+  const uploadHook = useUpload({ entityType });
+  const validateHook = useValidate({ entityType });
+  const applyHook = useApply({ entityType, onProgress: () => {} });
+  const templateHook = useGetTemplate({ entityType });
 
   // Combined state
   const [state, setState] = useState<ImportWizardState>({

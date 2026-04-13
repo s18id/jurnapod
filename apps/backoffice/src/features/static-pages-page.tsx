@@ -12,7 +12,6 @@ import type { SessionUser } from "../lib/session";
 
 type StaticPagesPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type StaticPageStatus = "DRAFT" | "PUBLISHED";
@@ -181,7 +180,7 @@ function buildStatusBadge(status: StaticPageStatus) {
   return <span style={statusDraftStyle}>DRAFT</span>;
 }
 
-export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
+export function StaticPagesPage({  }: StaticPagesPageProps) {
   const isOnline = useOnlineStatus();
   const [pages, setPages] = useState<StaticPageSummary[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -212,7 +211,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
         const response = await apiRequest<StaticPagesListResponse>(
           `/settings/pages${params}`,
           {},
-          accessToken
+          
         );
         if (!cancelled) {
           setPages(response.data);
@@ -239,7 +238,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, isOnline, search]);
+  }, [isOnline, search]);
 
   useEffect(() => {
     let cancelled = false;
@@ -323,7 +322,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
       const response = await apiRequest<StaticPageResponse>(
         `/settings/pages/${pageId}`,
         {},
-        accessToken
+        
       );
       setForm({
         slug: response.data.slug,
@@ -372,7 +371,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
               content_md: form.content_md
             })
           },
-          accessToken
+          
         );
         setForm({
           slug: response.data.slug,
@@ -393,7 +392,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
               status: "DRAFT"
             })
           },
-          accessToken
+          
         );
         setSelectedId(response.data.id);
         setStatus(response.data.status);
@@ -432,7 +431,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
         const response = await apiRequest<StaticPageResponse>(
           `/settings/pages/${selectedId}/publish`,
           { method: "POST" },
-          accessToken
+          
         );
         setStatus(response.data.status);
         await refreshList();
@@ -448,7 +447,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
               status: "PUBLISHED"
             })
           },
-          accessToken
+          
         );
         setSelectedId(response.data.id);
         setStatus(response.data.status);
@@ -475,7 +474,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
       const response = await apiRequest<StaticPageResponse>(
         `/settings/pages/${selectedId}/unpublish`,
         { method: "POST" },
-        accessToken
+        
       );
       setStatus(response.data.status);
       await refreshList();
@@ -495,7 +494,7 @@ export function StaticPagesPage({ accessToken }: StaticPagesPageProps) {
     const response = await apiRequest<StaticPagesListResponse>(
       `/settings/pages${params}`,
       {},
-      accessToken
+      
     );
     setPages(response.data);
   }

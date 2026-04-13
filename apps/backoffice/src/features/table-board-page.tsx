@@ -177,8 +177,7 @@ export function normalizeActionErrorMessage(message: string): string {
 
 export type TableBoardApiRequest = (
   path: string,
-  init?: RequestInit,
-  accessToken?: string
+  init?: RequestInit
 ) => Promise<unknown>;
 
 type ExecuteTableBoardActionInput = {
@@ -186,7 +185,6 @@ type ExecuteTableBoardActionInput = {
   action: "HOLD" | "SEAT" | "RELEASE";
   selectedOutletId: number | null;
   busyTableId: string | null;
-  accessToken: string;
   request: TableBoardApiRequest;
   refetchBoard: () => Promise<void>;
   setBusyTableId: (value: string | null) => void;
@@ -200,7 +198,6 @@ export async function executeTableBoardAction(input: ExecuteTableBoardActionInpu
     action,
     selectedOutletId,
     busyTableId,
-    accessToken,
     request,
     refetchBoard,
     setBusyTableId,
@@ -228,7 +225,7 @@ export async function executeTableBoardAction(input: ExecuteTableBoardActionInpu
         method: "POST",
         headers: buildExpectedVersionHeaders(row.version),
         body: JSON.stringify({ heldUntil })
-      }, accessToken);
+      });
       setActionSuccess(`Table ${row.tableCode} is now reserved.`);
     }
 
@@ -238,7 +235,7 @@ export async function executeTableBoardAction(input: ExecuteTableBoardActionInpu
         method: "POST",
         headers: buildExpectedVersionHeaders(row.version),
         body: JSON.stringify({ guestCount })
-      }, accessToken);
+      });
       setActionSuccess(`Guests seated at ${row.tableCode}.`);
     }
 
@@ -247,7 +244,7 @@ export async function executeTableBoardAction(input: ExecuteTableBoardActionInpu
         method: "POST",
         headers: buildExpectedVersionHeaders(row.version),
         body: JSON.stringify({})
-      }, accessToken);
+      });
       setActionSuccess(`Table ${row.tableCode} released.`);
     }
 
@@ -357,7 +354,6 @@ export function getAvailableActionsForTable(row: {
 
 type TableBoardPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type SessionDetail = {
@@ -398,7 +394,7 @@ export function resolveSessionModalTitle(sessionDetail: SessionDetail | null): s
 }
 
 export function TableBoardPage(props: TableBoardPageProps) {
-  const { user, accessToken } = props;
+  const { user } = props;
   const [selectedOutletId, setSelectedOutletId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [status, setStatus] = useState<BoardStatusFilter>("ALL");
@@ -417,8 +413,8 @@ export function TableBoardPage(props: TableBoardPageProps) {
   const [reservationFormError, setReservationFormError] = useState<string | null>(null);
   const [reservationSubmitting, setReservationSubmitting] = useState(false);
 
-  const outlets = useOutletsFull(user.company_id, accessToken);
-  const board = useTableBoard(selectedOutletId, accessToken, 8000);
+  const outlets = useOutletsFull(user.company_id);
+  const board = useTableBoard(selectedOutletId, 8000);
 
   const outletOptions = useMemo(
     () =>
@@ -467,7 +463,6 @@ export function TableBoardPage(props: TableBoardPageProps) {
       action,
       selectedOutletId,
       busyTableId,
-      accessToken,
       request: apiRequest,
       refetchBoard: board.refetch,
       setBusyTableId,
@@ -544,8 +539,7 @@ export function TableBoardPage(props: TableBoardPageProps) {
           reservation_at: reservationForm.reservationAt.toISOString(),
           duration_minutes: reservationForm.durationMinutes || undefined,
           notes: reservationForm.notes.trim() || null
-        },
-        accessToken
+        }
       );
       setActionSuccess("Reservation created successfully.");
       closeReservationModal();
@@ -572,8 +566,7 @@ export function TableBoardPage(props: TableBoardPageProps) {
     try {
       const payload = await apiRequest<{ success: boolean; data: SessionDetail }>(
         `/dinein/sessions/${row.currentSessionId}?outletId=${selectedOutletId}`,
-        {},
-        accessToken
+        {}
       );
       setSessionDetail(payload.data);
     } catch (error: unknown) {

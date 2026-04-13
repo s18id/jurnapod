@@ -52,7 +52,7 @@ type RuntimeConfig = {
 const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
   {
     label: "Core",
-    paths: ["/daily-sales", "/profit-loss", "/general-ledger", "/journals", "/accounting-worksheet"]
+    paths: ["/daily-sales", "/profit-loss", "/receivables-ageing", "/general-ledger", "/journals", "/accounting-worksheet"]
   },
   {
     label: "Accounting",

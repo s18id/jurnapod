@@ -9,7 +9,6 @@ import type { SessionUser } from "../lib/session";
 
 type TransactionTemplatesPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type TemplateLine = {
@@ -104,10 +103,10 @@ function formatAccountLabel(account: AccountResponse) {
   return `${account.code} - ${account.name}`;
 }
 
-export function TransactionTemplatesPage({ user, accessToken }: TransactionTemplatesPageProps) {
+export function TransactionTemplatesPage({ user }: TransactionTemplatesPageProps) {
   const companyId = user.company_id;
   const accountsFilter = useMemo(() => ({ is_active: true }), []);
-  const { data: accounts } = useAccounts(companyId, accessToken, accountsFilter);
+  const { data: accounts } = useAccounts(companyId, accountsFilter);
   const storageKey = useMemo(() => getStorageKey(companyId), [companyId]);
 
   const [templates, setTemplates] = useState<TransactionTemplate[]>(() => {

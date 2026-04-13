@@ -16,8 +16,7 @@ import { apiRequest } from "../lib/api-client";
  * Create a multi-table reservation group
  */
 export async function createReservationGroup(
-  data: ReservationGroupCreateRequest,
-  accessToken: string
+  data: ReservationGroupCreateRequest
 ): Promise<{ group_id: number; reservation_ids: number[] }> {
   const response = await apiRequest<{
     success: true;
@@ -27,8 +26,7 @@ export async function createReservationGroup(
     {
       method: "POST",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -37,16 +35,14 @@ export async function createReservationGroup(
  * Get reservation group details including all linked reservations
  */
 export async function getReservationGroup(
-  groupId: number,
-  accessToken: string
+  groupId: number
 ): Promise<ReservationGroupDetail> {
   const response = await apiRequest<{
     success: true;
     data: ReservationGroupDetail;
   }>(
     `/reservation-groups/${groupId}`,
-    {},
-    accessToken
+    {}
   );
   return response.data;
 }
@@ -55,8 +51,7 @@ export async function getReservationGroup(
  * Cancel a reservation group (ungroup reservations and delete group)
  */
 export async function cancelReservationGroup(
-  groupId: number,
-  accessToken: string
+  groupId: number
 ): Promise<{ deleted: boolean; ungrouped_count: number }> {
   const response = await apiRequest<{
     success: true;
@@ -65,8 +60,7 @@ export async function cancelReservationGroup(
     `/reservation-groups/${groupId}`,
     {
       method: "DELETE"
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -76,8 +70,7 @@ export async function cancelReservationGroup(
  */
 export async function updateReservationGroup(
   groupId: number,
-  data: ReservationGroupUpdateRequest,
-  accessToken: string
+  data: ReservationGroupUpdateRequest
 ): Promise<{ group_id: number; reservation_ids: number[]; updated_tables: number[]; removed_tables: number[] }> {
   const response = await apiRequest<{
     success: true;
@@ -87,8 +80,7 @@ export async function updateReservationGroup(
     {
       method: "PATCH",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -97,8 +89,7 @@ export async function updateReservationGroup(
  * Hook to fetch table suggestions for large party reservation
  */
 export function useTableSuggestions(
-  query: TableSuggestionQuery | null,
-  accessToken: string
+  query: TableSuggestionQuery | null
 ) {
   const [suggestions, setSuggestions] = useState<TableSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
@@ -127,8 +118,7 @@ export function useTableSuggestions(
         data: { suggestions: TableSuggestion[] };
       }>(
         `/reservation-groups/suggest-tables?${params.toString()}`,
-        {},
-        accessToken
+        {}
       );
 
       setSuggestions(response.data.suggestions);
@@ -139,7 +129,7 @@ export function useTableSuggestions(
     } finally {
       setLoading(false);
     }
-  }, [query, accessToken]);
+  }, [query]);
 
   // Auto-fetch when query or access token changes
   useEffect(() => {
@@ -152,7 +142,7 @@ export function useTableSuggestions(
 /**
  * Hook to manage reservation group operations
  */
-export function useReservationGroups(accessToken: string) {
+export function useReservationGroups() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
@@ -164,7 +154,7 @@ export function useReservationGroups(accessToken: string) {
       setCreateError(null);
 
       try {
-        const result = await createReservationGroup(data, accessToken);
+        const result = await createReservationGroup(data);
         return result;
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : "Failed to create reservation group";
@@ -174,7 +164,7 @@ export function useReservationGroups(accessToken: string) {
         setCreating(false);
       }
     },
-    [accessToken]
+    []
   );
 
   const updateGroup = useCallback(
@@ -188,7 +178,7 @@ export function useReservationGroups(accessToken: string) {
       setUpdateError(null);
 
       try {
-        const result = await updateReservationGroup(groupId, data, accessToken);
+        const result = await updateReservationGroup(groupId, data);
         return result;
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : "Failed to update reservation group";
@@ -198,7 +188,7 @@ export function useReservationGroups(accessToken: string) {
         setUpdating(false);
       }
     },
-    [accessToken]
+    []
   );
 
   return {

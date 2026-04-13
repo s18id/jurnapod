@@ -219,7 +219,6 @@ function getTermDays(term: string): number {
 
 type SalesInvoicesPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type InvoiceLineDraft = {
@@ -284,7 +283,6 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
       try {
         const itemsData = await CacheService.getCachedItems(
           props.user.company_id,
-          props.accessToken,
           { allowStale: true }
         );
         // Normalize items to expected shape
@@ -305,7 +303,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
       }
     }
     loadItems();
-  }, [props.user.company_id, props.accessToken]);
+  }, [props.user.company_id]);
 
   // Product items only (for dropdown)
   const productItems = useMemo(() => {
@@ -352,8 +350,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
 
       const response = await apiRequest<InvoicesResponse>(
         `/sales/invoices?${params.toString()}`,
-        {},
-        props.accessToken
+        {}
       );
       setInvoices(response.data.invoices);
       setInvoicesTotal(response.data.total);
@@ -477,8 +474,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
           {
             method: "POST",
             body: JSON.stringify(payload)
-          },
-          props.accessToken
+          }
         );
         resetNewInvoice();
         await refreshData(selectedOutletId);
@@ -504,8 +500,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
     try {
       const response = await apiRequest<InvoiceDetailResponse>(
         `/sales/invoices/${invoiceId}`,
-        {},
-        props.accessToken
+        {}
       );
       setEditingInvoice({
         id: response.data.id,
@@ -569,8 +564,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
         {
           method: "PATCH",
           body: JSON.stringify(payload)
-        },
-        props.accessToken
+        }
       );
       setEditingInvoice(null);
       await refreshData(selectedOutletId);
@@ -589,7 +583,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
     setSubmitting(true);
     setError(null);
     try {
-      await apiRequest(`/sales/invoices/${invoiceId}/post`, { method: "POST" }, props.accessToken);
+      await apiRequest(`/sales/invoices/${invoiceId}/post`, { method: "POST" });
       await refreshData(selectedOutletId);
     } catch (postError) {
       if (postError instanceof ApiError) {
@@ -606,7 +600,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
     setSubmitting(true);
     setError(null);
     try {
-      await apiRequest(`/sales/invoices/${invoiceId}/approve`, { method: "POST" }, props.accessToken);
+      await apiRequest(`/sales/invoices/${invoiceId}/approve`, { method: "POST" });
       await refreshData(selectedOutletId);
     } catch (approveError) {
       if (approveError instanceof ApiError) {
@@ -623,7 +617,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
     setSubmitting(true);
     setError(null);
     try {
-      await apiRequest(`/sales/invoices/${invoiceId}/void`, { method: "POST" }, props.accessToken);
+      await apiRequest(`/sales/invoices/${invoiceId}/void`, { method: "POST" });
       await refreshData(selectedOutletId);
     } catch (voidError) {
       if (voidError instanceof ApiError) {
@@ -658,11 +652,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
   async function handleViewPrint(invoiceId: number) {
     setError(null);
     try {
-      const response = await fetch(`${getApiBaseUrl()}/sales/invoices/${invoiceId}/print`, {
-        headers: {
-          Authorization: `Bearer ${props.accessToken}`
-        }
-      });
+      const response = await fetch(`${getApiBaseUrl()}/sales/invoices/${invoiceId}/print`);
 
       if (!response.ok) {
         throw new Error("Failed to load invoice print view");
@@ -684,11 +674,7 @@ export function SalesInvoicesPage(props: SalesInvoicesPageProps) {
   async function handleViewPdf(invoiceId: number) {
     setError(null);
     try {
-      const response = await fetch(`${getApiBaseUrl()}/sales/invoices/${invoiceId}/pdf`, {
-        headers: {
-          Authorization: `Bearer ${props.accessToken}`
-        }
-      });
+      const response = await fetch(`${getApiBaseUrl()}/sales/invoices/${invoiceId}/pdf`);
 
       if (!response.ok) {
         throw new Error("Failed to load invoice PDF");

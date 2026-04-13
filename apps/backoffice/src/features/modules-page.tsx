@@ -22,7 +22,6 @@ import type { SessionUser } from "../lib/session";
 
 type ModulesPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type ModulesResponse = {
@@ -241,7 +240,7 @@ function validateRows(rows: ModuleRow[]) {
   return errors;
 }
 
-export function ModulesPage({ accessToken }: ModulesPageProps) {
+export function ModulesPage({  }: ModulesPageProps) {
   const isOnline = useOnlineStatus();
   const [rows, setRows] = useState<ModuleRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -262,7 +261,7 @@ export function ModulesPage({ accessToken }: ModulesPageProps) {
         const response = await apiRequest<ModulesResponse>(
           "/settings/modules",
           {},
-          accessToken
+          
         );
         const nextRows = response.data.map((moduleEntry) => createRow(moduleEntry));
         setRows(nextRows);
@@ -279,7 +278,7 @@ export function ModulesPage({ accessToken }: ModulesPageProps) {
     }
 
     fetchModules().catch(() => setError("Failed to load modules"));
-  }, [accessToken]);
+  }, []);
 
   if (!isOnline) {
     return (
@@ -430,7 +429,7 @@ export function ModulesPage({ accessToken }: ModulesPageProps) {
             }))
           })
         },
-        accessToken
+        
       );
       setSaveSuccess(true);
     } catch (saveErr) {

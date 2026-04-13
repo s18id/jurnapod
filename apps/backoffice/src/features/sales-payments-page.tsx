@@ -136,7 +136,6 @@ function hasMoreThanTwoDecimals(value: number | string): boolean {
 
 type SalesPaymentsPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type PaymentSplitDraft = {
@@ -232,20 +231,17 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
   const accountFilter = useMemo(() => ({ is_payable: true }), []);
   const { data: payableAccounts, loading: accountsLoading } = useAccounts(
     props.user.company_id,
-    props.accessToken,
     accountFilter
   );
 
   // Fetch payment method mappings (legacy fallback for is_invoice_default)
   const { mappings: paymentMappings, loading: mappingsLoading } = useOutletPaymentMethodMappings(
-    selectedOutletId,
-    props.accessToken
+    selectedOutletId
   );
 
   // Fetch account mappings to get INVOICE_PAYMENT_BANK
   const { data: accountMappings, loading: accountMappingsLoading } = useOutletAccountMappings(
     selectedOutletId > 0 ? selectedOutletId : null,
-    props.accessToken,
     selectedOutletId > 0 ? "outlet" : "company"
   );
 
@@ -259,7 +255,6 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
     [selectedOutletId]
   );
   const { data: allInvoices, loading: invoicesLoading } = useSalesInvoices(
-    props.accessToken,
     invoiceFilters
   );
   // Filter out fully paid invoices
@@ -320,8 +315,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
 
       const response = await apiRequest<PaymentsResponse>(
         `/sales/payments?${params.toString()}`,
-        {},
-        props.accessToken
+        {}
       );
       if (requestSeq !== requestSeqRef.current) {
         return;
@@ -650,8 +644,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
           {
             method: "POST",
             body: JSON.stringify(payload)
-          },
-          props.accessToken
+          }
         );
         resetNewPayment();
         await refreshData(selectedOutletId, activeQueryKey);
@@ -773,8 +766,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
         {
           method: "PATCH",
           body: JSON.stringify(patchPayload)
-        },
-        props.accessToken
+        }
       );
       setEditingPayment(null);
       await refreshData(selectedOutletId, activeQueryKey);
@@ -793,7 +785,7 @@ export function SalesPaymentsPage(props: SalesPaymentsPageProps) {
     setSubmitting(true);
     setError(null);
     try {
-      await apiRequest(`/sales/payments/${paymentId}/post`, { method: "POST" }, props.accessToken);
+      await apiRequest(`/sales/payments/${paymentId}/post`, { method: "POST" });
       await refreshData(selectedOutletId, activeQueryKey);
     } catch (postError) {
       if (postError instanceof ApiError) {

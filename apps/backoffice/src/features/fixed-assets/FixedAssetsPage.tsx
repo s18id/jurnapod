@@ -76,7 +76,6 @@ type LedgerResponse = {
 
 type FixedAssetsPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 export function FixedAssetsPage(props: FixedAssetsPageProps) {
@@ -153,8 +152,7 @@ export function FixedAssetsPage(props: FixedAssetsPageProps) {
       }
       const response = await apiRequest<{ success: true; data: FixedAsset[] }>(
         `/accounts/fixed-assets${query}`,
-        {},
-        props.accessToken
+        {}
       );
       setAssets(response.data);
     } catch (fetchError) {
@@ -172,8 +170,7 @@ export function FixedAssetsPage(props: FixedAssetsPageProps) {
     try {
       const response = await apiRequest<{ success: true; data: FixedAssetCategory[] }>(
         "/accounts/fixed-asset-categories",
-        {},
-        props.accessToken
+        {}
       );
       setCategories(response.data);
     } catch (fetchError) {
@@ -185,8 +182,7 @@ export function FixedAssetsPage(props: FixedAssetsPageProps) {
     try {
       const response = await apiRequest<{ success: true; data: Array<{ id: number; code: string; name: string }> }>(
         `/accounts?company_id=${props.user.company_id}`,
-        {},
-        props.accessToken
+        {}
       );
       setAccounts(response.data);
     } catch (err) {
@@ -201,13 +197,11 @@ export function FixedAssetsPage(props: FixedAssetsPageProps) {
       const [bookRes, ledgerRes] = await Promise.all([
         apiRequest<{ success: true; data: FixedAssetBook }>(
           `/accounts/fixed-assets/${assetId}/book`,
-          {},
-          props.accessToken
+          {}
         ),
         apiRequest<{ success: true; data: LedgerResponse }>(
           `/accounts/fixed-assets/${assetId}/ledger`,
-          {},
-          props.accessToken
+          {}
         )
       ]);
       setAssetBook(bookRes.data);
@@ -278,7 +272,7 @@ export function FixedAssetsPage(props: FixedAssetsPageProps) {
 
     try {
       setError(null);
-      await apiRequest(`/accounts/fixed-assets/${assetId}`, { method: "DELETE" }, props.accessToken);
+      await apiRequest(`/accounts/fixed-assets/${assetId}`, { method: "DELETE" });
       await refreshAssets();
       notifications.show({ title: "Success", message: "Asset deleted", color: "green" });
       if (selectedAssetId === assetId) {
@@ -299,7 +293,7 @@ export function FixedAssetsPage(props: FixedAssetsPageProps) {
       await apiRequest(`/accounts/fixed-assets/${selectedAssetId}/acquisition`, {
         method: "POST",
         body: JSON.stringify(data)
-      }, props.accessToken);
+      });
       setAcquisitionModalOpen(false);
       await loadAssetDetails(selectedAssetId);
       await refreshAssets();
@@ -319,7 +313,7 @@ export function FixedAssetsPage(props: FixedAssetsPageProps) {
       await apiRequest(`/accounts/fixed-assets/${selectedAssetId}/transfer`, {
         method: "POST",
         body: JSON.stringify(data)
-      }, props.accessToken);
+      });
       setTransferModalOpen(false);
       await loadAssetDetails(selectedAssetId);
       await refreshAssets();
@@ -339,7 +333,7 @@ export function FixedAssetsPage(props: FixedAssetsPageProps) {
       await apiRequest(`/accounts/fixed-assets/${selectedAssetId}/impairment`, {
         method: "POST",
         body: JSON.stringify(data)
-      }, props.accessToken);
+      });
       setImpairmentModalOpen(false);
       await loadAssetDetails(selectedAssetId);
       notifications.show({ title: "Success", message: "Impairment recorded", color: "green" });
@@ -358,7 +352,7 @@ export function FixedAssetsPage(props: FixedAssetsPageProps) {
       await apiRequest(`/accounts/fixed-assets/${selectedAssetId}/disposal`, {
         method: "POST",
         body: JSON.stringify(data)
-      }, props.accessToken);
+      });
       setDisposalModalOpen(false);
       await loadAssetDetails(selectedAssetId);
       await refreshAssets();
@@ -436,7 +430,6 @@ export function FixedAssetsPage(props: FixedAssetsPageProps) {
       <AssetCreateModal
         opened={createAssetModalOpen}
         onClose={() => setCreateAssetModalOpen(false)}
-        accessToken={props.accessToken}
         categories={categories}
         outlets={outletOptions}
         onSuccess={() => refreshAssets()}
@@ -445,7 +438,6 @@ export function FixedAssetsPage(props: FixedAssetsPageProps) {
       <CategoryCreateModal
         opened={createCategoryModalOpen}
         onClose={() => setCreateCategoryModalOpen(false)}
-        accessToken={props.accessToken}
         accounts={accounts}
         onSuccess={() => refreshCategories()}
       />

@@ -40,7 +40,6 @@ import type { SessionUser } from "../lib/session";
 
 type OutletTablesPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type DialogMode = "create" | "edit" | "bulk" | null;
@@ -102,7 +101,7 @@ function getEffectiveStatusId(table: OutletTableResponse): OutletTableStatusIdTy
 }
 
 export function OutletTablesPage(props: OutletTablesPageProps) {
-  const { user, accessToken } = props;
+  const { user } = props;
   const canEditTableCode =
     user.global_roles.includes("SUPER_ADMIN") ||
     user.global_roles.includes("OWNER") ||
@@ -130,8 +129,8 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Data hooks
-  const outlets = useOutletsFull(userCompanyId, accessToken);
-  const tables = useOutletTables(selectedOutletId, accessToken);
+  const outlets = useOutletsFull(userCompanyId);
+  const tables = useOutletTables(selectedOutletId);
 
   // Auto-select first outlet (handle empty list and stale IDs)
   useEffect(() => {
@@ -311,8 +310,7 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
             zone: formData.zone?.trim() || null,
             capacity: formData.capacity,
             status_id: formData.status_id
-          },
-          accessToken
+          }
         );
         setSuccessMessage("Table created successfully");
       } else if (dialogMode === "edit" && editingTable) {
@@ -326,8 +324,7 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
             zone: formData.zone?.trim() || null,
             capacity: formData.capacity,
             ...(isCurrentlyDerived ? {} : { status_id: formData.status_id })
-          },
-          accessToken
+          }
         );
         setSuccessMessage("Table updated successfully");
       } else if (dialogMode === "bulk") {
@@ -342,8 +339,7 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
             zone: bulkFormData.zone?.trim() || null,
             capacity: bulkFormData.capacity,
             status_id: bulkFormData.status_id
-          },
-          accessToken
+          }
         );
         setSuccessMessage(`${result.created_count} tables created successfully`);
       }
@@ -362,7 +358,6 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
     canEditTableCode,
     bulkFormData,
     selectedOutletId,
-    accessToken,
     validateForm,
     validateBulkForm,
     tables,
@@ -383,12 +378,11 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
         await updateOutletTable(
           selectedOutletId,
           deleteConfirm.id,
-          { status_id: OutletTableStatusId.AVAILABLE },
-          accessToken
+          { status_id: OutletTableStatusId.AVAILABLE }
         );
         setSuccessMessage("Table reactivated successfully");
       } else {
-        await deactivateOutletTable(selectedOutletId, deleteConfirm.id, accessToken);
+        await deactivateOutletTable(selectedOutletId, deleteConfirm.id);
         setSuccessMessage("Table deactivated successfully");
       }
       await tables.refetch();
@@ -398,7 +392,7 @@ export function OutletTablesPage(props: OutletTablesPageProps) {
     } finally {
       setDeleting(false);
     }
-  }, [deleteConfirm, selectedOutletId, accessToken, tables]);
+  }, [deleteConfirm, selectedOutletId, tables]);
 
   // Clear success message on timeout
   useEffect(() => {

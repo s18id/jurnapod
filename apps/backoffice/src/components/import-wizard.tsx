@@ -80,7 +80,6 @@ export interface ImportWizardConfig<T> {
   parseRow: (row: Record<string, string>, columnMap: Record<string, string>) => Partial<T> | null;
   validateRow: (parsed: Partial<T>, rowIndex: number) => string | null;
   importFn: (rows: ImportPlanRow<T>[], onProgress?: (current: number, total: number) => void) => Promise<ImportResult>;
-  accessToken: string;
 }
 
 interface ImportWizardProps<T> {

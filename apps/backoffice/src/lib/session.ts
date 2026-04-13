@@ -120,8 +120,10 @@ export async function fetchCurrentUser(accessToken: string): Promise<SessionUser
   return response.data;
 }
 
-export async function refreshSessionUser(accessToken: string): Promise<SessionUser> {
-  return fetchCurrentUser(accessToken);
+export async function refreshSessionUser(): Promise<SessionUser> {
+  const response = await apiRequest<MeResponse>("/users/me", {});
+  storeCompanyTimezone(response.data.company_timezone ?? null);
+  return response.data;
 }
 
 /**

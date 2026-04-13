@@ -19,7 +19,6 @@ import type { RoleCode, SessionUser } from "../lib/session";
 
 type ModuleRolesPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type ModuleRow = {
@@ -31,18 +30,13 @@ type ModuleRow = {
 const MODULES = ModuleSchema.options as Module[];
 
 const MODULE_LABELS: Record<Module, string> = {
-  companies: "Companies",
-  outlets: "Outlets",
-  users: "Users",
-  roles: "Roles",
-  accounts: "Accounts",
-  journals: "Journals",
-  cash_bank: "Cash & Bank",
+  platform: "Platform",
+  pos: "POS",
   sales: "Sales",
   inventory: "Inventory",
-  purchasing: "Purchasing",
-  reports: "Reports",
-  settings: "Settings"
+  accounting: "Accounting",
+  treasury: "Treasury",
+  reservations: "Reservations"
 };
 
 const PERMISSION_BITS = {
@@ -90,11 +84,11 @@ function hasPermission(mask: number, bit: number): boolean {
 }
 
 export function ModuleRolesPage(props: ModuleRolesPageProps) {
-  const { user, accessToken } = props;
+  const { user } = props;
   const isOnline = useOnlineStatus();
   const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
 
-  const rolesQuery = useRoles(accessToken);
+  const rolesQuery = useRoles();
   const availableRoles = useMemo(() => {
     const roles = rolesQuery.data ?? [];
     return isSuperAdmin ? roles : roles.filter((role) => role.code !== "SUPER_ADMIN");
@@ -107,7 +101,7 @@ export function ModuleRolesPage(props: ModuleRolesPageProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
 
-  const moduleRolesQuery = useModuleRoles(accessToken, selectedRoleId);
+  const moduleRolesQuery = useModuleRoles(selectedRoleId);
 
   useEffect(() => {
     if (availableRoles.length === 0) {
@@ -197,7 +191,7 @@ export function ModuleRolesPage(props: ModuleRolesPageProps) {
       const updates = MODULES.filter(
         (moduleName) => moduleMasks[moduleName] !== baselineMasks[moduleName]
       ).map((moduleName) =>
-        updateModuleRolePermission(selectedRoleId, moduleName, moduleMasks[moduleName], accessToken)
+        updateModuleRolePermission(selectedRoleId, moduleName, moduleMasks[moduleName])
       );
 
       if (updates.length > 0) {

@@ -95,7 +95,6 @@ function flattenTree(nodes: AccountTreeNode[]): AccountResponse[] {
  */
 export function useAccountTypes(
   companyId: number,
-  accessToken: string,
   filters?: {
     is_active?: boolean;
     search?: string;
@@ -128,13 +127,12 @@ export function useAccountTypes(
 
         const response = await apiRequest<AccountTypesListResponse>(
           `/accounts/types?${params.toString()}`,
-          {},
-          accessToken
+          {}
         );
         setData(response.data);
         await CacheService.cacheAccountTypes(companyId, response.data);
       } else {
-        const cached = await CacheService.getCachedAccountTypes(companyId, accessToken, { allowStale: true });
+        const cached = await CacheService.getCachedAccountTypes(companyId, { allowStale: true });
         setData(cached);
       }
     } catch (fetchError) {
@@ -147,7 +145,7 @@ export function useAccountTypes(
     } finally {
       setLoading(false);
     }
-  }, [companyId, accessToken, isOnline, filters?.is_active, filters?.search, filters?.category]);
+  }, [companyId, isOnline, filters?.is_active, filters?.search, filters?.category]);
 
   useEffect(() => {
     refetch();
@@ -162,7 +160,6 @@ export function useAccountTypes(
  */
 export function useAccounts(
   companyId: number,
-  accessToken: string,
   filters?: Partial<Omit<AccountListQuery, "company_id">>
 ) {
   const [data, setData] = useState<AccountResponse[]>([]);
@@ -238,15 +235,14 @@ export function useAccounts(
 
         const response = await apiRequest<AccountsListResponse>(
           `/accounts?${params.toString()}`,
-          {},
-          accessToken
+          {}
         );
         setData(response.data);
         if (filters?.is_active !== false) {
           await CacheService.cacheAccounts(companyId, response.data);
         }
       } else {
-        const cached = await CacheService.getCachedAccounts(companyId, accessToken, { allowStale: true });
+        const cached = await CacheService.getCachedAccounts(companyId, { allowStale: true });
         setData(applyAccountFilters(cached));
       }
     } catch (fetchError) {
@@ -261,7 +257,7 @@ export function useAccounts(
         inFlightRef.current = false;
       }
     },
-    [companyId, accessToken, filters, isOnline]
+    [companyId, filters, isOnline]
   );
 
   useEffect(() => {
@@ -277,7 +273,6 @@ export function useAccounts(
  */
 export function useAccountTree(
   companyId: number,
-  accessToken: string,
   includeInactive?: boolean
 ) {
   const [data, setData] = useState<AccountTreeNode[]>([]);
@@ -297,13 +292,12 @@ export function useAccountTree(
 
         const response = await apiRequest<AccountTreeResponse>(
           `/accounts/tree?${params.toString()}`,
-          {},
-          accessToken
+          {}
         );
         setData(response.data);
         await CacheService.cacheAccounts(companyId, flattenTree(response.data));
       } else {
-        const cached = await CacheService.getCachedAccounts(companyId, accessToken, { allowStale: true });
+        const cached = await CacheService.getCachedAccounts(companyId, { allowStale: true });
         const filtered = includeInactive ? cached : cached.filter((account) => account.is_active);
         setData(buildAccountTree(filtered));
       }
@@ -317,7 +311,7 @@ export function useAccountTree(
     } finally {
       setLoading(false);
     }
-  }, [companyId, accessToken, includeInactive, isOnline]);
+  }, [companyId, includeInactive, isOnline]);
 
   useEffect(() => {
     refetch();
@@ -332,8 +326,7 @@ export function useAccountTree(
  */
 export function useAccount(
   accountId: number | null,
-  companyId: number,
-  accessToken: string
+  companyId: number
 ) {
   const [data, setData] = useState<AccountResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -355,12 +348,11 @@ export function useAccount(
         const params = new URLSearchParams({ company_id: String(companyId) });
         const response = await apiRequest<AccountSingleResponse>(
           `/accounts/${accountId}?${params.toString()}`,
-          {},
-          accessToken
+          {}
         );
         setData(response.data);
       } else {
-        const cached = await CacheService.getCachedAccounts(companyId, accessToken, { allowStale: true });
+        const cached = await CacheService.getCachedAccounts(companyId, { allowStale: true });
         const match = cached.find((account) => account.id === accountId) ?? null;
         setData(match);
       }
@@ -374,7 +366,7 @@ export function useAccount(
     } finally {
       setLoading(false);
     }
-  }, [accountId, companyId, accessToken, isOnline]);
+  }, [accountId, companyId, isOnline]);
 
   useEffect(() => {
     refetch();
@@ -389,8 +381,7 @@ export function useAccount(
  */
 export function useAccountUsage(
   accountId: number | null,
-  companyId: number,
-  accessToken: string
+  companyId: number
 ) {
   const [data, setData] = useState<AccountUsagePayload | null>(null);
   const [loading, setLoading] = useState(false);
@@ -410,8 +401,7 @@ export function useAccountUsage(
       const params = new URLSearchParams({ company_id: String(companyId) });
       const response = await apiRequest<AccountUsageResponse>(
         `/accounts/${accountId}/usage?${params.toString()}`,
-        {},
-        accessToken
+        {}
       );
       setData(response.data);
     } catch (fetchError) {
@@ -424,7 +414,7 @@ export function useAccountUsage(
     } finally {
       setLoading(false);
     }
-  }, [accountId, companyId, accessToken]);
+  }, [accountId, companyId]);
 
   useEffect(() => {
     refetch();
@@ -438,16 +428,14 @@ export function useAccountUsage(
  * Creates a new account
  */
 export async function createAccount(
-  data: AccountCreateRequest,
-  accessToken: string
+  data: AccountCreateRequest
 ): Promise<AccountResponse> {
   const response = await apiRequest<AccountSingleResponse>(
     "/accounts",
     {
       method: "POST",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -458,16 +446,14 @@ export async function createAccount(
  */
 export async function updateAccount(
   accountId: number,
-  data: AccountUpdateRequest,
-  accessToken: string
+  data: AccountUpdateRequest
 ): Promise<AccountResponse> {
   const response = await apiRequest<AccountSingleResponse>(
     `/accounts/${accountId}`,
     {
       method: "PUT",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -477,15 +463,13 @@ export async function updateAccount(
  * Deactivates (soft delete) an account
  */
 export async function deactivateAccount(
-  accountId: number,
-  accessToken: string
+  accountId: number
 ): Promise<void> {
   await apiRequest<{ success: true; data: AccountResponse }>(
     `/accounts/${accountId}`,
     {
       method: "DELETE"
-    },
-    accessToken
+    }
   );
 }
 
@@ -494,15 +478,13 @@ export async function deactivateAccount(
  * Reactivates a deactivated account
  */
 export async function reactivateAccount(
-  accountId: number,
-  accessToken: string
+  accountId: number
 ): Promise<AccountResponse> {
   const response = await apiRequest<AccountSingleResponse>(
     `/accounts/${accountId}/reactivate`,
     {
       method: "POST"
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -512,16 +494,14 @@ export async function reactivateAccount(
  * Creates a new account type
  */
 export async function createAccountType(
-  data: { company_id: number; name: string; category: string; normal_balance?: string; report_group?: string },
-  accessToken: string
+  data: { company_id: number; name: string; category: string; normal_balance?: string; report_group?: string }
 ): Promise<AccountTypeResponse> {
   const response = await apiRequest<{ success: true; data: AccountTypeResponse }>(
     `/accounts/types`,
     {
       method: "POST",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -532,16 +512,14 @@ export async function createAccountType(
  */
 export async function updateAccountType(
   accountTypeId: number,
-  data: { name?: string; category?: string; normal_balance?: string; report_group?: string },
-  accessToken: string
+  data: { name?: string; category?: string; normal_balance?: string; report_group?: string }
 ): Promise<AccountTypeResponse> {
   const response = await apiRequest<{ success: true; data: AccountTypeResponse }>(
     `/accounts/types/${accountTypeId}`,
     {
       method: "PUT",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -551,14 +529,12 @@ export async function updateAccountType(
  * Deactivates (soft delete) an account type
  */
 export async function deactivateAccountType(
-  accountTypeId: number,
-  accessToken: string
+  accountTypeId: number
 ): Promise<void> {
   await apiRequest<{ success: true; data: AccountTypeResponse }>(
     `/accounts/types/${accountTypeId}`,
     {
       method: "DELETE"
-    },
-    accessToken
+    }
   );
 }

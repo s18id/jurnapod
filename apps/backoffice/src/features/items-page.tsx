@@ -56,7 +56,6 @@ import { VariantManager } from "./variant-manager";
 
 interface ItemsPageProps {
   user: SessionUser;
-  accessToken: string;
 }
 
 type ItemFormData = {
@@ -76,7 +75,7 @@ const itemTypeOptions = [
   { value: "RECIPE", label: "Recipe" },
 ];
 
-export function ItemsPage({ user, accessToken }: ItemsPageProps) {
+export function ItemsPage({ user }: ItemsPageProps) {
   const isMobile = useMediaQuery("(max-width: 48em)");
 
   // Data hooks
@@ -85,31 +84,31 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
     loading: itemsLoading,
     error: itemsError,
     refresh: refreshItems,
-  } = useItems({ user, accessToken });
+  } = useItems({ user });
 
   const {
     itemGroups,
     loading: groupsLoading,
     error: groupsError,
     groupMap,
-  } = useItemGroups({ user, accessToken });
+  } = useItemGroups({ user });
 
   // Variant stats hook for stock rollup visibility
   const itemIds = useMemo(() => items.map((item) => item.id), [items]);
   const {
     stats: variantStats,
     // loading: _variantStatsLoading, // Reserved for future loading state UI
-  } = useItemVariantStats({ user, accessToken, itemIds });
+  } = useItemVariantStats({ user, itemIds });
 
   // Account hooks for COGS and Inventory Asset accounts
   const { data: expenseAccounts, loading: expenseAccountsLoading } = useAccounts(
     user.company_id,
-    accessToken,
+    
     { is_active: true }
   );
   const { data: assetAccounts, loading: assetAccountsLoading } = useAccounts(
     user.company_id,
-    accessToken,
+    
     { is_active: true }
   );
 
@@ -316,8 +315,7 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
         {
           method: "POST",
           body: JSON.stringify(formData),
-        },
-        accessToken
+        }
       );
 
       closeCreateModal();
@@ -344,8 +342,7 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
         {
           method: "PATCH",
           body: JSON.stringify(formData),
-        },
-        accessToken
+        }
       );
 
       closeEditModal();
@@ -372,8 +369,7 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
         `/inventory/items/${deletingItemId}`,
         {
           method: "DELETE",
-        },
-        accessToken
+        }
       );
 
       closeDeleteModal();
@@ -398,8 +394,7 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
         {
           method: "PATCH",
           body: JSON.stringify({ is_active: !item.is_active }),
-        },
-        accessToken
+        }
       );
 
       await refreshItems();
@@ -469,8 +464,7 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
             {
               method: "POST",
               body: JSON.stringify(row.parsed),
-            },
-            accessToken
+            }
           );
           results.success++;
           results.created++;
@@ -486,8 +480,8 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
       await refreshItems();
       return results;
     },
-    accessToken,
-  }), [accessToken, refreshItems]);
+    
+  }), [refreshItems]);
 
   const handleImportComplete = () => {
     closeImportModal();
@@ -1142,7 +1136,6 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
           recipeName={editingRecipeItem.name}
           recipeSku={editingRecipeItem.sku}
           user={user}
-          accessToken={accessToken}
           onClose={() => {
             closeRecipeEditor();
             setEditingRecipeItem(null);
@@ -1163,7 +1156,6 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
         {editingVariantItem && (
           <VariantManager
             user={user}
-            accessToken={accessToken}
             itemId={editingVariantItem.id}
             itemName={editingVariantItem.name}
             itemSku={editingVariantItem.sku}
@@ -1189,7 +1181,6 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
           <Stack gap="xl">
             <ItemBarcodeManager
               user={user}
-              accessToken={accessToken}
               itemId={editingBarcodeImageItem.id}
               itemName={editingBarcodeImageItem.name}
               currentBarcode={editingBarcodeImageItem.barcode}
@@ -1201,7 +1192,6 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
 
             <ImageUpload
               user={user}
-              accessToken={accessToken}
               itemId={editingBarcodeImageItem.id}
               itemName={editingBarcodeImageItem.name}
               onUploadSuccess={() => {
@@ -1211,7 +1201,6 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
 
             <ItemImageGallery
               user={user}
-              accessToken={accessToken}
               itemId={editingBarcodeImageItem.id}
               itemName={editingBarcodeImageItem.name}
               onImagesChange={() => {
@@ -1227,7 +1216,6 @@ export function ItemsPage({ user, accessToken }: ItemsPageProps) {
         opened={exportDialogOpen}
         onClose={closeExportDialog}
         entityType="items"
-        accessToken={accessToken}
         initialFilters={getExportFilters()}
         estimatedRowCount={filteredItems.length}
       />

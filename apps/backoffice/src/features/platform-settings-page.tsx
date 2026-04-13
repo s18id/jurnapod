@@ -26,7 +26,6 @@ import type { SessionUser } from "../lib/session";
 
 type PlatformSettingsPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type PlatformSettingsResponse = {
@@ -60,7 +59,7 @@ const initialFormState: Record<string, any> = {
   "mailer.smtp.tls_reject_unauthorized": "true"
 };
 
-export function PlatformSettingsPage({ user: _user, accessToken }: PlatformSettingsPageProps) {
+export function PlatformSettingsPage({ user: _user }: PlatformSettingsPageProps) {
   const isOnline = useOnlineStatus();
   
   // Form state
@@ -93,7 +92,7 @@ export function PlatformSettingsPage({ user: _user, accessToken }: PlatformSetti
         const response = await apiRequest<PlatformSettingsResponse>(
           `/platform/settings`,
           {},
-          accessToken
+          
         );
         const normalizedSettings = { ...initialFormState, ...response.data.settings };
         if (normalizedSettings["mailer.smtp.pass"] === "*****") {
@@ -112,7 +111,7 @@ export function PlatformSettingsPage({ user: _user, accessToken }: PlatformSetti
     }
 
     fetchSettings();
-  }, [accessToken]);
+  }, []);
 
   async function handleSave() {
     setSaving(true);
@@ -133,7 +132,7 @@ export function PlatformSettingsPage({ user: _user, accessToken }: PlatformSetti
           method: "PUT",
           body: JSON.stringify({ settings: settingsToSave })
         },
-        accessToken
+        
       );
       setSaveSuccess(true);
       setUpdatePassword(false);
@@ -142,7 +141,7 @@ export function PlatformSettingsPage({ user: _user, accessToken }: PlatformSetti
       const response = await apiRequest<PlatformSettingsResponse>(
         `/platform/settings`,
         {},
-        accessToken
+        
       );
       const normalizedSettings = { ...initialFormState, ...response.data.settings };
       setFormState(normalizedSettings);
@@ -172,7 +171,7 @@ export function PlatformSettingsPage({ user: _user, accessToken }: PlatformSetti
             text: testText
           })
         },
-        accessToken
+        
       );
       setTestSuccess(true);
     } catch (err) {

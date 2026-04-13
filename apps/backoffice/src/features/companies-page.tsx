@@ -45,7 +45,6 @@ import { storeCompanyTimezone, type SessionUser } from "../lib/session";
 
 type CompaniesPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type DialogMode = "create" | "edit" | "view" | null;
@@ -86,7 +85,7 @@ const statusOptions: Array<{ value: CompanyStatusFilter; label: string }> = [
 ];
 
 export function CompaniesPage(props: CompaniesPageProps) {
-  const { accessToken, user } = props;
+  const { user } = props;
   const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
   
   // Dialog state
@@ -118,7 +117,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
   const isMobile = useMediaQuery("(max-width: 48em)");
 
   // API hooks
-  const companiesQuery = useCompanies(accessToken, {
+  const companiesQuery = useCompanies({
     includeDeleted: isSuperAdmin && statusFilter !== "active",
     pagination,
     sort: sort ? { id: sort.id, direction: sort.direction } : undefined
@@ -269,8 +268,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
             address_line2: formData.address_line2.trim() || undefined,
             city: formData.city.trim() || undefined,
             postal_code: formData.postal_code.trim() || undefined
-          },
-          accessToken
+          }
         );
         setSuccessMessage("Company created successfully");
         await companiesQuery.refetch();
@@ -310,7 +308,7 @@ export function CompaniesPage(props: CompaniesPageProps) {
         }
 
         if (Object.keys(updates).length > 0) {
-          await updateCompany(editingCompany.id, updates, accessToken);
+          await updateCompany(editingCompany.id, updates);
           if (editingCompany.id === user.company_id && updates.timezone !== undefined) {
             storeCompanyTimezone(updates.timezone);
           }
@@ -414,10 +412,10 @@ export function CompaniesPage(props: CompaniesPageProps) {
 
     try {
       if (confirmState.action === "deactivate") {
-        await deleteCompany(confirmState.company.id, accessToken);
+        await deleteCompany(confirmState.company.id);
         setSuccessMessage(`Company "${confirmState.company.name}" deactivated successfully`);
       } else {
-        await reactivateCompany(confirmState.company.id, accessToken);
+        await reactivateCompany(confirmState.company.id);
         setSuccessMessage(`Company "${confirmState.company.name}" reactivated successfully`);
       }
       await companiesQuery.refetch();

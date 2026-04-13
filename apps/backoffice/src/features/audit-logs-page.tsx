@@ -14,7 +14,6 @@ import type { SessionUser } from "../lib/session";
 
 type AuditLogsPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type AuditLogsResult = {
@@ -92,8 +91,7 @@ export function AuditLogsPage(props: AuditLogsPageProps) {
 
       const response = await apiRequest<AuditLogsApiResponse>(
         `/audit-logs?${params.toString()}`,
-        {},
-        props.accessToken
+        {}
       );
 
       setLogs(response.data.logs);

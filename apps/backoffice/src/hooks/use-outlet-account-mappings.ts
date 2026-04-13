@@ -49,7 +49,6 @@ type MappingScope = "company" | "outlet";
 
 export function useOutletAccountMappings(
   outletId: number | null,
-  accessToken: string,
   scope: MappingScope = "outlet"
 ) {
   const [data, setData] = useState<OutletAccountMapping[] | EffectiveOutletAccountMapping[]>([]);
@@ -63,8 +62,7 @@ export function useOutletAccountMappings(
       try {
         const response = await apiRequest<CompanyMappingResponse>(
           `/settings/outlet-account-mappings?scope=company`,
-          {},
-          accessToken
+          {}
         );
         setData(response.data.mappings);
       } catch (fetchError) {
@@ -92,8 +90,7 @@ export function useOutletAccountMappings(
     try {
       const response = await apiRequest<OutletMappingResponse>(
         `/settings/outlet-account-mappings?scope=outlet&outlet_id=${outletId}`,
-        {},
-        accessToken
+        {}
       );
       setData(response.data.mappings);
     } catch (fetchError) {
@@ -106,7 +103,7 @@ export function useOutletAccountMappings(
     } finally {
       setLoading(false);
     }
-  }, [outletId, accessToken, scope]);
+  }, [outletId, scope]);
 
   useEffect(() => {
     refetch();
@@ -119,8 +116,7 @@ export function useOutletAccountMappings(
         {
           method: "PUT",
           body: JSON.stringify({ scope: "company", mappings })
-        },
-        accessToken
+        }
       );
       return response;
     }
@@ -134,8 +130,7 @@ export function useOutletAccountMappings(
       {
         method: "PUT",
         body: JSON.stringify({ scope: "outlet", outlet_id: outletId, mappings })
-      },
-      accessToken
+      }
     );
     return response;
   }

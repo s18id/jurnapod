@@ -3,14 +3,14 @@
 
 import { SyncService } from "./sync-service";
 
-export function setupAutoSync(accessToken: string, userId: number): () => void {
+export function setupAutoSync(userId: number): () => void {
   const handleOnline = () => {
-    SyncService.syncAll(accessToken, userId).catch(() => undefined);
+    SyncService.syncAll(userId).catch(() => undefined);
   };
 
   const handleVisibility = () => {
     if (!document.hidden && navigator.onLine) {
-      SyncService.syncAll(accessToken, userId).catch(() => undefined);
+      SyncService.syncAll(userId).catch(() => undefined);
     }
   };
 
@@ -19,12 +19,12 @@ export function setupAutoSync(accessToken: string, userId: number): () => void {
 
   const intervalId = window.setInterval(() => {
     if (navigator.onLine) {
-      SyncService.syncAll(accessToken, userId).catch(() => undefined);
+      SyncService.syncAll(userId).catch(() => undefined);
     }
   }, 30000);
 
   if (navigator.onLine) {
-    SyncService.syncAll(accessToken, userId).catch(() => undefined);
+    SyncService.syncAll(userId).catch(() => undefined);
   }
 
   return () => {

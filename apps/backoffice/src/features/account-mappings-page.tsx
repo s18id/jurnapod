@@ -38,7 +38,6 @@ import type { SessionUser } from "../lib/session";
 
 type AccountMappingsPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type MappingScope = "company" | "outlet";
@@ -97,7 +96,7 @@ function buildDefaultMappings(): Record<AnyMappingKey, number | ""> {
   );
 }
 
-export function AccountMappingsPage({ user, accessToken }: AccountMappingsPageProps) {
+export function AccountMappingsPage({ user }: AccountMappingsPageProps) {
   const isOnline = useOnlineStatus();
   const [scope, setScope] = useState<MappingScope>("outlet");
   const [outletId, setOutletId] = useState<number>(user.outlets[0]?.id ?? 0);
@@ -121,7 +120,7 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
 
   const { data: mappings, loading, error, refetch, save } = useOutletAccountMappings(
     scope === "outlet" ? outletId : null,
-    accessToken,
+    
     scope
   );
   const {
@@ -133,11 +132,11 @@ export function AccountMappingsPage({ user, accessToken }: AccountMappingsPagePr
     save: savePayment
   } = useOutletPaymentMethodMappings(
     scope === "outlet" ? outletId : null,
-    accessToken,
+    
     scope
   );
   const accountFilters = useMemo(() => ({ is_active: true }), []);
-  const { data: accounts } = useAccounts(user.company_id, accessToken, accountFilters);
+  const { data: accounts } = useAccounts(user.company_id, accountFilters);
 
   const accountOptions = useMemo(
     () =>

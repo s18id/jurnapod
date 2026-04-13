@@ -73,10 +73,7 @@ type UseSalesOrdersOptions = {
  * Hook: useSalesOrders
  * Fetches list of sales orders with optional filters
  */
-export function useSalesOrders(
-  accessToken: string,
-  options: UseSalesOrdersOptions = {}
-) {
+export function useSalesOrders(options: UseSalesOrdersOptions = {}) {
   const [data, setData] = useState<SalesOrder[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -100,8 +97,7 @@ export function useSalesOrders(
 
       const response = await apiRequest<OrdersListResponse>(
         `/sales/orders?${params}`,
-        {},
-        accessToken
+        {}
       );
       if (requestSeq !== requestSeqRef.current) {
         return;
@@ -123,7 +119,7 @@ export function useSalesOrders(
         setLoading(false);
       }
     }
-  }, [accessToken, options.outlet_id, options.status, options.date_from, options.date_to, options.limit, options.offset]);
+  }, [options.outlet_id, options.status, options.date_from, options.date_to, options.limit, options.offset]);
 
   useEffect(() => {
     refetch().catch(console.error);
@@ -136,7 +132,7 @@ export function useSalesOrders(
  * Hook: useSalesOrder
  * Fetches a single sales order by ID
  */
-export function useSalesOrder(accessToken: string, orderId: number | null) {
+export function useSalesOrder(orderId: number | null) {
   const [data, setData] = useState<SalesOrderDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -156,8 +152,7 @@ export function useSalesOrder(accessToken: string, orderId: number | null) {
     try {
       const response = await apiRequest<OrderDetailResponse>(
         `/sales/orders/${orderId}`,
-        {},
-        accessToken
+        {}
       );
       if (requestSeq !== requestSeqRef.current) {
         return;
@@ -178,7 +173,7 @@ export function useSalesOrder(accessToken: string, orderId: number | null) {
         setLoading(false);
       }
     }
-  }, [accessToken, orderId]);
+  }, [orderId]);
 
   useEffect(() => {
     refetch().catch(console.error);
@@ -191,7 +186,7 @@ export function useSalesOrder(accessToken: string, orderId: number | null) {
  * Hook: useCreateSalesOrder
  * Creates a new sales order
  */
-export function useCreateSalesOrder(accessToken: string) {
+export function useCreateSalesOrder() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -216,8 +211,7 @@ export function useCreateSalesOrder(accessToken: string) {
         {
           method: "POST",
           body: JSON.stringify(payload)
-        },
-        accessToken
+        }
       );
       return response.data;
     } catch (createError) {
@@ -230,7 +224,7 @@ export function useCreateSalesOrder(accessToken: string) {
     } finally {
       setLoading(false);
     }
-  }, [accessToken]);
+  }, []);
 
   return { create, loading, error };
 }
@@ -239,7 +233,7 @@ export function useCreateSalesOrder(accessToken: string) {
  * Hook: useUpdateSalesOrder
  * Updates an existing sales order
  */
-export function useUpdateSalesOrder(accessToken: string) {
+export function useUpdateSalesOrder() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -263,8 +257,7 @@ export function useUpdateSalesOrder(accessToken: string) {
         {
           method: "PATCH",
           body: JSON.stringify(payload)
-        },
-        accessToken
+        }
       );
       return response.data;
     } catch (updateError) {
@@ -277,7 +270,7 @@ export function useUpdateSalesOrder(accessToken: string) {
     } finally {
       setLoading(false);
     }
-  }, [accessToken]);
+  }, []);
 
   return { update, loading, error };
 }
@@ -286,7 +279,7 @@ export function useUpdateSalesOrder(accessToken: string) {
  * Hook: useConvertOrderToInvoice
  * Converts a sales order to invoice
  */
-export function useConvertOrderToInvoice(accessToken: string) {
+export function useConvertOrderToInvoice() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -306,8 +299,7 @@ export function useConvertOrderToInvoice(accessToken: string) {
         {
           method: "POST",
           body: JSON.stringify({ invoice_date: invoiceDate })
-        },
-        accessToken
+        }
       );
       return response.data;
     } catch (convertError) {
@@ -320,7 +312,7 @@ export function useConvertOrderToInvoice(accessToken: string) {
     } finally {
       setLoading(false);
     }
-  }, [accessToken]);
+  }, []);
 
   return { convert, loading, error };
 }
@@ -329,7 +321,7 @@ export function useConvertOrderToInvoice(accessToken: string) {
  * Hook: useCancelSalesOrder
  * Cancels a sales order
  */
-export function useCancelSalesOrder(accessToken: string) {
+export function useCancelSalesOrder() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -342,8 +334,7 @@ export function useCancelSalesOrder(accessToken: string) {
         {
           method: "POST",
           body: JSON.stringify({ reason })
-        },
-        accessToken
+        }
       );
     } catch (cancelError) {
       if (cancelError instanceof ApiError) {
@@ -355,7 +346,7 @@ export function useCancelSalesOrder(accessToken: string) {
     } finally {
       setLoading(false);
     }
-  }, [accessToken]);
+  }, []);
 
   return { cancel, loading, error };
 }

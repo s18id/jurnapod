@@ -55,7 +55,6 @@ type MappingScope = "company" | "outlet";
 
 export function useOutletPaymentMethodMappings(
   outletId: number | null,
-  accessToken: string,
   scope: MappingScope = "outlet"
 ) {
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodConfig[]>([]);
@@ -71,8 +70,7 @@ export function useOutletPaymentMethodMappings(
       try {
         const response = await apiRequest<CompanyMappingResponse>(
           `/settings/outlet-payment-method-mappings?scope=company`,
-          {},
-          accessToken
+          {}
         );
         setPaymentMethods(response.data.payment_methods);
         setMappings(response.data.mappings);
@@ -107,8 +105,7 @@ export function useOutletPaymentMethodMappings(
     try {
       const response = await apiRequest<OutletMappingResponse>(
         `/settings/outlet-payment-method-mappings?scope=outlet&outlet_id=${outletId}`,
-        {},
-        accessToken
+        {}
       );
       if (requestSeq !== requestSeqRef.current) {
         return;
@@ -131,7 +128,7 @@ export function useOutletPaymentMethodMappings(
         setLoading(false);
       }
     }
-  }, [outletId, accessToken, scope]);
+  }, [outletId, scope]);
 
   useEffect(() => {
     refetch();
@@ -153,8 +150,7 @@ export function useOutletPaymentMethodMappings(
         {
           method: "PUT",
           body: JSON.stringify({ scope: "company", mappings: filteredMappings })
-        },
-        accessToken
+        }
       );
       return response;
     }
@@ -178,8 +174,7 @@ export function useOutletPaymentMethodMappings(
       {
         method: "PUT",
         body: JSON.stringify({ scope: "outlet", outlet_id: outletId, mappings: filteredMappings })
-      },
-      accessToken
+      }
     );
     return response;
   }

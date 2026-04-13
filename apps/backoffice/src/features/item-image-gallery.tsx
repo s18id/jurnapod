@@ -29,7 +29,6 @@ interface ItemImagesResponse {
 
 interface ItemImageGalleryProps {
   user: SessionUser;
-  accessToken: string;
   itemId: number;
   itemName: string;
   onImagesChange?: () => void;
@@ -37,7 +36,7 @@ interface ItemImageGalleryProps {
 
 export function ItemImageGallery({
   user: _user,
-  accessToken,
+  
   itemId,
   itemName,
   onImagesChange,
@@ -54,8 +53,7 @@ export function ItemImageGallery({
     try {
       const response = await apiRequest<ItemImagesResponse>(
         `/inventory/items/${itemId}/images`,
-        {},
-        accessToken
+        {}
       );
       setImages(response.images);
     } catch {
@@ -63,7 +61,7 @@ export function ItemImageGallery({
     } finally {
       setLoading(false);
     }
-  }, [itemId, accessToken]);
+  }, [itemId]);
 
   useEffect(() => {
     fetchImages();
@@ -78,8 +76,7 @@ export function ItemImageGallery({
         {
           method: "PATCH",
           body: JSON.stringify({ is_primary: true }),
-        },
-        accessToken
+        }
       );
 
       // Refresh images
@@ -104,8 +101,7 @@ export function ItemImageGallery({
         `/inventory/images/${imageId}`,
         {
           method: "DELETE",
-        },
-        accessToken
+        }
       );
 
       // Refresh images
@@ -129,8 +125,7 @@ export function ItemImageGallery({
         {
           method: "PATCH",
           body: JSON.stringify({ sort_order: currentOrder - 1 }),
-        },
-        accessToken
+        }
       );
 
       // Refresh images
@@ -154,8 +149,7 @@ export function ItemImageGallery({
         {
           method: "PATCH",
           body: JSON.stringify({ sort_order: currentOrder + 1 }),
-        },
-        accessToken
+        }
       );
 
       // Refresh images

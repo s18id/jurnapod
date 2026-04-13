@@ -23,7 +23,6 @@ import type { SessionUser } from "../lib/session";
 
 type InventorySettingsPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type SettingsResponse = {
@@ -66,7 +65,7 @@ function buildOutletOptions(outlets: SessionUser["outlets"]) {
   }));
 }
 
-export function InventorySettingsPage({ user, accessToken }: InventorySettingsPageProps) {
+export function InventorySettingsPage({ user }: InventorySettingsPageProps) {
   const isOnline = useOnlineStatus();
   const outletOptions = useMemo(() => buildOutletOptions(user.outlets), [user.outlets]);
   const [outletId, setOutletId] = useState<number>(user.outlets[0]?.id ?? 0);
@@ -92,8 +91,7 @@ export function InventorySettingsPage({ user, accessToken }: InventorySettingsPa
         const keysParam = SETTINGS_KEYS.join(",");
         const response = await apiRequest<SettingsResponse>(
           `/settings/config?outlet_id=${outletId}&keys=${encodeURIComponent(keysParam)}`,
-          {},
-          accessToken
+          {}
         );
         const nextState: Record<string, number | boolean | string> = { ...DEFAULT_SETTINGS };
         response.data.settings.forEach((setting) => {
@@ -112,7 +110,7 @@ export function InventorySettingsPage({ user, accessToken }: InventorySettingsPa
     }
 
     fetchSettings().catch(() => setError("Failed to load inventory settings"));
-  }, [outletId, accessToken]);
+  }, [outletId]);
 
   if (!isOnline) {
     return (
@@ -144,8 +142,7 @@ export function InventorySettingsPage({ user, accessToken }: InventorySettingsPa
               value: formState[key]
             }))
           })
-        },
-        accessToken
+        }
       );
       setSaveSuccess(true);
     } catch (saveErr) {

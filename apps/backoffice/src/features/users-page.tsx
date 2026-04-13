@@ -65,7 +65,6 @@ import { trackActionMenuOpen, trackActionSelect, trackActionError } from "../lib
 
 type UsersPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 // Dialog modes split into Account-focused and Access-focused flows
@@ -108,7 +107,7 @@ const emptyForm: UserFormData = {
 };
 
 export function UsersPage(props: UsersPageProps) {
-  const { user, accessToken } = props;
+  const { user } = props;
   const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
   
   // Filters
@@ -225,22 +224,22 @@ export function UsersPage(props: UsersPageProps) {
     [sort]
   );
 
-  const usersQuery = useUsers(activeCompanyId, accessToken, {
+  const usersQuery = useUsers(activeCompanyId, {
     filters: usersFilters,
     pagination,
     sort: usersSort
   });
 
-  const rolesQuery = useRoles(accessToken, activeCompanyId);
+  const rolesQuery = useRoles(activeCompanyId);
   
   // Memoize companies query options to prevent infinite re-renders
   const companiesOptions = useMemo(() => ({ enabled: isSuperAdmin }), [isSuperAdmin]);
-  const companiesQuery = useCompanies(accessToken, companiesOptions);
+  const companiesQuery = useCompanies(companiesOptions);
   const outletCompanyId =
     isSuperAdmin && dialogMode === "account-create"
       ? (formData.company_id ?? activeCompanyId)
       : activeCompanyId;
-   const outletsQuery = useOutlets(outletCompanyId, accessToken);
+   const outletsQuery = useOutlets(outletCompanyId);
 
   // Convert loading state for DataTable
   const tableLoadingState = useMemo((): LoadingState => {
@@ -519,19 +518,19 @@ export function UsersPage(props: UsersPageProps) {
                 }))
               : undefined,
           is_active: accountFormData.is_active
-        }, accessToken);
+        });
         setSuccessMessage("User created successfully");
         await usersQuery.refetch({ force: true });
         closeDialog();
       } else if (dialogMode === "account-edit" && editingUser) {
         await updateUser(editingUser.id, {
           email: accountFormData.email !== editingUser.email ? accountFormData.email : undefined
-        }, accessToken);
+        });
         if (accountFormData.is_active !== editingUser.is_active) {
           if (accountFormData.is_active) {
-            await reactivateUser(editingUser.id, accessToken);
+            await reactivateUser(editingUser.id);
           } else {
-            await deactivateUser(editingUser.id, accessToken);
+            await deactivateUser(editingUser.id);
           }
         }
         setSuccessMessage("User account updated successfully");
@@ -592,7 +591,7 @@ export function UsersPage(props: UsersPageProps) {
           if (accessFormData.global_role_codes) {
             await updateUserRoles(editingUser.id, {
               role_codes: accessFormData.global_role_codes as Role[]
-            }, accessToken);
+            });
           }
           
           // Update outlet roles in parallel
@@ -607,7 +606,7 @@ export function UsersPage(props: UsersPageProps) {
             updateUserRoles(editingUser.id, {
               outlet_id: assignment.outlet_id,
               role_codes: assignment.role_codes as Role[]
-            }, accessToken)
+            })
           );
 
           const deletePromises = [...existingOutletIds]
@@ -616,7 +615,7 @@ export function UsersPage(props: UsersPageProps) {
               updateUserRoles(editingUser.id, {
                 outlet_id: outletId,
                 role_codes: []
-              }, accessToken)
+              })
             );
 
           await Promise.all([...updatePromises, ...deletePromises]);
@@ -652,7 +651,7 @@ export function UsersPage(props: UsersPageProps) {
       } else if (dialogMode === "password" && editingUser) {
         await updateUserPassword(editingUser.id, {
           password: formData.password
-        }, accessToken);
+        });
         setSuccessMessage("Password changed successfully");
         closeDialog();
       }
@@ -746,7 +745,7 @@ export function UsersPage(props: UsersPageProps) {
     setSuccessMessage(null);
     
     try {
-      await deactivateUser(targetUser.id, accessToken);
+      await deactivateUser(targetUser.id);
       setSuccessMessage("User deactivated successfully");
       await usersQuery.refetch({ force: true });
     } catch (deactivateError) {
@@ -768,7 +767,7 @@ export function UsersPage(props: UsersPageProps) {
     setSuccessMessage(null);
     
     try {
-      await reactivateUser(targetUser.id, accessToken);
+      await reactivateUser(targetUser.id);
       setSuccessMessage("User reactivated successfully");
       await usersQuery.refetch({ force: true });
     } catch (reactivateError) {

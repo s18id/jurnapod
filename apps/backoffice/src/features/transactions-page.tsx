@@ -16,7 +16,6 @@ import type { SessionUser } from "../lib/session";
 
 type TransactionsPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type JournalLine = {
@@ -129,12 +128,12 @@ function normalizeLines(lines: JournalLine[]) {
   });
 }
 
-export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
+export function TransactionsPage({ user }: TransactionsPageProps) {
   const companyId = user.company_id;
   const accountsFilter = useMemo(() => ({ is_active: true }), []);
   const isOnline = useOnlineStatus();
   
-  const { data: accounts } = useAccounts(companyId, accessToken, accountsFilter);
+  const { data: accounts } = useAccounts(companyId, accountsFilter);
 
   // Filter state
   const [filters, setFilters] = useState({
@@ -145,7 +144,7 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
     limit: 50,
     offset: 0
   });
-  const { data: journalBatches, loading: loadingBatches, refetch: refetchBatches } = useJournalBatches(companyId, accessToken, filters);
+  const { data: journalBatches, loading: loadingBatches, refetch: refetchBatches } = useJournalBatches(companyId, filters);
 
   // Detail modal state
   const [selectedBatch, setSelectedBatch] = useState<JournalBatchResponse | null>(null);
@@ -415,7 +414,7 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
       };
 
       if (isOnline) {
-        await createManualJournalEntry(payload, accessToken);
+        await createManualJournalEntry(payload);
         setSubmitStatus("success");
         setTimeout(() => {
           clearForm();
@@ -444,7 +443,7 @@ export function TransactionsPage({ user, accessToken }: TransactionsPageProps) {
       <div style={{ marginBottom: "20px" }}>
         <h1 style={{ marginBottom: "8px" }}>
           Transaction Input
-          <QueueStatusBadge accessToken={accessToken} userId={user.id} />
+          <QueueStatusBadge userId={user.id} />
         </h1>
         <p style={{ color: "#666", margin: 0 }}>
           Create manual journal entries for expenses, transfers, and adjustments

@@ -26,7 +26,7 @@ type ModuleSource = "live" | "cached" | "empty";
  * Hook: useModules
  * Fetches enabled modules for the company
  */
-export function useModules(accessToken: string | null, companyId: number | null) {
+export function useModules(companyId: number | null) {
   const [modules, setModules] = useState<ModuleConfig[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +34,7 @@ export function useModules(accessToken: string | null, companyId: number | null)
   const isOnline = useOnlineStatus();
 
   const refetch = useCallback(async () => {
-    if (!accessToken || !companyId) {
+    if (!companyId) {
       setModules([]);
       setLoading(false);
       setError(null);
@@ -54,8 +54,7 @@ export function useModules(accessToken: string | null, companyId: number | null)
 
       const response = await apiRequest<ModulesResponse>(
         "/settings/modules",
-        {},
-        accessToken
+        {}
       );
 
       const parsed = response.data.map((row) => ({
@@ -79,7 +78,7 @@ export function useModules(accessToken: string | null, companyId: number | null)
     } finally {
       setLoading(false);
     }
-  }, [accessToken, companyId, isOnline]);
+  }, [companyId, isOnline]);
 
   useEffect(() => {
     refetch();

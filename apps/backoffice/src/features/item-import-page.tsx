@@ -22,7 +22,6 @@ import type { SessionUser } from "../lib/session";
 
 interface ItemImportPageProps {
   user: SessionUser;
-  accessToken: string;
 }
 
 type ItemFormData = {
@@ -35,7 +34,7 @@ type ItemFormData = {
   is_active: boolean;
 };
 
-export function ItemImportPage({ user, accessToken }: ItemImportPageProps) {
+export function ItemImportPage({ user }: ItemImportPageProps) {
   const navigate = useNavigate();
 
   // Data hooks
@@ -43,7 +42,7 @@ export function ItemImportPage({ user, accessToken }: ItemImportPageProps) {
     loading: itemsLoading,
     error: itemsError,
     refresh: refreshItems,
-  } = useItems({ user, accessToken });
+  } = useItems({ user });
 
   // Import configuration for ImportWizard
   const importConfig: ImportWizardConfig<ItemFormData> = useMemo(() => ({
@@ -89,8 +88,7 @@ export function ItemImportPage({ user, accessToken }: ItemImportPageProps) {
             {
               method: "POST",
               body: JSON.stringify(row.parsed),
-            },
-            accessToken
+            }
           );
           results.success++;
           results.created++;
@@ -106,8 +104,8 @@ export function ItemImportPage({ user, accessToken }: ItemImportPageProps) {
       await refreshItems();
       return results;
     },
-    accessToken,
-  }), [accessToken, refreshItems]);
+    
+  }), [refreshItems]);
 
   const handleComplete = useCallback(() => {
     navigate("/items");

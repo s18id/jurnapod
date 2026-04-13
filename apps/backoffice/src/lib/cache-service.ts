@@ -135,7 +135,6 @@ export class CacheService {
 
   static async getCachedAccounts(
     companyId: number,
-    accessToken: string,
     options: CacheOptions = {}
   ): Promise<AccountResponse[]> {
     const cacheKey = buildCacheKey("accounts", { companyId });
@@ -143,12 +142,12 @@ export class CacheService {
     if (cached && (isCacheValid(cached) || options.allowStale)) {
       return cached.data as AccountResponse[];
     }
-    return this.refreshAccounts(companyId, accessToken);
+    return this.refreshAccounts(companyId);
   }
 
-  static async refreshAccounts(companyId: number, accessToken: string): Promise<AccountResponse[]> {
+  static async refreshAccounts(companyId: number): Promise<AccountResponse[]> {
     const params = new URLSearchParams({ company_id: String(companyId), is_active: "true" });
-    const response = await apiRequest<AccountsResponse>(`/accounts?${params.toString()}`, {}, accessToken);
+    const response = await apiRequest<AccountsResponse>(`/accounts?${params.toString()}`);
     const cacheKey = buildCacheKey("accounts", { companyId });
     await upsertCache(cacheKey, response.data, DAY_MS);
     return response.data;
@@ -161,7 +160,6 @@ export class CacheService {
 
   static async getCachedAccountTypes(
     companyId: number,
-    accessToken: string,
     options: CacheOptions = {}
   ): Promise<AccountTypeResponse[]> {
     const cacheKey = buildCacheKey("account_types", { companyId });
@@ -169,14 +167,14 @@ export class CacheService {
     if (cached && (isCacheValid(cached) || options.allowStale)) {
       return cached.data as AccountTypeResponse[];
     }
-    return this.refreshAccountTypes(companyId, accessToken);
+    return this.refreshAccountTypes(companyId);
   }
 
-  static async refreshAccountTypes(companyId: number, accessToken: string): Promise<AccountTypeResponse[]> {
+  static async refreshAccountTypes(companyId: number): Promise<AccountTypeResponse[]> {
     const params = new URLSearchParams({ company_id: String(companyId), is_active: "true" });
-    const response = await apiRequest<AccountTypesResponse>(`/accounts/types?${params.toString()}`, {}, accessToken);
+    const response = await apiRequest<AccountTypesResponse>(`/accounts/types?${params.toString()}`);
     const cacheKey = buildCacheKey("account_types", { companyId });
-    await upsertCache(cacheKey, response.data, DAY_MS);
+    await upsertCache(cacheKey, response.data, HALF_DAY_MS);
     return response.data;
   }
 
@@ -187,7 +185,6 @@ export class CacheService {
 
   static async getCachedItems(
     companyId: number,
-    accessToken: string,
     options: CacheOptions = {}
   ): Promise<unknown[]> {
     const cacheKey = buildCacheKey("items", { companyId });
@@ -195,11 +192,11 @@ export class CacheService {
     if (cached && (isCacheValid(cached) || options.allowStale)) {
       return cached.data as unknown[];
     }
-    return this.refreshItems(companyId, accessToken);
+    return this.refreshItems(companyId);
   }
 
-  static async refreshItems(companyId: number, accessToken: string): Promise<unknown[]> {
-    const response = await apiRequest<ItemsResponse>("/inventory/items", {}, accessToken);
+  static async refreshItems(companyId: number): Promise<unknown[]> {
+    const response = await apiRequest<ItemsResponse>("/inventory/items");
     const cacheKey = buildCacheKey("items", { companyId });
     await upsertCache(cacheKey, response.data, HALF_DAY_MS);
     return response.data;
@@ -207,7 +204,6 @@ export class CacheService {
 
   static async getCachedItemGroups(
     companyId: number,
-    accessToken: string,
     options: CacheOptions = {}
   ): Promise<unknown[]> {
     const cacheKey = buildCacheKey("item_groups", { companyId });
@@ -215,11 +211,11 @@ export class CacheService {
     if (cached && (isCacheValid(cached) || options.allowStale)) {
       return cached.data as unknown[];
     }
-    return this.refreshItemGroups(companyId, accessToken);
+    return this.refreshItemGroups(companyId);
   }
 
-  static async refreshItemGroups(companyId: number, accessToken: string): Promise<unknown[]> {
-    const response = await apiRequest<ItemGroupsResponse>("/inventory/item-groups", {}, accessToken);
+  static async refreshItemGroups(companyId: number): Promise<unknown[]> {
+    const response = await apiRequest<ItemGroupsResponse>("/inventory/item-groups");
     const cacheKey = buildCacheKey("item_groups", { companyId });
     await upsertCache(cacheKey, response.data, HALF_DAY_MS);
     return response.data;
@@ -228,7 +224,6 @@ export class CacheService {
   static async getCachedItemPrices(
     companyId: number,
     outletId: number,
-    accessToken: string,
     options: CacheOptions = {}
   ): Promise<unknown[]> {
     const cacheKey = buildCacheKey("item_prices", { companyId, outletId });
@@ -236,15 +231,14 @@ export class CacheService {
     if (cached && (isCacheValid(cached) || options.allowStale)) {
       return cached.data as unknown[];
     }
-    return this.refreshItemPrices(companyId, outletId, accessToken);
+    return this.refreshItemPrices(companyId, outletId);
   }
 
   static async refreshItemPrices(
     companyId: number,
-    outletId: number,
-    accessToken: string
+    outletId: number
   ): Promise<unknown[]> {
-    const response = await apiRequest<ItemPricesResponse>(`/inventory/item-prices?outlet_id=${outletId}`, {}, accessToken);
+    const response = await apiRequest<ItemPricesResponse>(`/inventory/item-prices?outlet_id=${outletId}`);
     const cacheKey = buildCacheKey("item_prices", { companyId, outletId });
     await upsertCache(cacheKey, response.data, HALF_DAY_MS);
     return response.data;
@@ -254,20 +248,19 @@ export class CacheService {
 type MasterDataRefreshOptions = {
   companyId: number;
   outletId: number;
-  accessToken: string;
 };
 
 export function setupMasterDataRefresh(options: MasterDataRefreshOptions): () => void {
-  const { companyId, outletId, accessToken } = options;
+  const { companyId, outletId } = options;
 
   async function runRefresh() {
     await Promise.all([
-      CacheService.refreshAccounts(companyId, accessToken),
-      CacheService.refreshAccountTypes(companyId, accessToken),
-      CacheService.refreshItems(companyId, accessToken),
-      CacheService.refreshItemGroups(companyId, accessToken),
+      CacheService.refreshAccounts(companyId),
+      CacheService.refreshAccountTypes(companyId),
+      CacheService.refreshItems(companyId),
+      CacheService.refreshItemGroups(companyId),
       outletId > 0
-        ? CacheService.refreshItemPrices(companyId, outletId, accessToken)
+        ? CacheService.refreshItemPrices(companyId, outletId)
         : Promise.resolve([])
     ]);
   }

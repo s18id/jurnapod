@@ -23,6 +23,11 @@ export const APP_ROUTES: readonly AppRoute[] = [
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
   },
   {
+    path: "/receivables-ageing",
+    label: "Receivables Ageing",
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
+  },
+  {
     path: "/general-ledger",
     label: "General Ledger",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]

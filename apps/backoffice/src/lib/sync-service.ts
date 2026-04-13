@@ -36,7 +36,7 @@ export class SyncService {
   private static maxRetries = 3;
   private static syncingTimeoutMs = 10 * 60 * 1000;
 
-  static async syncAll(accessToken: string, userId: number): Promise<SyncResult> {
+  static async syncAll(userId: number): Promise<SyncResult> {
     if (this.isSyncing) {
       return { success: 0, failed: 0, conflicts: 0 };
     }
@@ -85,7 +85,7 @@ export class SyncService {
             status: "syncing",
             nextRetryAt: new Date(Date.now() + this.syncingTimeoutMs)
           });
-          const result = await this.syncOne(item, accessToken);
+          const result = await this.syncOne(item);
           if (result.success) {
             await OutboxService.deleteItem(item.id, userId);
             success += 1;
@@ -115,7 +115,7 @@ export class SyncService {
     }
   }
 
-  private static async syncOne(item: OutboxItem, accessToken: string): Promise<SyncResponse> {
+  private static async syncOne(item: OutboxItem): Promise<SyncResponse> {
     const endpoint = resolveEndpoint(item.type);
     try {
       const payload = this.buildPayload(item);
@@ -124,8 +124,7 @@ export class SyncService {
         {
           method: "POST",
           body: JSON.stringify(payload)
-        },
-        accessToken
+        }
       );
       return { success: true };
     } catch (error) {

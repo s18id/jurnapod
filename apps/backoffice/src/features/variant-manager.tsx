@@ -39,7 +39,6 @@ import type { SessionUser } from "../lib/session";
 
 interface VariantManagerProps {
   user: SessionUser;
-  accessToken: string;
   itemId: number;
   itemName: string;
   itemSku: string | null;
@@ -51,7 +50,7 @@ type AttributeFormData = {
   values: string;
 };
 
-export function VariantManager({ user, accessToken, itemId, itemName, itemSku, onClose }: VariantManagerProps) {
+export function VariantManager({ user, itemId, itemName, itemSku, onClose }: VariantManagerProps) {
   const {
     attributes,
     variants,
@@ -62,7 +61,7 @@ export function VariantManager({ user, accessToken, itemId, itemName, itemSku, o
     deleteAttribute,
     updateVariant,
     adjustStock,
-  } = useVariants({ user, accessToken, itemId });
+  } = useVariants({ user, itemId });
 
   const [attributeForm, setAttributeForm] = useState<AttributeFormData>({
     attribute_name: "",

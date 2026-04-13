@@ -14,7 +14,7 @@ import { apiRequest } from "../lib/api-client";
 /**
  * Hook to fetch outlet tables for a specific outlet
  */
-export function useOutletTables(outletId: number | null, accessToken: string) {
+export function useOutletTables(outletId: number | null) {
   const [data, setData] = useState<OutletTableResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,9 +31,7 @@ export function useOutletTables(outletId: number | null, accessToken: string) {
 
     try {
       const response = await apiRequest<{ success: true; data: OutletTableResponse[] }>(
-        `/outlets/${outletId}/tables`,
-        {},
-        accessToken
+        `/outlets/${outletId}/tables`
       );
       setData(response.data);
     } catch (e: any) {
@@ -42,7 +40,7 @@ export function useOutletTables(outletId: number | null, accessToken: string) {
     } finally {
       setLoading(false);
     }
-  }, [outletId, accessToken]);
+  }, [outletId]);
 
   useEffect(() => {
     refetch();
@@ -56,8 +54,7 @@ export function useOutletTables(outletId: number | null, accessToken: string) {
  */
 export function useOutletTable(
   outletId: number | null,
-  tableId: number | null,
-  accessToken: string
+  tableId: number | null
 ) {
   const [data, setData] = useState<OutletTableResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -75,9 +72,7 @@ export function useOutletTable(
 
     try {
       const response = await apiRequest<{ success: true; data: OutletTableResponse }>(
-        `/outlets/${outletId}/tables/${tableId}`,
-        {},
-        accessToken
+        `/outlets/${outletId}/tables/${tableId}`
       );
       setData(response.data);
     } catch (e: any) {
@@ -86,7 +81,7 @@ export function useOutletTable(
     } finally {
       setLoading(false);
     }
-  }, [outletId, tableId, accessToken]);
+  }, [outletId, tableId]);
 
   useEffect(() => {
     refetch();
@@ -100,16 +95,14 @@ export function useOutletTable(
  */
 export async function createOutletTable(
   outletId: number,
-  data: OutletTableCreateRequest,
-  accessToken: string
+  data: OutletTableCreateRequest
 ): Promise<OutletTableResponse> {
   const response = await apiRequest<{ success: true; data: OutletTableResponse }>(
     `/outlets/${outletId}/tables`,
     {
       method: "POST",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -119,8 +112,7 @@ export async function createOutletTable(
  */
 export async function createOutletTablesBulk(
   outletId: number,
-  data: OutletTableBulkCreateRequest,
-  accessToken: string
+  data: OutletTableBulkCreateRequest
 ): Promise<{ created_count: number; tables: OutletTableResponse[] }> {
   const response = await apiRequest<{
     success: true;
@@ -130,8 +122,7 @@ export async function createOutletTablesBulk(
     {
       method: "POST",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -142,16 +133,14 @@ export async function createOutletTablesBulk(
 export async function updateOutletTable(
   outletId: number,
   tableId: number,
-  data: OutletTableUpdateRequest,
-  accessToken: string
+  data: OutletTableUpdateRequest
 ): Promise<OutletTableResponse> {
   const response = await apiRequest<{ success: true; data: OutletTableResponse }>(
     `/outlets/${outletId}/tables/${tableId}`,
     {
       method: "PUT",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -161,15 +150,13 @@ export async function updateOutletTable(
  */
 export async function deactivateOutletTable(
   outletId: number,
-  tableId: number,
-  accessToken: string
+  tableId: number
 ): Promise<void> {
   await apiRequest<{ success: true }>(
     `/outlets/${outletId}/tables/${tableId}`,
     {
       method: "PATCH"
-    },
-    accessToken
+    }
   );
 }
 

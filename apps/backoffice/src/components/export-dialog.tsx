@@ -40,7 +40,6 @@ interface ExportDialogProps {
   opened: boolean;
   onClose: () => void;
   entityType: ExportEntityType;
-  accessToken: string;
   initialFilters?: ExportFilters;
   estimatedRowCount?: number;
 }
@@ -53,7 +52,6 @@ export function ExportDialog({
   opened,
   onClose,
   entityType,
-  accessToken,
   initialFilters = {},
   estimatedRowCount = 0,
 }: ExportDialogProps) {
@@ -90,7 +88,7 @@ export function ExportDialog({
     retry,
   } = useExportDialog({
     entityType,
-    accessToken,
+    
     initialFilters,
   });
 

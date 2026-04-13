@@ -24,6 +24,7 @@ import {
   PosPaymentsPage as PosPaymentsReportPage,
   PosTransactionsPage as PosTransactionsReportPage
 } from "./reports-pages";
+import { ReceivablesAgeingPage as ReceivablesAgeingManagementPage } from "./receivables-ageing-page";
 import { SalesInvoicesPage as SalesInvoicesManagementPage } from "./sales-invoices-page";
 import { SalesPaymentsPage as SalesPaymentsManagementPage } from "./sales-payments-page";
 import { SalesCreditNotesPage as SalesCreditNotesManagementPage } from "./sales-credit-notes-page";
@@ -91,6 +92,8 @@ export const GeneralLedgerPage = GeneralLedgerReportPage;
 export const JournalsPage = JournalsReportPage;
 
 export const ProfitLossPage = ProfitLossReportPage;
+
+export const ReceivablesAgeingPage = ReceivablesAgeingManagementPage;
 
 export const AccountingWorksheetPage = AccountingWorksheetReportPage;
 

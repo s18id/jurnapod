@@ -39,8 +39,7 @@ export function extractReservationRowsFromApiPayload(payload: unknown): Reservat
  * Hook to fetch reservations with filters and pagination
  */
 export function useReservations(
-  query: Partial<ReservationListQuery> | null,
-  accessToken: string
+  query: Partial<ReservationListQuery> | null
 ) {
   const [data, setData] = useState<ReservationRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -93,9 +92,7 @@ export function useReservations(
           };
         };
       }>(
-        `/reservations?${params.toString()}`,
-        {},
-        accessToken
+        `/reservations?${params.toString()}`
       );
       
       // Extract reservations and total from nested response
@@ -111,7 +108,7 @@ export function useReservations(
     } finally {
       setLoading(false);
     }
-  }, [accessToken, outletId, status, dateFrom, dateTo, overlapFilter, from, to, limit, offset]);
+  }, [outletId, status, dateFrom, dateTo, overlapFilter, from, to, limit, offset]);
 
   useEffect(() => {
     refetch();
@@ -124,16 +121,14 @@ export function useReservations(
  * Create a new reservation
  */
 export async function createReservation(
-  data: ReservationCreateRequest,
-  accessToken: string
+  data: ReservationCreateRequest
 ): Promise<ReservationRow> {
   const response = await apiRequest<{ success: true; data: ReservationRow }>(
     "/reservations",
     {
       method: "POST",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   // Broadcast invalidation to all reservation pages
   if (typeof window !== "undefined") {
@@ -147,16 +142,14 @@ export async function createReservation(
  */
 export async function updateReservation(
   reservationId: number,
-  data: ReservationUpdateRequest,
-  accessToken: string
+  data: ReservationUpdateRequest
 ): Promise<ReservationRow> {
   const response = await apiRequest<{ success: true; data: ReservationRow }>(
     `/reservations/${reservationId}`,
     {
       method: "PATCH",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   // Broadcast invalidation to all reservation pages
   if (typeof window !== "undefined") {
@@ -169,8 +162,7 @@ export async function updateReservation(
  * Cancel a reservation (update status to CANCELLED)
  */
 export async function cancelReservation(
-  reservationId: number,
-  accessToken: string
+  reservationId: number
 ): Promise<ReservationRow> {
-  return updateReservation(reservationId, { status: "CANCELLED" }, accessToken);
+  return updateReservation(reservationId, { status: "CANCELLED" });
 }

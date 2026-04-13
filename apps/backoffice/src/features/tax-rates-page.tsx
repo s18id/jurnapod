@@ -26,7 +26,6 @@ import type { SessionUser } from "../lib/session";
 
 type TaxRatesPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type TaxRateRow = {
@@ -70,7 +69,7 @@ function buildNewRow(): TaxRateRow {
   };
 }
 
-export function TaxRatesPage({ user, accessToken }: TaxRatesPageProps) {
+export function TaxRatesPage({ user }: TaxRatesPageProps) {
   const isOnline = useOnlineStatus();
   const [rates, setRates] = useState<TaxRateRow[]>([]);
   const [defaultIds, setDefaultIds] = useState<string[]>([]);
@@ -82,7 +81,7 @@ export function TaxRatesPage({ user, accessToken }: TaxRatesPageProps) {
   const [defaultSaved, setDefaultSaved] = useState(false);
 
   const accountFilters = useMemo(() => ({ is_active: true }), []);
-  const { data: accounts } = useAccounts(user.company_id, accessToken, accountFilters);
+  const { data: accounts } = useAccounts(user.company_id, accountFilters);
 
   const accountOptions = useMemo(
     () => [
@@ -112,8 +111,8 @@ export function TaxRatesPage({ user, accessToken }: TaxRatesPageProps) {
       setError(null);
       try {
         const [ratesResponse, defaultsResponse] = await Promise.all([
-          apiRequest<TaxRatesResponse>("/settings/tax-rates", {}, accessToken),
-          apiRequest<TaxDefaultsResponse>("/settings/tax-defaults", {}, accessToken)
+          apiRequest<TaxRatesResponse>("/settings/tax-rates", {}),
+          apiRequest<TaxDefaultsResponse>("/settings/tax-defaults", {})
         ]);
         setRates(
           ratesResponse.data.map((row) => ({
@@ -139,7 +138,7 @@ export function TaxRatesPage({ user, accessToken }: TaxRatesPageProps) {
     }
 
     fetchRates().catch(() => setError("Failed to load tax rates"));
-  }, [accessToken]);
+  }, []);
 
   if (!isOnline) {
     return (
@@ -183,7 +182,7 @@ export function TaxRatesPage({ user, accessToken }: TaxRatesPageProps) {
               is_active: rate.is_active
             })
           },
-          accessToken
+          {}
         );
         updateRate(index, { id: response.data, isNew: false });
       } else {
@@ -200,7 +199,7 @@ export function TaxRatesPage({ user, accessToken }: TaxRatesPageProps) {
               is_active: rate.is_active
             })
           },
-          accessToken
+          {}
         );
       }
     } catch (saveErr) {
@@ -222,7 +221,7 @@ export function TaxRatesPage({ user, accessToken }: TaxRatesPageProps) {
       await apiRequest<{ success: true; data: null }>(
         `/settings/tax-rates/${rate.id}`,
         { method: "DELETE" },
-        accessToken
+        
       );
       updateRate(index, { is_active: false });
     } catch (saveErr) {
@@ -251,7 +250,7 @@ export function TaxRatesPage({ user, accessToken }: TaxRatesPageProps) {
             tax_rate_ids: defaultIds.map((id) => Number(id))
           })
         },
-        accessToken
+        
       );
       setDefaultSaved(true);
     } catch (saveErr) {

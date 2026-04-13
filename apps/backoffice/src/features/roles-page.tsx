@@ -39,7 +39,6 @@ import type { SessionUser } from "../lib/session";
 
 type RolesPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type DialogMode = "create" | "edit" | null;
@@ -66,7 +65,7 @@ const SYSTEM_ROLE_CODES = new Set([
 ]);
 
 export function RolesPage(props: RolesPageProps) {
-  const { accessToken, user } = props;
+  const { user } = props;
   const userCompanyId = user.company_id;
   const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
   
@@ -74,8 +73,8 @@ export function RolesPage(props: RolesPageProps) {
     isSuperAdmin ? undefined : userCompanyId
   );
   
-  const rolesQuery = useRoles(accessToken, filterCompanyId);
-  const companiesQuery = useCompanies(accessToken, { enabled: isSuperAdmin });
+  const rolesQuery = useRoles(filterCompanyId);
+  const companiesQuery = useCompanies({ enabled: isSuperAdmin });
 
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingRole, setEditingRole] = useState<RoleResponse | null>(null);
@@ -173,8 +172,7 @@ export function RolesPage(props: RolesPageProps) {
             code: formData.code.trim().toUpperCase(),
             name: formData.name.trim(),
             role_level: formData.role_level
-          },
-          accessToken
+          }
         );
         setSuccessMessage("Role created successfully");
         await rolesQuery.refetch();
@@ -184,8 +182,7 @@ export function RolesPage(props: RolesPageProps) {
           editingRole.id,
           {
             name: formData.name.trim()
-          },
-          accessToken
+          }
         );
         setSuccessMessage("Role updated successfully");
         await rolesQuery.refetch();
@@ -305,7 +302,7 @@ export function RolesPage(props: RolesPageProps) {
     setSuccessMessage(null);
 
     try {
-      await deleteRole(confirmState.id, accessToken);
+      await deleteRole(confirmState.id);
       setSuccessMessage(`Role "${confirmState.name}" deleted successfully`);
       await rolesQuery.refetch();
     } catch (deleteError) {

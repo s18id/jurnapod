@@ -12,7 +12,6 @@ export type BarcodeType = 'EAN13' | 'UPCA' | 'CODE128' | 'CUSTOM';
 
 interface ItemBarcodeManagerProps {
   user: SessionUser;
-  accessToken: string;
   itemId: number;
   itemName: string;
   currentBarcode?: string | null;
@@ -29,7 +28,7 @@ const barcodeTypeOptions = [
 
 export function ItemBarcodeManager({
   user: _user,
-  accessToken,
+  
   itemId,
   itemName,
   currentBarcode,
@@ -89,8 +88,7 @@ export function ItemBarcodeManager({
             barcode: barcode.trim(),
             barcode_type: barcodeType,
           }),
-        },
-        accessToken
+        }
       );
 
       setSuccess("Barcode saved successfully");
@@ -121,8 +119,7 @@ export function ItemBarcodeManager({
         `/inventory/items/${itemId}/barcode`,
         {
           method: "DELETE",
-        },
-        accessToken
+        }
       );
 
       setBarcode('');

@@ -39,7 +39,6 @@ import type { SessionUser } from "../lib/session";
 
 type AccountTypesPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type FormMode = "create" | "edit" | null;
@@ -76,7 +75,7 @@ const REPORT_GROUP_OPTIONS = [
   { value: "PL", label: "Laba Rugi (P&L)" }
 ];
 
-export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
+export function AccountTypesPage({ user }: AccountTypesPageProps) {
   const isOnline = useOnlineStatus();
   const companyId = user.company_id;
 
@@ -101,7 +100,7 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
 
   const { data: accountTypes, loading, error, refetch } = useAccountTypes(
     companyId,
-    accessToken,
+    
     typeFilters
   );
 
@@ -173,8 +172,7 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
             category: formData.category,
             normal_balance: formData.normal_balance,
             report_group: formData.report_group
-          },
-          accessToken
+          }
         );
         setSuccessMessage("Account type created successfully");
       } else if (formMode === "edit" && editingId) {
@@ -185,8 +183,7 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
             category: formData.category,
             normal_balance: formData.normal_balance,
             report_group: formData.report_group
-          },
-          accessToken
+          }
         );
         setSuccessMessage("Account type updated successfully");
       }
@@ -215,7 +212,7 @@ export function AccountTypesPage({ user, accessToken }: AccountTypesPageProps) {
     setSuccessMessage(null);
 
     try {
-      await deactivateAccountType(deactivateTarget.id, accessToken);
+      await deactivateAccountType(deactivateTarget.id);
       setSuccessMessage("Account type deactivated successfully");
       refetch();
     } catch (err) {

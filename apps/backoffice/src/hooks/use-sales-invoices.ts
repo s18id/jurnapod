@@ -44,7 +44,6 @@ type UseSalesInvoicesOptions = {
  * Fetches list of sales invoices with optional filters
  */
 export function useSalesInvoices(
-  accessToken: string,
   options: UseSalesInvoicesOptions = {}
 ) {
   const [data, setData] = useState<SalesInvoice[]>([]);
@@ -67,8 +66,7 @@ export function useSalesInvoices(
 
       const response = await apiRequest<InvoicesResponse>(
         `/sales/invoices?${params}`,
-        {},
-        accessToken
+        {}
       );
       if (requestSeq !== requestSeqRef.current) {
         return;
@@ -89,7 +87,7 @@ export function useSalesInvoices(
         setLoading(false);
       }
     }
-  }, [accessToken, options.outlet_id, options.status, options.payment_status, options.limit]);
+  }, [options.outlet_id, options.status, options.payment_status, options.limit]);
 
   useEffect(() => {
     refetch().catch(console.error);

@@ -29,7 +29,6 @@ type JournalBatchSingleResponse = {
  */
 export function useJournalBatches(
   companyId: number,
-  accessToken: string,
   filters?: Partial<Omit<JournalListQuery, "company_id">>
 ) {
   const [data, setData] = useState<JournalBatchResponse[]>([]);
@@ -66,8 +65,7 @@ export function useJournalBatches(
 
       const response = await apiRequest<JournalBatchListResponse>(
         `/journals?${params.toString()}`,
-        {},
-        accessToken
+        {}
       );
       setData(response.data);
     } catch (fetchError) {
@@ -82,7 +80,6 @@ export function useJournalBatches(
     }
   }, [
     companyId, 
-    accessToken, 
     filters?.outlet_id,
     filters?.start_date,
     filters?.end_date,
@@ -104,8 +101,7 @@ export function useJournalBatches(
  * Fetches a single journal batch by ID
  */
 export function useJournalBatch(
-  batchId: number | null,
-  accessToken: string
+  batchId: number | null
 ) {
   const [data, setData] = useState<JournalBatchResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -122,8 +118,7 @@ export function useJournalBatch(
     try {
       const response = await apiRequest<JournalBatchSingleResponse>(
         `/journals/${batchId}`,
-        {},
-        accessToken
+        {}
       );
       setData(response.data);
     } catch (fetchError) {
@@ -136,7 +131,7 @@ export function useJournalBatch(
     } finally {
       setLoading(false);
     }
-  }, [batchId, accessToken]);
+  }, [batchId]);
 
   useEffect(() => {
     refetch();
@@ -150,16 +145,14 @@ export function useJournalBatch(
  * Creates a manual journal entry (expense, transfer, adjustment, etc.)
  */
 export async function createManualJournalEntry(
-  data: ManualJournalEntryCreateRequest,
-  accessToken: string
+  data: ManualJournalEntryCreateRequest
 ): Promise<JournalBatchResponse> {
   const response = await apiRequest<JournalBatchSingleResponse>(
     `/journals`,
     {
       method: "POST",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }

@@ -49,7 +49,6 @@ import {
 
 interface PricesPageProps {
   user: SessionUser;
-  accessToken: string;
 }
 
 type PricingViewMode = "defaults" | "outlet";
@@ -71,7 +70,7 @@ interface PriceWithItem extends ItemPrice {
   defaultPrice?: number;
 }
 
-export function PricesPage({ user, accessToken }: PricesPageProps) {
+export function PricesPage({ user }: PricesPageProps) {
   const isMobile = useMediaQuery("(max-width: 48em)");
 
   // Data hooks
@@ -80,13 +79,13 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
     loading: itemsLoading,
     error: itemsError,
     itemMap,
-  } = useItems({ user, accessToken });
+  } = useItems({ user });
 
   const {
     loading: groupsLoading,
     error: groupsError,
     groupMap,
-  } = useItemGroups({ user, accessToken });
+  } = useItemGroups({ user });
 
   // Pricing data state
   const [prices, setPrices] = useState<ItemPrice[]>([]);
@@ -179,8 +178,8 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
 
     try {
       const [pricesResponse, defaultsResponse] = await Promise.all([
-        apiRequest<{ data: ItemPrice[] }>(`/inventory/item-prices?outlet_id=${selectedOutletId}`, {}, accessToken),
-        apiRequest<{ data: ItemPrice[] }>("/inventory/item-prices?scope=default", {}, accessToken),
+        apiRequest<{ data: ItemPrice[] }>(`/inventory/item-prices?outlet_id=${selectedOutletId}`, {}),
+        apiRequest<{ data: ItemPrice[] }>("/inventory/item-prices?scope=default", {}),
       ]);
 
       setPrices(pricesResponse.data);
@@ -190,7 +189,7 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
     } finally {
       setPricesLoading(false);
     }
-  }, [selectedOutletId, accessToken]);
+  }, [selectedOutletId]);
 
   useEffect(() => {
     fetchPrices();
@@ -312,8 +311,7 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
         {
           method: "POST",
           body: JSON.stringify(payload),
-        },
-        accessToken
+        }
       );
 
       closeCreateModal();
@@ -335,8 +333,7 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
         {
           method: "PATCH",
           body: JSON.stringify({ price, is_active: isActive }),
-        },
-        accessToken
+        }
       );
 
       closeEditModal();
@@ -364,8 +361,7 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
             is_active: true,
             outlet_id: selectedOutletId,
           }),
-        },
-        accessToken
+        }
       );
 
       closeOverrideModal();
@@ -385,8 +381,7 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
     try {
       await apiRequest(
         `/inventory/item-prices/${deletingPriceId}`,
-        { method: "DELETE" },
-        accessToken
+        { method: "DELETE" }
       );
 
       closeDeleteModal();
@@ -462,8 +457,7 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
                   is_active: row.parsed.is_active ?? true,
                   outlet_id: row.parsed.scope === "default" ? null : row.parsed.outlet_id,
                 }),
-              },
-              accessToken
+              }
             );
             results.success++;
             results.created++;
@@ -478,9 +472,9 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
         
         return results;
       },
-      accessToken,
+      
     };
-  }, [items, accessToken]);
+  }, [items]);
 
   const handleImportComplete = () => {
     closeImportModal();
@@ -736,7 +730,6 @@ export function PricesPage({ user, accessToken }: PricesPageProps) {
         opened={exportDialogOpen}
         onClose={closeExportDialog}
         entityType="prices"
-        accessToken={accessToken}
         initialFilters={getExportFilters()}
         estimatedRowCount={filteredPrices.length}
       />

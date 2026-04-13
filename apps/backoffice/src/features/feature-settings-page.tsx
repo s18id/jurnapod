@@ -23,7 +23,6 @@ import type { SessionUser } from "../lib/session";
 
 type FeatureSettingsPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type SettingsResponse = {
@@ -74,7 +73,7 @@ function buildOutletOptions(outlets: SessionUser["outlets"]) {
   }));
 }
 
-export function FeatureSettingsPage({ user, accessToken }: FeatureSettingsPageProps) {
+export function FeatureSettingsPage({ user }: FeatureSettingsPageProps) {
   const isOnline = useOnlineStatus();
   const outletOptions = useMemo(() => buildOutletOptions(user.outlets), [user.outlets]);
   const [outletId, setOutletId] = useState<number>(user.outlets[0]?.id ?? 0);
@@ -103,13 +102,11 @@ export function FeatureSettingsPage({ user, accessToken }: FeatureSettingsPagePr
         const [outletResponse, companyResponse] = await Promise.all([
           apiRequest<SettingsResponse>(
             `/settings/config?outlet_id=${outletId}&keys=${encodeURIComponent(outletKeysParam)}`,
-            {},
-            accessToken
+            {}
           ),
           apiRequest<{ success: true; data: { settings: SettingsResponse["data"]["settings"] } }>(
             `/settings/company-config?keys=${encodeURIComponent(companyKeysParam)}`,
-            {},
-            accessToken
+            {}
           )
         ]);
         const nextState: Record<string, number | boolean | string> = {
@@ -135,7 +132,7 @@ export function FeatureSettingsPage({ user, accessToken }: FeatureSettingsPagePr
     }
 
     fetchSettings().catch(() => setError("Failed to load outlet settings"));
-  }, [outletId, accessToken]);
+  }, [outletId]);
 
   if (!isOnline) {
     return (
@@ -167,8 +164,7 @@ export function FeatureSettingsPage({ user, accessToken }: FeatureSettingsPagePr
               value: formState[key]
             }))
           })
-        },
-        accessToken
+        }
       );
       await apiRequest<SettingsSaveResponse>(
         "/settings/company-config",
@@ -180,8 +176,7 @@ export function FeatureSettingsPage({ user, accessToken }: FeatureSettingsPagePr
               value: Number(formState[key] ?? DEFAULT_COMPANY_SETTINGS[key])
             }))
           })
-        },
-        accessToken
+        }
       );
       setSaveSuccess(true);
     } catch (saveErr) {

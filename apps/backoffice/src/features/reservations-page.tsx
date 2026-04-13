@@ -55,7 +55,6 @@ function getThisMonthRange(): { dateFrom: string; dateTo: string } {
 
 type ReservationsPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type DialogMode = "create" | "edit" | null;
@@ -103,7 +102,7 @@ const CustomerCell = memo(function CustomerCell({ name, phone }: CustomerCellPro
 });
 
 export function ReservationsPage(props: ReservationsPageProps) {
-  const { user, accessToken } = props;
+  const { user } = props;
   const isSuperAdminOrOwner =
     user.global_roles.includes("SUPER_ADMIN") || user.global_roles.includes("OWNER");
   const userCompanyId = user.company_id;
@@ -136,8 +135,8 @@ export function ReservationsPage(props: ReservationsPageProps) {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Data hooks
-  const outlets = useOutletsFull(userCompanyId, accessToken);
-  const tables = useOutletTables(selectedOutletId, accessToken);
+  const outlets = useOutletsFull(userCompanyId);
+  const tables = useOutletTables(selectedOutletId);
 
   // Auto-select first outlet when outlets load
   useEffect(() => {
@@ -169,7 +168,7 @@ export function ReservationsPage(props: ReservationsPageProps) {
         : null,
     [selectedOutletId, statusFilter, dateFrom, dateTo, page]
   );
-  const reservations = useReservations(reservationQuery, accessToken);
+  const reservations = useReservations(reservationQuery);
 
   // Listen for cross-page invalidation events
   useEffect(() => {
@@ -210,7 +209,7 @@ export function ReservationsPage(props: ReservationsPageProps) {
     setError(null);
 
     try {
-      await cancelReservation(cancelConfirm.reservation_id, accessToken);
+      await cancelReservation(cancelConfirm.reservation_id);
       setSuccessMessage("Reservation cancelled successfully");
       await reservations.refetch();
       setCancelConfirm(null);
@@ -219,7 +218,7 @@ export function ReservationsPage(props: ReservationsPageProps) {
     } finally {
       setCancelling(false);
     }
-  }, [cancelConfirm, accessToken, reservations]);
+  }, [cancelConfirm, reservations]);
 
   const handleStatusTransition = useCallback(
     async (reservation: ReservationRow, nextStatus: ReservationStatus) => {
@@ -231,8 +230,7 @@ export function ReservationsPage(props: ReservationsPageProps) {
           reservation.reservation_id,
           {
             status: nextStatus
-          },
-          accessToken
+          }
         );
         setSuccessMessage(`Reservation updated to ${nextStatus.replace("_", " ")}`);
         await Promise.all([reservations.refetch(), tables.refetch()]);
@@ -242,7 +240,7 @@ export function ReservationsPage(props: ReservationsPageProps) {
         setStatusUpdatingReservationId(null);
       }
     },
-    [accessToken, reservations, tables]
+    [reservations, tables]
   );
 
   // Clear success message on timeout
@@ -491,7 +489,6 @@ export function ReservationsPage(props: ReservationsPageProps) {
           mode={dialogMode === "edit" ? "edit" : "create"}
           reservation={editingReservation}
           outletId={selectedOutletId}
-          accessToken={accessToken}
           enableMultiTable={true}
           showTableSuggestions={true}
           defaultDurationMinutes={120}

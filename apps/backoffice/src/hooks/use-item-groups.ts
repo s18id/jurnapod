@@ -18,7 +18,6 @@ export type ItemGroup = {
 
 export interface UseItemGroupsProps {
   user: SessionUser;
-  accessToken: string;
 }
 
 export interface UseItemGroupsReturn {
@@ -39,11 +38,11 @@ export interface UseItemGroupsReturn {
  * - Proper loading and error states
  * - Automatic cleanup on unmount
  *
- * @param {UseItemGroupsProps} props - User and access token
+ * @param {UseItemGroupsProps} props - User session
  * @returns {UseItemGroupsReturn} Item groups data, loading state, error, refresh function, and groupMap
  *
  * @example
- * const { itemGroups, loading, error, refresh, groupMap } = useItemGroups({ user, accessToken });
+ * const { itemGroups, loading, error, refresh, groupMap } = useItemGroups({ user });
  *
  * // Access group by ID
  * const group = groupMap.get(groupId);
@@ -51,14 +50,14 @@ export interface UseItemGroupsReturn {
  * // Refresh data
  * await refresh();
  */
-export function useItemGroups({ user, accessToken }: UseItemGroupsProps): UseItemGroupsReturn {
+export function useItemGroups({ user }: UseItemGroupsProps): UseItemGroupsReturn {
   const [itemGroups, setItemGroups] = useState<ItemGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const isMounted = useRef(true);
 
   const fetchItemGroups = useCallback(async () => {
-    if (!user || !accessToken) {
+    if (!user) {
       if (isMounted.current) {
         setError("User not authenticated");
         setLoading(false);
@@ -70,7 +69,7 @@ export function useItemGroups({ user, accessToken }: UseItemGroupsProps): UseIte
     setError(null);
 
     try {
-      const data = await CacheService.getCachedItemGroups(user.company_id, accessToken);
+      const data = await CacheService.getCachedItemGroups(user.company_id);
 
       if (isMounted.current) {
         setItemGroups(data as ItemGroup[]);
@@ -83,10 +82,10 @@ export function useItemGroups({ user, accessToken }: UseItemGroupsProps): UseIte
         setLoading(false);
       }
     }
-  }, [user, accessToken]);
+  }, [user]);
 
   const refresh = useCallback(async () => {
-    if (!user || !accessToken) {
+    if (!user) {
       setError("User not authenticated");
       return;
     }
@@ -96,7 +95,7 @@ export function useItemGroups({ user, accessToken }: UseItemGroupsProps): UseIte
 
     try {
       // Force refresh by calling refreshItemGroups directly (bypasses cache)
-      const data = await CacheService.refreshItemGroups(user.company_id, accessToken);
+      const data = await CacheService.refreshItemGroups(user.company_id);
 
       if (isMounted.current) {
         setItemGroups(data as ItemGroup[]);
@@ -109,7 +108,7 @@ export function useItemGroups({ user, accessToken }: UseItemGroupsProps): UseIte
         setLoading(false);
       }
     }
-  }, [user, accessToken]);
+  }, [user]);
 
   useEffect(() => {
     const timeoutId = globalThis.setTimeout(() => {

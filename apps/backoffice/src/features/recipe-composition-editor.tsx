@@ -69,7 +69,6 @@ interface RecipeCompositionEditorProps {
   recipeName: string;
   recipeSku: string | null;
   user: SessionUser;
-  accessToken: string;
   onClose: () => void;
 }
 
@@ -78,7 +77,7 @@ export function RecipeCompositionEditor({
   recipeName,
   recipeSku,
   user,
-  accessToken,
+  
   onClose
 }: RecipeCompositionEditorProps) {
   // Data states
@@ -92,7 +91,7 @@ export function RecipeCompositionEditor({
   const [addModalOpen, { open: openAddModal, close: closeAddModal }] = useDisclosure(false);
 
   // Get available ingredients from useItems hook
-  const { items: allItems, loading: itemsLoading } = useItems({ user, accessToken });
+  const { items: allItems, loading: itemsLoading } = useItems({ user });
 
   // Filter to only INGREDIENT and PRODUCT types for selection
   const availableIngredients = allItems.filter(
@@ -114,16 +113,14 @@ export function RecipeCompositionEditor({
       // Fetch ingredients
       const ingredientsRes = await apiRequest(
         `/inventory/recipes/${recipeId}/ingredients`,
-        {},
-        accessToken
+        {}
       ) as { data: RecipeIngredient[] };
       setIngredients(ingredientsRes.data || []);
 
       // Fetch cost breakdown
       const costRes = await apiRequest(
         `/inventory/recipes/${recipeId}/cost`,
-        {},
-        accessToken
+        {}
       ) as { data: RecipeCostBreakdown };
       setCostBreakdown(costRes.data);
     } catch (err) {
@@ -131,7 +128,7 @@ export function RecipeCompositionEditor({
     } finally {
       setLoading(false);
     }
-  }, [recipeId, accessToken]);
+  }, [recipeId]);
 
   useEffect(() => {
     fetchData();
@@ -156,8 +153,7 @@ export function RecipeCompositionEditor({
             quantity: formData.quantity,
             unit_of_measure: formData.unit_of_measure
           })
-        },
-        accessToken
+        }
       );
 
       closeAddModal();
@@ -181,8 +177,7 @@ export function RecipeCompositionEditor({
     try {
       await apiRequest(
         `/inventory/recipes/ingredients/${ingredientId}`,
-        { method: "DELETE" },
-        accessToken
+        { method: "DELETE" }
       );
       await fetchData();
     } catch (err) {
@@ -207,8 +202,7 @@ export function RecipeCompositionEditor({
         {
           method: "PATCH",
           body: JSON.stringify({ quantity: newQuantity })
-        },
-        accessToken
+        }
       );
       await fetchData();
     } catch (err) {

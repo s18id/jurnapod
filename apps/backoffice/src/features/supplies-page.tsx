@@ -63,12 +63,11 @@ type Supply = {
 
 type SuppliesPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type ImportStep = "source" | "preview" | "apply";
 
-export function SuppliesPage(props: SuppliesPageProps) {
+export function SuppliesPage(_props: SuppliesPageProps) {
   const isOnline = useOnlineStatus();
   const [supplies, setSupplies] = useState<Supply[]>([]);
   const [loading, setLoading] = useState(false);
@@ -113,7 +112,7 @@ export function SuppliesPage(props: SuppliesPageProps) {
       const response = await apiRequest<{ success: true; data: Supply[] }>(
         "/inventory/supplies",
         {},
-        props.accessToken
+        
       );
       setSupplies(response.data);
     } catch (fetchError) {
@@ -191,7 +190,7 @@ export function SuppliesPage(props: SuppliesPageProps) {
           unit: newSupplyForm.unit.trim() || "unit",
           is_active: newSupplyForm.is_active
         })
-      }, props.accessToken);
+      });
       addHandlers.close();
       setNewSupplyForm({ sku: "", name: "", unit: "unit", is_active: true });
       setSuccessMessage("Supply created successfully");
@@ -212,7 +211,7 @@ export function SuppliesPage(props: SuppliesPageProps) {
 
     setDeletingSupplyId(deleteTarget.id);
     try {
-      await apiRequest(`/inventory/supplies/${deleteTarget.id}`, { method: "DELETE" }, props.accessToken);
+      await apiRequest(`/inventory/supplies/${deleteTarget.id}`, { method: "DELETE" });
       setDeleteTarget(null);
       setSuccessMessage("Supply deleted successfully");
       await refreshSupplies();
@@ -280,7 +279,7 @@ export function SuppliesPage(props: SuppliesPageProps) {
                 is_active: plan.original.is_active
               })
             },
-            props.accessToken
+            
           );
           results.push({
             rowIndex: plan.rowIndex,
@@ -297,7 +296,7 @@ export function SuppliesPage(props: SuppliesPageProps) {
               unit: plan.original.unit,
               is_active: plan.original.is_active
             })
-          }, props.accessToken);
+          });
           results.push({
             rowIndex: plan.rowIndex,
             action: "UPDATE",

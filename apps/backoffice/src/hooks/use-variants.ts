@@ -36,7 +36,6 @@ export type ItemVariant = {
 
 export interface UseVariantsProps {
   user: SessionUser;
-  accessToken: string;
   itemId: number | null;
 }
 
@@ -82,7 +81,7 @@ export interface UseVariantsReturn {
   adjustStock: (variantId: number, adjustment: number, reason: string) => Promise<void>;
 }
 
-export function useVariants({ user, accessToken, itemId }: UseVariantsProps): UseVariantsReturn {
+export function useVariants({ user, itemId }: UseVariantsProps): UseVariantsReturn {
   const [attributes, setAttributes] = useState<VariantAttribute[]>([]);
   const [variants, setVariants] = useState<ItemVariant[]>([]);
   const [loading, setLoading] = useState(false);
@@ -90,7 +89,7 @@ export function useVariants({ user, accessToken, itemId }: UseVariantsProps): Us
   const isMounted = useRef(true);
 
   const fetchData = useCallback(async () => {
-    if (!itemId || !user || !accessToken) {
+    if (!itemId || !user) {
       setAttributes([]);
       setVariants([]);
       return;
@@ -101,12 +100,8 @@ export function useVariants({ user, accessToken, itemId }: UseVariantsProps): Us
 
     try {
       const [attrsRes, variantsRes] = await Promise.all([
-        apiRequest<VariantAttributesResponse>(`/inventory/items/${itemId}/variant-attributes`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        }),
-        apiRequest<VariantsResponse>(`/inventory/items/${itemId}/variants`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        }),
+        apiRequest<VariantAttributesResponse>(`/inventory/items/${itemId}/variant-attributes`),
+        apiRequest<VariantsResponse>(`/inventory/items/${itemId}/variants`),
       ]);
 
       if (!isMounted.current) return;
@@ -132,14 +127,13 @@ export function useVariants({ user, accessToken, itemId }: UseVariantsProps): Us
         setLoading(false);
       }
     }
-  }, [itemId, user, accessToken]);
+  }, [itemId, user]);
 
   const createAttribute = useCallback(async (data: { attribute_name: string; values: string[] }) => {
-    if (!itemId || !accessToken) throw new Error("Missing item or token");
+    if (!itemId) throw new Error("Missing item");
 
     const response = await apiRequest<MutationResponse>(`/api/inventory/items/${itemId}/variant-attributes`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(data),
     });
 
@@ -148,14 +142,11 @@ export function useVariants({ user, accessToken, itemId }: UseVariantsProps): Us
     }
 
     await fetchData();
-  }, [itemId, accessToken, fetchData]);
+  }, [itemId, fetchData]);
 
   const updateAttribute = useCallback(async (attributeId: number, data: { attribute_name?: string; values?: string[] }) => {
-    if (!accessToken) throw new Error("Missing token");
-
     const response = await apiRequest<MutationResponse>(`/api/inventory/variant-attributes/${attributeId}`, {
       method: "PATCH",
-      headers: { Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(data),
     });
 
@@ -164,14 +155,11 @@ export function useVariants({ user, accessToken, itemId }: UseVariantsProps): Us
     }
 
     await fetchData();
-  }, [accessToken, fetchData]);
+  }, [fetchData]);
 
   const deleteAttribute = useCallback(async (attributeId: number) => {
-    if (!accessToken) throw new Error("Missing token");
-
     const response = await apiRequest<MutationResponse>(`/api/inventory/variant-attributes/${attributeId}`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${accessToken}` },
     });
 
     if (!response.success) {
@@ -179,7 +167,7 @@ export function useVariants({ user, accessToken, itemId }: UseVariantsProps): Us
     }
 
     await fetchData();
-  }, [accessToken, fetchData]);
+  }, [fetchData]);
 
   const updateVariant = useCallback(async (variantId: number, data: {
     sku?: string;
@@ -188,11 +176,8 @@ export function useVariants({ user, accessToken, itemId }: UseVariantsProps): Us
     barcode?: string | null;
     is_active?: boolean;
   }) => {
-    if (!accessToken) throw new Error("Missing token");
-
     const response = await apiRequest<MutationResponse>(`/api/inventory/variants/${variantId}`, {
       method: "PATCH",
-      headers: { Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(data),
     });
 
@@ -201,14 +186,11 @@ export function useVariants({ user, accessToken, itemId }: UseVariantsProps): Us
     }
 
     await fetchData();
-  }, [accessToken, fetchData]);
+  }, [fetchData]);
 
   const adjustStock = useCallback(async (variantId: number, adjustment: number, reason: string) => {
-    if (!accessToken) throw new Error("Missing token");
-
     const response = await apiRequest<MutationResponse>(`/api/inventory/variants/${variantId}/stock-adjustment`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({ adjustment, reason }),
     });
 
@@ -217,7 +199,7 @@ export function useVariants({ user, accessToken, itemId }: UseVariantsProps): Us
     }
 
     await fetchData();
-  }, [accessToken, fetchData]);
+  }, [fetchData]);
 
   useEffect(() => {
     fetchData();

@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { useState, useCallback, useMemo } from "react";
-import { getApiBaseUrl } from "../lib/api-client";
+import { apiStreamingRequest } from "../lib/api-client";
 
 // ============================================================================
 // Types
@@ -202,10 +202,6 @@ function saveColumns(entityType: ExportEntityType, columns: string[]): void {
 // useExport Hook
 // ============================================================================
 
-interface UseExportProps {
-  accessToken: string;
-}
-
 interface UseExportReturn {
   // Configuration state
   config: ExportConfig;
@@ -232,7 +228,7 @@ interface UseExportReturn {
   estimatedRowCount: number;
 }
 
-export function useExport({ accessToken }: UseExportProps): UseExportReturn {
+export function useExport(): UseExportReturn {
   // Configuration state
   const [entityType] = useState<ExportEntityType>("items");
   const [format, setFormat] = useState<ExportFormat>("csv");
@@ -332,15 +328,9 @@ export function useExport({ accessToken }: UseExportProps): UseExportReturn {
       setProgress({ phase: "streaming" });
 
       // Use fetch with streaming for large exports
-      const response = await fetch(
-        `${getApiBaseUrl()}/export/${entityType}?${params.toString()}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-          credentials: "include",
-        }
+      const response = await apiStreamingRequest(
+        `/export/${entityType}?${params.toString()}`,
+        { method: "POST" }
       );
 
       if (!response.ok) {
@@ -419,7 +409,7 @@ export function useExport({ accessToken }: UseExportProps): UseExportReturn {
     } finally {
       setLoading(false);
     }
-  }, [entityType, format, selectedColumns, filters, accessToken]);
+  }, [entityType, format, selectedColumns, filters]);
 
   return {
     config: {
@@ -450,7 +440,6 @@ export function useExport({ accessToken }: UseExportProps): UseExportReturn {
 
 interface UseExportDialogProps {
   entityType: ExportEntityType;
-  accessToken: string;
   initialFilters?: ExportFilters;
 }
 
@@ -489,7 +478,6 @@ interface UseExportDialogReturn {
  */
 export function useExportDialog({
   entityType,
-  accessToken,
   initialFilters = {},
 }: UseExportDialogProps): UseExportDialogReturn {
   const { columns, defaultColumns, availableGroups } = useExportColumns({ entityType });
@@ -582,15 +570,9 @@ export function useExportDialog({
 
       setProgress({ phase: "streaming" });
 
-      const response = await fetch(
-        `${getApiBaseUrl()}/export/${entityType}?${params.toString()}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-          credentials: "include",
-        }
+      const response = await apiStreamingRequest(
+        `/export/${entityType}?${params.toString()}`,
+        { method: "POST" }
       );
 
       if (!response.ok) {
@@ -633,7 +615,7 @@ export function useExportDialog({
     } finally {
       setLoading(false);
     }
-  }, [entityType, format, selectedColumns, filters, accessToken]);
+  }, [entityType, format, selectedColumns, filters]);
 
   return {
     columns,

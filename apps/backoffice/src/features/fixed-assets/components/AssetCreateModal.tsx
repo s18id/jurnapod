@@ -31,7 +31,6 @@ type OutletOption = {
 type AssetCreateModalProps = {
   opened: boolean;
   onClose: () => void;
-  accessToken: string;
   categories: CategoryOption[];
   outlets: OutletOption[];
   onSuccess: () => void;
@@ -40,7 +39,6 @@ type AssetCreateModalProps = {
 export function AssetCreateModal({
   opened,
   onClose,
-  accessToken,
   categories,
   outlets,
   onSuccess
@@ -80,7 +78,7 @@ export function AssetCreateModal({
           purchase_cost: form.purchase_cost.trim() ? Number(form.purchase_cost) : null,
           is_active: form.is_active
         })
-      }, accessToken);
+      });
 
       notifications.show({
         title: "Success",

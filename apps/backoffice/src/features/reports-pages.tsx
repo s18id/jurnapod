@@ -30,7 +30,6 @@ import type { SessionUser } from "../lib/session";
 
 type ReportsProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type FiscalYear = {
@@ -329,7 +328,7 @@ function resolveDefaultOpenFiscalYear(fiscalYears: FiscalYear[]): FiscalYear | n
   return null;
 }
 
-function useFiscalYears(accessToken: string, companyId: number) {
+function useFiscalYears(companyId: number) {
   const [data, setData] = useState<FiscalYear[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -341,8 +340,7 @@ function useFiscalYears(accessToken: string, companyId: number) {
       try {
         const response = await apiRequest<FiscalYearsResponse>(
           `/accounts/fiscal-years?company_id=${companyId}&include_closed=1`,
-          {},
-          accessToken
+          {}
         );
         setData(response.data);
       } catch (fetchError) {
@@ -357,7 +355,7 @@ function useFiscalYears(accessToken: string, companyId: number) {
     }
 
     fetchFiscalYears().catch(() => setError("Failed to load fiscal years"));
-  }, [accessToken, companyId]);
+  }, [companyId]);
 
   return { data, loading, error };
 }
@@ -452,8 +450,7 @@ export function PosTransactionsPage(props: ReportsProps) {
     try {
       const response = await apiRequest<PosTransactionsResponse>(
         `/reports/pos-transactions?outlet_id=${outletId}&date_from=${dateFrom}&date_to=${dateTo}`,
-        {},
-        props.accessToken
+        {}
       );
       setRows(response.data.transactions);
       setTotal(response.data.total);
@@ -464,7 +461,7 @@ export function PosTransactionsPage(props: ReportsProps) {
         setError("Failed to load POS transactions");
       }
     }
-  }, [dateFrom, dateTo, outletId, props.accessToken]);
+  }, [dateFrom, dateTo, outletId]);
 
   useEffect(() => {
     if (outletId <= 0) {
@@ -585,8 +582,7 @@ export function DailySalesPage(props: ReportsProps) {
     try {
       const response = await apiRequest<DailySalesResponse>(
         `/reports/daily-sales?outlet_id=${outletId}&date_from=${dateFrom}&date_to=${dateTo}`,
-        {},
-        props.accessToken
+        {}
       );
       setRows(response.data.rows);
     } catch (fetchError) {
@@ -596,7 +592,7 @@ export function DailySalesPage(props: ReportsProps) {
         setError("Failed to load daily sales");
       }
     }
-  }, [dateFrom, dateTo, outletId, props.accessToken]);
+  }, [dateFrom, dateTo, outletId]);
 
   useEffect(() => {
     if (outletId <= 0) {
@@ -696,10 +692,10 @@ export function GeneralLedgerPage(props: ReportsProps) {
     data: fiscalYears,
     loading: fiscalYearsLoading,
     error: fiscalYearsError
-  } = useFiscalYears(props.accessToken, props.user.company_id);
+  } = useFiscalYears(props.user.company_id);
   const { data: accounts, loading: accountsLoading, error: accountsError } = useAccounts(
     props.user.company_id,
-    props.accessToken
+    undefined
   );
   const activeAccounts = useMemo(() => accounts.filter((account) => account.is_active), [accounts]);
   const accountOptions = useMemo(
@@ -767,8 +763,7 @@ export function GeneralLedgerPage(props: ReportsProps) {
     try {
       const response = await apiRequest<GeneralLedgerResponse>(
         `/reports/general-ledger?outlet_id=${outletId}&account_id=${accountId}&date_from=${dateFrom}&date_to=${dateTo}&round=2&line_limit=${lineLimit}&line_offset=${lineOffset}`,
-        {},
-        props.accessToken
+        {}
       );
       setRows(response.data.rows);
     } catch (fetchError) {
@@ -780,7 +775,7 @@ export function GeneralLedgerPage(props: ReportsProps) {
     } finally {
       setLoading(false);
     }
-  }, [accountId, dateFrom, dateTo, lineLimit, lineOffset, outletId, props.accessToken]);
+  }, [accountId, dateFrom, dateTo, lineLimit, lineOffset, outletId]);
 
   useEffect(() => {
     setLineOffset(0);
@@ -1022,8 +1017,7 @@ export function PosPaymentsPage(props: ReportsProps) {
     try {
       const response = await apiRequest<PosPaymentsResponse>(
         `/reports/pos-payments?outlet_id=${outletId}&date_from=${dateFrom}&date_to=${dateTo}&status=${status}`,
-        {},
-        props.accessToken
+        {}
       );
       setRows(response.data.rows);
     } catch (fetchError) {
@@ -1033,7 +1027,7 @@ export function PosPaymentsPage(props: ReportsProps) {
         setError("Failed to load POS payment summary");
       }
     }
-  }, [dateFrom, dateTo, outletId, props.accessToken, status]);
+  }, [dateFrom, dateTo, outletId, status]);
 
   useEffect(() => {
     if (outletId <= 0) {
@@ -1144,7 +1138,7 @@ export function JournalsPage(props: ReportsProps) {
     data: fiscalYears,
     loading: fiscalYearsLoading,
     error: fiscalYearsError
-  } = useFiscalYears(props.accessToken, props.user.company_id);
+  } = useFiscalYears(props.user.company_id);
   const fiscalYearOptions = useMemo(() => buildFiscalYearOptions(fiscalYears), [fiscalYears]);
 
   const journalColumns = useMemo<ColumnDef<JournalRow>[]>(
@@ -1237,13 +1231,11 @@ export function JournalsPage(props: ReportsProps) {
       const [journalResponse, trialResponse] = await Promise.all([
         apiRequest<JournalResponse>(
           `/reports/journals?outlet_id=${outletId}&date_from=${dateFrom}&date_to=${dateTo}&as_of=${encodeURIComponent(asOf)}`,
-          {},
-          props.accessToken
+          {}
         ),
         apiRequest<TrialBalanceResponse>(
           `/reports/trial-balance?outlet_id=${outletId}&date_from=${dateFrom}&date_to=${dateTo}&as_of=${encodeURIComponent(asOf)}`,
-          {},
-          props.accessToken
+          {}
         )
       ]);
 
@@ -1257,7 +1249,7 @@ export function JournalsPage(props: ReportsProps) {
         setError("Failed to load journal report");
       }
     }
-  }, [dateFrom, dateTo, outletId, props.accessToken]);
+  }, [dateFrom, dateTo, outletId]);
 
   useEffect(() => {
     if (outletId <= 0) {
@@ -1405,16 +1397,14 @@ export function ProfitLossPage(props: ReportsProps) {
     data: fiscalYears,
     loading: fiscalYearsLoading,
     error: fiscalYearsError
-  } = useFiscalYears(props.accessToken, props.user.company_id);
+  } = useFiscalYears(props.user.company_id);
   const fiscalYearOptions = useMemo(() => buildFiscalYearOptions(fiscalYears), [fiscalYears]);
   const { data: accounts, loading: accountsLoading, error: accountsError } = useAccounts(
     props.user.company_id,
-    props.accessToken,
     accountFilters
   );
   const { data: accountTypes, loading: accountTypesLoading, error: accountTypesError } = useAccountTypes(
-    props.user.company_id,
-    props.accessToken
+    props.user.company_id
   );
 
   const loadRows = useCallback(async () => {
@@ -1431,8 +1421,7 @@ export function ProfitLossPage(props: ReportsProps) {
       }
       const response = await apiRequest<ProfitLossResponse>(
         `/reports/profit-loss?${params.toString()}`,
-        {},
-        props.accessToken
+        {}
       );
       setRows(response.data.rows);
       setTotals(response.data.totals);
@@ -1445,7 +1434,7 @@ export function ProfitLossPage(props: ReportsProps) {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo, outletId, props.accessToken]);
+  }, [dateFrom, dateTo, outletId]);
 
   useEffect(() => {
     const timeoutId = globalThis.setTimeout(() => {
@@ -1803,7 +1792,7 @@ export function AccountingWorksheetPage(props: ReportsProps) {
     data: fiscalYears,
     loading: fiscalYearsLoading,
     error: fiscalYearsError
-  } = useFiscalYears(props.accessToken, props.user.company_id);
+  } = useFiscalYears(props.user.company_id);
   const fiscalYearOptions = useMemo(() => buildFiscalYearOptions(fiscalYears), [fiscalYears]);
 
   const loadRows = useCallback(async () => {
@@ -1813,7 +1802,7 @@ export function AccountingWorksheetPage(props: ReportsProps) {
       const response = await apiRequest<WorksheetResponse>(
         `/reports/worksheet?outlet_id=${outletId}&date_from=${dateFrom}&date_to=${dateTo}&round=2`,
         {},
-        props.accessToken
+        
       );
       setRows(response.data.rows);
       setSummary(response.data.summary);
@@ -1826,7 +1815,7 @@ export function AccountingWorksheetPage(props: ReportsProps) {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo, outletId, props.accessToken]);
+  }, [dateFrom, dateTo, outletId]);
 
   useEffect(() => {
     if (outletId <= 0) {

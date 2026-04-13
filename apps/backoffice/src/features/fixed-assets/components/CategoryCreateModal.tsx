@@ -25,7 +25,6 @@ type AccountOption = {
 type CategoryCreateModalProps = {
   opened: boolean;
   onClose: () => void;
-  accessToken: string;
   accounts: AccountOption[];
   onSuccess: () => void;
 };
@@ -33,7 +32,6 @@ type CategoryCreateModalProps = {
 export function CategoryCreateModal({
   opened,
   onClose,
-  accessToken,
   accounts,
   onSuccess
 }: CategoryCreateModalProps) {
@@ -72,7 +70,7 @@ export function CategoryCreateModal({
           accum_depr_account_id: form.accum_depr_account_id ? Number(form.accum_depr_account_id) : null,
           is_active: form.is_active
         })
-      }, accessToken);
+      });
 
       notifications.show({
         title: "Success",

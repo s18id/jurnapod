@@ -80,7 +80,6 @@ interface ReservationFormModalProps {
   mode: ReservationFormMode;
   reservation?: ReservationRow | null;
   outletId: number;
-  accessToken: string;
   /** Enable multi-table (large party) support */
   enableMultiTable?: boolean;
   /** Show table suggestions based on guest count */
@@ -99,14 +98,13 @@ export function ReservationFormModal({
   mode,
   reservation,
   outletId,
-  accessToken,
   enableMultiTable = false,
   showTableSuggestions = false,
   defaultDurationMinutes = 120,
   onSuccess,
   onRefetchTables
 }: ReservationFormModalProps) {
-  const tables = useOutletTables(outletId, accessToken);
+  const tables = useOutletTables(outletId);
 
   const [formState, setFormState] = useState<ReservationFormState>(emptyFormState);
   const [isMultiTable, setIsMultiTable] = useState(false);
@@ -128,8 +126,7 @@ export function ReservationFormModal({
   }, [showTableSuggestions, formState.reservationAt, formState.guestCount, formState.durationMinutes, outletId]);
 
   const { suggestions: fetchedSuggestions, loading: suggestionsLoading } = useTableSuggestions(
-    suggestionQuery,
-    accessToken
+    suggestionQuery
   );
 
   // Initialize form when opening
@@ -209,7 +206,7 @@ export function ReservationFormModal({
           status: "BOOKED" as const
         };
 
-        await createReservation(payload, accessToken);
+        await createReservation(payload);
       } else if (mode === "edit" && reservation) {
         const payload = {
           customer_name: formState.customerName.trim(),
@@ -221,7 +218,7 @@ export function ReservationFormModal({
           notes: formState.notes.trim() || null
         };
 
-        await updateReservation(reservation.reservation_id, payload, accessToken);
+        await updateReservation(reservation.reservation_id, payload);
       }
 
       onSuccess?.();
@@ -232,7 +229,7 @@ export function ReservationFormModal({
     } finally {
       setSubmitting(false);
     }
-  }, [formState, mode, reservation, outletId, accessToken, isMultiTable, selectedTableIds, enableMultiTable, onSuccess, onRefetchTables, onClose]);
+  }, [formState, mode, reservation, outletId, isMultiTable, selectedTableIds, enableMultiTable, onSuccess, onRefetchTables, onClose]);
 
   const title = mode === "create"
     ? "Create Reservation"

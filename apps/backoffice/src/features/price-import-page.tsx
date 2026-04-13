@@ -22,7 +22,6 @@ import type { SessionUser } from "../lib/session";
 
 interface PriceImportPageProps {
   user: SessionUser;
-  accessToken: string;
 }
 
 type NormalizedPriceImportRow = {
@@ -43,7 +42,7 @@ interface ItemPrice {
   updated_at: string;
 }
 
-export function PriceImportPage({ user, accessToken }: PriceImportPageProps) {
+export function PriceImportPage({ user }: PriceImportPageProps) {
   const navigate = useNavigate();
 
   // Data hooks
@@ -51,7 +50,7 @@ export function PriceImportPage({ user, accessToken }: PriceImportPageProps) {
     items,
     loading: itemsLoading,
     error: itemsError,
-  } = useItems({ user, accessToken });
+  } = useItems({ user });
 
   // Fetch prices for refresh
   const fetchPrices = useCallback(async () => {
@@ -59,12 +58,12 @@ export function PriceImportPage({ user, accessToken }: PriceImportPageProps) {
       await apiRequest<{ data: ItemPrice[] }>(
         `/inventory/item-prices?outlet_id=${user.outlets[0]?.id ?? 0}`,
         {},
-        accessToken
+        
       );
     } catch {
       // Silently fail - prices are only fetched for refresh
     }
-  }, [accessToken, user.outlets]);
+  }, [user.outlets]);
 
   // Import configuration for ImportWizard
   const importConfig: ImportWizardConfig<NormalizedPriceImportRow> = useMemo(() => {
@@ -125,7 +124,7 @@ export function PriceImportPage({ user, accessToken }: PriceImportPageProps) {
                   outlet_id: row.parsed.scope === "default" ? null : row.parsed.outlet_id,
                 }),
               },
-              accessToken
+              
             );
             results.success++;
             results.created++;
@@ -141,9 +140,9 @@ export function PriceImportPage({ user, accessToken }: PriceImportPageProps) {
         await fetchPrices();
         return results;
       },
-      accessToken,
+      
     };
-  }, [items, accessToken, fetchPrices]);
+  }, [items, fetchPrices]);
 
   const handleComplete = useCallback(() => {
     navigate("/prices");

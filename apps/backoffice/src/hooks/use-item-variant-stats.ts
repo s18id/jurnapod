@@ -15,7 +15,6 @@ export type ItemVariantStats = {
 
 export interface UseItemVariantStatsProps {
   user: SessionUser;
-  accessToken: string;
   itemIds: number[];
 }
 
@@ -41,7 +40,6 @@ export interface UseItemVariantStatsReturn {
  */
 export function useItemVariantStats({
   user,
-  accessToken,
   itemIds,
 }: UseItemVariantStatsProps): UseItemVariantStatsReturn {
   const [stats, setStats] = useState<Map<number, ItemVariantStats>>(new Map());
@@ -50,7 +48,7 @@ export function useItemVariantStats({
   const isMounted = useRef(true);
 
   const fetchStats = useCallback(async () => {
-    if (!user || !accessToken || itemIds.length === 0) {
+    if (!user || itemIds.length === 0) {
       setStats(new Map());
       return;
     }
@@ -62,10 +60,7 @@ export function useItemVariantStats({
       // Fetch variant stats for all items in a single bulk request
       const itemIdsParam = itemIds.join(',');
       const response = await apiRequest<{ success: boolean; data: ItemVariantStats[] }>(
-        `/inventory/variant-stats?item_ids=${itemIdsParam}`,
-        {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        }
+        `/inventory/variant-stats?item_ids=${itemIdsParam}`
       );
 
       if (response.success && Array.isArray(response.data)) {
@@ -88,7 +83,7 @@ export function useItemVariantStats({
         setLoading(false);
       }
     }
-  }, [user, accessToken, itemIds]);
+  }, [user, itemIds]);
 
   useEffect(() => {
     fetchStats();

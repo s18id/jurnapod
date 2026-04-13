@@ -105,7 +105,6 @@ export function startPolling(callback: () => void, pollMs: number): () => void {
 
 export function useTableBoard(
   outletId: number | null,
-  accessToken: string,
   pollMs = 8000
 ) {
   const [data, setData] = useState<TableBoardRow[]>([]);
@@ -130,9 +129,7 @@ export function useTableBoard(
     setError(null);
     try {
       const payload = await apiRequest<TableBoardEnvelope>(
-        buildTableBoardPath(outletId),
-        {},
-        accessToken
+        buildTableBoardPath(outletId)
       );
       const rows = extractTableBoardRows(payload);
       const nextRecentChangeIds = calculateRecentChangeIds(rowsRef.current, rows);
@@ -148,7 +145,7 @@ export function useTableBoard(
     } finally {
       setLoading(false);
     }
-  }, [outletId, accessToken]);
+  }, [outletId]);
 
   useEffect(() => {
     void refetch();

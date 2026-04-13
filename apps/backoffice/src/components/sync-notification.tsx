@@ -8,11 +8,10 @@ import { useEffect, useState } from "react";
 import { SyncService, type SyncResult } from "../lib/sync-service";
 
 type SyncNotificationProps = {
-  accessToken: string;
   userId: number;
 };
 
-export function SyncNotification({ accessToken, userId }: SyncNotificationProps) {
+export function SyncNotification({ userId }: SyncNotificationProps) {
   const [syncing, setSyncing] = useState(false);
   const [result, setResult] = useState<SyncResult | null>(null);
   const theme = useMantineTheme();
@@ -22,7 +21,7 @@ export function SyncNotification({ accessToken, userId }: SyncNotificationProps)
 
     async function handleSync() {
       setSyncing(true);
-      const nextResult = await SyncService.syncAll(accessToken, userId);
+      const nextResult = await SyncService.syncAll(userId);
       setSyncing(false);
       
       if (nextResult.success > 0 || nextResult.failed > 0 || nextResult.conflicts > 0) {
@@ -45,7 +44,7 @@ export function SyncNotification({ accessToken, userId }: SyncNotificationProps)
         window.clearTimeout(timeoutId);
       }
     };
-  }, [accessToken, userId]);
+  }, [userId]);
 
   if (!syncing && !result) {
     return null;

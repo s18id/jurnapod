@@ -10,7 +10,6 @@ import type { SessionUser } from "../lib/session";
 
 interface ImageUploadProps {
   user: SessionUser;
-  accessToken: string;
   itemId: number;
   itemName: string;
   onUploadSuccess?: () => void;
@@ -21,7 +20,7 @@ const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 export function ImageUpload({
   user: _user,
-  accessToken,
+  
   itemId,
   itemName,
   onUploadSuccess,
@@ -90,8 +89,7 @@ export function ImageUpload({
           method: "POST",
           body: formData,
           // Don't set content-type header, browser will set it with boundary for FormData
-        },
-        accessToken
+        }
       );
 
       setSuccess("Image uploaded successfully");

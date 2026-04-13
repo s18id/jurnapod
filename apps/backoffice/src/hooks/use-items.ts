@@ -25,7 +25,6 @@ export type Item = {
 
 export interface UseItemsProps {
   user: SessionUser;
-  accessToken: string;
 }
 
 export interface UseItemsReturn {
@@ -46,11 +45,11 @@ export interface UseItemsReturn {
  * - Proper loading and error states
  * - Automatic cleanup on unmount
  *
- * @param {UseItemsProps} props - User and access token
+ * @param {UseItemsProps} props - User session
  * @returns {UseItemsReturn} Items data, loading state, error, refresh function, and itemMap
  *
  * @example
- * const { items, loading, error, refresh, itemMap } = useItems({ user, accessToken });
+ * const { items, loading, error, refresh, itemMap } = useItems({ user });
  *
  * // Access item by ID
  * const item = itemMap.get(itemId);
@@ -58,14 +57,14 @@ export interface UseItemsReturn {
  * // Refresh data
  * await refresh();
  */
-export function useItems({ user, accessToken }: UseItemsProps): UseItemsReturn {
+export function useItems({ user }: UseItemsProps): UseItemsReturn {
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const isMounted = useRef(true);
 
   const fetchItems = useCallback(async () => {
-    if (!user || !accessToken) {
+    if (!user) {
       if (isMounted.current) {
         setError("User not authenticated");
         setLoading(false);
@@ -77,7 +76,7 @@ export function useItems({ user, accessToken }: UseItemsProps): UseItemsReturn {
     setError(null);
 
     try {
-      const data = await CacheService.getCachedItems(user.company_id, accessToken);
+      const data = await CacheService.getCachedItems(user.company_id);
 
       if (isMounted.current) {
         setItems(data as Item[]);
@@ -90,10 +89,10 @@ export function useItems({ user, accessToken }: UseItemsProps): UseItemsReturn {
         setLoading(false);
       }
     }
-  }, [user, accessToken]);
+  }, [user]);
 
   const refresh = useCallback(async () => {
-    if (!user || !accessToken) {
+    if (!user) {
       setError("User not authenticated");
       return;
     }
@@ -103,7 +102,7 @@ export function useItems({ user, accessToken }: UseItemsProps): UseItemsReturn {
 
     try {
       // Force refresh by calling refreshItems directly (bypasses cache)
-      const data = await CacheService.refreshItems(user.company_id, accessToken);
+      const data = await CacheService.refreshItems(user.company_id);
 
       if (isMounted.current) {
         setItems(data as Item[]);
@@ -116,7 +115,7 @@ export function useItems({ user, accessToken }: UseItemsProps): UseItemsReturn {
         setLoading(false);
       }
     }
-  }, [user, accessToken]);
+  }, [user]);
 
   useEffect(() => {
     const timeoutId = globalThis.setTimeout(() => {

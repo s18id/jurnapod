@@ -83,7 +83,6 @@ type LedgerResponse = {
 
 type FixedAssetPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 export function FixedAssetPage(props: FixedAssetPageProps) {
@@ -200,8 +199,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
       const query = typeof filter === "number" ? `?outlet_id=${filter}` : "";
       const response = await apiRequest<{ success: true; data: FixedAsset[] }>(
         `/accounts/fixed-assets${query}`,
-        {},
-        props.accessToken
+        {}
       );
       setAssets(response.data);
     } catch (fetchError) {
@@ -219,8 +217,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     try {
       const response = await apiRequest<{ success: true; data: FixedAssetCategory[] }>(
         "/accounts/fixed-asset-categories",
-        {},
-        props.accessToken
+        {}
       );
       setCategories(response.data);
     } catch (fetchError) {
@@ -232,8 +229,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
     try {
       const response = await apiRequest<{ success: true; data: Array<{ id: number; code: string; name: string }> }>(
         `/accounts?company_id=${props.user.company_id}`,
-        {},
-        props.accessToken
+        {}
       );
       setAccounts(response.data);
     } catch (err) {
@@ -248,13 +244,11 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
       const [bookRes, ledgerRes] = await Promise.all([
         apiRequest<{ success: true; data: FixedAssetBook }>(
           `/accounts/fixed-assets/${assetId}/book`,
-          {},
-          props.accessToken
+          {}
         ),
         apiRequest<{ success: true; data: LedgerResponse }>(
           `/accounts/fixed-assets/${assetId}/ledger`,
-          {},
-          props.accessToken
+          {}
         )
       ]);
       setAssetBook(bookRes.data);
@@ -296,8 +290,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             accum_depr_account_id: categoryForm.accum_depr_account_id ? Number(categoryForm.accum_depr_account_id) : null,
             is_active: categoryForm.is_active
           })
-        },
-        props.accessToken
+        }
       );
       setCategoryForm({
         code: "",
@@ -342,8 +335,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             purchase_cost: createAssetForm.purchase_cost.trim() ? Number(createAssetForm.purchase_cost) : null,
             is_active: createAssetForm.is_active
           })
-        },
-        props.accessToken
+        }
       );
       setCreateAssetForm({
         name: "",
@@ -373,7 +365,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
 
     try {
       setError(null);
-      await apiRequest(`/accounts/fixed-assets/${assetId}`, { method: "DELETE" }, props.accessToken);
+      await apiRequest(`/accounts/fixed-assets/${assetId}`, { method: "DELETE" });
       await refreshAssets(outletFilter);
       notifications.show({ title: "Success", message: "Asset deleted", color: "green" });
     } catch (deleteError) {
@@ -433,8 +425,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             expense_account_id: acquisitionForm.expense_account_id ? Number(acquisitionForm.expense_account_id) : undefined,
             notes: acquisitionForm.notes
           })
-        },
-        props.accessToken
+        }
       );
       setAcquisitionModalOpen(false);
       await loadAssetDetails(selectedAsset.id);
@@ -471,8 +462,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             transfer_date: transferForm.transfer_date,
             notes: transferForm.notes
           })
-        },
-        props.accessToken
+        }
       );
       setTransferModalOpen(false);
       await loadAssetDetails(selectedAsset.id);
@@ -519,8 +509,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             expense_account_id: Number(impairmentForm.expense_account_id),
             accum_impairment_account_id: Number(impairmentForm.accum_impairment_account_id)
           })
-        },
-        props.accessToken
+        }
       );
       setImpairmentModalOpen(false);
       await loadAssetDetails(selectedAsset.id);
@@ -580,8 +569,7 @@ export function FixedAssetPage(props: FixedAssetPageProps) {
             disposal_expense_account_id: disposalForm.disposal_expense_account_id ? Number(disposalForm.disposal_expense_account_id) : undefined,
             notes: disposalForm.notes
           })
-        },
-        props.accessToken
+        }
       );
       setDisposalModalOpen(false);
       await loadAssetDetails(selectedAsset.id);

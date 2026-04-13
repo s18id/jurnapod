@@ -171,7 +171,6 @@ function calcDraftTotal(lines: CreditNoteLineDraft[]): number {
 
 type SalesCreditNotesPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 // ============================================================================
@@ -201,6 +200,7 @@ function makeDefaultDraft(): CreditNoteDraft {
 // ============================================================================
 
 export function SalesCreditNotesPage(props: SalesCreditNotesPageProps) {
+  const { user } = props;
   const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
   const [creditNotesTotal, setCreditNotesTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -209,7 +209,7 @@ export function SalesCreditNotesPage(props: SalesCreditNotesPageProps) {
   const [submitting, setSubmitting] = useState(false);
 
   const [selectedOutletId, setSelectedOutletId] = useState<number>(
-    props.user.outlets[0]?.id ?? 0
+    user.outlets[0]?.id ?? 0
   );
 
   // Filters
@@ -239,7 +239,7 @@ export function SalesCreditNotesPage(props: SalesCreditNotesPageProps) {
   // Customers for dropdown
   const [customers, setCustomers] = useState<Array<{ id: number; name: string }>>([]);
 
-  const outletOptions = props.user.outlets.map((outlet) => ({
+  const outletOptions = user.outlets.map((outlet) => ({
     value: String(outlet.id),
     label: outlet.name
   }));
@@ -262,8 +262,7 @@ export function SalesCreditNotesPage(props: SalesCreditNotesPageProps) {
 
       const response = await apiRequest<CreditNotesListResponse>(
         `/sales/credit-notes?${params.toString()}`,
-        {},
-        props.accessToken
+        {}
       );
       setCreditNotes(response.data.creditNotes);
       setCreditNotesTotal(response.data.total);
@@ -288,13 +287,12 @@ export function SalesCreditNotesPage(props: SalesCreditNotesPageProps) {
   useEffect(() => {
     if (!isOnline) return;
     apiRequest<{ data: Array<{ id: number; name: string }> }>(
-      `/customers?company_id=${props.user.company_id}`,
-      {},
-      props.accessToken
+      `/customers?company_id=${user.company_id}`,
+      {}
     ).then((response) => setCustomers(response.data)).catch(() => {
       // Silently fail - customers are optional
     });
-  }, [isOnline, props.user.company_id, props.accessToken]);
+  }, [isOnline, user.company_id]);
 
   // ============================================================================
   // Validation
@@ -363,8 +361,7 @@ export function SalesCreditNotesPage(props: SalesCreditNotesPageProps) {
 
       await apiRequest(
         "/sales/credit-notes",
-        { method: "POST", body: JSON.stringify(payload) },
-        props.accessToken
+        { method: "POST", body: JSON.stringify(payload) }
       );
 
       setNewCreditNote(makeDefaultDraft());
@@ -392,8 +389,7 @@ export function SalesCreditNotesPage(props: SalesCreditNotesPageProps) {
     try {
       const response = await apiRequest<CreditNoteDetailResponse>(
         `/sales/credit-notes/${creditNoteId}`,
-        {},
-        props.accessToken
+        {}
       );
       const cn = response.data;
       setEditingCreditNote({
@@ -428,8 +424,7 @@ export function SalesCreditNotesPage(props: SalesCreditNotesPageProps) {
     try {
       const response = await apiRequest<CreditNoteDetailResponse>(
         `/sales/credit-notes/${creditNoteId}`,
-        {},
-        props.accessToken
+        {}
       );
       setDetailCreditNote(response.data);
       setViewMode("detail");
@@ -483,8 +478,7 @@ export function SalesCreditNotesPage(props: SalesCreditNotesPageProps) {
 
       await apiRequest(
         `/sales/credit-notes/${editingCreditNote.id}`,
-        { method: "PATCH", body: JSON.stringify(payload) },
-        props.accessToken
+        { method: "PATCH", body: JSON.stringify(payload) }
       );
 
       setEditingCreditNote(null);
@@ -512,8 +506,7 @@ export function SalesCreditNotesPage(props: SalesCreditNotesPageProps) {
     try {
       await apiRequest(
         `/sales/credit-notes/${creditNoteId}/post`,
-        { method: "POST" },
-        props.accessToken
+        { method: "POST" }
       );
       setNotice({ color: "green", message: "Credit note posted to GL successfully." });
       await refreshData(selectedOutletId);
@@ -541,8 +534,7 @@ export function SalesCreditNotesPage(props: SalesCreditNotesPageProps) {
         {
           method: "POST",
           body: JSON.stringify({ reason })
-        },
-        props.accessToken
+        }
       );
       setNotice({ color: "yellow", message: "Credit note voided successfully." });
       await refreshData(selectedOutletId);

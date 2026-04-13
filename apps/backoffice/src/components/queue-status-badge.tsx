@@ -8,11 +8,10 @@ import { OutboxService } from "../lib/outbox-service";
 import { SyncService } from "../lib/sync-service";
 
 type QueueStatusBadgeProps = {
-  accessToken?: string | null;
   userId: number;
 };
 
-export function QueueStatusBadge({ accessToken, userId }: QueueStatusBadgeProps) {
+export function QueueStatusBadge({ userId }: QueueStatusBadgeProps) {
   const isOnline = useOnlineStatus();
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
@@ -39,11 +38,8 @@ export function QueueStatusBadge({ accessToken, userId }: QueueStatusBadgeProps)
   }, [userId]);
 
   async function handleManualSync() {
-    if (!accessToken) {
-      return;
-    }
     setSyncing(true);
-    await SyncService.syncAll(accessToken, userId).catch(() => undefined);
+    await SyncService.syncAll(userId).catch(() => undefined);
     setSyncing(false);
     const count = await OutboxService.getPendingCount(userId);
     setPendingCount(count);
@@ -67,7 +63,7 @@ export function QueueStatusBadge({ accessToken, userId }: QueueStatusBadgeProps)
       }}
     >
       {isOnline ? `Queue: ${pendingCount}` : `Offline queue: ${pendingCount}`}
-      {isOnline && accessToken ? (
+      {isOnline ? (
         <button
           type="button"
           onClick={handleManualSync}

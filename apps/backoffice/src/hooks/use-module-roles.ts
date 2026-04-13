@@ -16,7 +16,7 @@ type ModuleRoleSingleResponse = {
   data: ModuleRoleResponse;
 };
 
-export function useModuleRoles(accessToken: string, roleId: number | null) {
+export function useModuleRoles(roleId: number | null) {
   const [data, setData] = useState<ModuleRoleResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,8 +44,7 @@ export function useModuleRoles(accessToken: string, roleId: number | null) {
         const params = new URLSearchParams({ role_id: String(roleId) });
         const response = await apiRequest<ModuleRolesListResponse>(
           `/settings/module-roles?${params.toString()}`,
-          {},
-          accessToken
+          {}
         );
         setData(response.data);
       } catch (fetchError) {
@@ -60,7 +59,7 @@ export function useModuleRoles(accessToken: string, roleId: number | null) {
         inFlightRef.current = false;
       }
     },
-    [accessToken, roleId]
+    [roleId]
   );
 
   useEffect(() => {
@@ -73,16 +72,14 @@ export function useModuleRoles(accessToken: string, roleId: number | null) {
 export async function updateModuleRolePermission(
   roleId: number,
   moduleName: string,
-  permissionMask: number,
-  accessToken: string
+  permissionMask: number
 ): Promise<ModuleRoleResponse> {
   const response = await apiRequest<ModuleRoleSingleResponse>(
     `/settings/module-roles/${roleId}/${moduleName}`,
     {
       method: "PUT",
       body: JSON.stringify({ permission_mask: permissionMask })
-    },
-    accessToken
+    }
   );
   return response.data;
 }

@@ -49,7 +49,6 @@ import type { SessionUser } from "../lib/session";
 
 type AccountsPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type FormMode = "create" | "edit" | null;
@@ -109,13 +108,11 @@ export function AccountsPage(props: AccountsPageProps) {
 
   const { data: tree, loading, error: treeError, refetch } = useAccountTree(
     props.user.company_id,
-    props.accessToken,
     showInactive
   );
 
   const { data: accountTypes, loading: accountTypesLoading } = useAccountTypes(
     props.user.company_id,
-    props.accessToken,
     { is_active: undefined }
   );
 
@@ -340,8 +337,7 @@ export function AccountsPage(props: AccountsPageProps) {
             report_group: formData.report_group,
             is_payable: formData.is_payable,
             is_active: formData.is_active
-          },
-          props.accessToken
+          }
         );
         setSuccessMessage("Account created successfully");
       } else if (formMode === "edit" && editingId) {
@@ -358,8 +354,7 @@ export function AccountsPage(props: AccountsPageProps) {
             report_group: formData.report_group,
             is_payable: formData.is_payable,
             is_active: formData.is_active
-          },
-          props.accessToken
+          }
         );
         setSuccessMessage("Account updated successfully");
       }
@@ -386,7 +381,7 @@ export function AccountsPage(props: AccountsPageProps) {
     setSuccessMessage(null);
 
     try {
-      await deactivateAccount(account.id, props.accessToken);
+      await deactivateAccount(account.id);
       setSuccessMessage("Account deactivated successfully");
       await refetch();
     } catch (deactivateError) {
@@ -407,7 +402,7 @@ export function AccountsPage(props: AccountsPageProps) {
     setSuccessMessage(null);
 
     try {
-      await reactivateAccount(account.id, props.accessToken);
+      await reactivateAccount(account.id);
       setSuccessMessage("Account reactivated successfully");
       await refetch();
     } catch (reactivateError) {

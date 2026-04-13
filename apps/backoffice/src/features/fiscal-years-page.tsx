@@ -30,7 +30,6 @@ import type { SessionUser } from "../lib/session";
 
 type FiscalYearsPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 // =============================================================================
@@ -302,7 +301,7 @@ function hasManagePermission(user: SessionUser): boolean {
 // Main Component
 // =============================================================================
 
-export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
+export function FiscalYearsPage({ user }: FiscalYearsPageProps) {
   const isOnline = useOnlineStatus();
   const [fiscalYears, setFiscalYears] = useState<FiscalYearRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -355,8 +354,7 @@ export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
         try {
           const statusResp = await apiRequest<FiscalYearStatusResponse>(
             `/accounts/fiscal-years/${fy.id}/status`,
-            {},
-            accessToken
+            {}
           );
           if (statusResp.data.closeRequestId && statusResp.data.closeRequestStatus) {
             return {
@@ -388,8 +386,7 @@ export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
       try {
         const response = await apiRequest<FiscalYearsResponse>(
           `/accounts/fiscal-years?company_id=${user.company_id}&include_closed=1`,
-          {},
-          accessToken
+          {}
         );
         setFiscalYears(response.data);
 
@@ -407,7 +404,7 @@ export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
     }
 
     fetchFiscalYears().catch(() => setError("Failed to load fiscal years"));
-  }, [accessToken, user.company_id]);
+  }, [user.company_id]);
 
   const sortedYears = useMemo(() => {
     const statusOrder: Record<string, number> = {
@@ -535,8 +532,7 @@ export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
               end_date: draft.end_date.trim(),
               status: draft.status
             })
-          },
-          accessToken
+          }
         );
         setFiscalYears((prev) =>
           prev.map((r, idx) => (idx === rowIndex ? { ...response.data, isNew: false } : r))
@@ -556,8 +552,7 @@ export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
               end_date: draft.end_date.trim(),
               status: draft.status
             })
-          },
-          accessToken
+          }
         );
         setFiscalYears((prev) =>
           prev.map((r, idx) => (idx === rowIndex ? response.data : r))
@@ -609,8 +604,7 @@ export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
     try {
       const response = await apiRequest<ClosePreviewResponse>(
         `/accounts/fiscal-years/${fiscalYear.id}/close-preview`,
-        {},
-        accessToken
+        {}
       );
       setClosePreview(response.data);
     } catch (err) {
@@ -637,7 +631,7 @@ export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
           method: "POST",
           body: JSON.stringify({})
         },
-        accessToken
+        {}
       );
       setCloseInitiateResult(response.data);
 
@@ -653,8 +647,7 @@ export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
       // Refresh the fiscal years list to update close_info
       const fyResponse = await apiRequest<FiscalYearsResponse>(
         `/accounts/fiscal-years?company_id=${user.company_id}&include_closed=1`,
-        {},
-        accessToken
+        {}
       );
       setFiscalYears(fyResponse.data);
       await fetchCloseRequestStatuses(fyResponse.data);
@@ -699,8 +692,7 @@ export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
           body: JSON.stringify({
             close_request_id: selectedFiscalYear.close_info.close_request_id
           })
-        },
-        accessToken
+        }
       );
 
       setCloseSuccessMsg(
@@ -711,8 +703,7 @@ export function FiscalYearsPage({ user, accessToken }: FiscalYearsPageProps) {
       // Refresh the fiscal years list
       const fyResponse = await apiRequest<FiscalYearsResponse>(
         `/accounts/fiscal-years?company_id=${user.company_id}&include_closed=1`,
-        {},
-        accessToken
+        {}
       );
       setFiscalYears(fyResponse.data);
       await fetchCloseRequestStatuses(fyResponse.data);

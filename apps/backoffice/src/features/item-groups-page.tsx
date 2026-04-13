@@ -60,7 +60,6 @@ type ItemGroup = {
 
 type ItemGroupsPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 export function ItemGroupsPage(props: ItemGroupsPageProps) {
@@ -221,8 +220,8 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
     setError(null);
     try {
       const groups = (isOnline
-        ? await CacheService.refreshItemGroups(props.user.company_id, props.accessToken)
-        : await CacheService.getCachedItemGroups(props.user.company_id, props.accessToken, { allowStale: true })) as ItemGroup[];
+        ? await CacheService.refreshItemGroups(props.user.company_id)
+        : await CacheService.getCachedItemGroups(props.user.company_id, { allowStale: true })) as ItemGroup[];
       setItemGroups(groups);
       if (editingGroupId !== null) {
         const editedGroupStillExists = groups.some((g) => g.id === editingGroupId);
@@ -263,8 +262,7 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
             parent_id: newGroup.parent_id,
             is_active: newGroup.is_active
           })
-        },
-        props.accessToken
+        }
       );
       setNewGroup({ code: "", name: "", parent_id: null, is_active: true });
       await refreshData();
@@ -310,8 +308,7 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
             parent_id: groupDraft.parent_id,
             is_active: groupDraft.is_active
           })
-        },
-        props.accessToken
+        }
       );
       await refreshData();
       cancelEditGroup();
@@ -329,7 +326,7 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
 
     setDeleting(true);
     try {
-      await apiRequest(`/inventory/item-groups/${confirmDeleteGroup.id}`, { method: "DELETE" }, props.accessToken);
+      await apiRequest(`/inventory/item-groups/${confirmDeleteGroup.id}`, { method: "DELETE" });
       setConfirmDeleteGroup(null);
       await refreshData();
     } catch (deleteError) {
@@ -389,8 +386,7 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
               is_active: p.original.is_active
             }))
           })
-        },
-        props.accessToken
+        }
       );
 
       for (let i = 0; i < actionable.length; i++) {
@@ -814,7 +810,7 @@ export function ItemGroupsPage(props: ItemGroupsPageProps) {
                 <Textarea
                   label="Paste CSV data"
                   description="Format: code, name, parent_code, is_active"
-                  placeholder="code,name,parent_code,is_active&#10;GRP001,Main Group,,true&#10;GRP002,Sub Group,GRP001,true"
+                  placeholder="code,name,parent_code,is_active&#10;GRP001,Main Group,true&#10;GRP002,Sub Group,GRP001,true"
                   value={importText}
                   onChange={(event) => setImportText(event.currentTarget.value)}
                   minRows={6}

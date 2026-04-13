@@ -98,7 +98,6 @@ interface UseUsersOptions {
  */
 export function useUsers(
   companyId: number,
-  accessToken: string,
   options?: UseUsersOptions
 ) {
   const filters = options?.filters;
@@ -142,8 +141,7 @@ export function useUsers(
 
         const response = await apiRequest<UsersListResponse>(
           `/users${queryString}`,
-          { signal: controller.signal },
-          accessToken
+          { signal: controller.signal }
         );
         setData(response.data);
         setTotalCount(response.total ?? response.data.length);
@@ -165,7 +163,7 @@ export function useUsers(
         }
       }
     },
-    [companyId, accessToken, filters, pagination, sort]
+    [companyId, filters, pagination, sort]
   );
 
   useEffect(() => {
@@ -187,8 +185,7 @@ export function useUsers(
  */
 export function useUser(
   userId: number | null,
-  companyId: number,
-  accessToken: string
+  companyId: number
 ) {
   const [data, setData] = useState<UserResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -207,9 +204,7 @@ export function useUser(
     try {
       const params = new URLSearchParams({ company_id: String(companyId) });
       const response = await apiRequest<UserSingleResponse>(
-        `/users/${userId}?${params.toString()}`,
-        {},
-        accessToken
+        `/users/${userId}?${params.toString()}`
       );
       setData(response.data);
     } catch (fetchError) {
@@ -222,7 +217,7 @@ export function useUser(
     } finally {
       setLoading(false);
     }
-  }, [userId, companyId, accessToken]);
+  }, [userId, companyId]);
 
   useEffect(() => {
     refetch();
@@ -235,7 +230,7 @@ export function useUser(
  * Hook: useRoles
  * Fetches list of available roles
  */
-export function useRoles(accessToken: string, companyId?: number) {
+export function useRoles(companyId?: number) {
   const [data, setData] = useState<RoleResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -248,9 +243,7 @@ export function useRoles(accessToken: string, companyId?: number) {
         ? `?company_id=${companyId}` 
         : "";
       const response = await apiRequest<RolesListResponse>(
-        `/roles${params}`,
-        {},
-        accessToken
+        `/roles${params}`
       );
       setData(response.data);
     } catch (fetchError) {
@@ -263,7 +256,7 @@ export function useRoles(accessToken: string, companyId?: number) {
     } finally {
       setLoading(false);
     }
-  }, [accessToken, companyId]);
+  }, [companyId]);
 
   useEffect(() => {
     refetch();
@@ -276,7 +269,7 @@ export function useRoles(accessToken: string, companyId?: number) {
  * Hook: useOutlets
  * Fetches list of outlets for a company
  */
-export function useOutlets(companyId: number, accessToken: string) {
+export function useOutlets(companyId: number) {
   const [data, setData] = useState<OutletResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -287,9 +280,7 @@ export function useOutlets(companyId: number, accessToken: string) {
     try {
       const params = new URLSearchParams({ company_id: String(companyId) });
       const response = await apiRequest<OutletsListResponse>(
-        `/outlets?${params.toString()}`,
-        {},
-        accessToken
+        `/outlets?${params.toString()}`
       );
       setData(response.data);
     } catch (fetchError) {
@@ -302,7 +293,7 @@ export function useOutlets(companyId: number, accessToken: string) {
     } finally {
       setLoading(false);
     }
-  }, [companyId, accessToken]);
+  }, [companyId]);
 
   useEffect(() => {
     refetch();
@@ -316,16 +307,14 @@ export function useOutlets(companyId: number, accessToken: string) {
  * Creates a new user
  */
 export async function createUser(
-  data: UserCreateRequest,
-  accessToken: string
+  data: UserCreateRequest
 ): Promise<UserResponse> {
   const response = await apiRequest<UserSingleResponse>(
     "/users",
     {
       method: "POST",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -336,16 +325,14 @@ export async function createUser(
  */
 export async function updateUser(
   userId: number,
-  data: UserUpdateRequest,
-  accessToken: string
+  data: UserUpdateRequest
 ): Promise<UserResponse> {
   const response = await apiRequest<UserSingleResponse>(
     `/users/${userId}`,
     {
       method: "PATCH",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -356,16 +343,14 @@ export async function updateUser(
  */
 export async function updateUserRoles(
   userId: number,
-  data: UserRolesUpdateRequest,
-  accessToken: string
+  data: UserRolesUpdateRequest
 ): Promise<UserResponse> {
   const response = await apiRequest<UserSingleResponse>(
     `/users/${userId}/roles`,
     {
       method: "POST",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -376,16 +361,14 @@ export async function updateUserRoles(
  */
 export async function updateUserOutlets(
   userId: number,
-  data: UserOutletsUpdateRequest,
-  accessToken: string
+  data: UserOutletsUpdateRequest
 ): Promise<UserResponse> {
   const response = await apiRequest<UserSingleResponse>(
     `/users/${userId}/outlets`,
     {
       method: "POST",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -396,16 +379,14 @@ export async function updateUserOutlets(
  */
 export async function updateUserPassword(
   userId: number,
-  data: UserPasswordUpdateRequest,
-  accessToken: string
+  data: UserPasswordUpdateRequest
 ): Promise<void> {
   await apiRequest<{ success: true; data: null }>(
     `/users/${userId}/password`,
     {
       method: "POST",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
 }
 
@@ -414,15 +395,13 @@ export async function updateUserPassword(
  * Deactivates a user
  */
 export async function deactivateUser(
-  userId: number,
-  accessToken: string
+  userId: number
 ): Promise<UserResponse> {
   const response = await apiRequest<UserSingleResponse>(
     `/users/${userId}/deactivate`,
     {
       method: "POST"
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -432,15 +411,13 @@ export async function deactivateUser(
  * Reactivates a deactivated user
  */
 export async function reactivateUser(
-  userId: number,
-  accessToken: string
+  userId: number
 ): Promise<UserResponse> {
   const response = await apiRequest<UserSingleResponse>(
     `/users/${userId}/reactivate`,
     {
       method: "POST"
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -450,16 +427,14 @@ export async function reactivateUser(
  * Creates a new role
  */
 export async function createRole(
-  data: { code: string; name: string; role_level?: number },
-  accessToken: string
+  data: { code: string; name: string; role_level?: number }
 ): Promise<RoleResponse> {
   const response = await apiRequest<{ success: true; data: RoleResponse }>(
     "/roles",
     {
       method: "POST",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -470,16 +445,14 @@ export async function createRole(
  */
 export async function updateRole(
   roleId: number,
-  data: { name: string },
-  accessToken: string
+  data: { name: string }
 ): Promise<RoleResponse> {
   const response = await apiRequest<{ success: true; data: RoleResponse }>(
     `/roles/${roleId}`,
     {
       method: "PATCH",
       body: JSON.stringify(data)
-    },
-    accessToken
+    }
   );
   return response.data;
 }
@@ -489,14 +462,12 @@ export async function updateRole(
  * Deletes a role
  */
 export async function deleteRole(
-  roleId: number,
-  accessToken: string
+  roleId: number
 ): Promise<void> {
   await apiRequest<{ success: true; data: null }>(
     `/roles/${roleId}`,
     {
       method: "DELETE"
-    },
-    accessToken
+    }
   );
 }

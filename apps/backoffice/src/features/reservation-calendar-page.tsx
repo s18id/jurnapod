@@ -62,7 +62,6 @@ import { getStoredCompanyTimezone, refreshSessionUser, type SessionUser } from "
 
 type ReservationCalendarPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type ReservationFormState = {
@@ -138,10 +137,9 @@ export async function executeReservationFormAction(input: {
   editingReservationId: number | null;
   editingGroupId?: number | null;
   formState: ReservationFormState;
-  accessToken: string;
   isMultiTable?: boolean;
   selectedTableIds?: number[];
-  createReservationFn?: (data: ReservationCreateRequest, accessToken: string) => Promise<ReservationRow>;
+  createReservationFn?: (data: ReservationCreateRequest) => Promise<ReservationRow>;
   createReservationGroupFn?: (data: {
     outlet_id: number;
     customer_name: string;
@@ -151,7 +149,7 @@ export async function executeReservationFormAction(input: {
     reservation_at: string;
     duration_minutes: number;
     notes: string | null;
-  }, accessToken: string) => Promise<{ group_id: number; reservation_ids: number[] }>;
+  }) => Promise<{ group_id: number; reservation_ids: number[] }>;
   updateReservationGroupFn?: (groupId: number, data: {
     customer_name?: string;
     customer_phone?: string | null;
@@ -160,8 +158,8 @@ export async function executeReservationFormAction(input: {
     duration_minutes?: number;
     notes?: string | null;
     table_ids?: number[];
-  }, accessToken: string) => Promise<{ group_id: number; reservation_ids: number[]; updated_tables: number[]; removed_tables: number[] }>;
-  updateReservationFn?: (reservationId: number, data: ReservationUpdateRequest, accessToken: string) => Promise<ReservationRow>;
+  }) => Promise<{ group_id: number; reservation_ids: number[]; updated_tables: number[]; removed_tables: number[] }>;
+  updateReservationFn?: (reservationId: number, data: ReservationUpdateRequest) => Promise<ReservationRow>;
   refetchCalendar: () => Promise<unknown>;
   refetchTables: () => Promise<unknown>;
 }): Promise<ReservationFormExecutionResult> {
@@ -206,7 +204,7 @@ export async function executeReservationFormAction(input: {
           duration_minutes: Math.max(15, Math.round(input.formState.durationMinutes)),
           notes: input.formState.notes.trim() || null
         };
-        await createGroupFn(groupPayload, input.accessToken);
+        await createGroupFn(groupPayload);
       } else {
         // Create single-table reservation
         const payload: ReservationCreateRequest = {
@@ -219,7 +217,7 @@ export async function executeReservationFormAction(input: {
           duration_minutes: Math.max(15, Math.round(input.formState.durationMinutes)),
           notes: input.formState.notes.trim() || null
         };
-        await createFn(payload, input.accessToken);
+        await createFn(payload);
       }
     } else if (input.mode === "edit-group" && input.editingGroupId) {
       // Group edit: update the entire group
@@ -246,7 +244,7 @@ export async function executeReservationFormAction(input: {
         updatePayload.table_ids = input.selectedTableIds;
       }
 
-      await updateGroupFn(input.editingGroupId, updatePayload, input.accessToken);
+      await updateGroupFn(input.editingGroupId, updatePayload);
     } else if (input.editingReservationId) {
       // Individual reservation edit (not part of a group edit)
       const editPayload = {
@@ -258,7 +256,7 @@ export async function executeReservationFormAction(input: {
         duration_minutes: Math.max(15, Math.round(input.formState.durationMinutes)),
         notes: input.formState.notes.trim() || null
       };
-      await updateFn(input.editingReservationId, editPayload, input.accessToken);
+      await updateFn(input.editingReservationId, editPayload);
     } else {
       return { ok: false, errorMessage: "Cannot edit reservation: missing reservation id." };
     }
@@ -278,14 +276,13 @@ export function getCheckInTargetStatus(status: ReservationStatus): ReservationSt
 export async function executeReservationStatusAction(input: {
   row: ReservationRow;
   status: ReservationStatus;
-  accessToken: string;
-  updateReservationFn?: (reservationId: number, data: ReservationUpdateRequest, accessToken: string) => Promise<ReservationRow>;
+  updateReservationFn?: (reservationId: number, data: ReservationUpdateRequest) => Promise<ReservationRow>;
   refetchCalendar: () => Promise<unknown>;
   refetchTables: () => Promise<unknown>;
 }): Promise<ReservationStatusExecutionResult> {
   const updateFn = input.updateReservationFn ?? updateReservation;
   try {
-    await updateFn(input.row.reservation_id, { status: input.status }, input.accessToken);
+    await updateFn(input.row.reservation_id, { status: input.status });
     await Promise.all([input.refetchCalendar(), input.refetchTables()]);
     return {
       ok: true,
@@ -433,7 +430,7 @@ export function resolveCalendarTimezoneInfo(
 }
 
 export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
-  const { user, accessToken } = props;
+  const { user } = props;
   const [selectedOutletId, setSelectedOutletId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<ReservationCalendarViewMode>("week");
   const [anchorDate, setAnchorDate] = useState<Date>(new Date());
@@ -472,7 +469,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
 
     setDetailGroup(null);
 
-    getReservationGroup(detailReservation.reservation_group_id, accessToken)
+    getReservationGroup(detailReservation.reservation_group_id)
       .then((group) => {
         setDetailGroup(group);
       })
@@ -480,11 +477,11 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
         setDetailGroup(null);
       })
       .finally(() => undefined);
-  }, [detailReservation?.reservation_group_id, accessToken]);
+  }, [detailReservation?.reservation_group_id]);
 
   const touchStartX = useRef<number | null>(null);
 
-  const outlets = useOutletsFull(user.company_id, accessToken);
+  const outlets = useOutletsFull(user.company_id);
   const selectedOutlet = useMemo(
     () => outlets.data.find((outlet) => Number(outlet.id) === selectedOutletId) ?? null,
     [outlets.data, selectedOutletId]
@@ -508,21 +505,21 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
     }
 
     setTimezoneRefreshAttempted(true);
-    refreshSessionUser(accessToken)
+    refreshSessionUser()
       .then((nextUser) => {
         if (nextUser.company_timezone && nextUser.company_timezone.trim()) {
           setSessionCompanyTimezone(nextUser.company_timezone);
         }
       })
       .catch(() => undefined);
-  }, [timezoneRefreshAttempted, selectedOutlet?.timezone, sessionCompanyTimezone, selectedOutletId, accessToken]);
+  }, [timezoneRefreshAttempted, selectedOutlet?.timezone, sessionCompanyTimezone, selectedOutletId]);
 
   const calendarTimezoneInfo = useMemo(
     () => resolveCalendarTimezoneInfo(selectedOutlet?.timezone, sessionCompanyTimezone),
     [selectedOutlet?.timezone, sessionCompanyTimezone]
   );
   const selectedOutletTimezone = calendarTimezoneInfo.timezone;
-  const outletTables = useOutletTables(selectedOutletId, accessToken);
+  const outletTables = useOutletTables(selectedOutletId);
 
   useEffect(() => {
     async function loadCompanyReservationDefaults() {
@@ -532,8 +529,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
           data: { settings: Array<{ key: string; value: number | boolean | string; value_type: string }> };
         }>(
           `/settings/company-config?keys=${encodeURIComponent(COMPANY_SETTING_RESERVATION_DURATION_KEY)}`,
-          {},
-          accessToken
+          {}
         );
         const row = response.data.settings.find((setting) => setting.key === COMPANY_SETTING_RESERVATION_DURATION_KEY);
         const parsed = Number(row?.value ?? DEFAULT_RESERVATION_DURATION_MINUTES);
@@ -551,7 +547,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
     loadCompanyReservationDefaults().catch(() => {
       setDefaultDurationMinutes(DEFAULT_RESERVATION_DURATION_MINUTES);
     });
-  }, [accessToken]);
+  }, []);
 
   // Reset multi-table selections when mode changes
   useEffect(() => {
@@ -575,8 +571,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
   }, [isMultiTable, formState.reservationAt, formState.guestCount, formState.durationMinutes, selectedOutletId]);
 
   const { suggestions: fetchedSuggestions } = useTableSuggestions(
-    suggestionQuery,
-    accessToken
+    suggestionQuery
   );
 
   useEffect(() => {
@@ -589,8 +584,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
     viewMode,
     timeZone: selectedOutletTimezone ?? undefined,
     defaultDurationMinutes,
-    status: statusFilter,
-    accessToken
+    status: statusFilter
   });
 
   // Listen for cross-page invalidation events
@@ -723,7 +717,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
     if (row.reservation_group_id) {
       // Load full group details for group editing
       try {
-        const groupDetail = await getReservationGroup(row.reservation_group_id, accessToken);
+        const groupDetail = await getReservationGroup(row.reservation_group_id);
         const firstReservation = groupDetail.reservations[0];
         if (firstReservation) {
           // Calculate duration from reservation_at (API only provides reservation_at, not _ts fields)
@@ -767,7 +761,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
     }
 
     setFormOpen(true);
-  }, [accessToken, defaultDurationMinutes]);
+  }, [defaultDurationMinutes]);
 
   const closeFormModal = useCallback(() => {
     setFormOpen(false);
@@ -791,7 +785,6 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
       editingReservationId,
       editingGroupId,
       formState,
-      accessToken,
       isMultiTable,
       selectedTableIds,
       refetchCalendar: calendar.refetch,
@@ -807,7 +800,6 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
 
     setSubmitting(false);
   }, [
-    accessToken,
     calendar,
     closeFormModal,
     editingGroupId,
@@ -829,7 +821,6 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
       const result = await executeReservationStatusAction({
         row,
         status,
-        accessToken,
         refetchCalendar: calendar.refetch,
         refetchTables: outletTables.refetch
       });
@@ -846,7 +837,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
 
       setUpdatingStatusId(null);
     },
-    [accessToken, calendar, outletTables]
+    [calendar, outletTables]
   );
 
   const handleSendReminder = useCallback((row: ReservationRow) => {
@@ -864,7 +855,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
       setActionSuccess(null);
 
       try {
-        await cancelReservationGroup(row.reservation_group_id, accessToken);
+        await cancelReservationGroup(row.reservation_group_id);
         setActionSuccess(`Group #${row.reservation_group_id} cancelled.`);
         setDetailReservation(null);
         setDetailGroup(null);
@@ -877,7 +868,7 @@ export function ReservationCalendarPage(props: ReservationCalendarPageProps) {
         setUpdatingStatusId(null);
       }
     },
-    [accessToken, calendar, outletTables]
+    [calendar, outletTables]
   );
 
   return (

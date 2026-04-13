@@ -167,7 +167,6 @@ function getOrderStatusLabel(status: SalesOrderStatus): string {
 
 type SalesOrdersPageProps = {
   user: SessionUser;
-  accessToken: string;
 };
 
 type OrderLineDraft = {
@@ -245,7 +244,6 @@ export function SalesOrdersPage(props: SalesOrdersPageProps) {
       try {
         const itemsData = await CacheService.getCachedItems(
           props.user.company_id,
-          props.accessToken,
           { allowStale: true }
         );
         // Normalize items to expected shape
@@ -266,19 +264,17 @@ export function SalesOrdersPage(props: SalesOrdersPageProps) {
       }
     }
     loadItems();
-  }, [props.user.company_id, props.accessToken]);
+  }, [props.user.company_id]);
 
   // Fetch customers for dropdown
   useEffect(() => {
     if (!isOnline) return;
     apiRequest<{ data: Array<{ id: number; name: string }> }>(
-      `/customers?company_id=${props.user.company_id}`,
-      {},
-      props.accessToken
+      `/customers?company_id=${props.user.company_id}`
     ).then((response) => setCustomers(response.data)).catch(() => {
       // Silently fail - customers are optional
     });
-  }, [isOnline, props.user.company_id, props.accessToken]);
+  }, [isOnline, props.user.company_id]);
 
   // Product items only (for dropdown)
   const productItems = useMemo(() => {
@@ -319,9 +315,7 @@ export function SalesOrdersPage(props: SalesOrdersPageProps) {
       if (dateToFilter) params.set("date_to", dateToFilter);
 
       const response = await apiRequest<OrdersListResponse>(
-        `/sales/orders?${params.toString()}`,
-        {},
-        props.accessToken
+        `/sales/orders?${params.toString()}`
       );
       setOrders(response.data.orders);
       setOrdersTotal(response.data.total);
@@ -445,8 +439,7 @@ export function SalesOrdersPage(props: SalesOrdersPageProps) {
         {
           method: "POST",
           body: JSON.stringify(payload)
-        },
-        props.accessToken
+        }
       );
       resetNewOrder();
       await refreshData(selectedOutletId);
@@ -467,9 +460,7 @@ export function SalesOrdersPage(props: SalesOrdersPageProps) {
     setError(null);
     try {
       const response = await apiRequest<OrderDetailResponse>(
-        `/sales/orders/${orderId}`,
-        {},
-        props.accessToken
+        `/sales/orders/${orderId}`
       );
       const order = response.data;
       setEditingOrder({
@@ -503,9 +494,7 @@ export function SalesOrdersPage(props: SalesOrdersPageProps) {
     setError(null);
     try {
       const response = await apiRequest<OrderDetailResponse>(
-        `/sales/orders/${orderId}`,
-        {},
-        props.accessToken
+        `/sales/orders/${orderId}`
       );
       setViewingOrder(response.data);
     } catch (loadError) {
@@ -562,8 +551,7 @@ export function SalesOrdersPage(props: SalesOrdersPageProps) {
         {
           method: "PATCH",
           body: JSON.stringify(payload)
-        },
-        props.accessToken
+        }
       );
       setEditingOrder(null);
       await refreshData(selectedOutletId);
@@ -585,7 +573,7 @@ export function SalesOrdersPage(props: SalesOrdersPageProps) {
     setSubmitting(true);
     setError(null);
     try {
-      await apiRequest(`/sales/orders/${orderId}/confirm`, { method: "POST" }, props.accessToken);
+      await apiRequest(`/sales/orders/${orderId}/confirm`, { method: "POST" });
       await refreshData(selectedOutletId);
       if (viewingOrderId === orderId) {
         await loadOrderDetail(orderId);
@@ -605,7 +593,7 @@ export function SalesOrdersPage(props: SalesOrdersPageProps) {
     setSubmitting(true);
     setError(null);
     try {
-      await apiRequest(`/sales/orders/${orderId}/complete`, { method: "POST" }, props.accessToken);
+      await apiRequest(`/sales/orders/${orderId}/complete`, { method: "POST" });
       await refreshData(selectedOutletId);
       if (viewingOrderId === orderId) {
         await loadOrderDetail(orderId);
@@ -628,7 +616,7 @@ export function SalesOrdersPage(props: SalesOrdersPageProps) {
       await apiRequest(`/sales/orders/${orderId}/cancel`, {
         method: "POST",
         body: JSON.stringify({ reason })
-      }, props.accessToken);
+      });
       await refreshData(selectedOutletId);
       if (viewingOrderId === orderId) {
         await loadOrderDetail(orderId);
@@ -652,7 +640,7 @@ export function SalesOrdersPage(props: SalesOrdersPageProps) {
       await apiRequest(`/sales/orders/${orderId}/convert-to-invoice`, {
         method: "POST",
         body: JSON.stringify({ invoice_date: invoiceDate })
-      }, props.accessToken);
+      });
       setConvertModal(null);
       setNotice({ color: "blue", message: `Order converted to invoice successfully. Order status changed to "Converted".` });
       await refreshData(selectedOutletId);
