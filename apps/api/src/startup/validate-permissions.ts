@@ -14,9 +14,50 @@ import { sql } from 'kysely';
 const SYSTEM_ROLE_CODES = ['SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'CASHIER', 'ACCOUNTANT'];
 
 /**
- * Fetch module_roles from database for system roles
+ * Resolve which company should be used for startup ACL validation.
+ *
+ * Priority:
+ * 1) JP_COMPANY_CODE from environment
+ * 2) Lowest active company id as fallback
  */
-async function fetchDbPermissions(): Promise<any[]> {
+async function resolveValidationCompanyId(): Promise<number | null> {
+  const db = getDb();
+  const companyCode = process.env.JP_COMPANY_CODE;
+
+  if (companyCode) {
+    const byCode = await sql<{ id: number }>`
+      SELECT id
+      FROM companies
+      WHERE code = ${companyCode}
+        AND deleted_at IS NULL
+      ORDER BY id ASC
+      LIMIT 1
+    `.execute(db);
+
+    if (byCode.rows.length > 0) {
+      return Number((byCode.rows[0] as { id: number }).id);
+    }
+  }
+
+  const fallback = await sql<{ id: number }>`
+    SELECT id
+    FROM companies
+    WHERE deleted_at IS NULL
+    ORDER BY id ASC
+    LIMIT 1
+  `.execute(db);
+
+  if (fallback.rows.length === 0) {
+    return null;
+  }
+
+  return Number((fallback.rows[0] as { id: number }).id);
+}
+
+/**
+ * Fetch module_roles from database for system roles in one validation company.
+ */
+async function fetchDbPermissions(companyId: number): Promise<any[]> {
   const db = getDb();
   
   // Use raw SQL to avoid Kysely type issues with resource column
@@ -26,6 +67,7 @@ async function fetchDbPermissions(): Promise<any[]> {
     JOIN roles r ON r.id = mr.role_id
     WHERE r.code IN (${sql.join(SYSTEM_ROLE_CODES.map(s => sql`${s}`), sql`, `)})
       AND r.company_id IS NULL
+      AND mr.company_id = ${companyId}
     ORDER BY r.code, mr.module, mr.resource
   `.execute(db);
   
@@ -47,10 +89,24 @@ export async function validatePermissionsOnStartup(): Promise<void> {
   try {
     console.log('[startup] Running permission validation...');
     
-    const dbPermissions = await fetchDbPermissions();
+    const companyId = await resolveValidationCompanyId();
+
+    if (companyId === null) {
+      const msg = '[startup] No active company found for permission validation. Run seed script first.';
+      if (isProduction) {
+        console.warn(msg);
+      } else {
+        throw new Error(msg);
+      }
+      return;
+    }
+
+    console.log(`[startup] Validating permissions using company_id=${companyId}`);
+
+    const dbPermissions = await fetchDbPermissions(companyId);
     
     if (dbPermissions.length === 0) {
-      const msg = '[startup] No module_roles entries found for system roles. Run seed script first.';
+      const msg = `[startup] No module_roles entries found for system roles in company_id=${companyId}. Run seed script first.`;
       if (isProduction) {
         console.warn(msg);
       } else {

@@ -44,8 +44,8 @@ moduleRolesRoutes.use("/*", async (c, next) => {
   await next();
 });
 
-// PUT /settings/module-roles/:roleId/:module - Update module role permission
-moduleRolesRoutes.put("/:roleId/:module", async (c) => {
+// PUT /settings/module-roles/:roleId/:module/:resource - Update module role permission
+moduleRolesRoutes.put("/:roleId/:module/:resource", async (c) => {
   try {
     const auth = c.get("auth");
 
@@ -61,6 +61,12 @@ moduleRolesRoutes.put("/:roleId/:module", async (c) => {
 
     const roleId = NumericIdSchema.parse(c.req.param("roleId"));
     const module = c.req.param("module");
+    const resource = c.req.param("resource");
+
+    // Validate resource is non-empty string
+    if (!resource || typeof resource !== 'string' || resource.trim() === '') {
+      return errorResponse("INVALID_REQUEST", "resource must be a non-empty string", 400);
+    }
 
     const payload = await c.req.json();
     const permissionMask = z.number().int().parse(payload.permission_mask);
@@ -74,6 +80,7 @@ moduleRolesRoutes.put("/:roleId/:module", async (c) => {
       companyId: auth.companyId,
       roleId,
       module,
+      resource: resource.trim(),
       permissionMask,
       actor: {
         userId: auth.userId,
@@ -91,7 +98,7 @@ moduleRolesRoutes.put("/:roleId/:module", async (c) => {
       return errorResponse("NOT_FOUND", error.message, 404);
     }
 
-    console.error("PUT /settings/module-roles/:roleId/:module failed", error);
+    console.error("PUT /settings/module-roles/:roleId/:module/:resource failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to update module role", 500);
   }
 });
@@ -127,19 +134,20 @@ function isValidPermissionMask(mask: number): boolean {
 }
 
 export const registerSettingsModuleRoleRoutes = (app: OpenAPIHonoInterface): void => {
-  // PUT /settings/module-roles/:roleId/:module - Update module role permission
+  // PUT /settings/module-roles/:roleId/:module/:resource - Update module role permission
   app.openapi(
     createRoute({
       method: "put",
-      path: "/settings/module-roles/{roleId}/{module}",
+      path: "/settings/module-roles/{roleId}/{module}/{resource}",
       tags: ["Settings"],
       summary: "Update module role permission",
-      description: "Update permission mask for a role on a specific module",
+      description: "Update permission mask for a role on a specific module and resource",
       security: [{ BearerAuth: [] }],
       request: {
         params: z.object({
           roleId: z.string(),
-          module: z.string()
+          module: z.string(),
+          resource: z.string()
         }),
         body: {
           content: {
@@ -164,6 +172,12 @@ export const registerSettingsModuleRoleRoutes = (app: OpenAPIHonoInterface): voi
 
         const roleId = NumericIdSchema.parse(c.req.param("roleId"));
         const moduleParam = c.req.param("module");
+        const resourceParam = c.req.param("resource");
+
+        // Validate resource is non-empty string
+        if (!resourceParam || typeof resourceParam !== 'string' || resourceParam.trim() === '') {
+          return c.json({ success: false, error: { code: "INVALID_REQUEST", message: "resource must be a non-empty string" } }, 400);
+        }
 
         const payload = await c.req.json();
         const permissionMask = z.number().int().parse(payload.permission_mask);
@@ -177,6 +191,7 @@ export const registerSettingsModuleRoleRoutes = (app: OpenAPIHonoInterface): voi
           companyId: auth.companyId,
           roleId,
           module: moduleParam,
+          resource: resourceParam.trim(),
           permissionMask,
           actor: {
             userId: auth.userId,
@@ -192,7 +207,7 @@ export const registerSettingsModuleRoleRoutes = (app: OpenAPIHonoInterface): voi
         if (error instanceof Error && error.message.includes("not found")) {
           return c.json({ success: false, error: { code: "NOT_FOUND", message: error.message } }, 404);
         }
-        console.error("PUT /settings/module-roles/:roleId/:module failed", error);
+        console.error("PUT /settings/module-roles/:roleId/:module/:resource failed", error);
         return c.json({ success: false, error: { code: "INTERNAL_SERVER_ERROR", message: "Failed to update module role" } }, 500);
       }
     }

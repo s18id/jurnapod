@@ -54,6 +54,14 @@ export const ModulesUpdateSchema = z.object({
   modules: z.array(ModuleUpdateSchema)
 });
 
+// Canonical permission bits (from @jurnapod/shared)
+// Bits: READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32
+const VALID_PERMISSION_BITS = 1 | 2 | 4 | 8 | 16 | 32; // = 63
+
+function isValidPermissionMask(mask: number): boolean {
+  return (mask & ~VALID_PERMISSION_BITS) === 0;
+}
+
 // =============================================================================
 // Modules Routes
 // =============================================================================
@@ -214,8 +222,8 @@ modulesRoutes.put("/extended", async (c) => {
   }
 });
 
-// PUT /settings/module-roles/:roleId/:module - Update module role permission
-modulesRoutes.put("/module-roles/:roleId/:module", async (c) => {
+// PUT /settings/module-roles/:roleId/:module/:resource - Update module role permission
+modulesRoutes.put("/module-roles/:roleId/:module/:resource", async (c) => {
   try {
     const auth = c.get("auth");
 
@@ -232,14 +240,29 @@ modulesRoutes.put("/module-roles/:roleId/:module", async (c) => {
 
     const roleId = NumericIdSchema.parse(c.req.param("roleId"));
     const module = c.req.param("module");
+    const resource = c.req.param("resource");
+
+    // Validate resource is non-empty string
+    if (!resource || typeof resource !== 'string' || resource.trim() === '') {
+      return errorResponse("INVALID_REQUEST", "resource must be a non-empty string", 400);
+    }
 
     const payload = await c.req.json();
     const permissionMask = z.number().int().parse(payload.permission_mask);
+
+    if (!isValidPermissionMask(permissionMask)) {
+      return errorResponse(
+        "INVALID_PERMISSION_MASK",
+        `Permission mask ${permissionMask} contains non-canonical bits. Valid bits: READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32`,
+        400
+      );
+    }
 
     const result = await setModuleRolePermission({
       companyId: auth.companyId,
       roleId,
       module,
+      resource: resource.trim(),
       permissionMask,
       actor: {
         userId: auth.userId,
@@ -257,7 +280,7 @@ modulesRoutes.put("/module-roles/:roleId/:module", async (c) => {
       return errorResponse("NOT_FOUND", error.message, 404);
     }
 
-    console.error("PUT /settings/module-roles/:roleId/:module failed", error);
+    console.error("PUT /settings/module-roles/:roleId/:module/:resource failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to update module role", 500);
   }
 });
@@ -503,19 +526,20 @@ export const registerSettingsModuleRoutes = (app: OpenAPIHonoInterface): void =>
     }
   );
 
-  // PUT /settings/modules/module-roles/:roleId/:module - Update module role permission
+  // PUT /settings/modules/module-roles/:roleId/:module/:resource - Update module role permission
   app.openapi(
     createRoute({
       method: "put",
-      path: "/settings/modules/module-roles/{roleId}/{module}",
+      path: "/settings/modules/module-roles/{roleId}/{module}/{resource}",
       tags: ["Settings"],
       summary: "Update module role permission",
-      description: "Update permission mask for a role on a specific module",
+      description: "Update permission mask for a role on a specific module and resource",
       security: [{ BearerAuth: [] }],
       request: {
         params: z.object({
           roleId: z.string(),
-          module: z.string()
+          module: z.string(),
+          resource: z.string()
         }),
         body: {
           content: {
@@ -540,14 +564,31 @@ export const registerSettingsModuleRoutes = (app: OpenAPIHonoInterface): void =>
 
         const roleId = NumericIdSchema.parse(c.req.param("roleId"));
         const moduleParam = c.req.param("module");
+        const resourceParam = c.req.param("resource");
+
+        // Validate resource is non-empty string
+        if (!resourceParam || typeof resourceParam !== 'string' || resourceParam.trim() === '') {
+          return c.json({ success: false, error: { code: "INVALID_REQUEST", message: "resource must be a non-empty string" } }, 400);
+        }
 
         const payload = await c.req.json();
         const permissionMask = z.number().int().parse(payload.permission_mask);
+
+        if (!isValidPermissionMask(permissionMask)) {
+          return c.json({
+            success: false,
+            error: {
+              code: "INVALID_PERMISSION_MASK",
+              message: `Permission mask ${permissionMask} contains non-canonical bits. Valid bits: READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32`
+            }
+          }, 400);
+        }
 
         const result = await setModuleRolePermission({
           companyId: auth.companyId,
           roleId,
           module: moduleParam,
+          resource: resourceParam.trim(),
           permissionMask,
           actor: {
             userId: auth.userId,
