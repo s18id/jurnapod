@@ -762,6 +762,7 @@ export interface ModuleRoles {
   id: Generated<number>;
   module: string;
   permission_mask: Generated<number>;
+  resource: string;
   role_id: number;
   updated_at: Generated<Date>;
 }
