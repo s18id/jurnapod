@@ -10,13 +10,13 @@ export interface RoleAssignment {
 export async function getRoleIdByCode(
   adapter: AuthDbAdapter,
   code: string
-): Promise<number | null> {
+): Promise<number | undefined> {
   const row = await adapter.db
     .selectFrom('roles')
     .where('code', '=', code)
     .select(['id'])
     .executeTakeFirst();
-  return row?.id ?? null;
+  return row?.id;
 }
 
 export async function assignUserRole(

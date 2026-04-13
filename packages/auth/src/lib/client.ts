@@ -24,6 +24,7 @@ import { RBACManager } from '../rbac/index.js';
 import { LoginThrottle } from '../throttle/index.js';
 import { EmailTokenManager } from '../email/index.js';
 import { GoogleOAuthProvider } from '../oauth/index.js';
+import { MODULE_PERMISSION_BITS } from '../rbac/permissions.js';
 
 /**
  * Create the auth client with adapter and configuration.
@@ -141,22 +142,16 @@ export function createAuthClient(
         canRead?: boolean;
         canUpdate?: boolean;
         canDelete?: boolean;
-        canReport?: boolean;
+        canAnalyze?: boolean;
+        canManage?: boolean;
       }): number {
-        // Use imported helper from permissions
-        const bits: Record<string, number> = {
-          create: 1,
-          read: 2,
-          update: 4,
-          delete: 8,
-          report: 16,
-        };
         let mask = 0;
-        if (params.canCreate) mask |= bits.create;
-        if (params.canRead) mask |= bits.read;
-        if (params.canUpdate) mask |= bits.update;
-        if (params.canDelete) mask |= bits.delete;
-        if (params.canReport) mask |= bits.report;
+        if (params.canCreate) mask |= MODULE_PERMISSION_BITS.create;
+        if (params.canRead) mask |= MODULE_PERMISSION_BITS.read;
+        if (params.canUpdate) mask |= MODULE_PERMISSION_BITS.update;
+        if (params.canDelete) mask |= MODULE_PERMISSION_BITS.delete;
+        if (params.canAnalyze) mask |= MODULE_PERMISSION_BITS.analyze;
+        if (params.canManage) mask |= MODULE_PERMISSION_BITS.manage;
         return mask;
       },
     },

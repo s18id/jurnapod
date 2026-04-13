@@ -202,7 +202,7 @@ export function formatValidationReport(report: FullValidationReport): string {
   const lines: string[] = [];
   
   lines.push('='.repeat(70));
-  lines.push('PERMISSION VALIDATION REPORT');
+  lines.push('PERMISSION VALIDATION REPORT OUTPUT');
   lines.push('='.repeat(70));
   lines.push(`Overall: ${report.isValid ? '✓ VALID' : '✗ INVALID'}`);
   lines.push(`Roles: ${report.validRoles}/${report.totalRoles} valid`);

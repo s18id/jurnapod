@@ -119,7 +119,9 @@ export class RBACManager {
 
         if (typeof outletId === 'number') {
           // Check global permission with bitmask check
-          // For resource-level ACL: ONLY match specific resource (no fallback to module-level NULL)
+          // Strict resource-level ACL:
+          // - if resource is provided: match exact resource only
+          // - if resource is omitted: match module-level only (resource IS NULL)
           const res = resource ?? null;
           const globalPermMatch = await this.adapter.db
             .selectFrom('user_role_assignments as ura')
@@ -158,7 +160,9 @@ export class RBACManager {
           hasPermission = Boolean(globalPermMatch) || Boolean(outletPermMatch);
         } else {
           // No outletId - check global permissions with bitmask check
-          // For resource-level ACL: ONLY match specific resource (no fallback to module-level NULL)
+          // Strict resource-level ACL:
+          // - if resource is provided: match exact resource only
+          // - if resource is omitted: match module-level only (resource IS NULL)
           const res = resource ?? null;
           const globalPermMatch = await this.adapter.db
             .selectFrom('user_role_assignments as ura')
