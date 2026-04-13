@@ -60,6 +60,7 @@ export interface RoleRepository {
     companyId: number;
     roleId?: number;
     module?: string;
+    resource?: string;
   }): Promise<ModuleRoleResponse[]>;
 
   /**
@@ -69,6 +70,7 @@ export interface RoleRepository {
     companyId: number;
     roleId: number;
     module: string;
+    resource: string;
     permissionMask: number;
   }): Promise<ModuleRoleResponse>;
 }

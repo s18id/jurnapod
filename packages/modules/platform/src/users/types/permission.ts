@@ -13,6 +13,7 @@ export type ModuleRoleResponse = {
   role_id: number;
   role_code: string;
   module: string;
+  resource: string;
   permission_mask: number;
   created_at: string;
   updated_at: string;
@@ -26,6 +27,7 @@ export type ModuleRoleRow = {
   role_id: number;
   role_code: string;
   module: string;
+  resource: string;
   permission_mask: number;
   created_at: Date;
   updated_at: Date;

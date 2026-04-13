@@ -282,23 +282,28 @@ export class RoleService {
     companyId: number;
     roleId?: number;
     module?: string;
+    resource?: string;
   }): Promise<ModuleRoleResponse[]> {
     let query = this.db
       .selectFrom("module_roles as mr")
       .innerJoin("roles as r", "r.id", "mr.role_id")
       .where("mr.company_id", "=", params.companyId)
       .select([
-        "mr.id", "mr.role_id", "r.code as role_code", "mr.module",
+        "mr.id", "mr.role_id", "r.code as role_code", "mr.module", "mr.resource",
         "mr.permission_mask", "mr.created_at", "mr.updated_at"
       ])
       .orderBy("r.code", "asc")
-      .orderBy("mr.module", "asc");
+      .orderBy("mr.module", "asc")
+      .orderBy("mr.resource", "asc");
 
     if (params.roleId) {
       query = query.where("mr.role_id", "=", params.roleId);
     }
     if (params.module) {
       query = query.where("mr.module", "=", params.module);
+    }
+    if (params.resource) {
+      query = query.where("mr.resource", "=", params.resource);
     }
 
     const rows = await query.execute();
@@ -308,6 +313,7 @@ export class RoleService {
       role_id: Number(row.role_id),
       role_code: row.role_code,
       module: row.module,
+      resource: row.resource,
       permission_mask: Number(row.permission_mask ?? 0),
       created_at: toRfc3339Required(row.created_at),
       updated_at: toRfc3339Required(row.updated_at)
@@ -321,6 +327,7 @@ export class RoleService {
     companyId: number;
     roleId: number;
     module: string;
+    resource: string;
     permissionMask: number;
     actor: UserActor;
   }): Promise<ModuleRoleResponse> {
@@ -357,6 +364,7 @@ export class RoleService {
         .where("company_id", "=", params.companyId)
         .where("role_id", "=", params.roleId)
         .where("module", "=", params.module)
+        .where("resource", "=", params.resource)
         .select(["id", "permission_mask"])
         .executeTakeFirst();
 
@@ -376,6 +384,7 @@ export class RoleService {
             company_id: params.companyId,
             role_id: params.roleId,
             module: params.module,
+            resource: params.resource,
             permission_mask: permissionMask
           })
           .execute();
@@ -387,8 +396,9 @@ export class RoleService {
         .where("mr.company_id", "=", params.companyId)
         .where("mr.role_id", "=", params.roleId)
         .where("mr.module", "=", params.module)
+        .where("mr.resource", "=", params.resource)
         .select([
-          "mr.id", "mr.role_id", "r.code as role_code", "mr.module",
+          "mr.id", "mr.role_id", "r.code as role_code", "mr.module", "mr.resource",
           "mr.permission_mask", "mr.created_at", "mr.updated_at"
         ])
         .executeTakeFirst();
@@ -403,6 +413,7 @@ export class RoleService {
         role_id: Number(row.role_id),
         role_code: row.role_code,
         module: row.module,
+        resource: row.resource,
         permission_mask: Number(row.permission_mask ?? 0),
         created_at: toRfc3339Required(row.created_at),
         updated_at: toRfc3339Required(row.updated_at)
