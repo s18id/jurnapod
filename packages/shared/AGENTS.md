@@ -78,6 +78,10 @@ This package exports ACL constants for the resource-level permission model:
 
 **Location:** `src/constants/rbac.ts`, `src/constants/modules.ts`
 
+**Canonical Permission Source:** `src/constants/roles.defaults.json`
+
+`roles.defaults.json` is the single source of truth for default role-permission matrix. Seed and validation flows must consume this source directly (or via `rbac.ts` exports), not duplicate hardcoded matrices.
+
 **7 Canonical Modules:**
 - platform, pos, sales, inventory, accounting, treasury, reservations
 

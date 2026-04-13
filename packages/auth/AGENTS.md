@@ -251,6 +251,31 @@ packages/auth/
 
 ## Testing Approach
 
+### ACL Cleanup Policy (P0 Blocker)
+
+**Canonical system roles are immutable reference data in persistent test DBs.**
+Never delete or broadly mutate `module_roles` for system roles (`SUPER_ADMIN`, `OWNER`, `COMPANY_ADMIN`, `ADMIN`, `ACCOUNTANT`, `CASHIER`) using shared `role_id` scope.
+
+**P0 Rules:**
+- ❌ **BLOCKER**: Cleanup/deletion on `module_roles` by `role_id` alone
+- ✅ **Required**: Scope ACL cleanup by `company_id` **and** `role_id`
+- ✅ **Required**: Prefer cleanup by exact inserted row IDs when possible
+- ✅ **Required**: Integration tests should mutate custom test roles or company-scoped rows only
+
+**Bad cleanup pattern (forbidden):**
+```typescript
+await db.deleteFrom('module_roles').where('role_id', 'in', roleIds).execute();
+```
+
+**Safe cleanup pattern:**
+```typescript
+await db
+  .deleteFrom('module_roles')
+  .where('company_id', '=', testCompanyId)
+  .where('role_id', 'in', roleIds)
+  .execute();
+```
+
 ### Rule: NO Mock Adapter for DB-Related Tests
 
 **Mock adapter is forbidden for database-related tests.** DB operations must be tested with real database using integration tests.
@@ -450,5 +475,22 @@ Mocking database interactions for code that reads/writes SQL tables creates a **
 **Non-DB logic** (pure computation) may use unit tests without database.
 
 Any DB mock found in DB-backed tests is a P0 risk and must be treated as a blocker.
+
+### ACL Cleanup Policy (P0 Blocker)
+
+**Canonical system roles are immutable reference data in persistent test DBs.** Deleting or modifying `module_roles` rows for system roles (`SUPER_ADMIN`, `OWNER`, `COMPANY_ADMIN`, `ADMIN`, `ACCOUNTANT`, `CASHIER`) with `company_id=NULL` corrupts the seeded ACL baseline and breaks all subsequent tests.
+
+**P0 Rules:**
+- ❌ **BLOCKER**: Any cleanup/deletion by `role_id` alone on `module_roles` — this wipes canonical rows shared across all companies
+- ✅ **Required**: ACL cleanup must scope by `company_id` AND `role_id` (e.g., `WHERE company_id = ? AND role_id IN (?)`)
+- ✅ **Required**: Integration tests should mutate **custom test roles**, not seeded system roles
+- ✅ **Required**: Use exact inserted row IDs when cleanup scope is ambiguous
+
+**Recovery commands for corrupted ACL:**
+```bash
+npm run db:migrate -w @jurnapod/db
+npm run db:seed -w @jurnapod/db
+npm run db:seed:test-accounts -w @jurnapod/db
+```
 
 For project-wide conventions, see root `AGENTS.md`.

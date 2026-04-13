@@ -166,6 +166,11 @@ If an existing fixture/helper is too broad for a test scenario:
 ### Testing expectations
 - Expect tests when changing: auth/RBAC, `/sync/push`, `/sync/pull`, posting endpoints, settings/config endpoints, report query logic.
 
+### Insufficient-Permission Test User Rule (MANDATORY)
+- For tests asserting **insufficient permission** (expecting 401/403), do **NOT** use OWNER/SUPER_ADMIN/other roles that legitimately have access.
+- Use a truly under-privileged role (`CASHIER`) or a custom test role with explicit missing bits.
+- If a test uses a high-privilege role to assert denial, that test is invalid and must be corrected.
+
 ---
 
 ## Critical Rules
@@ -228,6 +233,23 @@ If no suitable helper exists, create/refactor one first (DRY), then use it.
 
 **Exception:** Ad-hoc SQL is allowed only for: 1) Teardown/cleanup, 2) Read-only verifications when no library function exists, 3) Schema introspection.
 
+### ACL Cleanup Policy (P0 Blocker)
+
+**Canonical system roles are immutable reference data in persistent test DBs.** Deleting or modifying `module_roles` rows for system roles (`SUPER_ADMIN`, `OWNER`, `COMPANY_ADMIN`, `ADMIN`, `ACCOUNTANT`, `CASHIER`) with `company_id=NULL` corrupts the seeded ACL baseline and breaks all subsequent tests.
+
+**P0 Rules:**
+- ❌ **BLOCKER**: Any cleanup/deletion by `role_id` alone on `module_roles` — this wipes canonical rows shared across all companies
+- ✅ **Required**: ACL cleanup must scope by `company_id` AND `role_id` (e.g., `WHERE company_id = ? AND role_id IN (?)`)
+- ✅ **Required**: Integration tests should mutate **custom test roles**, not seeded system roles
+- ✅ **Required**: Use exact inserted row IDs when cleanup scope is ambiguous
+
+**Recovery commands for corrupted ACL:**
+```bash
+npm run db:migrate -w @jurnapod/db
+npm run db:seed -w @jurnapod/db
+npm run db:seed:test-accounts -w @jurnapod/db
+```
+
 ---
 
 ## Test Infrastructure
@@ -253,7 +275,7 @@ If no suitable helper exists, create/refactor one first (DRY), then use it.
 | `getRoleIdByCode(roleCode)` | Get system role ID ("OWNER", "ADMIN", etc.) |
 | `assignUserGlobalRole(userId, roleId)` | Assign global role to user |
 | `assignUserOutletRole(userId, roleId, outletId)` | Assign outlet-scoped role |
-| `setModulePermission(companyId, roleId, module, mask, resource?)` | Set module permission (resource optional for Epic 39) |
+| `setModulePermission(companyId, roleId, module, mask, options?)` | Set module permission with system-role mutation guardrail |
 | `setupUserPermission({...})` | Complete permission setup in one call |
 | `cleanupTestFixtures()` | Clean up all created fixtures |
 | `resetFixtureRegistry()` | Reset registry without deleting records |

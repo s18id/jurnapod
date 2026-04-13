@@ -14,6 +14,8 @@ Database connectivity and schema management layer for Jurnapod ERP.
 | Command | Purpose |
 |---------|---------|
 | `npm run db:migrate` | Run pending migrations (locking, idempotent) |
+| `npm run db:seed` | Restore canonical seeded roles and baseline data |
+| `npm run db:seed:test-accounts` | Seed test accounts for integration readiness |
 | `npm run db:smoke` | Run smoke tests against database |
 | `npm run typecheck` | TypeScript check |
 | `npm run build` | Compile TypeScript to dist/ |
@@ -186,6 +188,22 @@ const complex = await sql`
 
 ## Critical Constraints
 
+### ACL Baseline Protection (P0)
+
+Canonical ACL rows for system roles are shared reference data. Test cleanup must never wipe them globally.
+
+- ❌ **BLOCKER**: Any `module_roles` cleanup by `role_id` alone
+- ✅ **Required**: Scope ACL cleanup by `company_id` and `role_id` (or exact inserted row IDs)
+- ✅ **Required**: Use custom test roles for mutation-heavy ACL tests
+
+If ACL baseline is corrupted, recover with:
+
+```bash
+npm run db:migrate -w @jurnapod/db
+npm run db:seed -w @jurnapod/db
+npm run db:seed:test-accounts -w @jurnapod/db
+```
+
 ### Tenant Isolation
 
 **ALWAYS** scope queries by `company_id`:
@@ -334,6 +352,23 @@ afterAll(async () => {
 - Time (use `vi.useFakeTimers()`)
 
 **Non-DB logic (pure computation) may use unit tests without database.**
+
+### ACL Cleanup Policy (P0 Blocker)
+
+**Canonical system roles are immutable reference data in persistent test DBs.** Deleting or modifying `module_roles` rows for system roles (`SUPER_ADMIN`, `OWNER`, `COMPANY_ADMIN`, `ADMIN`, `ACCOUNTANT`, `CASHIER`) with `company_id=NULL` corrupts the seeded ACL baseline and breaks all subsequent tests.
+
+**P0 Rules:**
+- ❌ **BLOCKER**: Any cleanup/deletion by `role_id` alone on `module_roles` — this wipes canonical rows shared across all companies
+- ✅ **Required**: ACL cleanup must scope by `company_id` AND `role_id` (e.g., `WHERE company_id = ? AND role_id IN (?)`)
+- ✅ **Required**: Integration tests should mutate **custom test roles**, not seeded system roles
+- ✅ **Required**: Use exact inserted row IDs when cleanup scope is ambiguous
+
+**Recovery commands for corrupted ACL:**
+```bash
+npm run db:migrate -w @jurnapod/db
+npm run db:seed -w @jurnapod/db
+npm run db:seed:test-accounts -w @jurnapod/db
+```
 
 ---
 

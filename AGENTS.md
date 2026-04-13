@@ -155,6 +155,13 @@ Focused tests required when changing:
 
 Flag code that filters `audit_logs` by `result` instead of `success`.
 
+### Permission Test Role Selection (MANDATORY)
+
+For negative authorization tests (expected 401/403), do not use roles that legitimately satisfy access (e.g., OWNER/SUPER_ADMIN/other valid role for target resource).
+
+- ✅ Use `CASHIER` or a dedicated custom low-privilege test role with explicit missing permissions
+- ❌ Invalid test pattern: expecting denial while authenticating as a role that should be allowed
+
 ---
 
 ## Database Testing Policy (MANDATORY)
@@ -194,6 +201,23 @@ Allowed raw SQL in tests remains limited to:
 - teardown/cleanup
 - read-only verification
 - schema introspection
+
+### ACL Cleanup Policy (P0 Blocker)
+
+**Canonical system roles are immutable reference data in persistent test DBs.** Deleting or modifying `module_roles` rows for system roles (`SUPER_ADMIN`, `OWNER`, `COMPANY_ADMIN`, `ADMIN`, `ACCOUNTANT`, `CASHIER`) with `company_id=NULL` corrupts the seeded ACL baseline and breaks all subsequent tests.
+
+**P0 Rules:**
+- ❌ **BLOCKER**: Any cleanup/deletion by `role_id` alone on `module_roles` — this wipes canonical rows shared across all companies
+- ✅ **Required**: ACL cleanup must scope by `company_id` AND `role_id` (e.g., `WHERE company_id = ? AND role_id IN (?)`)
+- ✅ **Required**: Integration tests should mutate **custom test roles**, not seeded system roles
+- ✅ **Required**: Use exact inserted row IDs when cleanup scope is ambiguous
+
+**Recovery commands for corrupted ACL:**
+```bash
+npm run db:migrate -w @jurnapod/db
+npm run db:seed -w @jurnapod/db
+npm run db:seed:test-accounts -w @jurnapod/db
+```
 
 ---
 
@@ -405,6 +429,32 @@ Permissions use `module.resource` format (e.g., `platform.users`, `accounting.jo
 - **Operational**: CREATE, READ, UPDATE permissions (daily transactions)
 - **Structural**: MANAGE, READ permissions (configuration, setup)
 - **Analytical**: ANALYZE, READ permissions (reports, dashboards)
+
+### Strict ACL Enforcement (Migration 0158)
+
+As of Epic 39 completion, the ACL system enforces **mandatory resource-level permissions**:
+
+| Rule | Status | Description |
+|------|--------|-------------|
+| `resource` NOT NULL | ✅ Enforced | Migration 0158 enforces `module_roles.resource IS NOT NULL` |
+| No wildcard fallback | ✅ Enforced | `resource=NULL` does NOT grant resource-level access |
+| Explicit resource required | ✅ Required | All `requireAccess()` calls must specify `resource` parameter |
+| Module-only permissions | ❌ Removed | Legacy module-level-only permissions are no longer valid |
+
+**Implementation Notes:**
+- The `module_roles` table requires explicit `resource` values for all permission entries
+- Routes using `requireAccess()` without a `resource` parameter will fail at runtime
+- Migration 0158 expanded any remaining legacy null-resource entries to explicit resource values
+- Test fixtures must specify explicit resources; no implicit grants exist
+
+**Validation:**
+```typescript
+// ✅ Correct - explicit resource
+requireAccess({ module: 'inventory', resource: 'items', permission: 'READ' })
+
+// ❌ Invalid - missing resource (will fail)
+requireAccess({ module: 'inventory', permission: 'READ' })
+```
 
 ### Role Permission Matrix
 
