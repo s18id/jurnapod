@@ -472,3 +472,10 @@ development_status:
   39-10-reservations-module: done
   # Phase 3: Final
   39-11-verification-cleanup: done
+
+  # Epic 40: Backoffice Feature Completeness - API-to-UI Gap Closure
+  epic-40: in-progress
+  40-1-credit-notes-management: done
+  40-2-fiscal-year-closing: done
+  40-3-sales-orders-management: backlog
+  40-4-receivables-ageing: backlog

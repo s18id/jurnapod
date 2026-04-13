@@ -39,11 +39,15 @@
 | Epic 33 | Permission System Consolidation | done | epic-33-retrospective |
 | Epic 34 | Test Reorganization & Assessment | done | epic-34-sprint-plan |
 | Epic 35 | Route Library Extraction + Kysely Compliance | done | epic-35-sprint-plan |
+| Epic 36 | OpenAPI Documentation & Swagger UI | done | epic-36-retrospective |
+| Epic 37 | Generic File Uploader | done | — |
+| Epic 38 | Transaction Safety & Deadlock Hardening | done | epic-38-retrospective |
+| Epic 39 | ACL Reorganization - Remove Reports Module, Consolidate to 7 Canonical Modules | done | — |
 
 ## Upcoming
 
 | Epic | Title | Status |
 |------|-------|--------|
-| Epic 36 | OpenAPI Documentation & Swagger UI | done |
+| Epic 40 | Backoffice Feature Completeness - API-to-UI Gap Closure | draft |
 
-_Last Updated: 2026-04-09_
+_Last Updated: 2026-04-13_
