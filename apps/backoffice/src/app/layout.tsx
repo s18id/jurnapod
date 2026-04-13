@@ -69,7 +69,7 @@ const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
   },
   {
     label: "Sales",
-    paths: ["/sales-invoices", "/sales-payments"]
+    paths: ["/sales-invoices", "/sales-payments", "/sales-credit-notes"]
   },
   {
     label: "POS",

@@ -26,6 +26,7 @@ import {
 } from "./reports-pages";
 import { SalesInvoicesPage as SalesInvoicesManagementPage } from "./sales-invoices-page";
 import { SalesPaymentsPage as SalesPaymentsManagementPage } from "./sales-payments-page";
+import { SalesCreditNotesPage as SalesCreditNotesManagementPage } from "./sales-credit-notes-page";
 import { SuppliesPage as SuppliesManagementPage } from "./supplies-page";
 import { ModulesPage as ModulesFeaturePage } from "./modules-page";
 import { TaxRatesPage as TaxRatesFeaturePage } from "./tax-rates-page";
@@ -95,6 +96,8 @@ export const AccountingWorksheetPage = AccountingWorksheetReportPage;
 export const SalesInvoicesPage = SalesInvoicesManagementPage;
 
 export const SalesPaymentsPage = SalesPaymentsManagementPage;
+
+export const SalesCreditNotesPage = SalesCreditNotesManagementPage;
 
 export const AccountMappingsPage = AccountMappingsSettingsPage;
 
