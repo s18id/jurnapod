@@ -32,6 +32,39 @@ So that **{benefit}**.
   - [ ] 409: ...
   - [ ] 500: ...
 
+## Test Fixtures
+
+**Complete this section if the story introduces new data patterns, extraction/migration work, or canonical patterns.**
+
+> Reference: [AGENTS.md](../../AGENTS.md) - "Canonical Test Fixtures" and "Extraction Story Checklist" sections
+
+### Pre-Implementation Checklist
+- [ ] New patterns identified that need canonical fixtures (timestamps, status IDs, enum values, etc.)
+- [ ] Existing canonical fixtures reviewed for reuse potential
+- [ ] Fixture location determined (`packages/db/test-fixtures.ts`, `packages/shared/test/fixtures.ts`, or package-level equivalent)
+
+### Fixture Creation/Update
+- [ ] **New fixtures needed:** List patterns requiring canonical fixtures:
+  - [ ] Pattern 1: `___` (e.g., `reservation_start_ts` handling)
+  - [ ] Pattern 2: `___` (e.g., `status_id` conventions)
+  - [ ] Pattern 3: `___`
+- [ ] **Existing fixtures to update:**
+  - [ ] `___` (file path) - update reason: ___
+
+### Test File Audit (Post-Implementation - MANDATORY)
+- [ ] All new tests use canonical fixtures (not ad-hoc raw SQL INSERT/UPDATE)
+- [ ] Existing tests audited against new canonical patterns
+- [ ] Test files requiring fixture updates identified:
+  - [ ] `___` (test file path) - needs: ___
+  - [ ] `___` (test file path) - needs: ___
+- [ ] All identified test files updated to use canonical fixtures
+
+### Extraction/Migration Stories Only
+- [ ] Pre-extraction: All consumers of code being extracted identified
+- [ ] Post-extraction: Adapter shim immediately deleted (no lingering shims)
+- [ ] Route flipping verified: all consumers use new package imports
+- [ ] Full test suite run to verify no regressions
+
 ## Tasks / Subtasks
 
 - [ ] {task_description}
