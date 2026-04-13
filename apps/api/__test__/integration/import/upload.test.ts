@@ -19,9 +19,11 @@ import {
   createTestCompany, 
   createTestOutlet,
   createTestUser,
+  createTestRole,
+  assignUserGlobalRole,
+  setModulePermission,
   resetFixtureRegistry,
   getTestAccessToken,
-  setupUserPermission,
 } from '../../fixtures';
 import { getSeedSyncContext } from '../../fixtures';
 import { createHash } from 'node:crypto';
@@ -46,13 +48,15 @@ describe('import.upload', { timeout: 30000 }, () => {
     
     // Create cashier token with inventory create permission
     const db = await import('../../helpers/db').then(m => m.getTestDb());
-    await setupUserPermission({
-      userId: cashierUserId,
+    const cashierImportRole = await createTestRole(baseUrl, ownerToken, 'Import Cashier');
+    await assignUserGlobalRole(cashierUserId, cashierImportRole.id);
+    await setModulePermission(
       companyId,
-      roleCode: 'CASHIER',
-      module: 'inventory',
-      permission: 'create',
-    });
+      cashierImportRole.id,
+      'inventory',
+      'items',
+      2 // CREATE
+    );
     
     // Login as cashier
     const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
@@ -103,13 +107,15 @@ describe('import.upload', { timeout: 30000 }, () => {
 
     // Create user without inventory create permission
     const user = await createTestUser(companyId, { email: `no-perm-${Date.now()}@test.com` });
-    await setupUserPermission({
-      userId: user.id,
+    const readOnlyRole = await createTestRole(baseUrl, ownerToken, 'Import ReadOnly');
+    await assignUserGlobalRole(user.id, readOnlyRole.id);
+    await setModulePermission(
       companyId,
-      roleCode: 'CASHIER',
-      module: 'inventory',
-      permission: 'read', // Only read, not create
-    });
+      readOnlyRole.id,
+      'inventory',
+      'items',
+      1 // READ only
+    );
 
     // Login as that user
     const loginRes = await fetch(`${baseUrl}/api/auth/login`, {

@@ -38,7 +38,7 @@ async function insertModuleRole(
     roleId: number;
     companyId: number;
     module: string;
-    resource: string | null;
+    resource: string;
     permissionMask: number;
   }
 ): Promise<number> {
@@ -56,10 +56,15 @@ async function insertModuleRole(
   return Number(result.insertId);
 }
 
-async function cleanupModuleRolesByRoleIds(adapter: AuthDbAdapter, roleIds: number[]): Promise<void> {
+async function cleanupModuleRolesByRoleIds(
+  adapter: AuthDbAdapter,
+  companyId: number,
+  roleIds: number[]
+): Promise<void> {
   if (roleIds.length === 0) return;
   await adapter.db
     .deleteFrom('module_roles')
+    .where('company_id', '=', companyId)
     .where('role_id', 'in', roleIds)
     .execute();
 }
@@ -74,10 +79,12 @@ test('user with platform.users permission CAN access platform module with resour
   const userIds: number[] = [];
   const outletIdsToCleanup: number[] = [];
   let adminRoleId: number | undefined;
+  let companyId: number | undefined;
 
   try {
     // Create test company
     const company = await createCompany(adapter);
+    companyId = company.id;
     companyIds.push(company.id);
 
     // Create test user
@@ -118,7 +125,7 @@ test('user with platform.users permission CAN access platform module with resour
     assert.strictEqual(result!.hasPermission, true, 'Should have READ permission for platform.users');
   } finally {
     await cleanupRoleAssignments(adapter, userIds);
-    if (adminRoleId) await cleanupModuleRolesByRoleIds(adapter, [adminRoleId]);
+    if (adminRoleId && companyId) await cleanupModuleRolesByRoleIds(adapter, companyId, [adminRoleId]);
     await cleanupUsers(adapter, userIds);
     await cleanupOutlets(adapter, outletIdsToCleanup);
     await cleanupCompanies(adapter, companyIds);
@@ -135,10 +142,12 @@ test('user with platform.users permission CANNOT access platform module with res
   const userIds: number[] = [];
   const outletIdsToCleanup: number[] = [];
   let adminRoleId: number | undefined;
+  let companyId: number | undefined;
 
   try {
     // Create test company
     const company = await createCompany(adapter);
+    companyId = company.id;
     companyIds.push(company.id);
 
     // Create test user
@@ -181,7 +190,7 @@ test('user with platform.users permission CANNOT access platform module with res
     assert.strictEqual(result!.hasPermission, false, 'Should NOT have READ permission for platform.roles');
   } finally {
     await cleanupRoleAssignments(adapter, userIds);
-    if (adminRoleId) await cleanupModuleRolesByRoleIds(adapter, [adminRoleId]);
+    if (adminRoleId && companyId) await cleanupModuleRolesByRoleIds(adapter, companyId, [adminRoleId]);
     await cleanupUsers(adapter, userIds);
     await cleanupOutlets(adapter, outletIdsToCleanup);
     await cleanupCompanies(adapter, companyIds);
@@ -189,19 +198,21 @@ test('user with platform.users permission CANNOT access platform module with res
 });
 
 // ---------------------------------------------------------------------------
-// Test 3: User with module-level platform permission (resource=NULL) can access ALL platform resources
+// Test 3: Strict ACL - resource-specific permission does NOT grant access to other resources
 // ---------------------------------------------------------------------------
 
-test('user with module-level platform permission (resource=NULL) can access ALL platform resources', { skip: !useRealDb }, async () => {
+test('strict ACL: resource-specific permission does NOT grant access to other resources', { skip: !useRealDb }, async () => {
   const adapter = createRealDbAdapter();
   const companyIds: number[] = [];
   const userIds: number[] = [];
   const outletIdsToCleanup: number[] = [];
   let adminRoleId: number | undefined;
+  let companyId: number | undefined;
 
   try {
     // Create test company
     const company = await createCompany(adapter);
+    companyId = company.id;
     companyIds.push(company.id);
 
     // Create test user
@@ -218,19 +229,20 @@ test('user with module-level platform permission (resource=NULL) can access ALL 
 
     await assignUserRole(adapter, { userId: user.id, roleId: adminRoleId, companyId: company.id, outletId: outlet.id });
 
-    // Grant READ permission (bit 1) for platform with NO specific resource (NULL = module-level)
+    // Grant READ permission (bit 1) for platform.users
+    // Strict ACL: having platform.users does NOT automatically grant platform.roles or platform.companies
     const readBit = MODULE_PERMISSION_BITS.read;
     await insertModuleRole(adapter, {
       roleId: adminRoleId,
       companyId: company.id,
       module: 'platform',
-      resource: null, // Module-level permission
+      resource: 'users', // Specific resource-level permission
       permissionMask: readBit,
     });
 
     const rbac = new RBACManager(adapter, testConfig);
 
-    // Access platform.users (should succeed - module-level grants access to all resources)
+    // Access platform.users (should succeed - exact resource match)
     const result1 = await rbac.checkAccess({
       userId: user.id,
       companyId: company.id,
@@ -241,9 +253,9 @@ test('user with module-level platform permission (resource=NULL) can access ALL 
     });
 
     assert.ok(result1, 'Should return access result');
-    assert.strictEqual(result1!.hasPermission, true, 'Should have READ permission for platform.users via module-level');
+    assert.strictEqual(result1!.hasPermission, true, 'Should have READ permission for platform.users via exact resource match');
 
-    // Access platform.roles (should also succeed - module-level grants access to ALL resources)
+    // Access platform.roles (should fail - no platform.roles permission granted)
     const result2 = await rbac.checkAccess({
       userId: user.id,
       companyId: company.id,
@@ -254,9 +266,9 @@ test('user with module-level platform permission (resource=NULL) can access ALL 
     });
 
     assert.ok(result2, 'Should return access result');
-    assert.strictEqual(result2!.hasPermission, true, 'Should have READ permission for platform.roles via module-level');
+    assert.strictEqual(result2!.hasPermission, false, 'Should NOT have READ permission for platform.roles (different resource)');
 
-    // Access platform.companies (should also succeed)
+    // Access platform.companies (should fail - no platform.companies permission granted)
     const result3 = await rbac.checkAccess({
       userId: user.id,
       companyId: company.id,
@@ -267,10 +279,24 @@ test('user with module-level platform permission (resource=NULL) can access ALL 
     });
 
     assert.ok(result3, 'Should return access result');
-    assert.strictEqual(result3!.hasPermission, true, 'Should have READ permission for platform.companies via module-level');
+    assert.strictEqual(result3!.hasPermission, false, 'Should NOT have READ permission for platform.companies (different resource)');
+
+    // With strict ACL (resource NOT NULL), omitting resource should NOT fallback to module-level
+    // since there are no module-level (NULL resource) permissions anymore.
+    // This is the key behavioral change: resource is always required.
+    const result4 = await rbac.checkAccess({
+      userId: user.id,
+      companyId: company.id,
+      module: 'platform',
+      permission: 'read',
+      outletId: outlet.id,
+    });
+
+    assert.ok(result4, 'Should return access result');
+    assert.strictEqual(result4!.hasPermission, false, 'Strict ACL: Should NOT have module-level fallback when resource is omitted (NULL resources removed)');
   } finally {
     await cleanupRoleAssignments(adapter, userIds);
-    if (adminRoleId) await cleanupModuleRolesByRoleIds(adapter, [adminRoleId]);
+    if (adminRoleId && companyId) await cleanupModuleRolesByRoleIds(adapter, companyId, [adminRoleId]);
     await cleanupUsers(adapter, userIds);
     await cleanupOutlets(adapter, outletIdsToCleanup);
     await cleanupCompanies(adapter, companyIds);
@@ -287,10 +313,12 @@ test('SUPER_ADMIN bypasses resource checks', { skip: !useRealDb }, async () => {
   const userIds: number[] = [];
   const outletIdsToCleanup: number[] = [];
   let superAdminRoleId: number | undefined;
+  let companyId: number | undefined;
 
   try {
     // Create test company
     const company = await createCompany(adapter);
+    companyId = company.id;
     companyIds.push(company.id);
 
     // Create test user
@@ -324,7 +352,7 @@ test('SUPER_ADMIN bypasses resource checks', { skip: !useRealDb }, async () => {
     assert.strictEqual(result!.hasPermission, true, 'SUPER_ADMIN should bypass resource checks');
   } finally {
     await adapter.db.deleteFrom('user_role_assignments').where('user_id', 'in', userIds).execute();
-    if (superAdminRoleId) await cleanupModuleRolesByRoleIds(adapter, [superAdminRoleId]);
+    if (superAdminRoleId && companyId) await cleanupModuleRolesByRoleIds(adapter, companyId, [superAdminRoleId]);
     await cleanupUsers(adapter, userIds);
     await cleanupOutlets(adapter, outletIdsToCleanup);
     await cleanupCompanies(adapter, companyIds);
@@ -341,10 +369,12 @@ test('user with multiple resource permissions can access each granted resource',
   const userIds: number[] = [];
   const outletIdsToCleanup: number[] = [];
   let adminRoleId: number | undefined;
+  let companyId: number | undefined;
 
   try {
     // Create test company
     const company = await createCompany(adapter);
+    companyId = company.id;
     companyIds.push(company.id);
 
     // Create test user
@@ -420,7 +450,7 @@ test('user with multiple resource permissions can access each granted resource',
     assert.strictEqual(result3!.hasPermission, false, 'Should NOT have READ permission for platform.companies');
   } finally {
     await cleanupRoleAssignments(adapter, userIds);
-    if (adminRoleId) await cleanupModuleRolesByRoleIds(adapter, [adminRoleId]);
+    if (adminRoleId && companyId) await cleanupModuleRolesByRoleIds(adapter, companyId, [adminRoleId]);
     await cleanupUsers(adapter, userIds);
     await cleanupOutlets(adapter, outletIdsToCleanup);
     await cleanupCompanies(adapter, companyIds);
@@ -437,10 +467,12 @@ test('canManageCompanyDefaults respects resource parameter', { skip: !useRealDb 
   const userIds: number[] = [];
   const outletIdsToCleanup: number[] = [];
   let ownerRoleId: number | undefined;
+  let companyId: number | undefined;
 
   try {
     // Create test company
     const company = await createCompany(adapter);
+    companyId = company.id;
     companyIds.push(company.id);
 
     // Create test user
@@ -474,7 +506,7 @@ test('canManageCompanyDefaults respects resource parameter', { skip: !useRealDb 
     assert.strictEqual(result2, false, 'Should NOT be able to manage platform.companies defaults');
   } finally {
     await cleanupRoleAssignments(adapter, userIds);
-    if (ownerRoleId) await cleanupModuleRolesByRoleIds(adapter, [ownerRoleId]);
+    if (ownerRoleId && companyId) await cleanupModuleRolesByRoleIds(adapter, companyId, [ownerRoleId]);
     await cleanupUsers(adapter, userIds);
     await cleanupOutlets(adapter, outletIdsToCleanup);
     await cleanupCompanies(adapter, companyIds);

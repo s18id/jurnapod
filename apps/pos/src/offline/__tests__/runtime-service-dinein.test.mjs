@@ -23,6 +23,15 @@ function createNetworkMock() {
   };
 }
 
+async function seedOutletTables(storage, scope) {
+  const now = new Date().toISOString();
+  await storage.upsertOutletTables([
+    { pk: `${scope.company_id}:${scope.outlet_id}:1`, table_id: 1, company_id: scope.company_id, outlet_id: scope.outlet_id, code: 'T1', name: 'Table 1', zone: 'Main', capacity: 4, status: 'AVAILABLE', updated_at: now },
+    { pk: `${scope.company_id}:${scope.outlet_id}:2`, table_id: 2, company_id: scope.company_id, outlet_id: scope.outlet_id, code: 'T2', name: 'Table 2', zone: 'Main', capacity: 4, status: 'AVAILABLE', updated_at: now },
+    { pk: `${scope.company_id}:${scope.outlet_id}:3`, table_id: 3, company_id: scope.company_id, outlet_id: scope.outlet_id, code: 'T3', name: 'Table 3', zone: 'Main', capacity: 4, status: 'RESERVED', updated_at: now },
+  ]);
+}
+
 test("resolveActiveOrder is idempotent for same dine-in reservation and table context", async () => {
   const db = createPosOfflineDb(`jp-pos-runtime-service-dinein-idempotent-${crypto.randomUUID()}`);
   const storage = createWebStorageAdapter(db);
@@ -30,6 +39,7 @@ test("resolveActiveOrder is idempotent for same dine-in reservation and table co
   const scope = { company_id: 1, outlet_id: 10 };
 
   try {
+    await seedOutletTables(storage, scope);
     const tables = await runtime.getOutletTables(scope);
     const available = tables.filter((table) => table.status === "AVAILABLE");
     assert.ok(available.length >= 1, "expected at least one available table");
@@ -79,6 +89,7 @@ test("transferActiveOrderTable moves linked reservation and keeps table states c
   const scope = { company_id: 1, outlet_id: 11 };
 
   try {
+    await seedOutletTables(storage, scope);
     const tables = await runtime.getOutletTables(scope);
     const available = tables.filter((table) => table.status === "AVAILABLE");
     assert.ok(available.length >= 1, "expected at least one available table");
@@ -135,6 +146,7 @@ test("completeOrderSession closes order, releases table, and finalizes reservati
   const scope = { company_id: 1, outlet_id: 12 };
 
   try {
+    await seedOutletTables(storage, scope);
     const tables = await runtime.getOutletTables(scope);
     const available = tables.filter((table) => table.status === "AVAILABLE");
     assert.ok(available.length >= 1, "expected at least one available table");
@@ -180,6 +192,7 @@ test("transferActiveOrderTable blocks moving into table with another active rese
   const scope = { company_id: 1, outlet_id: 17 };
 
   try {
+    await seedOutletTables(storage, scope);
     const tables = await runtime.getOutletTables(scope);
     const fromTable = tables.find((table) => table.status === "AVAILABLE");
     const toTable = tables.find((table) => table.status === "RESERVED" && table.table_id !== fromTable?.table_id);
@@ -226,7 +239,7 @@ test("upsertActiveOrderSnapshot emits update log and outbox job", async () => {
       table_id: null,
       reservation_id: null,
       guest_count: null,
-      is_finalized: false,
+      kitchen_sent: false,
       order_status: "OPEN",
       paid_amount: 0,
       notes: "new order",
@@ -275,7 +288,7 @@ test("upsertActiveOrderSnapshot requests background push when update queued", as
       table_id: null,
       reservation_id: null,
       guest_count: null,
-      is_finalized: false,
+      kitchen_sent: false,
       order_status: "OPEN",
       paid_amount: 0,
       notes: "auto push",
@@ -306,6 +319,7 @@ test("resolveActiveOrder defaults settlement flow by service type", async () => 
   const scope = { company_id: 1, outlet_id: 21 };
 
   try {
+    await seedOutletTables(storage, scope);
     const takeaway = await runtime.resolveActiveOrder(scope, {
       service_type: "TAKEAWAY"
     });
@@ -339,7 +353,7 @@ test("cancelFinalizedOrderLine reduces committed qty and writes immutable cancel
       table_id: null,
       reservation_id: null,
       guest_count: null,
-      is_finalized: true,
+      kitchen_sent: true,
       order_status: "OPEN",
       paid_amount: 0,
       notes: null,
@@ -409,7 +423,7 @@ test("cancelFinalizedOrderLine requires reason and bounded quantity", async () =
       table_id: null,
       reservation_id: null,
       guest_count: null,
-      is_finalized: true,
+      kitchen_sent: true,
       order_status: "OPEN",
       paid_amount: 0,
       notes: null,
@@ -457,6 +471,7 @@ test("resume order then cancel item keeps totals consistent and writes update lo
   const scope = { company_id: 1, outlet_id: 16 };
 
   try {
+    await seedOutletTables(storage, scope);
     const tableId = 1;
     await runtime.setOutletTableStatus(scope, tableId, "AVAILABLE");
 
@@ -465,7 +480,7 @@ test("resume order then cancel item keeps totals consistent and writes update lo
       table_id: tableId,
       reservation_id: null,
       guest_count: 2,
-      is_finalized: true,
+      kitchen_sent: true,
       order_status: "OPEN",
       paid_amount: 0,
       notes: "table order",

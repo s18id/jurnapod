@@ -64,7 +64,7 @@ test('hasPermissionBit - returns true when permission bit is set', () => {
   assert.strictEqual(hasPermissionBit(mask, 'read'), true, 'Should return true for read');
   assert.strictEqual(hasPermissionBit(mask, 'update'), false, 'Should return false for update');
   assert.strictEqual(hasPermissionBit(mask, 'delete'), false, 'Should return false for delete');
-  assert.strictEqual(hasPermissionBit(mask, 'report'), false, 'Should return false for report');
+  assert.strictEqual(hasPermissionBit(mask, 'analyze'), false, 'Should return false for analyze');
 });
 
 test('hasPermissionBit - returns true when all permission bits are set', () => {
@@ -73,13 +73,13 @@ test('hasPermissionBit - returns true when all permission bits are set', () => {
                   MODULE_PERMISSION_BITS.read | 
                   MODULE_PERMISSION_BITS.update | 
                   MODULE_PERMISSION_BITS.delete | 
-                  MODULE_PERMISSION_BITS.report;
+                  MODULE_PERMISSION_BITS.analyze;
   
   assert.strictEqual(hasPermissionBit(allMask, 'create'), true);
   assert.strictEqual(hasPermissionBit(allMask, 'read'), true);
   assert.strictEqual(hasPermissionBit(allMask, 'update'), true);
   assert.strictEqual(hasPermissionBit(allMask, 'delete'), true);
-  assert.strictEqual(hasPermissionBit(allMask, 'report'), true);
+  assert.strictEqual(hasPermissionBit(allMask, 'analyze'), true);
 });
 
 test('hasPermissionBit - returns false for zero mask', () => {
@@ -89,7 +89,7 @@ test('hasPermissionBit - returns false for zero mask', () => {
   assert.strictEqual(hasPermissionBit(emptyMask, 'read'), false);
   assert.strictEqual(hasPermissionBit(emptyMask, 'update'), false);
   assert.strictEqual(hasPermissionBit(emptyMask, 'delete'), false);
-  assert.strictEqual(hasPermissionBit(emptyMask, 'report'), false);
+  assert.strictEqual(hasPermissionBit(emptyMask, 'analyze'), false);
 });
 
 test('hasPermissionBit - handles individual permission bits correctly', () => {
@@ -97,7 +97,7 @@ test('hasPermissionBit - handles individual permission bits correctly', () => {
   assert.strictEqual(hasPermissionBit(MODULE_PERMISSION_BITS.read, 'read'), true);
   assert.strictEqual(hasPermissionBit(MODULE_PERMISSION_BITS.update, 'update'), true);
   assert.strictEqual(hasPermissionBit(MODULE_PERMISSION_BITS.delete, 'delete'), true);
-  assert.strictEqual(hasPermissionBit(MODULE_PERMISSION_BITS.report, 'report'), true);
+  assert.strictEqual(hasPermissionBit(MODULE_PERMISSION_BITS.analyze, 'analyze'), true);
 });
 
 test('buildPermissionMask - builds correct mask from boolean flags', () => {
@@ -106,7 +106,7 @@ test('buildPermissionMask - builds correct mask from boolean flags', () => {
     canRead: true,
     canUpdate: false,
     canDelete: false,
-    canReport: false
+    canAnalyze: false
   });
   
   const expected = MODULE_PERMISSION_BITS.create | MODULE_PERMISSION_BITS.read;
@@ -119,14 +119,14 @@ test('buildPermissionMask - builds full mask when all true', () => {
     canRead: true,
     canUpdate: true,
     canDelete: true,
-    canReport: true
+    canAnalyze: true
   });
   
   const expected = MODULE_PERMISSION_BITS.create | 
                    MODULE_PERMISSION_BITS.read | 
                    MODULE_PERMISSION_BITS.update | 
                    MODULE_PERMISSION_BITS.delete | 
-                   MODULE_PERMISSION_BITS.report;
+                   MODULE_PERMISSION_BITS.analyze;
   assert.strictEqual(mask, expected, 'Should build full mask');
 });
 
@@ -136,7 +136,7 @@ test('buildPermissionMask - returns 0 when all false', () => {
     canRead: false,
     canUpdate: false,
     canDelete: false,
-    canReport: false
+    canAnalyze: false
   });
   
   assert.strictEqual(mask, 0, 'Should return 0 when all flags are false');
@@ -151,20 +151,20 @@ test('buildPermissionMask - partial params work correctly', () => {
   const onlyDelete = buildPermissionMask({ canDelete: true });
   assert.strictEqual(onlyDelete, MODULE_PERMISSION_BITS.delete);
   
-  const onlyReport = buildPermissionMask({ canReport: true });
-  assert.strictEqual(onlyReport, MODULE_PERMISSION_BITS.report);
+  const onlyAnalyze = buildPermissionMask({ canAnalyze: true });
+  assert.strictEqual(onlyAnalyze, MODULE_PERMISSION_BITS.analyze);
   
   const createAndDelete = buildPermissionMask({ canCreate: true, canDelete: true });
   assert.strictEqual(createAndDelete, MODULE_PERMISSION_BITS.create | MODULE_PERMISSION_BITS.delete);
 });
 
 test('MODULE_PERMISSION_BITS has correct bit values', () => {
-  // Canonical layout: READ=1, CREATE=2, UPDATE=4, DELETE=8, REPORT=16
+  // Canonical layout: READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16
   assert.strictEqual(MODULE_PERMISSION_BITS.read, 1, 'read should be 1 (00001)');
   assert.strictEqual(MODULE_PERMISSION_BITS.create, 2, 'create should be 2 (00010)');
   assert.strictEqual(MODULE_PERMISSION_BITS.update, 4, 'update should be 4 (00100)');
   assert.strictEqual(MODULE_PERMISSION_BITS.delete, 8, 'delete should be 8 (01000)');
-  assert.strictEqual(MODULE_PERMISSION_BITS.report, 16, 'report should be 16 (10000)');
+  assert.strictEqual(MODULE_PERMISSION_BITS.analyze, 16, 'analyze should be 16 (10000)');
 });
 
 test('buildPermissionMask and hasPermissionBit work together', () => {
@@ -174,7 +174,7 @@ test('buildPermissionMask and hasPermissionBit work together', () => {
     canRead: true,
     canUpdate: true,
     canDelete: true,
-    canReport: false
+    canAnalyze: false
   });
   
   // Verify CRUD permissions
@@ -182,16 +182,16 @@ test('buildPermissionMask and hasPermissionBit work together', () => {
   assert.strictEqual(hasPermissionBit(crudMask, 'read'), true);
   assert.strictEqual(hasPermissionBit(crudMask, 'update'), true);
   assert.strictEqual(hasPermissionBit(crudMask, 'delete'), true);
-  assert.strictEqual(hasPermissionBit(crudMask, 'report'), false);
+  assert.strictEqual(hasPermissionBit(crudMask, 'analyze'), false);
   
-  // Build a mask for report-only access
-  const reportMask = buildPermissionMask({ canReport: true });
+  // Build a mask for analyze-only access
+  const analyzeMask = buildPermissionMask({ canAnalyze: true });
   
-  assert.strictEqual(hasPermissionBit(reportMask, 'create'), false);
-  assert.strictEqual(hasPermissionBit(reportMask, 'read'), false);
-  assert.strictEqual(hasPermissionBit(reportMask, 'update'), false);
-  assert.strictEqual(hasPermissionBit(reportMask, 'delete'), false);
-  assert.strictEqual(hasPermissionBit(reportMask, 'report'), true);
+  assert.strictEqual(hasPermissionBit(analyzeMask, 'create'), false);
+  assert.strictEqual(hasPermissionBit(analyzeMask, 'read'), false);
+  assert.strictEqual(hasPermissionBit(analyzeMask, 'update'), false);
+  assert.strictEqual(hasPermissionBit(analyzeMask, 'delete'), false);
+  assert.strictEqual(hasPermissionBit(analyzeMask, 'analyze'), true);
 });
 
 test('checkRole works with different role combinations', () => {
@@ -215,19 +215,19 @@ test('checkRole works with different role combinations', () => {
 
 test('ModulePermission type accepts all valid permissions', () => {
   // This is a compile-time check but we also verify runtime values
-  const permissions: ModulePermission[] = ['create', 'read', 'update', 'delete', 'report'];
+  const permissions: ModulePermission[] = ['create', 'read', 'update', 'delete', 'analyze'];
   
-for (const permission of permissions) {
-  const params = {
-    canCreate: permission === 'create',
-    canRead: permission === 'read',
-    canUpdate: permission === 'update',
-    canDelete: permission === 'delete',
-    canReport: permission === 'report',
-  };
-  const mask = buildPermissionMask(params);
-  assert.strictEqual(hasPermissionBit(mask, permission), true);
-}
+  for (const permission of permissions) {
+    const params = {
+      canCreate: permission === 'create',
+      canRead: permission === 'read',
+      canUpdate: permission === 'update',
+      canDelete: permission === 'delete',
+      canAnalyze: permission === 'analyze',
+    };
+    const mask = buildPermissionMask(params);
+    assert.strictEqual(hasPermissionBit(mask, permission), true);
+  }
 });
 
 test('RoleCode type accepts all valid roles', () => {

@@ -1314,6 +1314,7 @@ export type ModuleRoleResponse = {
   role_id: number;
   role_code: string;
   module: string;
+  resource: string;
   permission_mask: number;
   created_at: string;
   updated_at: string;
@@ -1333,11 +1334,12 @@ export async function listModuleRoles(params: {
     .innerJoin('roles as r', 'r.id', 'mr.role_id')
     .where('mr.company_id', '=', params.companyId)
     .select([
-      'mr.id', 'mr.role_id', 'r.code as role_code', 'mr.module',
+      'mr.id', 'mr.role_id', 'r.code as role_code', 'mr.module', 'mr.resource',
       'mr.permission_mask', 'mr.created_at', 'mr.updated_at'
     ])
     .orderBy('r.code', 'asc')
-    .orderBy('mr.module', 'asc');
+    .orderBy('mr.module', 'asc')
+    .orderBy('mr.resource', 'asc');
 
   if (params.roleId) {
     query = query.where('mr.role_id', '=', params.roleId);
@@ -1353,6 +1355,7 @@ export async function listModuleRoles(params: {
     role_id: Number(row.role_id),
     role_code: row.role_code,
     module: row.module,
+    resource: row.resource ?? '',
     permission_mask: Number(row.permission_mask ?? 0),
     created_at: toRfc3339Required(row.created_at),
     updated_at: toRfc3339Required(row.updated_at)
@@ -1363,6 +1366,7 @@ export async function setModuleRolePermission(params: {
   companyId: number;
   roleId: number;
   module: string;
+  resource: string;
   permissionMask: number;
   actor: UserActor;
 }): Promise<ModuleRoleResponse> {
@@ -1399,11 +1403,12 @@ export async function setModuleRolePermission(params: {
       .where('company_id', '=', params.companyId)
       .where('role_id', '=', params.roleId)
       .where('module', '=', params.module)
+      .where('resource', '=', params.resource)
       .select(['id', 'permission_mask'])
       .executeTakeFirst();
 
     const auditContext = buildAuditContext(params.companyId, params.actor);
-    const entityId = `module-role:${params.roleId}:${params.module}`;
+    const entityId = `module-role:${params.roleId}:${params.module}:${params.resource}`;
     
     if (existing) {
       const currentMask = Number(existing.permission_mask ?? 0);
@@ -1413,6 +1418,7 @@ export async function setModuleRolePermission(params: {
         .where('company_id', '=', params.companyId)
         .where('role_id', '=', params.roleId)
         .where('module', '=', params.module)
+        .where('resource', '=', params.resource)
         .execute();
 
       if (currentMask !== permissionMask) {
@@ -1431,6 +1437,7 @@ export async function setModuleRolePermission(params: {
           company_id: params.companyId,
           role_id: params.roleId,
           module: params.module,
+          resource: params.resource,
           permission_mask: permissionMask
         })
         .execute();
@@ -1439,6 +1446,7 @@ export async function setModuleRolePermission(params: {
         type: "module_role",
         role_id: params.roleId,
         module: params.module,
+        resource: params.resource,
         permission_mask: permissionMask
       });
     }
@@ -1449,8 +1457,9 @@ export async function setModuleRolePermission(params: {
       .where('mr.company_id', '=', params.companyId)
       .where('mr.role_id', '=', params.roleId)
       .where('mr.module', '=', params.module)
+      .where('mr.resource', '=', params.resource)
       .select([
-        'mr.id', 'mr.role_id', 'r.code as role_code', 'mr.module',
+        'mr.id', 'mr.role_id', 'r.code as role_code', 'mr.module', 'mr.resource',
         'mr.permission_mask', 'mr.created_at', 'mr.updated_at'
       ])
       .executeTakeFirst();
@@ -1465,6 +1474,7 @@ export async function setModuleRolePermission(params: {
       role_id: Number(row.role_id),
       role_code: row.role_code,
       module: row.module,
+      resource: row.resource ?? '',
       permission_mask: Number(row.permission_mask ?? 0),
       created_at: toRfc3339Required(row.created_at),
       updated_at: toRfc3339Required(row.updated_at)

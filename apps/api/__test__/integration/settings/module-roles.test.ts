@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 // Integration tests for settings-module-roles.update
-// Tests PUT /settings/module-roles/:roleId/:module endpoint - updates module role permissions.
+// Tests PUT /settings/module-roles/:roleId/:module/:resource endpoint - updates module role permissions.
 // Note: Uses custom test role to avoid corrupting system roles (ADMIN, ACCOUNTANT, etc.)
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -33,7 +33,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('rejects request without auth', async () => {
-    const res = await fetch(`${baseUrl}/api/settings/module-roles/1/POS`, {
+    const res = await fetch(`${baseUrl}/api/settings/module-roles/1/POS/transactions`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ permission_mask: 15 })
@@ -42,7 +42,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('updates module role permission with valid payload when OWNER bypasses module permission', async () => {
-    const updateRes = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS`, {
+    const updateRes = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS/transactions`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -58,7 +58,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('updates module role permission for different module', async () => {
-    const updateRes = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/INVENTORY`, {
+    const updateRes = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/INVENTORY/items`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -73,7 +73,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('returns 400 for invalid role id format', async () => {
-    const res = await fetch(`${baseUrl}/api/settings/module-roles/invalid/POS`, {
+    const res = await fetch(`${baseUrl}/api/settings/module-roles/invalid/POS/transactions`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -86,7 +86,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('accepts negative permission mask (implementation allows it)', async () => {
-    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS`, {
+    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS/transactions`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -101,7 +101,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('returns 400 for non-integer permission mask', async () => {
-    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS`, {
+    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS/transactions`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -114,7 +114,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('returns 400 when permission_mask is missing', async () => {
-    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS`, {
+    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS/transactions`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -127,7 +127,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('updates permission with zero mask (no permissions)', async () => {
-    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS`, {
+    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS/transactions`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -140,7 +140,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
   });
 
   it('updates permission with large mask value', async () => {
-    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS`, {
+    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/POS/transactions`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -152,9 +152,8 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
     expect([200, 400, 403, 404, 500]).toContain(res.status);
   });
 
-  it('updates module role permission for CASHIER role', async () => {
-    // Get CASHIER role ID - this is a system role so we test with valid mask
-    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/SALES`, {
+  it('updates module role permission for SALES module', async () => {
+    const res = await fetch(`${baseUrl}/api/settings/module-roles/${testRoleId}/SALES/invoices`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,

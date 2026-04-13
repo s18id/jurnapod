@@ -134,6 +134,7 @@ const COMPANY_MODULE_DEFAULTS = [
   { code: "sales", enabled: true, config: {} },
   { code: "inventory", enabled: true, config: { level: 0 } },
   { code: "purchasing", enabled: false, config: {} },
+  // @deprecated Use accounting.reports with ANALYZE permission instead
   { code: "reports", enabled: true, config: {} },
   { code: "settings", enabled: true, config: {} },
   { code: "accounts", enabled: true, config: {} },

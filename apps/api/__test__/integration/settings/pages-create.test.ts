@@ -12,6 +12,7 @@ import {
   getTestAccessToken,
   getSeedSyncContext,
   createTestUser,
+  createTestRole,
   assignUserGlobalRole,
   getRoleIdByCode,
   setModulePermission,
@@ -104,11 +105,12 @@ describe('pages-create', { timeout: 30000 }, () => {
     const adminUser = await createTestUser(context.companyId, {
       email: `settings-create-${Date.now()}@example.com`
     });
-    const roleId = await getRoleIdByCode('ADMIN');
-    await assignUserGlobalRole(adminUser.id, roleId);
+    const role = await createTestRole(baseUrl, cashierToken, 'Settings Creator');
+    await assignUserGlobalRole(adminUser.id, role.id);
     await setModulePermission(
       context.companyId,
-      roleId,
+      role.id,
+      'platform',
       'settings',
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
@@ -172,11 +174,12 @@ describe('pages-create', { timeout: 30000 }, () => {
     const adminUser = await createTestUser(context.companyId, {
       email: `settings-invalid-slug-${Date.now()}@example.com`
     });
-    const roleId = await getRoleIdByCode('ADMIN');
-    await assignUserGlobalRole(adminUser.id, roleId);
+    const role = await createTestRole(baseUrl, cashierToken, 'Settings Creator Slug');
+    await assignUserGlobalRole(adminUser.id, role.id);
     await setModulePermission(
       context.companyId,
-      roleId,
+      role.id,
+      'platform',
       'settings',
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
@@ -237,11 +240,12 @@ describe('pages-create', { timeout: 30000 }, () => {
     const adminUser = await createTestUser(context.companyId, {
       email: `settings-duplicate-${Date.now()}@example.com`
     });
-    const roleId = await getRoleIdByCode('ADMIN');
-    await assignUserGlobalRole(adminUser.id, roleId);
+    const role = await createTestRole(baseUrl, cashierToken, 'Settings Creator Duplicate');
+    await assignUserGlobalRole(adminUser.id, role.id);
     await setModulePermission(
       context.companyId,
-      roleId,
+      role.id,
+      'platform',
       'settings',
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
@@ -322,11 +326,12 @@ describe('pages-create', { timeout: 30000 }, () => {
     const adminUser = await createTestUser(context.companyId, {
       email: `settings-published-${Date.now()}@example.com`
     });
-    const roleId = await getRoleIdByCode('ADMIN');
-    await assignUserGlobalRole(adminUser.id, roleId);
+    const role = await createTestRole(baseUrl, cashierToken, 'Settings Creator Published');
+    await assignUserGlobalRole(adminUser.id, role.id);
     await setModulePermission(
       context.companyId,
-      roleId,
+      role.id,
+      'platform',
       'settings',
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
@@ -385,11 +390,12 @@ describe('pages-create', { timeout: 30000 }, () => {
     const adminUser = await createTestUser(context.companyId, {
       email: `settings-missing-${Date.now()}@example.com`
     });
-    const roleId = await getRoleIdByCode('ADMIN');
-    await assignUserGlobalRole(adminUser.id, roleId);
+    const role = await createTestRole(baseUrl, cashierToken, 'Settings Creator Missing');
+    await assignUserGlobalRole(adminUser.id, role.id);
     await setModulePermission(
       context.companyId,
-      roleId,
+      role.id,
+      'platform',
       'settings',
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );

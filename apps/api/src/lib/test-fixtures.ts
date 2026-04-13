@@ -886,23 +886,57 @@ export async function assignUserOutletRole(
 }
 
 /**
- * Set module-level permissions for a role in a company.
+ * Set resource-level permissions for a role in a company.
  * Use this for setting up test data with specific permission masks.
  * 
  * @param companyId - Company ID
  * @param roleId - Role ID
  * @param module - Module name (e.g., 'inventory', 'sales')
+ * @param resource - Resource name (e.g., 'items', 'journals')
  * @param permissionMask - Permission mask (use MODULE_PERMISSION_BITS or buildPermissionMask)
+ * @param options - Optional settings
+ * @param options.allowSystemRoleMutation - Allow mutation of canonical system roles (default: false)
  */
 export async function setModulePermission(
   companyId: number,
   roleId: number,
   module: string,
-  permissionMask: number
+  resource: string,
+  permissionMask: number,
+  options?: { allowSystemRoleMutation?: boolean }
 ): Promise<void> {
   const db = getDb();
+
+  // Reject missing/empty resource
+  if (!resource || typeof resource !== 'string' || resource.trim() === '') {
+    throw new Error(
+      `setModulePermission: resource must be a non-empty string. ` +
+      `Got: ${JSON.stringify(resource)}`
+    );
+  }
+
+  const trimmedResource = resource.trim();
+
+  // Guardrail: prevent mutation of canonical system roles in integration tests.
+  // Tests should use custom roles for ACL mutation scenarios.
+  if (!options?.allowSystemRoleMutation) {
+    const roleResult = await sql`SELECT code, company_id FROM roles WHERE id = ${roleId} LIMIT 1`.execute(db);
+    if (roleResult.rows.length > 0) {
+      const roleRow = roleResult.rows[0] as { code: string; company_id: number | null };
+      const CANONICAL_SYSTEM_ROLE_CODES = ['SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER'] as const;
+      if (CANONICAL_SYSTEM_ROLE_CODES.includes(roleRow.code as typeof CANONICAL_SYSTEM_ROLE_CODES[number])) {
+        throw new Error(
+          `REFUSE to mutate canonical system role '${roleRow.code}'. ` +
+          `This function cannot modify module_roles rows for system roles ` +
+          `(SUPER_ADMIN, OWNER, COMPANY_ADMIN, ADMIN, ACCOUNTANT, CASHIER). ` +
+          `Use a custom test role instead, or pass { allowSystemRoleMutation: true } to override.`
+        );
+      }
+    }
+  }
+
   // Use INSERT ... ON DUPLICATE KEY UPDATE for idempotency in tests
-  await sql`INSERT INTO module_roles (company_id, role_id, module, permission_mask) VALUES (${companyId}, ${roleId}, ${module}, ${permissionMask}) ON DUPLICATE KEY UPDATE permission_mask = ${permissionMask}`.execute(db);
+  await sql`INSERT INTO module_roles (company_id, role_id, module, resource, permission_mask) VALUES (${companyId}, ${roleId}, ${module}, ${trimmedResource}, ${permissionMask}) ON DUPLICATE KEY UPDATE permission_mask = ${permissionMask}`.execute(db);
 }
 
 /**
@@ -917,6 +951,7 @@ export async function setupUserPermission(params: {
   companyId: number;
   roleCode: string;
   module: string;
+  resource: string;
   permission: ModulePermission | "all";
   isGlobal?: boolean;
   outletId?: number;
@@ -933,7 +968,7 @@ export async function setupUserPermission(params: {
     ? buildPermissionMask({ canCreate: true, canRead: true, canUpdate: true, canDelete: true })
     : MODULE_PERMISSION_BITS[params.permission];
   
-  await setModulePermission(params.companyId, roleId, params.module, mask);
+  await setModulePermission(params.companyId, roleId, params.module, params.resource, mask);
 }
 
 export type SeedSyncContext = {

@@ -13,6 +13,7 @@ import {
   getSeedSyncContext,
   createTestCompanyMinimal,
   createTestUser,
+  createTestRole,
   assignUserGlobalRole,
   getRoleIdByCode,
   setModulePermission
@@ -92,11 +93,12 @@ describe('pages-list', { timeout: 30000 }, () => {
     const adminUser = await createTestUser(context.companyId, {
       email: `settings-admin-${Date.now()}@example.com`
     });
-    const roleId = await getRoleIdByCode('ADMIN');
-    await assignUserGlobalRole(adminUser.id, roleId);
+    const role = await createTestRole(baseUrl, cashierToken, 'Settings Reader');
+    await assignUserGlobalRole(adminUser.id, role.id);
     await setModulePermission(
       context.companyId,
-      roleId,
+      role.id,
+      'platform',
       'settings',
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
@@ -192,11 +194,12 @@ describe('pages-list', { timeout: 30000 }, () => {
     const adminUser = await createTestUser(context.companyId, {
       email: `settings-admin-search-${Date.now()}@example.com`
     });
-    const roleId = await getRoleIdByCode('ADMIN');
-    await assignUserGlobalRole(adminUser.id, roleId);
+    const role = await createTestRole(baseUrl, cashierToken, 'Settings Reader Search');
+    await assignUserGlobalRole(adminUser.id, role.id);
     await setModulePermission(
       context.companyId,
-      roleId,
+      role.id,
+      'platform',
       'settings',
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );

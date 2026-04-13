@@ -12,8 +12,8 @@ import {
   getTestAccessToken,
   getSeedSyncContext,
   createTestUser,
+  createTestRole,
   assignUserGlobalRole,
-  getRoleIdByCode,
   setModulePermission
 } from '../../fixtures';
 import { buildPermissionMask } from '@jurnapod/auth';
@@ -36,6 +36,7 @@ describe('public-pages', { timeout: 30000 }, () => {
   });
 
   it('returns published page without auth', async () => {
+    const ownerToken = await getTestAccessToken(baseUrl);
     const context = await getSeedSyncContext();
     const uniqueSlug = `public-page-${Date.now()}-${Math.random().toString(36).substring(7)}`;
     
@@ -43,11 +44,12 @@ describe('public-pages', { timeout: 30000 }, () => {
     const adminUser = await createTestUser(context.companyId, {
       email: `settings-public-${Date.now()}@example.com`
     });
-    const roleId = await getRoleIdByCode('ADMIN');
-    await assignUserGlobalRole(adminUser.id, roleId);
+    const role = await createTestRole(baseUrl, ownerToken, 'Settings Public Publisher');
+    await assignUserGlobalRole(adminUser.id, role.id);
     await setModulePermission(
       context.companyId,
-      roleId,
+      role.id,
+      'platform',
       'settings',
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
@@ -112,6 +114,7 @@ describe('public-pages', { timeout: 30000 }, () => {
   });
 
   it('does not return DRAFT page', async () => {
+    const ownerToken = await getTestAccessToken(baseUrl);
     const context = await getSeedSyncContext();
     const uniqueSlug = `draft-page-${Date.now()}-${Math.random().toString(36).substring(7)}`;
     
@@ -119,11 +122,12 @@ describe('public-pages', { timeout: 30000 }, () => {
     const adminUser = await createTestUser(context.companyId, {
       email: `settings-draft-public-${Date.now()}@example.com`
     });
-    const roleId = await getRoleIdByCode('ADMIN');
-    await assignUserGlobalRole(adminUser.id, roleId);
+    const role = await createTestRole(baseUrl, ownerToken, 'Settings Public Draft');
+    await assignUserGlobalRole(adminUser.id, role.id);
     await setModulePermission(
       context.companyId,
-      roleId,
+      role.id,
+      'platform',
       'settings',
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
@@ -180,6 +184,7 @@ describe('public-pages', { timeout: 30000 }, () => {
   });
 
   it('returns 404 for unpublished page', async () => {
+    const ownerToken = await getTestAccessToken(baseUrl);
     const context = await getSeedSyncContext();
     const uniqueSlug = `unpub-page-${Date.now()}-${Math.random().toString(36).substring(7)}`;
     
@@ -187,11 +192,12 @@ describe('public-pages', { timeout: 30000 }, () => {
     const adminUser = await createTestUser(context.companyId, {
       email: `settings-unpub-public-${Date.now()}@example.com`
     });
-    const roleId = await getRoleIdByCode('ADMIN');
-    await assignUserGlobalRole(adminUser.id, roleId);
+    const role = await createTestRole(baseUrl, ownerToken, 'Settings Public Unpublish');
+    await assignUserGlobalRole(adminUser.id, role.id);
     await setModulePermission(
       context.companyId,
-      roleId,
+      role.id,
+      'platform',
       'settings',
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
@@ -260,6 +266,7 @@ describe('public-pages', { timeout: 30000 }, () => {
   });
 
   it('returns content_html rendered from markdown', async () => {
+    const ownerToken = await getTestAccessToken(baseUrl);
     const context = await getSeedSyncContext();
     const uniqueSlug = `markdown-page-${Date.now()}-${Math.random().toString(36).substring(7)}`;
     
@@ -267,11 +274,12 @@ describe('public-pages', { timeout: 30000 }, () => {
     const adminUser = await createTestUser(context.companyId, {
       email: `settings-md-public-${Date.now()}@example.com`
     });
-    const roleId = await getRoleIdByCode('ADMIN');
-    await assignUserGlobalRole(adminUser.id, roleId);
+    const role = await createTestRole(baseUrl, ownerToken, 'Settings Public Markdown');
+    await assignUserGlobalRole(adminUser.id, role.id);
     await setModulePermission(
       context.companyId,
-      roleId,
+      role.id,
+      'platform',
       'settings',
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );

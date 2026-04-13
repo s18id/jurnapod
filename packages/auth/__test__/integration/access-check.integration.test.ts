@@ -333,17 +333,17 @@ test('checkAccess() detects SUPER_ADMIN even when user_role_assignment has no co
     const user = await createUser(adapter, company.id, { email: 'global-super@example.com' }, testConfig);
     userIds.push(user.id);
 
-    // Assign SUPER_ADMIN role with company_id = NULL (global, not tied to any company)
+    // Assign SUPER_ADMIN role for this company context
     const superAdminRoleId = await getRoleIdByCode(adapter, 'SUPER_ADMIN');
     assert.ok(superAdminRoleId, 'SUPER_ADMIN role should exist in database');
 
-    // Assign WITHOUT company_id (null = global)
+    // Assign with company_id (schema requires non-null)
     await adapter.db
       .insertInto('user_role_assignments')
       .values({
         user_id: user.id,
         role_id: superAdminRoleId,
-        company_id: null,
+        company_id: company.id,
         outlet_id: null
       })
       .execute();
@@ -366,7 +366,7 @@ test('checkAccess() detects SUPER_ADMIN even when user_role_assignment has no co
 // Test: hasOutletAccess() returns true for globally-assigned SUPER_ADMIN
 // ---------------------------------------------------------------------------
 
-test('hasOutletAccess() returns true for SUPER_ADMIN with null company_id', { skip: !useRealDb }, async () => {
+test('hasOutletAccess() returns true for SUPER_ADMIN with company-scoped assignment', { skip: !useRealDb }, async () => {
   const adapter = createRealDbAdapter();
   const companyIds: number[] = [];
   const userIds: number[] = [];
@@ -381,10 +381,10 @@ test('hasOutletAccess() returns true for SUPER_ADMIN with null company_id', { sk
 
     const superAdminRoleId = await getRoleIdByCode(adapter, 'SUPER_ADMIN');
 
-    // Global assignment (no company_id)
+    // Company-scoped assignment (schema requires company_id)
     await adapter.db
       .insertInto('user_role_assignments')
-      .values({ user_id: user.id, role_id: superAdminRoleId, company_id: null, outlet_id: null })
+      .values({ user_id: user.id, role_id: superAdminRoleId, company_id: company.id, outlet_id: null })
       .execute();
 
     const outlet = await createOutlet(adapter, company.id);
@@ -406,7 +406,7 @@ test('hasOutletAccess() returns true for SUPER_ADMIN with null company_id', { sk
 // Test: canManageCompanyDefaults() returns true for globally-assigned SUPER_ADMIN
 // ---------------------------------------------------------------------------
 
-test('canManageCompanyDefaults() returns true for SUPER_ADMIN with null company_id', { skip: !useRealDb }, async () => {
+test('canManageCompanyDefaults() returns true for SUPER_ADMIN with company-scoped assignment', { skip: !useRealDb }, async () => {
   const adapter = createRealDbAdapter();
   const companyIds: number[] = [];
   const userIds: number[] = [];
@@ -421,10 +421,10 @@ test('canManageCompanyDefaults() returns true for SUPER_ADMIN with null company_
 
     const superAdminRoleId = await getRoleIdByCode(adapter, 'SUPER_ADMIN');
 
-    // Global assignment (no company_id)
+    // Company-scoped assignment (schema requires company_id)
     await adapter.db
       .insertInto('user_role_assignments')
-      .values({ user_id: user.id, role_id: superAdminRoleId, company_id: null, outlet_id: null })
+      .values({ user_id: user.id, role_id: superAdminRoleId, company_id: company.id, outlet_id: null })
       .execute();
 
     const rbac = new RBACManager(adapter, testConfig);

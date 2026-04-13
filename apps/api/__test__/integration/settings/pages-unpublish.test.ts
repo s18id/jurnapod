@@ -12,6 +12,7 @@ import {
   getTestAccessToken,
   getSeedSyncContext,
   createTestUser,
+  createTestRole,
   assignUserGlobalRole,
   getRoleIdByCode,
   setModulePermission
@@ -91,11 +92,12 @@ describe('pages-unpublish', { timeout: 30000 }, () => {
     const adminUser = await createTestUser(context.companyId, {
       email: `settings-unpublish-404-${Date.now()}@example.com`
     });
-    const roleId = await getRoleIdByCode('ADMIN');
-    await assignUserGlobalRole(adminUser.id, roleId);
+    const role = await createTestRole(baseUrl, cashierToken, 'Settings Unpublisher');
+    await assignUserGlobalRole(adminUser.id, role.id);
     await setModulePermission(
       context.companyId,
-      roleId,
+      role.id,
+      'platform',
       'settings',
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
@@ -143,11 +145,12 @@ describe('pages-unpublish', { timeout: 30000 }, () => {
     const adminUser = await createTestUser(context.companyId, {
       email: `settings-unpublish-${Date.now()}@example.com`
     });
-    const roleId = await getRoleIdByCode('ADMIN');
-    await assignUserGlobalRole(adminUser.id, roleId);
+    const role = await createTestRole(baseUrl, cashierToken, 'Settings Unpublisher Missing');
+    await assignUserGlobalRole(adminUser.id, role.id);
     await setModulePermission(
       context.companyId,
-      roleId,
+      role.id,
+      'platform',
       'settings',
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
@@ -226,11 +229,12 @@ describe('pages-unpublish', { timeout: 30000 }, () => {
     const adminUser = await createTestUser(context.companyId, {
       email: `settings-unpublish-idempotent-${Date.now()}@example.com`
     });
-    const roleId = await getRoleIdByCode('ADMIN');
-    await assignUserGlobalRole(adminUser.id, roleId);
+    const role = await createTestRole(baseUrl, cashierToken, 'Settings Unpublisher Published');
+    await assignUserGlobalRole(adminUser.id, role.id);
     await setModulePermission(
       context.companyId,
-      roleId,
+      role.id,
+      'platform',
       'settings',
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
@@ -308,11 +312,12 @@ describe('pages-unpublish', { timeout: 30000 }, () => {
     const adminUser = await createTestUser(context.companyId, {
       email: `settings-unpublish-invalid-${Date.now()}@example.com`
     });
-    const roleId = await getRoleIdByCode('ADMIN');
-    await assignUserGlobalRole(adminUser.id, roleId);
+    const role = await createTestRole(baseUrl, cashierToken, 'Settings Unpublisher Idempotent');
+    await assignUserGlobalRole(adminUser.id, role.id);
     await setModulePermission(
       context.companyId,
-      roleId,
+      role.id,
+      'platform',
       'settings',
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );

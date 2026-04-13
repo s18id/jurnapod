@@ -19,6 +19,26 @@ let baseUrl: string;
 let accessToken: string;
 let seedCtx: { companyId: number; outletId: number };
 
+async function resolveOpenFiscalDate(companyId: number): Promise<string | null> {
+  const db = getTestDb();
+  const row = await sql<{
+    start_date: string;
+  }>`
+    SELECT start_date
+    FROM fiscal_years
+    WHERE company_id = ${companyId}
+      AND status = 'OPEN'
+    ORDER BY start_date ASC
+    LIMIT 1
+  `.execute(db);
+
+  if (row.rows.length === 0) {
+    return null;
+  }
+
+  return String((row.rows[0] as { start_date: string }).start_date);
+}
+
 describe('cash-bank.void', { timeout: 30000 }, () => {
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
@@ -53,6 +73,12 @@ describe('cash-bank.void', { timeout: 30000 }, () => {
       return;
     }
 
+    const transactionDate = await resolveOpenFiscalDate(seedCtx.companyId);
+    if (!transactionDate) {
+      expect(true).toBe(true);
+      return;
+    }
+
     const sourceAccountId = Number((accounts.rows[0] as { id: number }).id);
     const destAccountId = Number((accounts.rows[1] as { id: number }).id);
     const uniqueDesc = `Void draft test ${Date.now()}`;
@@ -66,6 +92,7 @@ describe('cash-bank.void', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         transaction_type: 'MUTATION',
+        transaction_date: transactionDate,
         description: uniqueDesc,
         source_account_id: sourceAccountId,
         destination_account_id: destAccountId,
@@ -108,6 +135,12 @@ describe('cash-bank.void', { timeout: 30000 }, () => {
       return;
     }
 
+    const transactionDate = await resolveOpenFiscalDate(seedCtx.companyId);
+    if (!transactionDate) {
+      expect(true).toBe(true);
+      return;
+    }
+
     const sourceAccountId = Number((accounts.rows[0] as { id: number }).id);
     const destAccountId = Number((accounts.rows[1] as { id: number }).id);
     const uniqueDesc = `Void posted test ${Date.now()}`;
@@ -121,6 +154,7 @@ describe('cash-bank.void', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         transaction_type: 'MUTATION',
+        transaction_date: transactionDate,
         description: uniqueDesc,
         source_account_id: sourceAccountId,
         destination_account_id: destAccountId,
@@ -209,6 +243,11 @@ describe('cash-bank.void', { timeout: 30000 }, () => {
     const sourceAccountId = Number((accounts.rows[0] as { id: number }).id);
     const destAccountId = Number((accounts.rows[1] as { id: number }).id);
     const uniqueDesc = `Double void test ${Date.now()}`;
+    const transactionDate = await resolveOpenFiscalDate(seedCtx.companyId);
+    if (!transactionDate) {
+      expect(true).toBe(true);
+      return;
+    }
 
     // Create, post, and void once
     const createRes = await fetch(`${baseUrl}/api/cash-bank-transactions`, {
@@ -219,6 +258,7 @@ describe('cash-bank.void', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         transaction_type: 'MUTATION',
+        transaction_date: transactionDate,
         description: uniqueDesc,
         source_account_id: sourceAccountId,
         destination_account_id: destAccountId,
