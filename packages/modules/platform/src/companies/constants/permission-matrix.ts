@@ -13,7 +13,7 @@
  * - 2  (0b00010): CREATE
  * - 4  (0b00100): UPDATE
  * - 8  (0b01000): DELETE
- * - 16 (0b10000): ANALYZE (was REPORT)
+* - 16 (0b10000): ANALYZE // (was REPORT)
  * - 32 (0b100000): MANAGE
  *
  * Composite constants:

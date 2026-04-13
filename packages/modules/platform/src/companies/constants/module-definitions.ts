@@ -40,6 +40,7 @@ export const MODULE_DEFINITIONS = [
     code: "reports",
     name: "Reports",
     description: "Reporting and analytics"
+    // @deprecated Use accounting.reports with ANALYZE permission instead
   },
   {
     code: "settings",

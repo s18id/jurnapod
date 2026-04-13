@@ -18,7 +18,7 @@ export const PERMISSION_BITS = {
   CREATE:  2,    // 0b000010
   UPDATE:  4,    // 0b000100
   DELETE:  8,    // 0b001000
-  ANALYZE: 16,   // 0b010000 (was REPORT)
+  ANALYZE: 16,   // 0b010000 // (was REPORT)
   MANAGE:  32,   // 0b100000 - NEW
 } as const;
 
