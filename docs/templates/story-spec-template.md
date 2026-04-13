@@ -190,6 +190,31 @@ Complete this section if the story involves sync operations, data persistence, o
 
 - {What other stories or work must be complete first}
 
+## Shared Contract Changes (MANDATORY for Constants/Types)
+
+> Applies when: story modifies shared constants, types, or contracts consumed by other packages/tests.
+
+### Blast Radius Check (E33-A1)
+Before marking complete, verify the change doesn't break consumers:
+
+- [ ] Grep for all usages of the changed constant/type in other packages
+- [ ] Grep for all usages in test files
+- [ ] Run consuming package tests — all must pass
+- [ ] Document any consumer files that needed updates
+
+### Constant Change Verification (E33-A4)
+When changing shared constant values:
+
+- [ ] Update all test expectations that reference the constant
+- [ ] Verify no hardcoded assertion values remain from old constants
+- [ ] Cross-reference with canonical fixtures
+
+### Consumer Audit Results
+
+| Consumer File | Tested | Result |
+|--------------|---------|--------|
+| `packages/shared/src/...` | ✅/❌ | Pass/Fail |
+
 ## Technical Debt Review
 
 Complete before marking story done. If any box is checked, add a TD item to [TECHNICAL-DEBT.md](../adr/TECHNICAL-DEBT.md) before closing.

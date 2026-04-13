@@ -10,10 +10,10 @@
 | Priority | Open | Done | Won't Fix | Total |
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
-| P1 | 4 | 6 | 0 | 10 |
+| P1 | 0 | 10 | 0 | 10 |
 | P2 | 5 | 13 | 0 | 18 |
 | P3 | 1 | 2 | 3 | 6 |
-| **Total** | **10** | **25** | **3** | **38** |
+| **Total** | **6** | **29** | **3** | **38** |
 
 ---
 
@@ -27,10 +27,8 @@
 
 | ID | Action | From | Owner | Status |
 |----|--------|------|-------|--------|
-| E33-A1 | Add "blast radius check" to shared contract changes | Epic 33 | Charlie | Open |
-| E33-A4 | Add shared constant change verification to test checklist | Epic 33 | Dana | Open |
-| E34-A4 | Add "zero test failures" CI gate | Epic 34 | Quinn | Open |
-| E34-A5 | Audit test fixtures for sentinel IDs (all FK constraints) | Epic 34 | Amelia | Open |
+| E34-A4 | Add "zero test failures" CI gate | Epic 34 | Quinn | Done |
+| E34-A5 | Audit test fixtures for sentinel IDs (all FK constraints) | Epic 34 | Amelia | Done |
 
 ---
 
