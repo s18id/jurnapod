@@ -1,4 +1,4 @@
-last_updated: 2026-04-12T00:00:00Z
+last_updated: 2026-04-14T00:00:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -474,8 +474,19 @@ development_status:
   39-11-verification-cleanup: done
 
   # Epic 40: Backoffice Feature Completeness - API-to-UI Gap Closure
-  epic-40: in-progress
+  epic-40: done
   40-1-credit-notes-management: done
   40-2-fiscal-year-closing: done
   40-3-sales-orders-management: done
-  40-4-receivables-ageing: review
+  40-4-receivables-ageing: done
+  epic-40-retrospective: done
+
+  # Epic 41: Auth Token Centralization
+  epic-41: done
+  41-1-api-client-token-resolution: done
+  41-2-hook-token-migration: done
+  41-3-page-component-token-migration: done
+  41-4-router-cleanup: done
+  41-5-xhr-wrapper-functions: done
+  41-6-final-verification: done
+  epic-41-retrospective: done

@@ -1,6 +1,6 @@
 # Action Items Tracker
 
-**Last Updated:** 2026-04-08T00:00:00Z
+**Last Updated:** 2026-04-14T00:00:00Z
 **Review Cadence:** Monthly at sprint retrospective
 
 ---
@@ -11,9 +11,9 @@
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
 | P1 | 4 | 6 | 0 | 10 |
-| P2 | 8 | 7 | 0 | 15 |
-| P3 | 0 | 2 | 3 | 5 |
-| **Total** | **12** | **19** | **3** | **34** |
+| P2 | 5 | 13 | 0 | 18 |
+| P3 | 1 | 2 | 3 | 6 |
+| **Total** | **10** | **25** | **3** | **38** |
 
 ---
 
@@ -48,6 +48,9 @@
 | E34-A6 | Add vitest alias config template to all packages | Epic 34 | Winston | Open |
 | E34-A7 | Document DB cleanup hook patterns | Epic 34 | Murat | Open |
 | E34-A8 | Create lint rule unit test template | Epic 34 | Barry | Open |
+| E41-A4 | Add @deprecated JSDoc to explicit accessToken arg in api-client.ts | Epic 41 | Dev | Done |
+| E41-A5 | Update project-context.md with Backoffice API Client section | Epic 41 | Tech Writer | Done |
+| E41-A8 | For future bulk migration stories: enumerate every target in story AC | Epic 41 | SM | Done |
 | E31-A1 | Document canonical test fixture pattern | Epic 31 | Tech Writer | Done |
 | E31-A2 | Add adapter deletion checklist to extraction stories | Epic 31 | Tech Writer | Done |
 
@@ -57,7 +60,9 @@
 
 ## P3 - Low (Backlog)
 
-*(empty — no open P3 items)*
+| ID | Action | From | Owner | Status |
+|----|--------|------|-------|--------|
+| E41-A7 | Set sunset milestone for removing explicit `accessToken` arg from all production call sites | Epic 41 | PM | Backlog |
 
 ---
 
@@ -96,6 +101,10 @@
 | **E30-A4** | Add "monitor the monitoring" section to runbook | Epic 30 | Epic 30 | Added section to `apps/api/src/routes/admin-runbook.ts` |
 | **E31-A1** | Document canonical test fixture pattern | Epic 31 | Epic 31 | Added Canonical Test Fixtures section to AGENTS.md |
 | **E31-A2** | Add adapter deletion checklist to extraction stories | Epic 31 | Epic 31 | Added Extraction Story Checklist section to AGENTS.md |
+| **E40-A1** | API Contract Verification: Verify API endpoints return expected shapes before UI stories | Epic 40 | Epic 40 | Added API Contract Verification section to story template |
+| **E40-A2** | Formal API Gap Tracking: Create process for documenting discovered API gaps | Epic 40 | Epic 40 | Added API Gaps Found table to story template |
+| **E40-A3** | Consistent Story Completion Docs: Ensure all reports have equal depth | Epic 40 | Epic 40 | Created `docs/templates/story-completion-template.md` |
+| **E40-A4** | Per-Button Permission Enforcement: Implement granular checks | Epic 40 | Epic 40 | Created `use-permission.ts` hook and `PermissionButton.tsx` component |
 
 ### P3
 
@@ -170,4 +179,4 @@ Examples:
 - `E8-A1` = Epic 8, Action 1
 - `E15-A2` = Epic 15, Action 2
 
-_Last Updated: 2026-04-08T00:00:00Z_
+_Last Updated: 2026-04-13T00:00:00Z_

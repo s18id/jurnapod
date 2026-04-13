@@ -34,15 +34,35 @@ export class ApiError extends Error {
 }
 
 export type ApiRequestOptions = {
+  /**
+   * @deprecated Use the canonical getStoredAccessToken() path instead.
+   *             This override exists for incremental migration only.
+   *             Do not use in new code.
+   */
   accessToken?: string;  // temporary migration override
   skipAuth?: boolean;    // for public endpoints
 };
 
 export type StreamingRequestOptions = {
+  /**
+   * @deprecated Use the canonical getStoredAccessToken() path instead.
+   *             This override exists for incremental migration only.
+   *             Do not use in new code.
+   */
   accessToken?: string;
   skipAuth?: boolean;
 };
 
+/**
+ * Resolves the access token for API requests.
+ * Resolution order (canonical):
+ *   1. Explicit string arg (legacy compat — avoid using)
+ *   2. options.accessToken override (migration aid only)
+ *   3. getStoredAccessToken() from auth storage (canonical new path)
+ *
+ * @deprecated The explicit string arg is a legacy compat bridge.
+ *             New code should use the canonical getStoredAccessToken() path.
+ */
 function resolveToken(third?: string | ApiRequestOptions): string | undefined {
   if (typeof third === 'string') {
     return third;
@@ -121,6 +141,9 @@ export async function apiStreamingRequest(
 
 // ============================================================================
 // XHR Upload Wrappers (for progress tracking)
+// NOTE: Keep error handling semantics aligned with apiRequest().
+// Any changes to apiRequest's error handling (new codes, retry policy, etc.)
+// should be mirrored here.
 // ============================================================================
 
 export type UploadProgressCallback = (percentage: number) => void;

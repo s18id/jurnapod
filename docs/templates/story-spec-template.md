@@ -12,6 +12,40 @@ So that **{benefit}**.
 
 {Background context, previous work, dependencies, and why this story exists}
 
+---
+
+## API Contract Verification (MANDATORY for UI Stories)
+
+> **Purpose:** Verify all API endpoints return expected contract shapes BEFORE starting UI implementation.
+> *"Endpoint exists" ≠ "Endpoint is complete"*
+
+### Pre-Implementation Checklist
+
+- [ ] Call each API endpoint directly (e.g., via curl, Postman, or API client)
+- [ ] Verify response shape matches API contract in story or shared package
+- [ ] Verify required fields are present and not null/placeholder
+- [ ] Verify authentication/authorization works as expected
+- [ ] Verify error responses (400, 401, 403, 404, 500) are properly shaped
+- [ ] Document any API gaps discovered in the table below
+
+### API Endpoint Verification Results
+
+| Endpoint | Method | Expected Shape | Verified | Notes |
+|----------|--------|----------------|---------|-------|
+| `/api/v1/...` | GET | `{ data: [], pagination: {} }` | ✅/❌ | {notes} |
+
+### API Gaps Found (Document Here)
+
+If any gaps are found, either:
+1. Block story until API is fixed, OR
+2. Document gap and proceed with acknowledgment that UI is built against incomplete contract
+
+| Gap | Impact | Resolution |
+|-----|--------|-----------|
+| {description} | {High/Medium/Low} | {Fixed/Will fix later/Proceeding with known gap} |
+
+---
+
 ## Acceptance Criteria
 
 **AC1: {criterion_name}**
@@ -20,6 +54,20 @@ So that **{benefit}**.
 **Then** {expected_result}
 
 {... more ACs as needed}
+
+## Bulk Migration AC Rule (MANDATORY for Cross-Cutting Refactors)
+
+> When migrating multiple files/functions/hooks (bulk migrations), enumerate **every target explicitly in the AC table below**, not just in the completion report. This closes the loophole where "AC passes but a target was missed."
+
+### Bulk Migration Targets
+
+| # | Target File/Function | Status |
+|---|----------------------|--------|
+| 1 | `path/to/file` | To be migrated |
+| 2 | `path/to/file` | To be migrated |
+| ... | ... | ... |
+
+**AC verification requires:** All rows show "migrated" — partial completion is not acceptance.
 
 ## Test Coverage Criteria
 

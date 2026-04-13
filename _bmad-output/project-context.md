@@ -75,6 +75,27 @@ _Critical rules and patterns. Read before implementing. Follow ALL rules exactly
 - Mantine for backoffice, Ionic for POS
 - Be strict about company/outlet scoping in admin/reporting screens
 
+### Backoffice API Client (`apps/backoffice/src/lib/api-client.ts`)
+
+**Token Resolution Order (canonical):**
+1. Explicit string arg — legacy compat bridge, avoid using
+2. `options.accessToken` — migration aid only, do not use in new code
+3. `getStoredAccessToken()` from auth storage — canonical new path (default for all new code)
+
+**Functions:**
+| Function | Purpose | Use Case |
+|----------|---------|----------|
+| `apiRequest<T>()` | Standard JSON responses | Most API calls, handles 401 refresh/retry |
+| `apiStreamingRequest()` | Streaming/blob responses | Exports, file downloads |
+| `uploadWithProgress()` | XHR upload with progress | File uploads with progress tracking |
+| `applyWithProgress()` | XHR JSON POST with progress | Import apply with progress tracking |
+
+**Rules:**
+- Never pass `accessToken` explicitly in new code — use canonical storage path
+- XHR wrappers (`uploadWithProgress`, `applyWithProgress`) use XMLHttpRequest only where needed (progress events) and return Promises
+- Keep error handling semantics in XHR wrappers aligned with `apiRequest()` (documented in code)
+- See `apps/backoffice/__test__/unit/lib-api-client.test.ts` for behavioral tests
+
 ### Sync Patterns
 - `/sync/push`: Fully transactional (doc + journal in same tx)
 - `/sync/pull`: Delta sync via `updated_after` timestamp
@@ -284,7 +305,17 @@ await pool.execute(`INSERT INTO user_role_assignments...`);
 | `epics.md` | Central index (titles only for plugin parsing) |
 | `epic-{N}.md` | Full definition with goals, stories, success criteria |
 | `epic-{N}.retrospective.md` | Lessons learned |
+| `story-{N}.{M}.md` | Story specification |
+| `story-{N}.{M}.completion.md` | Story completion report |
 | `sprint-status.yaml` | Story status tracking |
+| `action-items.md` | Cross-epic action items tracker |
+
+### Templates
+
+| Template | Location | Purpose |
+|----------|----------|---------|
+| Story Spec | `docs/templates/story-spec-template.md` | Story specification with AC, API verification |
+| Story Completion | `docs/templates/story-completion-template.md` | Story completion report |
 
 ### Epic Documentation Requirements
 Every epic MUST have: definition, retrospective, story tracking in sprint-status.yaml
@@ -357,6 +388,9 @@ await batchInsertItems(companyId, inserts, connection);
 | **Use library functions in tests** | Centralizes schema changes; tests break less |
 | **DB pool cleanup mandatory** | Tests hang without it |
 | **QA from day one** | Validate regressions during story, not after |
+| **API-first requires contract verification** | "Endpoint exists" ≠ "Endpoint is complete" - verify before building UI |
+| **Documentation depth independent of bug count** | Completion reports should be consistent regardless of difficulty |
+| **Permission design ≠ permission implementation** | Route-level checks ≠ per-button visibility |
 
 ---
 
@@ -376,4 +410,4 @@ _bmad-output/
 
 ---
 
-_Last Updated: 2026-04-06_
+_Last Updated: 2026-04-13_
