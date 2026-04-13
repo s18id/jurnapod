@@ -36,12 +36,12 @@ Centralize backoffice bearer token resolution inside `apiRequest()` so UI layers
 
 | Story | Title | Estimate | Priority | Status |
 |-------|-------|----------|----------|--------|
-| 41.1 | API Client Token Resolution | 8h | P0 | ✅ Done |
-| 41.2 | Hook Token Migration | 12h | P0 | ✅ Done |
-| 41.3 | Page/Component Token Migration | 16h | P0 | ✅ Done |
-| 41.4 | Router Cleanup | 4h | P1 | ✅ Done |
-| 41.5 | XHR Wrapper Functions | 6h | P1 | ✅ Done |
-| 41.6 | Final Verification | 2h | P1 | ✅ Done |
+| 41.1 | [API Client Token Resolution](./story-41.1.md) | 8h | P0 | ✅ Done |
+| 41.2 | [Hook Token Migration](./story-41.2.md) | 12h | P0 | ✅ Done |
+| 41.3 | [Page/Component Token Migration](./story-41.3.md) | 16h | P0 | ✅ Done |
+| 41.4 | [Router Cleanup](./story-41.4.md) | 4h | P1 | ✅ Done |
+| 41.5 | [XHR Wrapper Functions](./story-41.5.md) | 6h | P1 | ✅ Done |
+| 41.6 | [Final Verification](./story-41.6.md) | 2h | P1 | ✅ Done |
 
 **Total Estimate:** 48h
 
@@ -49,7 +49,9 @@ Centralize backoffice bearer token resolution inside `apiRequest()` so UI layers
 
 ## Story Details
 
-### Story 41.1: API Client Token Resolution
+### Story 41.1: API Client Token Resolution ✅
+- **Story File:** [story-41.1.md](./story-41.1.md)
+- **Completion Report:** [story-41.1.completion.md](./story-41.1.completion.md)
 
 **Goal:** Extend `apiRequest` to resolve tokens internally and create supporting functions.
 
@@ -70,7 +72,9 @@ Centralize backoffice bearer token resolution inside `apiRequest()` so UI layers
 
 ---
 
-### Story 41.2: Hook Token Migration
+### Story 41.2: Hook Token Migration ✅
+- **Story File:** [story-41.2.md](./story-41.2.md)
+- **Completion Report:** [story-41.2.completion.md](./story-41.2.completion.md)
 
 **Goal:** Remove `accessToken` from all hook signatures.
 
@@ -96,7 +100,9 @@ Centralize backoffice bearer token resolution inside `apiRequest()` so UI layers
 
 ---
 
-### Story 41.3: Page/Component Token Migration
+### Story 41.3: Page/Component Token Migration ✅
+- **Story File:** [story-41.3.md](./story-41.3.md)
+- **Completion Report:** [story-41.3.completion.md](./story-41.3.completion.md)
 
 **Goal:** Remove `accessToken` from page and component props.
 
@@ -115,7 +121,9 @@ Centralize backoffice bearer token resolution inside `apiRequest()` so UI layers
 
 ---
 
-### Story 41.4: Router Cleanup
+### Story 41.4: Router Cleanup ✅
+- **Story File:** [story-41.4.md](./story-41.4.md)
+- **Completion Report:** [story-41.4.completion.md](./story-41.4.completion.md)
 
 **Goal:** Stop forwarding accessToken from router to pages.
 
@@ -128,7 +136,9 @@ Centralize backoffice bearer token resolution inside `apiRequest()` so UI layers
 
 ---
 
-### Story 41.5: XHR Wrapper Functions
+### Story 41.5: XHR Wrapper Functions ✅
+- **Story File:** [story-41.5.md](./story-41.5.md)
+- **Completion Report:** [story-41.5.completion.md](./story-41.5.completion.md)
 
 **Goal:** Create proper wrappers for XHR-based operations.
 
@@ -143,7 +153,9 @@ Centralize backoffice bearer token resolution inside `apiRequest()` so UI layers
 
 ---
 
-### Story 41.6: Final Verification
+### Story 41.6: Final Verification ✅
+- **Story File:** [story-41.6.md](./story-41.6.md)
+- **Completion Report:** [story-41.6.completion.md](./story-41.6.completion.md)
 
 **Goal:** Ensure all changes are stable.
 

@@ -50,7 +50,7 @@ Use existing report types from `@jurnapod/shared`:
 ## Acceptance Criteria
 
 ### AC1: Report Route and Navigation
-- [ ] Create `/reports/receivables-ageing` route and page component
+- [x] Create `/reports/receivables-ageing` route and page component
 - [ ] Add "Receivables Ageing" menu item under Reports section in sidebar
 - [ ] Menu item visibility controlled by:
   - `modules.reports.enabled` (or appropriate module flag)
@@ -58,7 +58,7 @@ Use existing report types from `@jurnapod/shared`:
 - [ ] Follow existing report route patterns (e.g., `/reports/profit-loss`)
 
 ### AC2: Report Filters
-- [ ] Filter panel with:
+- [x] Filter panel with:
   - **As-of Date**: Date picker, default to today
   - **Outlet**: Dropdown (optional, "All Outlets" default)
   - **Customer**: Searchable dropdown (optional, "All Customers" default)
@@ -68,7 +68,7 @@ Use existing report types from `@jurnapod/shared`:
 - [ ] Store filter state in URL query parameters for shareability
 
 ### AC3: Summary Cards
-- [ ] Display summary cards at top of report:
+- [x] Display summary cards at top of report:
   - **Total Outstanding**: Sum of all ageing buckets
   - **Current**: Amount not yet due
   - **Overdue**: Sum of all overdue buckets (1-30 + 31-60 + 61-90 + 90+)
@@ -78,7 +78,7 @@ Use existing report types from `@jurnapod/shared`:
 - [ ] Color coding: Green for Current, Yellow/Orange for Overdue, Red for high % Overdue (>30%)
 
 ### AC4: Ageing Table
-- [ ] Data table with columns:
+- [x] Data table with columns:
   - Customer Name
   - Current (amount not yet due)
   - 1-30 Days (overdue amount)
@@ -93,13 +93,13 @@ Use existing report types from `@jurnapod/shared`:
 - [ ] Handle empty state when no data
 
 ### AC5: Sorting
-- [ ] Make all columns sortable
+- [x] Make all columns sortable
 - [ ] Default sort: Total Outstanding (descending)
 - [ ] Indicate sort direction with icons
 - [ ] Support multi-column sort (optional enhancement)
 
 ### AC6: CSV Export
-- [ ] "Export CSV" button in toolbar
+- [x] "Export CSV" button in toolbar
 - [ ] Export includes all columns from the table
 - [ ] Filename format: `receivables-ageing-{as-of-date}.csv`
 - [ ] Include report metadata in CSV (as-of date, generated at, filters applied)
@@ -112,7 +112,7 @@ Use existing report types from `@jurnapod/shared`:
 - [ ] Hover tooltip showing invoice breakdown (optional enhancement)
 
 ### AC8: Data Hook
-- [ ] Create `useReceivablesAgeing()` hook in `apps/backoffice/src/hooks/`
+- [x] Create `useReceivablesAgeing()` hook in `apps/backoffice/src/hooks/`
 - [ ] Hook signature:
   ```typescript
   function useReceivablesAgeing(params: {

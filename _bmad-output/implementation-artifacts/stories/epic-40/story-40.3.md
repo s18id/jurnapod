@@ -44,7 +44,7 @@ Import schemas/types from `@jurnapod/shared`:
 ## Acceptance Criteria
 
 ### AC1: List View
-- [ ] Create `/sales-orders` route and page component
+- [x] Create `/sales-orders` route and page component
 - [ ] Display paginated list of sales orders with columns:
   - Order Number
   - Customer Name
@@ -63,7 +63,7 @@ Import schemas/types from `@jurnapod/shared`:
 - [ ] Show empty state when no orders exist
 
 ### AC2: Create Sales Order
-- [ ] Create new order form at `/sales-orders/new`
+- [x] Create new order form at `/sales-orders/new`
 - [ ] Form fields:
   - Customer (searchable dropdown)
   - Order Date
@@ -85,7 +85,7 @@ Import schemas/types from `@jurnapod/shared`:
 - [ ] Show success/error notifications
 
 ### AC3: Edit Sales Order
-- [ ] Edit form accessible at `/sales-orders/:id/edit`
+- [x] Edit form accessible at `/sales-orders/:id/edit`
 - [ ] Only allow editing when status is "Draft" or "Confirmed"
 - [ ] Pre-populate form with existing data
 - [ ] Same validation as create form
@@ -94,7 +94,7 @@ Import schemas/types from `@jurnapod/shared`:
 - [ ] Handle concurrent edit conflicts gracefully
 
 ### AC4: Sales Order Detail View
-- [ ] Detail view at `/sales-orders/:id`
+- [x] Detail view at `/sales-orders/:id`
 - [ ] Display:
   - Order header info (number, dates, status, customer)
   - Outlet information
@@ -110,7 +110,7 @@ Import schemas/types from `@jurnapod/shared`:
   - Back to list
 
 ### AC5: Convert to Invoice Workflow
-- [ ] "Convert to Invoice" button in detail view for Confirmed orders
+- [x] "Convert to Invoice" button in detail view for Confirmed orders
 - [ ] Open conversion modal with preview:
   - Order summary (number, customer, total)
   - Invoice date selection (default today)
@@ -134,7 +134,7 @@ Import schemas/types from `@jurnapod/shared`:
   - Keep modal open for user to review
 
 ### AC6: Cancel Order
-- [ ] "Cancel" button in detail view for Draft/Confirmed orders
+- [x] "Cancel" button in detail view for Draft/Confirmed orders
 - [ ] Confirmation modal requiring reason input
 - [ ] Call `POST /api/v1/sales/orders/:id/cancel` (or equivalent endpoint)
 - [ ] Show success notification
@@ -142,7 +142,7 @@ Import schemas/types from `@jurnapod/shared`:
 - [ ] Show cancel reason in audit trail
 
 ### AC7: Navigation and Permissions
-- [ ] Add "Sales Orders" menu item under Sales section in sidebar
+- [x] Add "Sales Orders" menu item under Sales section in sidebar
 - [ ] Menu item visibility controlled by `modules.sales.enabled`
 - [ ] Enforce ACL permissions:
   - List/View: `sales.orders.READ`
@@ -153,7 +153,7 @@ Import schemas/types from `@jurnapod/shared`:
 - [ ] Hide action buttons when user lacks permission
 
 ### AC8: Data Hooks
-- [ ] Create `useSalesOrders()` hook for listing with filters in `apps/backoffice/src/hooks/`
+- [x] Create `useSalesOrders()` hook for listing with filters in `apps/backoffice/src/hooks/`
 - [ ] Create `useSalesOrder(id)` hook for detail fetching
 - [ ] Create `useCreateSalesOrder()` hook for creation
 - [ ] Create `useUpdateSalesOrder(id)` hook for updates
