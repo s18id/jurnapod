@@ -122,3 +122,25 @@ treasury    transactions
 **Note:** Old module-level entries (users, roles, companies, outlets, settings, accounts, journals, cash_bank with NULL resource) were **kept for backward compatibility**. The new `module.resource` entries are in place alongside them. Full cleanup of old entries can be done in a separate cleanup story if needed.
 
 **Epic Status:** Updated to `done` in sprint-status.yaml
+
+### Post-Completion Stabilization (2026-04-13)
+
+**API Test Verification — Managed Server Batch Runner:**
+
+| Test File | Tests | Result |
+|-----------|-------|--------|
+| `cash-bank/create.test.ts` | — | ✅ Passed |
+| `settings/module-roles.test.ts` | — | ✅ Passed |
+| `roles/create.test.ts` | — | ✅ Passed |
+| `roles/update.test.ts` | — | ✅ Passed |
+| `users/create.test.ts` | — | ✅ Passed |
+| `settings/config-get.test.ts` | — | ✅ Passed |
+
+**Result: 6 files passed, 45 tests passed.**
+
+**Stabilization fixes applied:**
+- Canonical permission source consolidated to `packages/shared/src/constants/roles.defaults.json`
+- Seed script imports canonical JSON directly and transforms to API format
+- settings-config response normalizes `value_type` to API shape (`int` → `number`)
+- users role-level query enforces tenant scoping with `ura.company_id`
+- `uq_module_role` unique constraint verified present (migration 0147)

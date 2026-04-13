@@ -411,6 +411,52 @@ ALTER TABLE module_roles ADD INDEX idx_resource (resource);
 - [x] All tests pass
 - [x] TypeScript typecheck passes on all packages
 
+## Post-Completion Stabilization (2026-04-13)
+
+### Canonical Permission Source
+
+Permission matrix canonical source is now a single JSON file:
+
+```
+packages/shared/src/constants/roles.defaults.json
+```
+
+This JSON is imported directly by:
+- `permission-matrix.ts` (TypeScript re-export with types)
+- `apps/api/src/lib/companies.ts` (imports `MODULE_ROLE_DEFAULTS_API`)
+- `packages/db/scripts/seed.mjs` (runtime import for seeding)
+
+The seed script transforms the canonical JSON to API format at runtime rather than maintaining separate copies.
+
+### DB Seed Flow for Integration Readiness
+
+```bash
+npm run db:migrate -w @jurnapod/db
+npm run db:seed -w @jurnapod/db
+npm run db:seed:test-accounts -w @jurnapod/db
+```
+
+### API Test Verification (2026-04-13)
+
+Targeted API integration tests were reverified using managed server batch runner:
+
+| Test File | Result |
+|-----------|--------|
+| `cash-bank/create.test.ts` | ✅ Passed |
+| `settings/module-roles.test.ts` | ✅ Passed |
+| `roles/create.test.ts` | ✅ Passed |
+| `roles/update.test.ts` | ✅ Passed |
+| `users/create.test.ts` | ✅ Passed |
+| `settings/config-get.test.ts` | ✅ Passed |
+
+**Result: 6 files passed, 45 tests passed.**
+
+### Stabilization Fixes Applied
+
+1. **settings-config response normalization** — `value_type` now normalized to API shape (`int` → `number`) for consistent contract
+2. **users role-level query** — Now enforces tenant scoping with `ura.company_id` in JOIN
+3. **unique constraint verified** — `uq_module_role` exists on `module_roles` (migration 0147), confirming naming consistency
+
 ## Implementation Phases
 
 ### Phase 1A: Shared Package Foundation
