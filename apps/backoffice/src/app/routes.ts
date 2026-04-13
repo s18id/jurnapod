@@ -99,6 +99,12 @@ export const APP_ROUTES: readonly AppRoute[] = [
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "sales"
   },
+  {
+    path: "/sales-orders",
+    label: "Sales Orders",
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "sales"
+  },
 
   // === POS ===
   {

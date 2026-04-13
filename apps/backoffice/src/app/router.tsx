@@ -72,6 +72,7 @@ const PosTransactionsPage = lazyNamed(loadPagesModule, "PosTransactionsPage");
 const SalesInvoicesPage = lazyNamed(loadPagesModule, "SalesInvoicesPage");
 const SalesPaymentsPage = lazyNamed(loadPagesModule, "SalesPaymentsPage");
 const SalesCreditNotesPage = lazyNamed(loadPagesModule, "SalesCreditNotesPage");
+const SalesOrdersPage = lazyNamed(loadPagesModule, "SalesOrdersPage");
 const SuppliesPage = lazyNamed(loadPagesModule, "SuppliesPage");
 const AccountMappingsPage = lazyNamed(loadPagesModule, "AccountMappingsPage");
 const FeatureSettingsPage = lazyNamed(loadPagesModule, "FeatureSettingsPage");
@@ -220,6 +221,9 @@ function RouteScreen(props: { path: string; user: SessionUser; accessToken: stri
   }
   if (props.path === "/sales-credit-notes") {
     return renderLazyPage(<SalesCreditNotesPage user={props.user} accessToken={props.accessToken} />);
+  }
+  if (props.path === "/sales-orders") {
+    return renderLazyPage(<SalesOrdersPage user={props.user} accessToken={props.accessToken} />);
   }
   if (props.path === "/pos-transactions") {
     return renderLazyPage(<PosTransactionsPage user={props.user} accessToken={props.accessToken} />);
