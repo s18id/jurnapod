@@ -10,6 +10,7 @@ import { closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
+  loginForTest,
   getSeedSyncContext as loadSeedSyncContext,
   createTestUser,
   createTestRole,
@@ -19,14 +20,39 @@ import {
 import { buildPermissionMask } from '@jurnapod/auth';
 
 let baseUrl: string;
+let ownerToken: string;
+let sharedAdminToken: string;
+let testPassword: string;
 
 describe('public-pages', { timeout: 30000 }, () => {
   let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
-  const getSeedSyncContext = async () => seedCtx;
 
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     seedCtx = await loadSeedSyncContext();
+
+    ownerToken = await getTestAccessToken(baseUrl);
+    const companyCode = process.env.JP_COMPANY_CODE;
+    const ownerPassword = process.env.JP_OWNER_PASSWORD;
+    if (!companyCode || !ownerPassword) {
+      throw new Error('JP_COMPANY_CODE and JP_OWNER_PASSWORD must be set for settings pages tests');
+    }
+    testPassword = ownerPassword;
+
+    const sharedAdminUser = await createTestUser(seedCtx.companyId, {
+      email: `settings-public-shared-${Date.now()}@example.com`,
+      password: testPassword
+    });
+    const sharedRole = await createTestRole(baseUrl, ownerToken, 'Settings Public Shared');
+    await assignUserGlobalRole(sharedAdminUser.id, sharedRole.id);
+    await setModulePermission(
+      seedCtx.companyId,
+      sharedRole.id,
+      'platform',
+      'settings',
+      buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
+    );
+    sharedAdminToken = await loginForTest(baseUrl, companyCode, sharedAdminUser.email, testPassword);
   });
 
   afterAll(async () => {
@@ -40,53 +66,13 @@ describe('public-pages', { timeout: 30000 }, () => {
   });
 
   it('returns published page without auth', async () => {
-    const ownerToken = await getTestAccessToken(baseUrl);
-    const context = await getSeedSyncContext();
     const uniqueSlug = `public-page-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    
-    // Create user with settings create permission
-    const adminUser = await createTestUser(context.companyId, {
-      email: `settings-public-${Date.now()}@example.com`
-    });
-    const role = await createTestRole(baseUrl, ownerToken, 'Settings Public Publisher');
-    await assignUserGlobalRole(adminUser.id, role.id);
-    await setModulePermission(
-      context.companyId,
-      role.id,
-      'platform',
-      'settings',
-      buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
-    );
-
-    // Get token for admin user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: adminUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
-
-    if (!adminToken) {
-      expect(true).toBe(true);
-      return;
-    }
 
     // Create a PUBLISHED page
     const createRes = await fetch(`${baseUrl}/api/settings/pages`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${adminToken}`,
+        'Authorization': `Bearer ${sharedAdminToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -118,53 +104,13 @@ describe('public-pages', { timeout: 30000 }, () => {
   });
 
   it('does not return DRAFT page', async () => {
-    const ownerToken = await getTestAccessToken(baseUrl);
-    const context = await getSeedSyncContext();
     const uniqueSlug = `draft-page-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    
-    // Create user with settings create permission
-    const adminUser = await createTestUser(context.companyId, {
-      email: `settings-draft-public-${Date.now()}@example.com`
-    });
-    const role = await createTestRole(baseUrl, ownerToken, 'Settings Public Draft');
-    await assignUserGlobalRole(adminUser.id, role.id);
-    await setModulePermission(
-      context.companyId,
-      role.id,
-      'platform',
-      'settings',
-      buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
-    );
-
-    // Get token for admin user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: adminUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
-
-    if (!adminToken) {
-      expect(true).toBe(true);
-      return;
-    }
 
     // Create a DRAFT page
     const createRes = await fetch(`${baseUrl}/api/settings/pages`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${adminToken}`,
+        'Authorization': `Bearer ${sharedAdminToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -188,53 +134,13 @@ describe('public-pages', { timeout: 30000 }, () => {
   });
 
   it('returns 404 for unpublished page', async () => {
-    const ownerToken = await getTestAccessToken(baseUrl);
-    const context = await getSeedSyncContext();
     const uniqueSlug = `unpub-page-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    
-    // Create user with settings create and update permission
-    const adminUser = await createTestUser(context.companyId, {
-      email: `settings-unpub-public-${Date.now()}@example.com`
-    });
-    const role = await createTestRole(baseUrl, ownerToken, 'Settings Public Unpublish');
-    await assignUserGlobalRole(adminUser.id, role.id);
-    await setModulePermission(
-      context.companyId,
-      role.id,
-      'platform',
-      'settings',
-      buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
-    );
-
-    // Get token for admin user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: adminUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
-
-    if (!adminToken) {
-      expect(true).toBe(true);
-      return;
-    }
 
     // Create a PUBLISHED page
     const createRes = await fetch(`${baseUrl}/api/settings/pages`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${adminToken}`,
+        'Authorization': `Bearer ${sharedAdminToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -257,7 +163,7 @@ describe('public-pages', { timeout: 30000 }, () => {
     await fetch(`${baseUrl}/api/settings/pages/${pageId}/unpublish`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${adminToken}`,
+        'Authorization': `Bearer ${sharedAdminToken}`,
         'Content-Type': 'application/json'
       }
     });
@@ -270,53 +176,13 @@ describe('public-pages', { timeout: 30000 }, () => {
   });
 
   it('returns content_html rendered from markdown', async () => {
-    const ownerToken = await getTestAccessToken(baseUrl);
-    const context = await getSeedSyncContext();
     const uniqueSlug = `markdown-page-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    
-    // Create user with settings create permission
-    const adminUser = await createTestUser(context.companyId, {
-      email: `settings-md-public-${Date.now()}@example.com`
-    });
-    const role = await createTestRole(baseUrl, ownerToken, 'Settings Public Markdown');
-    await assignUserGlobalRole(adminUser.id, role.id);
-    await setModulePermission(
-      context.companyId,
-      role.id,
-      'platform',
-      'settings',
-      buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
-    );
-
-    // Get token for admin user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: adminUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
-
-    if (!adminToken) {
-      expect(true).toBe(true);
-      return;
-    }
 
     // Create a page with markdown content
     const createRes = await fetch(`${baseUrl}/api/settings/pages`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${adminToken}`,
+        'Authorization': `Bearer ${sharedAdminToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({

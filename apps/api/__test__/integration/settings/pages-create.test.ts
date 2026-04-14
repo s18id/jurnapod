@@ -10,6 +10,7 @@ import { closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
+  loginForTest,
   getSeedSyncContext as loadSeedSyncContext,
   createTestUser,
   createTestRole,
@@ -22,6 +23,9 @@ import { buildPermissionMask } from '@jurnapod/auth';
 
 let baseUrl: string;
 let cashierToken: string;
+let sharedAdminToken: string;
+let sharedLimitedToken: string;
+let testPassword: string;
 
 describe('pages-create', { timeout: 30000 }, () => {
   let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
@@ -31,6 +35,36 @@ describe('pages-create', { timeout: 30000 }, () => {
     baseUrl = getTestBaseUrl();
     cashierToken = await getTestAccessToken(baseUrl);
     seedCtx = await loadSeedSyncContext();
+
+    const companyCode = process.env.JP_COMPANY_CODE;
+    const ownerPassword = process.env.JP_OWNER_PASSWORD;
+    if (!companyCode || !ownerPassword) {
+      throw new Error('JP_COMPANY_CODE and JP_OWNER_PASSWORD must be set for settings pages tests');
+    }
+    testPassword = ownerPassword;
+
+    const sharedAdminUser = await createTestUser(seedCtx.companyId, {
+      email: `settings-create-shared-${Date.now()}@example.com`,
+      password: testPassword
+    });
+    const sharedRole = await createTestRole(baseUrl, cashierToken, 'Settings Creator Shared');
+    await assignUserGlobalRole(sharedAdminUser.id, sharedRole.id);
+    await setModulePermission(
+      seedCtx.companyId,
+      sharedRole.id,
+      'platform',
+      'settings',
+      buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
+    );
+    sharedAdminToken = await loginForTest(baseUrl, companyCode, sharedAdminUser.email, testPassword);
+
+    const sharedLimitedUser = await createTestUser(seedCtx.companyId, {
+      email: `settings-create-limited-${Date.now()}@example.com`,
+      password: testPassword
+    });
+    const cashierRoleId = await getRoleIdByCode('CASHIER');
+    await assignUserGlobalRole(sharedLimitedUser.id, cashierRoleId);
+    sharedLimitedToken = await loginForTest(baseUrl, companyCode, sharedLimitedUser.email, testPassword);
   });
 
   afterAll(async () => {
@@ -52,43 +86,10 @@ describe('pages-create', { timeout: 30000 }, () => {
   });
 
   it('returns 403 when user lacks settings create permission', async () => {
-    const context = await getSeedSyncContext();
-    
-    // Create a user without settings permission
-    const limitedUser = await createTestUser(context.companyId, {
-      email: `limited-create-${Date.now()}@example.com`
-    });
-    const roleId = await getRoleIdByCode('CASHIER');
-    await assignUserGlobalRole(limitedUser.id, roleId);
-
-    // Get token for limited user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: limitedUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const limitedToken = loginBody.data?.access_token;
-
-    if (!limitedToken) {
-      expect(true).toBe(true);
-      return;
-    }
-
     const res = await fetch(`${baseUrl}/api/settings/pages`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${limitedToken}`,
+        'Authorization': `Bearer ${sharedLimitedToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -119,29 +120,7 @@ describe('pages-create', { timeout: 30000 }, () => {
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
 
-    // Get token for admin user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: adminUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
-
-    if (!adminToken) {
-      expect(true).toBe(true);
-      return;
-    }
+    const adminToken = sharedAdminToken;
 
     const res = await fetch(`${baseUrl}/api/settings/pages`, {
       method: 'POST',
@@ -188,29 +167,7 @@ describe('pages-create', { timeout: 30000 }, () => {
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
 
-    // Get token for admin user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: adminUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
-
-    if (!adminToken) {
-      expect(true).toBe(true);
-      return;
-    }
+    const adminToken = sharedAdminToken;
 
     // Test with invalid slug containing uppercase and special characters
     const res = await fetch(`${baseUrl}/api/settings/pages`, {
@@ -254,29 +211,7 @@ describe('pages-create', { timeout: 30000 }, () => {
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
 
-    // Get token for admin user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: adminUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
-
-    if (!adminToken) {
-      expect(true).toBe(true);
-      return;
-    }
+    const adminToken = sharedAdminToken;
 
     // Create first page with the slug
     const firstRes = await fetch(`${baseUrl}/api/settings/pages`, {
@@ -340,29 +275,7 @@ describe('pages-create', { timeout: 30000 }, () => {
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
 
-    // Get token for admin user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: adminUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
-
-    if (!adminToken) {
-      expect(true).toBe(true);
-      return;
-    }
+    const adminToken = sharedAdminToken;
 
     const res = await fetch(`${baseUrl}/api/settings/pages`, {
       method: 'POST',
@@ -404,29 +317,7 @@ describe('pages-create', { timeout: 30000 }, () => {
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
 
-    // Get token for admin user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: adminUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
-
-    if (!adminToken) {
-      expect(true).toBe(true);
-      return;
-    }
+    const adminToken = sharedAdminToken;
 
     // Missing title
     const res = await fetch(`${baseUrl}/api/settings/pages`, {

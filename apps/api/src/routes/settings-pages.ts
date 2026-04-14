@@ -243,6 +243,10 @@ adminPagesRoutes.post("/:id/publish", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid page ID", 400);
     }
 
+    if (error instanceof StaticPageNotFoundError) {
+      return errorResponse("NOT_FOUND", "Page not found", 404);
+    }
+
     console.error("POST /settings/pages/:id/publish failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to publish page", 500);
   }
@@ -558,6 +562,9 @@ export const registerSettingsPageRoutes = (app: OpenAPIHonoInterface): void => {
       } catch (error) {
         if (error instanceof z.ZodError) {
           return c.json({ success: false, error: { code: "INVALID_REQUEST", message: "Invalid page ID" } }, 400);
+        }
+        if (error instanceof StaticPageNotFoundError) {
+          return c.json({ success: false, error: { code: "NOT_FOUND", message: "Page not found" } }, 404);
         }
         console.error("POST /settings/pages/:id/publish failed", error);
         return c.json({ success: false, error: { code: "INTERNAL_SERVER_ERROR", message: "Failed to publish page" } }, 500);

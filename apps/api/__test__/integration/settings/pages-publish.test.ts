@@ -23,8 +23,9 @@ import { buildPermissionMask } from '@jurnapod/auth';
 let baseUrl: string;
 let cashierToken: string;
 let sharedContext: Awaited<ReturnType<typeof loadSeedSyncContext>>;
-const getSeedSyncContext = async () => sharedContext;
 let sharedAdminToken: string;
+let sharedLimitedToken: string;
+let testPassword: string;
 
 describe('pages-publish', { timeout: 30000 }, () => {
   beforeAll(async () => {
@@ -37,10 +38,11 @@ describe('pages-publish', { timeout: 30000 }, () => {
     if (!companyCode || !ownerPassword) {
       throw new Error('JP_COMPANY_CODE and JP_OWNER_PASSWORD must be set for settings pages tests');
     }
+    testPassword = ownerPassword;
 
     const sharedAdminUser = await createTestUser(sharedContext.companyId, {
       email: `settings-publish-shared-${Date.now()}@example.com`,
-      password: ownerPassword
+      password: testPassword
     });
     const sharedRole = await createTestRole(baseUrl, cashierToken, 'Settings Publisher Shared');
     await assignUserGlobalRole(sharedAdminUser.id, sharedRole.id);
@@ -52,7 +54,15 @@ describe('pages-publish', { timeout: 30000 }, () => {
       buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
     );
 
-    sharedAdminToken = await loginForTest(baseUrl, companyCode, sharedAdminUser.email, ownerPassword);
+    sharedAdminToken = await loginForTest(baseUrl, companyCode, sharedAdminUser.email, testPassword);
+
+    const limitedUser = await createTestUser(sharedContext.companyId, {
+      email: `settings-publish-limited-${Date.now()}@example.com`,
+      password: testPassword
+    });
+    const cashierRoleId = await getRoleIdByCode('CASHIER');
+    await assignUserGlobalRole(limitedUser.id, cashierRoleId);
+    sharedLimitedToken = await loginForTest(baseUrl, companyCode, limitedUser.email, testPassword);
   });
 
   afterAll(async () => {
@@ -68,43 +78,10 @@ describe('pages-publish', { timeout: 30000 }, () => {
   });
 
   it('returns 403 when user lacks settings update permission', async () => {
-    const context = await getSeedSyncContext();
-    
-    // Create a user without settings permission
-    const limitedUser = await createTestUser(context.companyId, {
-      email: `limited-publish-${Date.now()}@example.com`
-    });
-    const roleId = await getRoleIdByCode('CASHIER');
-    await assignUserGlobalRole(limitedUser.id, roleId);
-
-    // Get token for limited user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: limitedUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const limitedToken = loginBody.data?.access_token;
-
-    if (!limitedToken) {
-      expect(true).toBe(true);
-      return;
-    }
-
     const res = await fetch(`${baseUrl}/api/settings/pages/1/publish`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${limitedToken}`,
+        'Authorization': `Bearer ${sharedLimitedToken}`,
         'Content-Type': 'application/json'
       }
     });
@@ -113,50 +90,10 @@ describe('pages-publish', { timeout: 30000 }, () => {
   });
 
   it('returns 404 for non-existent page', async () => {
-    const context = await getSeedSyncContext();
-    
-    // Create user with settings update permission
-    const adminUser = await createTestUser(context.companyId, {
-      email: `settings-publish-404-${Date.now()}@example.com`
-    });
-    const role = await createTestRole(baseUrl, cashierToken, 'Settings Publisher');
-    await assignUserGlobalRole(adminUser.id, role.id);
-    await setModulePermission(
-      context.companyId,
-      role.id,
-      'platform',
-      'settings',
-      buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
-    );
-
-    // Get token for admin user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: adminUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
-
-    if (!adminToken) {
-      expect(true).toBe(true);
-      return;
-    }
-
     const res = await fetch(`${baseUrl}/api/settings/pages/999999999/publish`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${adminToken}`,
+        'Authorization': `Bearer ${sharedAdminToken}`,
         'Content-Type': 'application/json'
       }
     });
@@ -165,52 +102,13 @@ describe('pages-publish', { timeout: 30000 }, () => {
   });
 
   it('publishes a DRAFT page', async () => {
-    const context = await getSeedSyncContext();
     const uniqueSlug = `publish-test-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    
-    // Create user with settings create and update permission
-    const adminUser = await createTestUser(context.companyId, {
-      email: `settings-publish-${Date.now()}@example.com`
-    });
-    const role = await createTestRole(baseUrl, cashierToken, 'Settings Publisher Missing');
-    await assignUserGlobalRole(adminUser.id, role.id);
-    await setModulePermission(
-      context.companyId,
-      role.id,
-      'platform',
-      'settings',
-      buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
-    );
-
-    // Get token for admin user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: adminUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
-
-    if (!adminToken) {
-      expect(true).toBe(true);
-      return;
-    }
 
     // Create a DRAFT page
     const createRes = await fetch(`${baseUrl}/api/settings/pages`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${adminToken}`,
+        'Authorization': `Bearer ${sharedAdminToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -233,7 +131,7 @@ describe('pages-publish', { timeout: 30000 }, () => {
     const res = await fetch(`${baseUrl}/api/settings/pages/${pageId}/publish`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${adminToken}`,
+        'Authorization': `Bearer ${sharedAdminToken}`,
         'Content-Type': 'application/json'
       }
     });
@@ -261,52 +159,13 @@ describe('pages-publish', { timeout: 30000 }, () => {
   });
 
   it('allows publishing an already published page (idempotent)', async () => {
-    const context = await getSeedSyncContext();
     const uniqueSlug = `publish-idempotent-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    
-    // Create user with settings create and update permission
-    const adminUser = await createTestUser(context.companyId, {
-      email: `settings-publish-idempotent-${Date.now()}@example.com`
-    });
-    const role = await createTestRole(baseUrl, cashierToken, 'Settings Publisher Idempotent');
-    await assignUserGlobalRole(adminUser.id, role.id);
-    await setModulePermission(
-      context.companyId,
-      role.id,
-      'platform',
-      'settings',
-      buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
-    );
-
-    // Get token for admin user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: adminUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
-
-    if (!adminToken) {
-      expect(true).toBe(true);
-      return;
-    }
 
     // Create an already PUBLISHED page
     const createRes = await fetch(`${baseUrl}/api/settings/pages`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${adminToken}`,
+        'Authorization': `Bearer ${sharedAdminToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -329,7 +188,7 @@ describe('pages-publish', { timeout: 30000 }, () => {
     const res = await fetch(`${baseUrl}/api/settings/pages/${pageId}/publish`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${adminToken}`,
+        'Authorization': `Bearer ${sharedAdminToken}`,
         'Content-Type': 'application/json'
       }
     });

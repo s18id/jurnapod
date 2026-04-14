@@ -10,8 +10,8 @@ import { closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
+  loginForTest,
   getSeedSyncContext as loadSeedSyncContext,
-  createTestCompanyMinimal,
   createTestUser,
   createTestRole,
   assignUserGlobalRole,
@@ -22,15 +22,47 @@ import { buildPermissionMask } from '@jurnapod/auth';
 
 let baseUrl: string;
 let cashierToken: string;
+let sharedAdminToken: string;
+let sharedLimitedToken: string;
+let testPassword: string;
 
 describe('pages-list', { timeout: 30000 }, () => {
   let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
-  const getSeedSyncContext = async () => seedCtx;
 
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     cashierToken = await getTestAccessToken(baseUrl);
     seedCtx = await loadSeedSyncContext();
+
+    const companyCode = process.env.JP_COMPANY_CODE;
+    const ownerPassword = process.env.JP_OWNER_PASSWORD;
+    if (!companyCode || !ownerPassword) {
+      throw new Error('JP_COMPANY_CODE and JP_OWNER_PASSWORD must be set for settings pages tests');
+    }
+    testPassword = ownerPassword;
+
+    const sharedAdminUser = await createTestUser(seedCtx.companyId, {
+      email: `settings-list-shared-${Date.now()}@example.com`,
+      password: testPassword
+    });
+    const sharedRole = await createTestRole(baseUrl, cashierToken, 'Settings Reader Shared');
+    await assignUserGlobalRole(sharedAdminUser.id, sharedRole.id);
+    await setModulePermission(
+      seedCtx.companyId,
+      sharedRole.id,
+      'platform',
+      'settings',
+      buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
+    );
+    sharedAdminToken = await loginForTest(baseUrl, companyCode, sharedAdminUser.email, testPassword);
+
+    const sharedLimitedUser = await createTestUser(seedCtx.companyId, {
+      email: `settings-list-limited-${Date.now()}@example.com`,
+      password: testPassword
+    });
+    const cashierRoleId = await getRoleIdByCode('CASHIER');
+    await assignUserGlobalRole(sharedLimitedUser.id, cashierRoleId);
+    sharedLimitedToken = await loginForTest(baseUrl, companyCode, sharedLimitedUser.email, testPassword);
   });
 
   afterAll(async () => {
@@ -44,45 +76,10 @@ describe('pages-list', { timeout: 30000 }, () => {
   });
 
   it('returns 403 when user lacks settings read permission', async () => {
-    const context = await getSeedSyncContext();
-    
-    // Create a user without settings permission
-    const limitedUser = await createTestUser(context.companyId, {
-      email: `limited-user-${Date.now()}@example.com`
-    });
-    const roleId = await getRoleIdByCode('CASHIER');
-    await assignUserGlobalRole(limitedUser.id, roleId);
-    // No settings module permission set - defaults to no access
-
-    // Get token for limited user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: limitedUser.email,
-        password: process.env.JP_OWNER_PASSWORD // Use default password from env
-      })
-    });
-
-    if (!loginRes.ok) {
-      // If login fails due to password, skip this specific assertion
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const limitedToken = loginBody.data?.access_token;
-
-    if (!limitedToken) {
-      expect(true).toBe(true);
-      return;
-    }
-
     const res = await fetch(`${baseUrl}/api/settings/pages`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${limitedToken}`,
+        'Authorization': `Bearer ${sharedLimitedToken}`,
         'Content-Type': 'application/json'
       }
     });
@@ -91,50 +88,10 @@ describe('pages-list', { timeout: 30000 }, () => {
   });
 
   it('returns 200 with valid token for user with settings read permission', async () => {
-    const context = await getSeedSyncContext();
-    
-    // Create user with settings read permission
-    const adminUser = await createTestUser(context.companyId, {
-      email: `settings-admin-${Date.now()}@example.com`
-    });
-    const role = await createTestRole(baseUrl, cashierToken, 'Settings Reader');
-    await assignUserGlobalRole(adminUser.id, role.id);
-    await setModulePermission(
-      context.companyId,
-      role.id,
-      'platform',
-      'settings',
-      buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
-    );
-
-    // Get token for admin user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: adminUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
-
-    if (!adminToken) {
-      expect(true).toBe(true);
-      return;
-    }
-
     const res = await fetch(`${baseUrl}/api/settings/pages`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${adminToken}`,
+        'Authorization': `Bearer ${sharedAdminToken}`,
         'Content-Type': 'application/json'
       }
     });
@@ -150,28 +107,7 @@ describe('pages-list', { timeout: 30000 }, () => {
   });
 
   it('returns 200 for OWNER/SUPER_ADMIN who bypasses module permissions', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
-
-    if (!ownerToken) {
-      expect(true).toBe(true);
-      return;
-    }
+    const ownerToken = cashierToken;
 
     const res = await fetch(`${baseUrl}/api/settings/pages`, {
       method: 'GET',
@@ -192,50 +128,10 @@ describe('pages-list', { timeout: 30000 }, () => {
   });
 
   it('supports search query parameter', async () => {
-    const context = await getSeedSyncContext();
-    
-    // Create user with settings read permission
-    const adminUser = await createTestUser(context.companyId, {
-      email: `settings-admin-search-${Date.now()}@example.com`
-    });
-    const role = await createTestRole(baseUrl, cashierToken, 'Settings Reader Search');
-    await assignUserGlobalRole(adminUser.id, role.id);
-    await setModulePermission(
-      context.companyId,
-      role.id,
-      'platform',
-      'settings',
-      buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
-    );
-
-    // Get token for admin user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: adminUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
-
-    if (!adminToken) {
-      expect(true).toBe(true);
-      return;
-    }
-
     const res = await fetch(`${baseUrl}/api/settings/pages?q=test`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${adminToken}`,
+        'Authorization': `Bearer ${sharedAdminToken}`,
         'Content-Type': 'application/json'
       }
     });
