@@ -10,7 +10,7 @@
 
 import type { RowDataPacket } from "mysql2/promise";
 import { getDbPool, type KyselySchema } from "../db.js";
-import { sql, CompiledQuery } from "kysely";
+import { CompiledQuery } from "kysely";
 
 // ============================================================================
 // Types

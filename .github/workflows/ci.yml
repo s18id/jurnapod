@@ -117,6 +117,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install DB and seed
+        run: npm run db:migrate && npm run db:seed && npm run db:seed:test-data && npm run db:smoke
+
       - name: Run test server
         run: npm run test-server -w @jurnapod/api &
 

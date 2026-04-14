@@ -5,7 +5,6 @@ import { useCallback, useMemo } from "react";
 import type { SessionUser } from "../lib/session";
 import {
   PERMISSION_BITS,
-  PERMISSION_MASK,
   PERMISSION_MAP,
   type PermissionBit,
 } from "@jurnapod/shared";

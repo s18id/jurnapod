@@ -337,8 +337,7 @@ orderRoutes.post("/:id/convert-to-invoice", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid order ID", 400);
     }
 
-    // Parse optional invoice_date from request body
-    let invoiceDate: string | undefined;
+    // Parse optional invoice_date from request body (validated for future invoice flow)
     let body;
     try {
       body = await c.req.json();
@@ -350,9 +349,7 @@ orderRoutes.post("/:id/convert-to-invoice", async (c) => {
     if (!parsed.success) {
       return errorResponse("INVALID_REQUEST", "Invalid invoice_date", 400);
     }
-    if (parsed.data.invoice_date) {
-      invoiceDate = parsed.data.invoice_date;
-    }
+    void parsed.data.invoice_date;
 
     // Get order first to check status and outlet access
     const order = await orderService.getOrder(auth.companyId, orderId, {
@@ -427,8 +424,7 @@ orderRoutes.post("/:id/cancel", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid order ID", 400);
     }
 
-    // Parse optional reason from request body
-    let reason: string | undefined;
+    // Parse optional reason from request body (validated for future cancellation audit metadata)
     let body;
     try {
       body = await c.req.json();
@@ -440,9 +436,7 @@ orderRoutes.post("/:id/cancel", async (c) => {
     if (!parsed.success) {
       return errorResponse("INVALID_REQUEST", "Invalid reason", 400);
     }
-    if (parsed.data.reason) {
-      reason = parsed.data.reason;
-    }
+    void parsed.data.reason;
 
     // Get order first to check status and outlet access
     const order = await orderService.getOrder(auth.companyId, orderId, {

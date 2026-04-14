@@ -15,11 +15,10 @@
  */
 
 import { Hono } from "hono";
-import { z } from "zod";
 import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { authenticateRequest } from "@/lib/auth-guard";
-import { errorResponse, successResponse } from "@/lib/response";
+import { errorResponse } from "@/lib/response";
 import {
   handleListJournals,
   handleCreateJournal,

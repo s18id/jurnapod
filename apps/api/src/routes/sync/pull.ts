@@ -69,7 +69,7 @@ const syncPullModuleGuard = requireAccess({
   module: "pos",
   resource: "transactions",
   permission: "read",
-  outletId: (request, auth) => {
+  outletId: (request, _auth) => {
     const url = new URL(request.url);
     const outletIdParam = url.searchParams.get("outlet_id");
     if (!outletIdParam) return null;
