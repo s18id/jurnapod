@@ -490,3 +490,13 @@ development_status:
   41-5-xhr-wrapper-functions: done
   41-6-final-verification: done
   epic-41-retrospective: done
+
+  # Epic 42: Test Infrastructure Hardening & Performance
+  epic-42: done
+  42-1-token-seed-context-caching: done
+  42-2-db-transaction-safety: done
+  42-3-test-assertion-quality: done
+  42-4-login-reuse-across-suites: done
+  42-5-beforeall-seedctx-caching: done
+  42-6-final-verification: done
+  epic-42-retrospective: done
