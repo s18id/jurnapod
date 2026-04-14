@@ -272,7 +272,7 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
       db
     );
 
-    return db.transaction("rw", [db.sales, db.products_cache, db.variants_cache, db.sale_items, db.payments, db.outbox_jobs, db.inventory_stock, db.stock_reservations], async () => {
+    const result = await db.transaction("rw", [db.sales, db.products_cache, db.variants_cache, db.sale_items, db.payments, db.outbox_jobs, db.inventory_stock, db.stock_reservations], async () => {
       const completedAt = nowIso();
       const clientTxId = crypto.randomUUID();
       const trxAt = input.trx_at ?? completedAt;
