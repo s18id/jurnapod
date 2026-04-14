@@ -97,7 +97,7 @@ describe('settings-modules.update', { timeout: 30000 }, () => {
     });
 
     // Empty string code passes validation but updateCompanyModule returns ModuleNotFoundError -> 404
-    expect([400, 404, 500]).toContain(res.status);
+    expect([400, 404]).toContain(res.status);
   });
 
   it('returns 404 for non-existent module code', async () => {
@@ -115,7 +115,7 @@ describe('settings-modules.update', { timeout: 30000 }, () => {
     });
 
     // Non-existent module should return 404 or 400 for validation error
-    expect([400, 404, 500]).toContain(res.status);
+    expect([400, 404]).toContain(res.status);
   });
 
   it('returns 200 when modules array is empty', async () => {
@@ -131,7 +131,7 @@ describe('settings-modules.update', { timeout: 30000 }, () => {
     });
 
     // Empty modules array passes schema validation - no modules to update returns 200
-    expect([200, 400, 403, 500]).toContain(res.status);
+    expect([200, 400, 403]).toContain(res.status);
   });
 
   it('returns 400 when missing required fields', async () => {
@@ -146,7 +146,7 @@ describe('settings-modules.update', { timeout: 30000 }, () => {
       })
     });
 
-    expect([400, 403, 500]).toContain(res.status);
+    expect([400, 403]).toContain(res.status);
   });
 
   it('updates multiple modules in single request', async () => {

@@ -42,23 +42,7 @@ describe('companies.update', { timeout: 60000 }, () => {
   });
 
   it('updates company fields for own company', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     // Update the seed company (which the owner belongs to)
     const res = await fetch(`${baseUrl}/api/companies/${companyId}`, {
@@ -84,23 +68,7 @@ describe('companies.update', { timeout: 60000 }, () => {
   });
 
   it('returns 200 for empty update payload (all fields optional)', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/companies/${companyId}`, {
       method: 'PATCH',
@@ -116,23 +84,7 @@ describe('companies.update', { timeout: 60000 }, () => {
   });
 
   it('returns 400 for invalid email format', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/companies/${companyId}`, {
       method: 'PATCH',
@@ -149,23 +101,7 @@ describe('companies.update', { timeout: 60000 }, () => {
   });
 
   it('returns 404 for non-existent company', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/companies/999999`, {
       method: 'PATCH',
@@ -178,7 +114,7 @@ describe('companies.update', { timeout: 60000 }, () => {
       })
     });
 
-    expect([404, 500]).toContain(res.status);
+    expect(res.status).toBe(404);
   });
 
   it('validates company code uniqueness on update', async () => {
@@ -193,23 +129,7 @@ describe('companies.update', { timeout: 60000 }, () => {
       name: 'Company Two'
     });
 
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     // Note: The PATCH endpoint does NOT support updating code.
     // Code uniqueness is validated on CREATE only.
@@ -231,23 +151,7 @@ describe('companies.update', { timeout: 60000 }, () => {
   });
 
   it('allows timezone update', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/companies/${companyId}`, {
       method: 'PATCH',
@@ -290,6 +194,6 @@ describe('companies.update', { timeout: 60000 }, () => {
 
     // Note: The route allows this when user has module permission via role
     // This test documents actual behavior - module permission can grant cross-company access
-    expect([200, 403, 500]).toContain(res.status);
+    expect([200, 403]).toContain(res.status);
   });
 });

@@ -65,23 +65,7 @@ describe('outlets.tenant-scope', { timeout: 30000 }, () => {
   });
 
   it('non-SUPER_ADMIN cannot update outlet from another company', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/outlets/${outletId}?company_id=99999`, {
       method: 'PATCH',
@@ -98,23 +82,7 @@ describe('outlets.tenant-scope', { timeout: 30000 }, () => {
   });
 
   it('non-SUPER_ADMIN cannot delete outlet from another company', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/outlets/${outletId}?company_id=99999`, {
       method: 'DELETE',
@@ -130,23 +98,7 @@ describe('outlets.tenant-scope', { timeout: 30000 }, () => {
   it('SUPER_ADMIN can create outlets in other companies', async () => {
     // This test requires a SUPER_ADMIN token - skip if not available
     // In practice, the seeded SUPER_ADMIN credentials are needed
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     // Create another company to test cross-company outlet creation
     const otherCompany = await createTestCompanyMinimal({
@@ -173,23 +125,7 @@ describe('outlets.tenant-scope', { timeout: 30000 }, () => {
   });
 
   it('lists outlets for own company without company_id param', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/outlets`, {
       method: 'GET',

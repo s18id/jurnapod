@@ -58,7 +58,7 @@ describe('tax-rates.create', { timeout: 30000 }, () => {
     });
 
     // OWNER/SUPER_ADMIN bypasses module permission - expect success
-    expect([200, 201, 400, 409, 500]).toContain(res.status);
+    expect([200, 201, 400, 409]).toContain(res.status);
     
     // If created successfully, register cleanup for the API-side-effect data
     if (res.status === 200 || res.status === 201) {
@@ -126,7 +126,7 @@ describe('tax-rates.create', { timeout: 30000 }, () => {
     });
 
     // 0 is valid, should succeed for owner
-    expect([200, 201, 400, 500]).toContain(res.status);
+    expect([200, 201, 400]).toContain(res.status);
   });
 
   it('validates rate_percent is within 0-100 range - boundary test 100', async () => {
@@ -146,7 +146,7 @@ describe('tax-rates.create', { timeout: 30000 }, () => {
     });
 
     // 100 is valid, should succeed for owner
-    expect([200, 201, 400, 500]).toContain(res.status);
+    expect([200, 201, 400]).toContain(res.status);
   });
 
   it('returns 400 for missing required fields', async () => {

@@ -55,7 +55,7 @@ describe('users.create', { timeout: 30000 }, () => {
       })
     });
     // OWNER bypasses module permission, so this may succeed (200/201) or fail for other reasons
-    expect([200, 201, 400, 500]).toContain(res.status);
+    expect([200, 201, 400]).toContain(res.status);
   });
 
   it('creates user with valid payload when OWNER role bypasses module permission', async () => {

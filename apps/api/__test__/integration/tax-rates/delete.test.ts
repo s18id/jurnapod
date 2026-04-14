@@ -106,7 +106,7 @@ describe('tax-rates.delete', { timeout: 30000 }, () => {
       }
     });
 
-    expect([400, 404, 500]).toContain(res.status);
+    expect([400, 404]).toContain(res.status);
   });
 
   it('prevents deletion of referenced tax rates', async () => {

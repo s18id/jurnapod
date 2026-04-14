@@ -110,7 +110,7 @@ describe('tax-rates.update', { timeout: 30000 }, () => {
       body: JSON.stringify({ name: 'Updated Tax' })
     });
 
-    expect([400, 404, 500]).toContain(res.status);
+    expect([400, 404]).toContain(res.status);
   });
 
   it('returns 400 when rate_percent is negative', async () => {

@@ -238,7 +238,7 @@ describe('settings-modules.extended-update', { timeout: 30000 }, () => {
       })
     });
 
-    expect([400, 403, 500]).toContain(res.status);
+    expect([400, 403]).toContain(res.status);
   });
 
   it('returns 404 for non-existent module code', async () => {
@@ -255,7 +255,7 @@ describe('settings-modules.extended-update', { timeout: 30000 }, () => {
       })
     });
 
-    expect([400, 404, 500]).toContain(res.status);
+    expect([400, 404]).toContain(res.status);
   });
 
   it('returns 400 when modules array is empty', async () => {
@@ -270,7 +270,7 @@ describe('settings-modules.extended-update', { timeout: 30000 }, () => {
       })
     });
 
-    expect([400, 403, 500]).toContain(res.status);
+    expect([400, 403]).toContain(res.status);
   });
 
   it('returns 400 when missing required fields', async () => {
@@ -285,7 +285,7 @@ describe('settings-modules.extended-update', { timeout: 30000 }, () => {
       })
     });
 
-    expect([400, 403, 500]).toContain(res.status);
+    expect([400, 403]).toContain(res.status);
   });
 
   it('updates multiple modules with different typed settings', async () => {

@@ -38,23 +38,7 @@ describe('outlets.access', { timeout: 30000 }, () => {
   });
 
   it('returns 400 when outlet_id parameter is missing', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/outlets/access`, {
       method: 'GET',
@@ -68,23 +52,7 @@ describe('outlets.access', { timeout: 30000 }, () => {
   });
 
   it('returns 400 for invalid outlet_id format', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/outlets/access?outlet_id=invalid`, {
       method: 'GET',
@@ -98,23 +66,7 @@ describe('outlets.access', { timeout: 30000 }, () => {
   });
 
   it('returns access granted for valid outlet', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/outlets/access?outlet_id=${outletId}`, {
       method: 'GET',
@@ -135,23 +87,7 @@ describe('outlets.access', { timeout: 30000 }, () => {
   });
 
   it('returns 403 for outlet user has no access to', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     // Try to access a non-existent outlet
     const res = await fetch(`${baseUrl}/api/outlets/access?outlet_id=999999`, {
@@ -164,6 +100,6 @@ describe('outlets.access', { timeout: 30000 }, () => {
 
     // Non-existent outlet - depends on RBAC implementation
     // May return 200 if owner bypasses outlet access check, or 403/404/500 otherwise
-    expect([200, 403, 404, 500]).toContain(res.status);
+    expect([200, 403, 404]).toContain(res.status);
   });
 });

@@ -38,23 +38,7 @@ describe('outlets.get-by-id', { timeout: 30000 }, () => {
   });
 
   it('returns 404 for non-existent outlet', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/outlets/999999`, {
       method: 'GET',
@@ -69,23 +53,7 @@ describe('outlets.get-by-id', { timeout: 30000 }, () => {
   });
 
   it('returns 400 for invalid outlet ID format', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/outlets/invalid`, {
       method: 'GET',
@@ -112,23 +80,7 @@ describe('outlets.get-by-id', { timeout: 30000 }, () => {
   });
 
   it('returns 400 when requesting another company outlet', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/outlets/${outletId}?company_id=99999`, {
       method: 'GET',

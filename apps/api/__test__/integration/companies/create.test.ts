@@ -10,17 +10,30 @@ import { closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
+  loginForTest,
   getSeedSyncContext,
   registerFixtureCleanup
 } from '../../fixtures';
 
 let baseUrl: string;
 let accessToken: string;
+let superAdminToken: string | null = null;
 
 describe('companies.create', { timeout: 30000 }, () => {
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
+
+    const companyCode = process.env.JP_COMPANY_CODE;
+    const superAdminEmail = process.env.JP_SUPER_ADMIN_EMAIL;
+    const superAdminPassword = process.env.JP_SUPER_ADMIN_PASSWORD;
+    if (companyCode && superAdminEmail && superAdminPassword) {
+      try {
+        superAdminToken = await loginForTest(baseUrl, companyCode, superAdminEmail, superAdminPassword);
+      } catch {
+        superAdminToken = null;
+      }
+    }
   });
 
   afterAll(async () => {
@@ -61,29 +74,12 @@ describe('companies.create', { timeout: 30000 }, () => {
   });
 
   it('creates company with valid SUPER_ADMIN credentials', async () => {
-    // Note: JP_SUPER_ADMIN_EMAIL may not exist in test DB (platform-level user)
-    // If no SUPER_ADMIN exists, skip the test
-    const superAdminEmail = process.env.JP_SUPER_ADMIN_EMAIL;
-    const superAdminPassword = process.env.JP_SUPER_ADMIN_PASSWORD;
-    
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: superAdminEmail,
-        password: superAdminPassword
-      })
-    });
-
-    if (!loginRes.ok) {
-      // SUPER_ADMIN may not exist in test DB - skip if login fails
+    if (!superAdminToken) {
+      // SUPER_ADMIN may not exist in test DB - skip
       expect(true).toBe(true);
       return;
     }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
+    const adminToken = superAdminToken;
 
     const uniqueCode = `CO-NEW-${Date.now()}`;
     const res = await fetch(`${baseUrl}/api/companies`, {
@@ -124,25 +120,12 @@ describe('companies.create', { timeout: 30000 }, () => {
   });
 
   it('returns 400 for missing required fields', async () => {
-    // Use SUPER_ADMIN credentials - endpoint requires SUPER_ADMIN role
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_SUPER_ADMIN_EMAIL,
-        password: process.env.JP_SUPER_ADMIN_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      // SUPER_ADMIN may not exist in test DB - skip if login fails
+    if (!superAdminToken) {
+      // SUPER_ADMIN may not exist in test DB - skip
       expect(true).toBe(true);
       return;
     }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
+    const adminToken = superAdminToken;
 
     const res = await fetch(`${baseUrl}/api/companies`, {
       method: 'POST',
@@ -158,25 +141,12 @@ describe('companies.create', { timeout: 30000 }, () => {
   });
 
   it('returns 400 for invalid email format', async () => {
-    // Use SUPER_ADMIN credentials to properly reach validation (400) not auth rejection (403)
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_SUPER_ADMIN_EMAIL,
-        password: process.env.JP_SUPER_ADMIN_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      // SUPER_ADMIN may not exist in test DB - skip if login fails
+    if (!superAdminToken) {
+      // SUPER_ADMIN may not exist in test DB - skip
       expect(true).toBe(true);
       return;
     }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
+    const adminToken = superAdminToken;
 
     const uniqueCode = `CO-EMAIL-${Date.now()}`;
     const res = await fetch(`${baseUrl}/api/companies`, {
@@ -197,25 +167,12 @@ describe('companies.create', { timeout: 30000 }, () => {
   });
 
   it('returns 409 for duplicate company code', async () => {
-    // Use SUPER_ADMIN credentials to properly reach business logic (409) not auth rejection (403)
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_SUPER_ADMIN_EMAIL,
-        password: process.env.JP_SUPER_ADMIN_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      // SUPER_ADMIN may not exist in test DB - skip if login fails
+    if (!superAdminToken) {
+      // SUPER_ADMIN may not exist in test DB - skip
       expect(true).toBe(true);
       return;
     }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
+    const adminToken = superAdminToken;
 
     // Use the seed company code which should already exist
     const seedCompanyCode = process.env.JP_COMPANY_CODE;

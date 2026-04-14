@@ -51,24 +51,8 @@ describe('outlets.list', { timeout: 30000 }, () => {
   });
 
   it('lists outlets for authenticated company', async () => {
-    // Login with owner credentials to bypass permission check
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    // Use suite-level owner token to bypass permission check
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/outlets`, {
       method: 'GET',

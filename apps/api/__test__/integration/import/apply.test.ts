@@ -131,7 +131,8 @@ describe('import.apply', { timeout: 30000 }, () => {
 
   it('updates existing items via apply', async () => {
     const timestamp = Date.now();
-    const sku = `APPLY-UPD-${timestamp}`;
+    const nonce = Math.random().toString(36).slice(2, 8).toUpperCase();
+    const sku = `APPLY-UPD-${timestamp}-${nonce}`;
     
     // Create an existing item first (using PRODUCT type which is valid in DB)
     const existingItem = await createTestItem(companyId, { 
@@ -139,6 +140,15 @@ describe('import.apply', { timeout: 30000 }, () => {
       name: 'Original Name',
       type: 'PRODUCT'
     });
+
+    // Precondition guard: fixture helper may return existing row on SKU conflict.
+    // Ensure this test starts from the expected original value.
+    const db = (await import('../../helpers/db')).getTestDb();
+    const beforeItem = await db.selectFrom('items')
+      .where('id', '=', existingItem.id)
+      .select('name')
+      .executeTakeFirst();
+    expect(beforeItem?.name).toBe('Original Name');
 
     // Upload file with same SKU but different name
     const uploadId = await uploadTestFile('items', 
@@ -166,7 +176,6 @@ describe('import.apply', { timeout: 30000 }, () => {
     expect(body.data.updated).toBe(1);
     
     // Verify item was updated in DB
-    const db = (await import('../../helpers/db')).getTestDb();
     const updatedItem = await db.selectFrom('items')
       .where('id', '=', existingItem.id)
       .select('name')

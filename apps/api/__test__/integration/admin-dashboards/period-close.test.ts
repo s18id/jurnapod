@@ -57,7 +57,7 @@ describe('admin-dashboards.period-close', { timeout: 30000 }, () => {
 
     // OWNER/SUPER_ADMIN bypasses module permissions
     // 404 if fiscal year doesn't exist, 200 if it does
-    expect([200, 403, 404, 500]).toContain(res.status);
+    expect([200, 403, 404]).toContain(res.status);
 
     if (res.status === 200) {
       const body = await res.json();
@@ -75,7 +75,7 @@ describe('admin-dashboards.period-close', { timeout: 30000 }, () => {
     });
 
     // 404 if fiscal year doesn't exist, 200 if it does
-    expect([200, 403, 404, 500]).toContain(res.status);
+    expect([200, 403, 404]).toContain(res.status);
 
     if (res.status === 200) {
       const body = await res.json();
@@ -135,7 +135,7 @@ describe('admin-dashboards.period-close', { timeout: 30000 }, () => {
 
     // Should return 200 with empty data, 400 for invalid input, or 404 if not found
     // The key is it should not crash
-    expect([200, 400, 404, 500]).toContain(res.status);
+    expect([200, 400, 404]).toContain(res.status);
 
     if (res.status === 200) {
       const body = await res.json();

@@ -182,7 +182,7 @@ describe('admin-dashboards.trial-balance', { timeout: 30000 }, () => {
     });
 
     // 500 may occur if fiscal year doesn't have data
-    expect([200, 403, 500]).toContain(res.status);
+    expect([200, 403]).toContain(res.status);
 
     if (res.status === 200) {
       const body = await res.json();
@@ -214,7 +214,7 @@ describe('admin-dashboards.trial-balance', { timeout: 30000 }, () => {
     });
 
     // 500 may occur if fiscal year doesn't have data
-    expect([200, 403, 500]).toContain(res.status);
+    expect([200, 403]).toContain(res.status);
 
     if (res.status === 200) {
       const body = await res.json();

@@ -36,24 +36,7 @@ describe('companies.list', { timeout: 30000 }, () => {
   });
 
   it('returns 200 with valid token for SUPER_ADMIN listing all companies', async () => {
-    // Login with owner credentials to test as SUPER_ADMIN
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/companies`, {
       method: 'GET',
@@ -98,23 +81,7 @@ describe('companies.list', { timeout: 30000 }, () => {
   });
 
   it('respects is_active filter param', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/companies?is_active=false`, {
       method: 'GET',

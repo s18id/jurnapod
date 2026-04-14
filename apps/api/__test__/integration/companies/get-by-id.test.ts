@@ -59,23 +59,7 @@ describe('companies.get-by-id', { timeout: 30000 }, () => {
   });
 
   it('returns 404 for non-existent company', async () => {
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: process.env.JP_OWNER_EMAIL,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const ownerToken = loginBody.data?.access_token;
+    const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/companies/999999`, {
       method: 'GET',
@@ -85,7 +69,7 @@ describe('companies.get-by-id', { timeout: 30000 }, () => {
       }
     });
 
-    expect([404, 500]).toContain(res.status);
+    expect(res.status).toBe(404);
   });
 
   it('returns 400 for invalid company ID format', async () => {
@@ -111,6 +95,6 @@ describe('companies.get-by-id', { timeout: 30000 }, () => {
     });
 
     // Non-SUPER_ADMIN accessing another company without permission should get 403
-    expect([403, 404, 500]).toContain(res.status);
+    expect([403, 404]).toContain(res.status);
   });
 });

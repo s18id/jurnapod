@@ -150,6 +150,6 @@ describe('inventory.items.variant-stats', { timeout: 30000 }, () => {
       headers: { 'Authorization': `Bearer ${accessToken}` }
     });
     // Route throws error for invalid ID format, returning 500
-    expect([400, 500]).toContain(res.status);
+    expect(res.status).toBe(400);
   });
 });

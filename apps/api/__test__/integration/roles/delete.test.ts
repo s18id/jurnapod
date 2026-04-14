@@ -42,7 +42,7 @@ describe('roles.delete', { timeout: 30000 }, () => {
       }
     });
     // 409 if users are assigned to role (conflict), 403 if no permission, 404 if not found
-    expect([200, 403, 404, 409, 500]).toContain(res.status);
+    expect([200, 403, 404, 409]).toContain(res.status);
   });
 
   it('returns 400 for invalid role ID format', async () => {
@@ -116,6 +116,6 @@ describe('roles.delete', { timeout: 30000 }, () => {
     });
 
     // System roles should be protected - expect rejection
-    expect([403, 404, 500]).toContain(res.status);
+    expect([403, 404]).toContain(res.status);
   });
 });

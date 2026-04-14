@@ -82,7 +82,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
       body: JSON.stringify({ permission_mask: 15 })
     });
 
-    expect([400, 403, 500]).toContain(res.status);
+    expect([400, 403]).toContain(res.status);
   });
 
   it('accepts negative permission mask (implementation allows it)', async () => {
@@ -97,7 +97,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
 
     // Note: z.number().int() doesn't restrict to non-negative, so API accepts negative masks
     // This may be a validation gap worth reviewing
-    expect([200, 400, 403, 500]).toContain(res.status);
+    expect([200, 400, 403]).toContain(res.status);
   });
 
   it('returns 400 for non-integer permission mask', async () => {
@@ -110,7 +110,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
       body: JSON.stringify({ permission_mask: 1.5 })
     });
 
-    expect([400, 403, 500]).toContain(res.status);
+    expect([400, 403]).toContain(res.status);
   });
 
   it('returns 400 when permission_mask is missing', async () => {
@@ -123,7 +123,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
       body: JSON.stringify({})
     });
 
-    expect([400, 403, 500]).toContain(res.status);
+    expect([400, 403]).toContain(res.status);
   });
 
   it('updates permission with zero mask (no permissions)', async () => {
@@ -136,7 +136,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
       body: JSON.stringify({ permission_mask: 0 })
     });
 
-    expect([200, 400, 403, 404, 500]).toContain(res.status);
+    expect([200, 400, 403, 404]).toContain(res.status);
   });
 
   it('updates permission with large mask value', async () => {
@@ -149,7 +149,7 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
       body: JSON.stringify({ permission_mask: 255 })
     });
 
-    expect([200, 400, 403, 404, 500]).toContain(res.status);
+    expect([200, 400, 403, 404]).toContain(res.status);
   });
 
   it('updates module role permission for SALES module', async () => {
@@ -164,6 +164,6 @@ describe('settings-module-roles.update', { timeout: 30000 }, () => {
       })
     });
 
-    expect([200, 400, 403, 404, 500]).toContain(res.status);
+    expect([200, 400, 403, 404]).toContain(res.status);
   });
 });
