@@ -10,7 +10,7 @@ import { closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
-  getSeedSyncContext,
+  getSeedSyncContext as loadSeedSyncContext,
   createTestCompanyMinimal,
   createTestUser,
   createTestRole,
@@ -24,9 +24,13 @@ let baseUrl: string;
 let cashierToken: string;
 
 describe('pages-list', { timeout: 30000 }, () => {
+  let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
+  const getSeedSyncContext = async () => seedCtx;
+
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     cashierToken = await getTestAccessToken(baseUrl);
+    seedCtx = await loadSeedSyncContext();
   });
 
   afterAll(async () => {

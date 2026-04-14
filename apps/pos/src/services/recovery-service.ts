@@ -253,7 +253,7 @@ export class RecoveryService {
 
     const outboxJobs = await this.db.outbox_jobs.where("sale_id").equals(saleId).toArray();
     const latestJob = outboxJobs.sort((a, b) => 
-      Date.parse(b.updated_at) - Date.parse(a.updated_at)
+      (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0)
     )[0];
 
     let state: TransactionState;

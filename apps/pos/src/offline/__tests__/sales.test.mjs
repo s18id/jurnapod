@@ -50,14 +50,16 @@ test("double complete same sale yields one success and one deterministic failure
       sale_id: draft.sale_id,
       items: [{ item_id: 101, qty: 1 }],
       payments: [{ method: "CASH", amount: 50000 }],
-      totals: {
-        subtotal: 50000,
-        discount_total: 0,
-        tax_total: 0,
-        grand_total: 50000,
-        paid_total: 50000,
-        change_total: 0
-      }
+        totals: {
+          subtotal: 50000,
+          discount_total: 0,
+          discount_percent: 0,
+          discount_fixed: 0,
+          tax_total: 0,
+          grand_total: 50000,
+          paid_total: 50000,
+          change_total: 0
+        }
     };
 
     const [first, second] = await Promise.allSettled([

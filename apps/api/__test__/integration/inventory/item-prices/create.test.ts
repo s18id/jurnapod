@@ -9,7 +9,7 @@ import { closeTestDb } from '../../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
-  getSeedSyncContext,
+  getSeedSyncContext as loadSeedSyncContext,
   createTestItem,
   registerFixtureCleanup
 } from '../../../fixtures';
@@ -19,11 +19,15 @@ let accessToken: string;
 let authTestItemId: number;
 
 describe('inventory.item-prices.create', { timeout: 30000 }, () => {
+  let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
+  const getSeedSyncContext = async () => seedCtx;
+
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     // Create a minimal item for auth/validation tests (ID used only when auth passes)
-    const ctx = await getSeedSyncContext();
+    seedCtx = await loadSeedSyncContext();
+    const ctx = seedCtx;
     const item = await createTestItem(ctx.companyId, {
       sku: `AUTH-TEST-${Date.now()}`,
       name: 'Auth Test Item',

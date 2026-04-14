@@ -10,7 +10,7 @@ import { closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
-  getSeedSyncContext,
+  getSeedSyncContext as loadSeedSyncContext,
   registerFixtureCleanup
 } from '../../fixtures';
 import { SETTINGS_REGISTRY, SETTINGS_KEYS } from '@jurnapod/shared';
@@ -24,9 +24,13 @@ let baseUrl: string;
 let accessToken: string;
 
 describe('settings.config-update', { timeout: 30000 }, () => {
+  let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
+  const getSeedSyncContext = async () => seedCtx;
+
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
+    seedCtx = await loadSeedSyncContext();
   });
 
   afterAll(async () => {

@@ -10,7 +10,7 @@ import { closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
-  getSeedSyncContext,
+  getSeedSyncContext as loadSeedSyncContext,
   createTestUser,
   createTestRole,
   assignUserGlobalRole,
@@ -21,8 +21,12 @@ import { buildPermissionMask } from '@jurnapod/auth';
 let baseUrl: string;
 
 describe('public-pages', { timeout: 30000 }, () => {
+  let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
+  const getSeedSyncContext = async () => seedCtx;
+
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
+    seedCtx = await loadSeedSyncContext();
   });
 
   afterAll(async () => {

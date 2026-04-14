@@ -64,6 +64,19 @@ const ER_LOCK_WAIT_TIMEOUT = 'ER_LOCK_WAIT_TIMEOUT';
 const MYSQL_ERRNO_LOCK_WAIT_TIMEOUT = 1205;
 
 /**
+ * MySQL/MariaDB check-read conflict error code.
+ *
+ * Seen as: "Record has changed since last read"
+ * This is a transient concurrency conflict and should be retried.
+ */
+const ER_CHECKREAD = 'ER_CHECKREAD';
+
+/**
+ * MySQL/MariaDB check-read conflict errno.
+ */
+const MYSQL_ERRNO_CHECKREAD = 1020;
+
+/**
  * Phrase that appears in lock wait timeout messages.
  */
 const LOCK_WAIT_TIMEOUT_PHRASE = 'lock wait timeout exceeded';
@@ -82,7 +95,8 @@ const DEFAULT_INITIAL_DELAY_MS = 100;
 /**
  * Execute a callback within a transaction, retrying on MySQL deadlocks.
  * 
- * Uses exponential backoff between retries. All other errors propagate normally.
+ * Uses exponential backoff between retries. Retries transient transaction conflicts
+ * (deadlocks, lock wait timeouts, check-read conflicts). All other errors propagate normally.
  * The transaction is rolled back automatically on any error (including deadlock)
  * before retry, so the callback can be re-executed safely.
  * 
@@ -154,6 +168,10 @@ export function isDeadlockError(error: unknown): boolean {
       return true;
     }
 
+    if (typeof err.code === 'string' && err.code === ER_CHECKREAD) {
+      return true;
+    }
+
     if (typeof err.errno === 'number' && err.errno === MYSQL_ERRNO_DEADLOCK) {
       return true;
     }
@@ -162,11 +180,22 @@ export function isDeadlockError(error: unknown): boolean {
       return true;
     }
 
+    if (typeof err.errno === 'number' && err.errno === MYSQL_ERRNO_CHECKREAD) {
+      return true;
+    }
+
     if (typeof err.message === 'string' && err.message.toLowerCase().includes('deadlock found')) {
       return true;
     }
 
     if (typeof err.message === 'string' && err.message.toLowerCase().includes(LOCK_WAIT_TIMEOUT_PHRASE)) {
+      return true;
+    }
+
+    if (
+      typeof err.message === 'string' &&
+      err.message.toLowerCase().includes('record has changed since last read')
+    ) {
       return true;
     }
 

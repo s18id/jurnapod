@@ -10,7 +10,7 @@ import { getTestDb, closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
-  getSeedSyncContext,
+  getSeedSyncContext as loadSeedSyncContext,
   createTestItem,
   createTestVariant,
   createTestPrice,
@@ -23,11 +23,15 @@ let accessToken: string;
 let authTestItemId: number;
 
 describe('pos.cart-validate', { timeout: 30000 }, () => {
+  let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
+  const getSeedSyncContext = async () => seedCtx;
+
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     // Query a valid item ID for auth/validation tests (ID used only when auth passes)
-    const ctx = await getSeedSyncContext();
+    seedCtx = await loadSeedSyncContext();
+    const ctx = seedCtx;
     const db = getTestDb();
     const itemResult = await sql`
       SELECT id FROM items WHERE company_id = ${ctx.companyId} LIMIT 1

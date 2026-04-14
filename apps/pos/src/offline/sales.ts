@@ -63,9 +63,11 @@ function reconcileSaleTotals(
   const lineDiscountTotal = sumMoney(itemRows.map((line) => line.discount_amount));
   const afterLineDiscounts = normalizeMoney(subtotal - lineDiscountTotal);
   
-  const percentDiscount = normalizeMoney(afterLineDiscounts * (transactionDiscounts.discount_percent / 100));
+  const discountPercent = transactionDiscounts.discount_percent ?? 0;
+  const discountFixed = transactionDiscounts.discount_fixed ?? 0;
+  const percentDiscount = normalizeMoney(afterLineDiscounts * (discountPercent / 100));
   const afterPercent = normalizeMoney(afterLineDiscounts - percentDiscount);
-  const fixedDiscount = normalizeMoney(Math.min(transactionDiscounts.discount_fixed, afterPercent));
+  const fixedDiscount = normalizeMoney(Math.min(discountFixed, afterPercent));
   
   const totalDiscount = normalizeMoney(lineDiscountTotal + percentDiscount + fixedDiscount);
   const grandTotal = normalizeMoney(Math.max(0, subtotal - totalDiscount));
@@ -77,8 +79,8 @@ function reconcileSaleTotals(
   return {
     subtotal,
     discount_total: totalDiscount,
-    discount_percent: transactionDiscounts.discount_percent,
-    discount_fixed: transactionDiscounts.discount_fixed,
+    discount_percent: discountPercent,
+    discount_fixed: discountFixed,
     discount_code: transactionDiscounts.discount_code,
     tax_total: taxTotal,
     grand_total: grandTotal,
@@ -376,27 +378,32 @@ export async function completeSale(input: CompleteSaleInput, db: PosOfflineDb = 
 
       const outboxJob = await enqueueOutboxJobInTransaction({ sale_id: currentSale.sale_id }, db, completedAt);
 
-      // Enhanced durability: Verify transaction state after commit
-      // This addresses AC2 requirement for durable local commit with client_tx_id
-      try {
-        const recoveryService = getRecoveryService();
-        const transactionState = await recoveryService.getTransactionState(currentSale.sale_id);
-        if (!transactionState || transactionState.state !== "COMPLETED") {
-          // Log integrity issue but don't fail the transaction (it's already committed)
-          console.warn(`Unexpected transaction state for ${currentSale.sale_id}:`, transactionState?.state || "NOT_FOUND");
-        }
-      } catch (verificationError) {
-        // Don't fail the transaction for verification errors
-        console.warn(`Transaction state verification error for ${currentSale.sale_id}:`, verificationError);
-      }
-
-      return {
+      const result = {
         sale_id: currentSale.sale_id,
         client_tx_id: clientTxId,
-        status: "COMPLETED",
+        status: "COMPLETED" as const,
         outbox_job_id: outboxJob.job_id
       };
+
+      return result;
     });
+    
+    // Enhanced durability: Verify transaction state after commit
+    // This addresses AC2 requirement for durable local commit with client_tx_id
+    // Called outside the transaction block to avoid PrematureCommitError
+    try {
+      const recoveryService = getRecoveryService();
+      const transactionState = await recoveryService.getTransactionState(result.sale_id);
+      if (!transactionState || transactionState.state !== "COMPLETED") {
+        // Log integrity issue but don't fail the transaction (it's already committed)
+        console.warn(`Unexpected transaction state for ${result.sale_id}:`, transactionState?.state || "NOT_FOUND");
+      }
+    } catch (verificationError) {
+      // Don't fail the transaction for verification errors
+      console.warn(`Transaction state verification error for ${result.sale_id}:`, verificationError);
+    }
+
+    return result;
   });
 }
 

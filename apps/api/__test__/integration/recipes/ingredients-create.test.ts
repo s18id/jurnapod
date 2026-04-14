@@ -9,7 +9,7 @@ import { closeTestDb, getTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
-  getSeedSyncContext,
+  getSeedSyncContext as loadSeedSyncContext,
   createTestItem,
   registerFixtureCleanup
 } from '../../fixtures';
@@ -21,11 +21,15 @@ let authTestIngredientItemId: number;
 let authTestRecipeId: number;
 
 describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
+  let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
+  const getSeedSyncContext = async () => seedCtx;
+
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     // Query valid IDs for auth/validation tests (IDs used only when auth passes)
-    const ctx = await getSeedSyncContext();
+    seedCtx = await loadSeedSyncContext();
+    const ctx = seedCtx;
     const db = getTestDb();
     const itemResult = await sql`
       SELECT id FROM items WHERE company_id = ${ctx.companyId} LIMIT 1

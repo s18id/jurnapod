@@ -66,6 +66,8 @@
 import { getDb } from "./db";
 import { sql } from "kysely";
 import { withTransactionRetry } from "@jurnapod/db";
+import { getAppEnv } from "./env";
+import { hashPassword } from "./password-hash";
 import { createCompanyBasic, CompanyCodeExistsError } from "./companies";
 import { createOutletBasic, OutletCodeExistsError } from "./outlets";
 import { createUserBasic, UserEmailExistsError } from "./users";
@@ -160,6 +162,81 @@ const createdFixtures: TestFixtures = {
 };
 
 const registeredCleanupTasks: RegisteredCleanupTask[] = [];
+
+const tokenCache = new Map<string, string>();
+const tokenInFlight = new Map<string, Promise<string>>();
+
+function buildTokenCacheKey(
+  baseUrl: string,
+  companyCode: string,
+  email: string,
+  password: string
+): string {
+  return `${baseUrl}::${companyCode}::${email.toLowerCase()}::${password}`;
+}
+
+async function requestLoginToken(
+  baseUrl: string,
+  companyCode: string,
+  email: string,
+  password: string
+): Promise<string> {
+  const res = await fetch(`${baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ companyCode, email, password })
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Failed to login: ${res.status} ${body}`);
+  }
+
+  const data = await res.json();
+  return data.data.access_token;
+}
+
+async function resetUserPasswordForTests(userId: number, password: string): Promise<void> {
+  const db = getDb();
+  const env = getAppEnv();
+  const passwordHash = await hashPassword(password, {
+    defaultAlgorithm: env.auth.password.defaultAlgorithm,
+    bcryptRounds: env.auth.password.bcryptRounds,
+    argon2MemoryKb: env.auth.password.argon2MemoryKb,
+    argon2TimeCost: env.auth.password.argon2TimeCost,
+    argon2Parallelism: env.auth.password.argon2Parallelism
+  });
+
+  await db
+    .updateTable("users")
+    .set({
+      password_hash: passwordHash,
+      is_active: 1,
+      updated_at: new Date()
+    })
+    .where("id", "=", userId)
+    .execute();
+}
+
+async function isTokenStillValid(baseUrl: string, token: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${baseUrl}/api/users/me`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      }
+    });
+
+    // 401 means token is invalid/expired.
+    // Other statuses are treated as usable token for auth purposes.
+    return res.status !== 401;
+  } catch {
+    // If probe fails due to network/transient issues, keep cached token.
+    // Request path will still surface real failures in test assertions.
+    return true;
+  }
+}
 
 /**
  * Register additional cleanup work for test data not created via fixture helpers.
@@ -747,6 +824,10 @@ export async function cleanupTestFixtures(): Promise<void> {
   createdFixtures.items = [];
   createdFixtures.variants = [];
   registeredCleanupTasks.length = 0;
+  seedSyncContextCache.clear();
+  seedSyncContextInFlight.clear();
+  tokenCache.clear();
+  tokenInFlight.clear();
 }
 
 /**
@@ -977,6 +1058,9 @@ export type SeedSyncContext = {
   cashierUserId: number;
 };
 
+const seedSyncContextCache = new Map<string, SeedSyncContext>();
+const seedSyncContextInFlight = new Map<string, Promise<SeedSyncContext>>();
+
 /**
  * Resolve seeded sync context and reuse an existing cashier when available.
  * Falls back to deterministic cashier creation per company when not found.
@@ -992,63 +1076,87 @@ export async function getSeedSyncContext(options?: {
     throw new Error("JP_COMPANY_CODE must be set for sync integration tests");
   }
 
-  const db = getDb();
-  const companyOutlet = await db
-    .selectFrom("companies as c")
-    .innerJoin("outlets as o", "o.company_id", "c.id")
-    .select(["c.id as company_id", "o.id as outlet_id"])
-    .where("c.code", "=", companyCode)
-    .where("o.code", "=", outletCode)
-    .executeTakeFirst();
-
-  if (!companyOutlet) {
-    throw new Error(
-      `Seed company/outlet not found for JP_COMPANY_CODE=${companyCode}, JP_OUTLET_CODE=${outletCode}`
-    );
+  const cacheKey = `${companyCode}:${outletCode}`;
+  const cached = seedSyncContextCache.get(cacheKey);
+  if (cached) {
+    return cached;
   }
 
-  const companyId = Number(companyOutlet.company_id);
-  const outletId = Number(companyOutlet.outlet_id);
+  const inFlight = seedSyncContextInFlight.get(cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
 
-  const existingCashier = await db
-    .selectFrom("users as u")
-    .innerJoin("user_role_assignments as ura", "ura.user_id", "u.id")
-    .innerJoin("roles as r", "r.id", "ura.role_id")
-    .select("u.id as user_id")
-    .where("u.company_id", "=", companyId)
-    .where("u.is_active", "=", 1)
-    .where((eb) => eb.or([eb("r.code", "=", "CASHIER"), eb("r.name", "like", "%cashier%")]))
-    .orderBy("u.id", "asc")
-    .executeTakeFirst();
+  const resolvePromise = (async () => {
+    const db = getDb();
+    const companyOutlet = await db
+      .selectFrom("companies as c")
+      .innerJoin("outlets as o", "o.company_id", "c.id")
+      .select(["c.id as company_id", "o.id as outlet_id"])
+      .where("c.code", "=", companyCode)
+      .where("o.code", "=", outletCode)
+      .executeTakeFirst();
 
-  if (existingCashier) {
-    return {
+    if (!companyOutlet) {
+      throw new Error(
+        `Seed company/outlet not found for JP_COMPANY_CODE=${companyCode}, JP_OUTLET_CODE=${outletCode}`
+      );
+    }
+
+    const companyId = Number(companyOutlet.company_id);
+    const outletId = Number(companyOutlet.outlet_id);
+
+    const existingCashier = await db
+      .selectFrom("users as u")
+      .innerJoin("user_role_assignments as ura", "ura.user_id", "u.id")
+      .innerJoin("roles as r", "r.id", "ura.role_id")
+      .select("u.id as user_id")
+      .where("u.company_id", "=", companyId)
+      .where("u.is_active", "=", 1)
+      .where((eb) => eb.or([eb("r.code", "=", "CASHIER"), eb("r.name", "like", "%cashier%")]))
+      .orderBy("u.id", "asc")
+      .executeTakeFirst();
+
+    if (existingCashier) {
+      const resolved = {
+        companyId,
+        outletId,
+        cashierUserId: Number(existingCashier.user_id)
+      };
+      seedSyncContextCache.set(cacheKey, resolved);
+      return resolved;
+    }
+
+    const cashier = await createTestUser(companyId, {
+      email: `sync-test-cashier+${companyId}@example.com`,
+      name: "Sync Test Cashier"
+    });
+
+    // Keep this deterministic sync cashier reusable across test files.
+    // It should not be removed by cleanupTestFixtures(), otherwise each file
+    // will recreate it and we lose cross-suite reuse.
+    createdFixtures.users = createdFixtures.users.filter((u) => u.id !== cashier.id);
+
+    // Only assign CASHIER role. Do not mutate module_roles here,
+    // because this helper is used broadly across integration tests.
+    const cashierRoleId = await getRoleIdByCode("CASHIER");
+    await assignUserGlobalRole(cashier.id, cashierRoleId);
+
+    const resolved = {
       companyId,
       outletId,
-      cashierUserId: Number(existingCashier.user_id)
+      cashierUserId: cashier.id
     };
+    seedSyncContextCache.set(cacheKey, resolved);
+    return resolved;
+  })();
+
+  seedSyncContextInFlight.set(cacheKey, resolvePromise);
+  try {
+    return await resolvePromise;
+  } finally {
+    seedSyncContextInFlight.delete(cacheKey);
   }
-
-  const cashier = await createTestUser(companyId, {
-    email: `sync-test-cashier+${companyId}@example.com`,
-    name: "Sync Test Cashier"
-  });
-
-  // Keep this deterministic sync cashier reusable across test files.
-  // It should not be removed by cleanupTestFixtures(), otherwise each file
-  // will recreate it and we lose cross-suite reuse.
-  createdFixtures.users = createdFixtures.users.filter((u) => u.id !== cashier.id);
-
-  // Only assign CASHIER role. Do not mutate module_roles here,
-  // because this helper is used broadly across integration tests.
-  const cashierRoleId = await getRoleIdByCode("CASHIER");
-  await assignUserGlobalRole(cashier.id, cashierRoleId);
-
-  return {
-    companyId,
-    outletId,
-    cashierUserId: cashier.id
-  };
 }
 
 /**
@@ -1087,8 +1195,25 @@ export async function getOrCreateTestCashierForPermission(
       company_id: Number(existing.company_id),
       email: existing.email
     };
-    // Get token via login
-    const token = await loginForTest(baseUrl, companyCode, email, password);
+    let token: string;
+    try {
+      // Get token via login
+      token = await loginForTest(baseUrl, companyCode, email, password);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isInvalidCredentials =
+        message.includes("Failed to login: 401") || message.includes("INVALID_CREDENTIALS");
+
+      if (!isInvalidCredentials) {
+        throw error;
+      }
+
+      // Existing deterministic user may have stale/unknown password from prior runs.
+      // Reset to requested password, then force-refresh login once.
+      await resetUserPasswordForTests(user.id, password);
+      token = await loginForTest(baseUrl, companyCode, email, password, { forceRefresh: true });
+    }
+
     return { user, accessToken: token };
   }
 
@@ -1124,21 +1249,44 @@ export async function loginForTest(
   baseUrl: string,
   companyCode: string,
   email: string,
-  password: string
+  password: string,
+  options?: { forceRefresh?: boolean; verifyCachedToken?: boolean }
 ): Promise<string> {
-  const res = await fetch(`${baseUrl}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ companyCode, email, password })
-  });
+  const cacheKey = buildTokenCacheKey(baseUrl, companyCode, email, password);
+  const verifyCachedToken = options?.verifyCachedToken ?? true;
+  if (options?.forceRefresh !== true) {
+    const cached = tokenCache.get(cacheKey);
+    if (cached) {
+      if (!verifyCachedToken) {
+        return cached;
+      }
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Failed to login: ${res.status} ${body}`);
+      const stillValid = await isTokenStillValid(baseUrl, cached);
+      if (stillValid) {
+        return cached;
+      }
+
+      // Obsolete token: remove and continue to one-time relogin below.
+      tokenCache.delete(cacheKey);
+    }
+
+    const inFlight = tokenInFlight.get(cacheKey);
+    if (inFlight) {
+      return inFlight;
+    }
   }
 
-  const data = await res.json();
-  return data.data.access_token;
+  const loginPromise = requestLoginToken(baseUrl, companyCode, email, password)
+    .then((token) => {
+      tokenCache.set(cacheKey, token);
+      return token;
+    })
+    .finally(() => {
+      tokenInFlight.delete(cacheKey);
+    });
+
+  tokenInFlight.set(cacheKey, loginPromise);
+  return loginPromise;
 }
 
 // ============================================================================
@@ -1205,17 +1353,5 @@ export async function getTestAccessToken(baseUrl: string): Promise<string> {
     throw new Error("Test credentials not configured: JP_COMPANY_CODE, JP_OWNER_EMAIL, JP_OWNER_PASSWORD must be set");
   }
   
-  const res = await fetch(`${baseUrl}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ companyCode, email, password })
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Failed to get test access token: ${res.status} ${body}`);
-  }
-
-  const body = await res.json();
-  return body.data.access_token;
+  return loginForTest(baseUrl, companyCode, email, password);
 }

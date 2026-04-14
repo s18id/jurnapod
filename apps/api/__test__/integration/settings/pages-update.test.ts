@@ -10,7 +10,8 @@ import { closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
-  getSeedSyncContext,
+  loginForTest,
+  getSeedSyncContext as loadSeedSyncContext,
   createTestUser,
   createTestRole,
   assignUserGlobalRole,
@@ -21,11 +22,37 @@ import { buildPermissionMask } from '@jurnapod/auth';
 
 let baseUrl: string;
 let cashierToken: string;
+let sharedContext: Awaited<ReturnType<typeof loadSeedSyncContext>>;
+const getSeedSyncContext = async () => sharedContext;
+let sharedAdminToken: string;
 
 describe('pages-update', { timeout: 30000 }, () => {
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     cashierToken = await getTestAccessToken(baseUrl);
+
+    sharedContext = await loadSeedSyncContext();
+    const companyCode = process.env.JP_COMPANY_CODE;
+    const ownerPassword = process.env.JP_OWNER_PASSWORD;
+    if (!companyCode || !ownerPassword) {
+      throw new Error('JP_COMPANY_CODE and JP_OWNER_PASSWORD must be set for settings pages tests');
+    }
+
+    const sharedAdminUser = await createTestUser(sharedContext.companyId, {
+      email: `settings-update-shared-${Date.now()}@example.com`,
+      password: ownerPassword
+    });
+    const sharedRole = await createTestRole(baseUrl, cashierToken, 'Settings Updater Shared');
+    await assignUserGlobalRole(sharedAdminUser.id, sharedRole.id);
+    await setModulePermission(
+      sharedContext.companyId,
+      sharedRole.id,
+      'platform',
+      'settings',
+      buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
+    );
+
+    sharedAdminToken = await loginForTest(baseUrl, companyCode, sharedAdminUser.email, ownerPassword);
   });
 
   afterAll(async () => {
@@ -407,53 +434,14 @@ describe('pages-update', { timeout: 30000 }, () => {
   });
 
   it('allows updating slug to valid unique value', async () => {
-    const context = await getSeedSyncContext();
     const oldSlug = `old-valid-${Date.now()}-${Math.random().toString(36).substring(7)}`;
     const newSlug = `new-valid-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    
-    // Create user with settings create and update permission
-    const adminUser = await createTestUser(context.companyId, {
-      email: `settings-update-valid-${Date.now()}@example.com`
-    });
-    const role = await createTestRole(baseUrl, cashierToken, 'Settings Updater Unique');
-    await assignUserGlobalRole(adminUser.id, role.id);
-    await setModulePermission(
-      context.companyId,
-      role.id,
-      'platform',
-      'settings',
-      buildPermissionMask({ canRead: true, canCreate: true, canUpdate: true })
-    );
-
-    // Get token for admin user
-    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        companyCode: process.env.JP_COMPANY_CODE,
-        email: adminUser.email,
-        password: process.env.JP_OWNER_PASSWORD
-      })
-    });
-
-    if (!loginRes.ok) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const loginBody = await loginRes.json();
-    const adminToken = loginBody.data?.access_token;
-
-    if (!adminToken) {
-      expect(true).toBe(true);
-      return;
-    }
 
     // Create a page
     const createRes = await fetch(`${baseUrl}/api/settings/pages`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${adminToken}`,
+        'Authorization': `Bearer ${sharedAdminToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -475,7 +463,7 @@ describe('pages-update', { timeout: 30000 }, () => {
     const res = await fetch(`${baseUrl}/api/settings/pages/${pageId}`, {
       method: 'PATCH',
       headers: {
-        'Authorization': `Bearer ${adminToken}`,
+        'Authorization': `Bearer ${sharedAdminToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ slug: newSlug })
