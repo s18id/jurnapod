@@ -10,7 +10,7 @@ import { closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
-  getSeedSyncContext,
+  getSeedSyncContext as loadSeedSyncContext,
   createTestCompanyMinimal,
   registerFixtureCleanup
 } from '../../fixtures';
@@ -18,13 +18,15 @@ import {
 let baseUrl: string;
 let accessToken: string;
 let companyId: number;
+let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
+const getSeedSyncContext = async () => seedCtx;
 
 describe('companies.update', { timeout: 60000 }, () => {
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
-    const context = await getSeedSyncContext();
-    companyId = context.companyId;
+    seedCtx = await loadSeedSyncContext();
+    companyId = seedCtx.companyId;
   });
 
   afterAll(async () => {

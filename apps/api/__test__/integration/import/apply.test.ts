@@ -20,22 +20,24 @@ import {
   createTestItem,
   createTestPrice,
   registerFixtureCleanup,
+  getSeedSyncContext as loadSeedSyncContext,
 } from '../../fixtures';
-import { getSeedSyncContext } from '../../fixtures';
 
 let baseUrl: string;
 let ownerToken: string;
 let companyId: number;
 let cashierUserId: number;
+let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
+const getSeedSyncContext = async () => seedCtx;
 
 describe('import.apply', { timeout: 30000 }, () => {
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     ownerToken = await getTestAccessToken(baseUrl);
     
-    const ctx = await getSeedSyncContext();
-    companyId = ctx.companyId;
-    cashierUserId = ctx.cashierUserId;
+    seedCtx = await loadSeedSyncContext();
+    companyId = seedCtx.companyId;
+    cashierUserId = seedCtx.cashierUserId;
   });
 
   afterAll(async () => {

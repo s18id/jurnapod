@@ -7,17 +7,18 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
-import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext } from '../../fixtures';
+import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext as loadSeedSyncContext } from '../../fixtures';
 
 let baseUrl: string;
 let accessToken: string;
-let seedContext: { companyId: number; outletId: number };
+let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
+const getSeedSyncContext = async () => seedCtx;
 
 describe('admin-dashboards.trial-balance', { timeout: 30000 }, () => {
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
-    seedContext = await getSeedSyncContext();
+    seedCtx = await loadSeedSyncContext();
   });
 
   afterAll(async () => {
@@ -103,7 +104,7 @@ describe('admin-dashboards.trial-balance', { timeout: 30000 }, () => {
   });
 
   it('supports outlet_id filter', async () => {
-    const res = await fetch(`${baseUrl}/admin/dashboard/trial-balance?fiscal_year_id=1&outlet_id=${seedContext.outletId}`, {
+    const res = await fetch(`${baseUrl}/admin/dashboard/trial-balance?fiscal_year_id=1&outlet_id=${seedCtx.outletId}`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'

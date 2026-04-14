@@ -11,6 +11,7 @@ import {
   getTestAccessToken,
   registerFixtureCleanup
 } from '../../../fixtures';
+import { randomInt } from 'crypto';
 
 let baseUrl: string;
 let accessToken: string;
@@ -65,7 +66,8 @@ describe('inventory.item-groups.bulk-create', { timeout: 30000 }, () => {
 
   it('creates hierarchical groups via parent_code', async () => {
     const timestamp = Date.now();
-    const parentCode = `BULK-PARENT-${timestamp}`.slice(0, 20);
+    const randomizer = randomInt(10)
+    const parentCode = `PARENT-${timestamp}-${randomizer}`.slice(0, 20);
 
     const res = await fetch(`${baseUrl}/api/inventory/item-groups/bulk`, {
       method: 'POST',

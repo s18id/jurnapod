@@ -10,21 +10,23 @@ import { closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
-  getSeedSyncContext
+  getSeedSyncContext as loadSeedSyncContext
 } from '../../fixtures';
 
 let baseUrl: string;
 let accessToken: string;
 let companyId: number;
 let cashierUserId: number;
+let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
+const getSeedSyncContext = async () => seedCtx;
 
 describe('users.create', { timeout: 30000 }, () => {
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
-    const context = await getSeedSyncContext();
-    companyId = context.companyId;
-    cashierUserId = context.cashierUserId;
+    seedCtx = await loadSeedSyncContext();
+    companyId = seedCtx.companyId;
+    cashierUserId = seedCtx.cashierUserId;
   });
 
   afterAll(async () => {
