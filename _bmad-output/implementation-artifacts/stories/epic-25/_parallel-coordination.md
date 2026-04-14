@@ -7,7 +7,7 @@ Story 25.4: Add tests, update route adapter, validate full gate.
 ## Batch 1 (Parallel, non-overlapping)
 
 ### Scope A: Treasury test stabilization
-**Agent:** bmad-dev  
+**Agent:** bmad-agent-dev  
 **Status:** ✅ DONE  
 **Files allowed:**
 - `packages/modules/treasury/src/helpers.test.ts`
@@ -29,7 +29,7 @@ Story 25.4: Add tests, update route adapter, validate full gate.
 ---
 
 ### Scope B: CashBankService posting integration
-**Agent:** bmad-dev  
+**Agent:** bmad-agent-dev  
 **Status:** ✅ DONE  
 **Files allowed:**
 - `packages/modules/treasury/src/cash-bank-service.ts`
@@ -66,7 +66,7 @@ Story 25.4: Add tests, update route adapter, validate full gate.
 ## Batch 2 (Adapter-only)
 
 ### Scope C: API adapter composition seam
-**Agent:** bmad-dev  
+**Agent:** bmad-agent-dev  
 **Status:** ✅ DONE  
 **Files changed:**
 - `apps/api/src/lib/treasury-adapter.ts`
@@ -81,7 +81,7 @@ Story 25.4: Add tests, update route adapter, validate full gate.
 ## Batch 3 (Route-only)
 
 ### Scope D: Route migration to treasury service
-**Agent:** bmad-dev  
+**Agent:** bmad-agent-dev  
 **Status:** ✅ DONE  
 **Files changed:**
 - `apps/api/src/routes/cash-bank-transactions.ts`
@@ -96,7 +96,7 @@ Story 25.4: Add tests, update route adapter, validate full gate.
 ## Batch 4 (Corrective + Validation)
 
 ### Scope E1: Posting transaction-owner safety fix
-**Agent:** bmad-dev  
+**Agent:** bmad-agent-dev  
 **Status:** ✅ DONE  
 **Files changed:**
 - `packages/modules/treasury/src/cash-bank-service.ts`
@@ -106,7 +106,7 @@ Story 25.4: Add tests, update route adapter, validate full gate.
 - Prevents runtime failure on missing begin/commit/rollback in adapter posting repository
 
 ### Scope E2: Adapter import cleanup
-**Agent:** bmad-dev  
+**Agent:** bmad-agent-dev  
 **Status:** ✅ DONE  
 **Files changed:**
 - `apps/api/src/lib/treasury-adapter.ts`
@@ -115,7 +115,7 @@ Story 25.4: Add tests, update route adapter, validate full gate.
 - Removed unused import introduced during Scope C
 
 ### Scope F: Transactional posting via same executor (P0 fix)
-**Agent:** bmad-dev  
+**Agent:** bmad-agent-dev  
 **Status:** ✅ DONE  
 **Files changed:**
 - `apps/api/src/lib/treasury-adapter.ts`
@@ -128,7 +128,7 @@ Story 25.4: Add tests, update route adapter, validate full gate.
 - Resolves P0 partial-posting risk
 
 ### Scope G: Missing FiscalYearNotOpenError handler in void route (P1 fix)
-**Agent:** bmad-dev  
+**Agent:** bmad-agent-dev  
 **Status:** ✅ DONE  
 **Files changed:**
 - `apps/api/src/routes/cash-bank-transactions.ts`
@@ -137,7 +137,7 @@ Story 25.4: Add tests, update route adapter, validate full gate.
 - Added `FiscalYearNotOpenError` handler to void route with same `errorResponse("FISCAL_YEAR_CLOSED", error.message, 400)` mapping as post route
 
 ### Scope H: cash-bank.ts → thin re-export shim (cleanup)
-**Agent:** bmad-dev (direct)  
+**Agent:** bmad-agent-dev (direct)  
 **Status:** ✅ DONE  
 **Files changed:**
 - `apps/api/src/lib/cash-bank.ts` (766 lines → 52 lines)

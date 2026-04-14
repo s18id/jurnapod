@@ -5,7 +5,7 @@
 **Story Points:** 5  
 **Priority:** P1  
 **Risk:** HIGH  
-**Assigned:** bmad-dev
+**Assigned:** bmad-agent-dev
 
 ---
 
@@ -29,7 +29,7 @@ Retire duplicated API pull-runtime implementation in `lib/sync/master-data.ts` f
 
 ## Sprint Plan
 
-- **Owner Role:** @bmad-dev
+- **Owner Role:** @bmad-agent-dev
 - **Estimate:** 5 SP (~2-2.5 days)
 - **Dependency:** Story 21.4 done (mandatory sequence)
 - **Test Gate:** pull route + sync + critical suites pass before handoff

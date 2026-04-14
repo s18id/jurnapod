@@ -2,7 +2,7 @@
 
 ## Status
 
-**DONE** (approved by bmad-review)
+**DONE** (approved by bmad-agent-review)
 
 ## Files Created
 

@@ -30,7 +30,7 @@ Extract the domain model from `apps/api/src/lib/cash-bank.ts` into the new `@jur
 
 ## Status
 
-**DONE** - Approved by bmad-review
+**DONE** - Approved by bmad-agent-review
 
 ## Files to Modify
 
@@ -250,7 +250,7 @@ npm run typecheck -w @jurnapod/api
 ## Dev Agent Record
 
 **Story:** 25.2 - Extract cash-bank domain model/types/errors/helpers to modules-treasury
-**Agent:** bmad-dev
+**Agent:** bmad-agent-dev
 **Date:** 2026-04-03
 
 ### Files Created/Modified

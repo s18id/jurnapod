@@ -164,7 +164,7 @@ Keep existing error handling:
 
 ## Completion Notes
 
-**Completed by:** bmad-dev (delegated agent)
+**Completed by:** bmad-agent-dev (delegated agent)
 **Completion Date:** 2026-03-28
 **Actual Effort:** ~2 hours
 **Depends on:** Story 12.3 (completed)

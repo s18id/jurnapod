@@ -2,7 +2,7 @@
 
 ## Status
 
-**DONE** (approved after bmad-review)
+**DONE** (approved after bmad-agent-review)
 
 ## Files Modified/Created
 
@@ -78,5 +78,5 @@ npm run test:unit:single -w @jurnapod/api src/lib/master-data.supplies.test.ts  
 
 ## Reviewer Outcome
 
-- **bmad-review verdict:** APPROVED
+- **bmad-agent-review verdict:** APPROVED
 - **Severity summary:** no P0/P1 blockers; closure approved with minor non-blocking follow-up notes.

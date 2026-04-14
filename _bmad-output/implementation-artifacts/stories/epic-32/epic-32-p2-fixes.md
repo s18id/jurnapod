@@ -23,7 +23,7 @@
 - `packages/modules/accounting/src/reconciliation/dashboard-service.ts` (P2-014)
 - `packages/modules/platform/src/audit/period-transition.ts` (P2-017, P2-018)
 
-## Phase 2: Post-Implementation Review Fixes (bmad-review)
+## Phase 2: Post-Implementation Review Fixes (bmad-agent-review)
 
 ### P0 Blockers
 | ID | File | Issue | Fix |

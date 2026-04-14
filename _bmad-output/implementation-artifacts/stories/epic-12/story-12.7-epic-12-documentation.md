@@ -405,7 +405,7 @@ epic-12-retrospective: backlog
 
 ## Completion Notes
 
-**Completed by:** bmad-dev (delegated agent)  
+**Completed by:** bmad-agent-dev (delegated agent)  
 **Completion Date:** 2026-03-28  
 **Actual Effort:** ~3 hours  
 **Depends on:** Stories 12.1-12.6 (all completed)

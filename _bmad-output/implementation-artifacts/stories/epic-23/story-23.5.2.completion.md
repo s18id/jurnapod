@@ -15,7 +15,7 @@
 ## Review Evidence
 
 - **Review verdict:** APPROVED
-- **Reviewer agent:** `bmad-review`
+- **Reviewer agent:** `bmad-agent-review`
 - **Outcome:** Prior REQUEST_CHANGES items resolved:
   - Subpath contract gaps resolved
   - `export *` policy inconsistency resolved

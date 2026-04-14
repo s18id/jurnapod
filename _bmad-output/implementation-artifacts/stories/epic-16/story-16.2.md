@@ -66,7 +66,7 @@ The existing `processBatches` in `batch-processor.ts` does not have delay suppor
 ## Dev Agent Record
 
 **Implementation Date:** 2026-03-29  
-**Agent:** bmad-dev  
+**Agent:** bmad-agent-dev  
 **Time Spent:** ~30 minutes
 
 ### Files Created/Modified

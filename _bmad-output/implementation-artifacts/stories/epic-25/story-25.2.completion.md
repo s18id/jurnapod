@@ -2,7 +2,7 @@
 
 ## Status
 
-**DONE** (approved by bmad-review)
+**DONE** (approved by bmad-agent-review)
 
 ## Files Created/Modified
 
@@ -37,7 +37,7 @@ npm run typecheck -w @jurnapod/api               # PASS
 
 ## Review Outcome
 
-- **Reviewer:** bmad-review
+- **Reviewer:** bmad-agent-review
 - **Verdict:** APPROVED
 - **Blockers:** None (no P0/P1)
 - **Follow-up notes:** P2/P3 documentation/style observations only; non-blocking for closure.

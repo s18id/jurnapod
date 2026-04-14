@@ -5,7 +5,7 @@
 **Story Points:** 2  
 **Priority:** P1  
 **Risk:** LOW  
-**Assigned:** bmad-dev
+**Assigned:** bmad-agent-dev
 
 ---
 
@@ -28,7 +28,7 @@ Remove duplicate `PosSyncModule` singleton/init/get logic from sync pull and syn
 
 ## Sprint Plan
 
-- **Owner Role:** @bmad-dev
+- **Owner Role:** @bmad-agent-dev
 - **Estimate:** 2 SP (~1 day)
 - **Dependency:** None (first story in mandatory sequence)
 - **Test Gate:** pull + push route unit tests must pass before handoff

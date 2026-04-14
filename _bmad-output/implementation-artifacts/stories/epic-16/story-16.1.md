@@ -81,7 +81,7 @@ function sleep(ms: number): Promise<void> {
 ## Dev Agent Record
 
 **Implementation Date:** 2026-03-29  
-**Agent:** bmad-dev  
+**Agent:** bmad-agent-dev  
 **Time Spent:** ~45 minutes
 
 ### Files Created/Modified

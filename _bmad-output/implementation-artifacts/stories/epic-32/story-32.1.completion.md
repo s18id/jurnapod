@@ -74,7 +74,7 @@
 - [x] `npm run typecheck -w @jurnapod/api` passes
 - [x] `npm run build -w @jurnapod/api` passes
 - [x] Code review completed with no blockers
-- [x] AI review conducted (bmad-review)
+- [x] AI review conducted (bmad-agent-review)
 
 ---
 

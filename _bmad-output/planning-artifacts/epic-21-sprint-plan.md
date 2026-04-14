@@ -2,7 +2,7 @@
 
 **Epic:** 21 — API Sync Runtime Consolidation (Package-First)  
 **Sprint Focus:** Infrastructure-first execution with strict sync contract safety  
-**Prepared By:** @bmad-sm  
+**Prepared By:** @bmad-agent-sm  
 **Date:** 2026-04-01
 
 ---

@@ -182,7 +182,7 @@ Create `apps/api/src/lib/sync/check-duplicate.test.ts` with:
 
 ## Completion Notes
 
-**Completed by:** bmad-dev (delegated agent)
+**Completed by:** bmad-agent-dev (delegated agent)
 **Completion Date:** 2026-03-28
 **Actual Effort:** ~3 hours
 

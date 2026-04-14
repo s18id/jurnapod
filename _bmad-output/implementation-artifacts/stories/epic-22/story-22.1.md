@@ -5,7 +5,7 @@
 **Story Points:** 3  
 **Priority:** P1  
 **Risk:** HIGH  
-**Assigned:** bmad-dev
+**Assigned:** bmad-agent-dev
 
 ---
 

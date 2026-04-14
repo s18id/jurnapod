@@ -18,11 +18,11 @@
 | New feature requirements (PRD) | `bmad-create-prd` |
 | Architecture / tech design | `bmad-create-architecture` |
 | Break down requirements into stories | `bmad-create-epics-and-stories` |
-| Product management | `bmad-pm` |
+| Product management | `bmad-agent-pm` |
 | Sprint planning | `bmad-sprint-planning` |
 | Sprint status | `bmad-sprint-status` |
 | Document existing project | `bmad-document-project` |
-| Technical writing | `bmad-tech-writer` |
+| Technical writing | `bmad-agent-tech-writer` |
 
 ---
 

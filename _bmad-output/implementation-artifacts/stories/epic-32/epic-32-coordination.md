@@ -4,15 +4,15 @@
 
 | Story | Status | Owner | Commit |
 |-------|--------|-------|--------|
-| 32.1 Fiscal Year Close | ✅ Done | bmad-dev | f3990b8 |
-| 32.2 Reconciliation Dashboard | ✅ Done | bmad-dev | f3990b8 |
-| 32.3 Trial Balance Validation | ✅ Done | bmad-dev | 2b5891e |
-| 32.4 Period Transition Audit | ✅ Done | bmad-dev | 2b5891e |
-| 32.5 Roll Forward Workspace | ✅ Done | bmad-dev | 5f2b4b2 |
+| 32.1 Fiscal Year Close | ✅ Done | bmad-agent-dev | f3990b8 |
+| 32.2 Reconciliation Dashboard | ✅ Done | bmad-agent-dev | f3990b8 |
+| 32.3 Trial Balance Validation | ✅ Done | bmad-agent-dev | 2b5891e |
+| 32.4 Period Transition Audit | ✅ Done | bmad-agent-dev | 2b5891e |
+| 32.5 Roll Forward Workspace | ✅ Done | bmad-agent-dev | 5f2b4b2 |
 
 ## Post-Story Fixes
 
-After implementation, bmad-review identified the following issues during code review:
+After implementation, bmad-agent-review identified the following issues during code review:
 
 | ID | Severity | File | Issue |
 |----|----------|------|-------|
@@ -28,7 +28,7 @@ All fixes committed in `8c2e1cc` and `dc05502`.
 
 During Epic 32, an ADR-0014 boundary violation was caught:
 - `fiscal-years.ts` (1317 lines) was placed in `apps/api/src/lib/` — pure domain logic that belonged in `modules-accounting`
-- Discovered and resolved via bmad-architect consultation
+- Discovered and resolved via bmad-agent-architect consultation
 - Fiscal year domain extracted to `packages/modules/accounting/src/fiscal-year/`
 - API layer converted to thin adapter consuming package service
 

@@ -43,7 +43,7 @@ SUPER_ADMIN is a **global platform role** — not scoped to any company. If a SU
 
 ### Architecture Decision
 
-Per bmad-architect guidance: `@jurnapod/auth` should NOT import from `modules-platform`. The SUPER_ADMIN check must be implemented via direct DB query within auth packages.
+Per bmad-agent-architect guidance: `@jurnapod/auth` should NOT import from `modules-platform`. The SUPER_ADMIN check must be implemented via direct DB query within auth packages.
 
 ---
 
