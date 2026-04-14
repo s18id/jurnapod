@@ -6,6 +6,7 @@
   "scripts": {
     "predev": "npm run build -w @jurnapod/offline-db",
     "dev": "vite",
+    "prebuild": "npm run build -w @jurnapod/shared",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
