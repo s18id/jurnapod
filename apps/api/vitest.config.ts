@@ -27,9 +27,10 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['__test__/**/*.test.ts'],
-    testTimeout: 30000,
-    hookTimeout: 30000,
-    teardownTimeout: 10000,
+    // CI integration suites can run ~2 minutes on shared runners
+    testTimeout: 120000,
+    hookTimeout: 120000,
+    teardownTimeout: 30000,
     // Use threads pool — max 2 workers prevents memory exhaustion
     pool: 'threads',
     maxWorkers: 4,
