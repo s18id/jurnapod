@@ -79,7 +79,7 @@
 │                   modules-accounting, modules-inventory, modules-platform,   │
 │                   modules-reporting, modules-sales, (all domain modules)     │
 │  19. @jurnapod/backoffice   — React dashboard (Vite)                       │
-│     ↳ depends on: offline-db (dev dependency for predev)                    │
+│     ↳ depends on: shared (runtime), offline-db (dev for predev)             │
 │  20. @jurnapod/pos          — React POS app (Capacitor/Vite)               │
 │     ↳ depends on: offline-db (dev dependency for predev/prebuild)           │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -181,7 +181,7 @@ npm run build:pos
 
 ### POS and Backoffice `predev`/`prebuild` Scripts
 
-Both `apps/pos` and `apps/backoffice` have `predev` and `prebuild` scripts that force `@jurnapod/offline-db` to build first:
+`apps/pos` and `apps/backoffice` have prebuild guards for their required internal packages:
 
 ```json
 // apps/pos/package.json
@@ -191,11 +191,20 @@ Both `apps/pos` and `apps/backoffice` have `predev` and `prebuild` scripts that 
     "prebuild": "npm run build -w @jurnapod/offline-db"
   }
 }
+
+// apps/backoffice/package.json
+{
+  "scripts": {
+    "predev": "npm run build -w @jurnapod/offline-db",
+    "prebuild": "npm run build -w @jurnapod/shared"
+  }
+}
 ```
 
 This is necessary because:
-- Both apps import `dexie` from `@jurnapod/offline-db`
-- Vite needs the compiled output before it can bundle the app
+- POS imports `dexie` from `@jurnapod/offline-db`
+- Backoffice imports schemas/types/constants from `@jurnapod/shared`
+- Vite/PWA needs compiled internal package output before bundling
 
 ### Why `@jurnapod/offline-db` Has No Internal Dependencies
 
@@ -265,7 +274,7 @@ auth   sync-core  modules-platform
 | `@jurnapod/backoffice-sync` | lib | shared, sync-core | Backoffice sync |
 | `@jurnapod/pos-sync` | lib | db, shared, sync-core, inventory, accounting | POS sync |
 | `@jurnapod/api` | app | (all packages) | Hono REST API |
-| `@jurnapod/backoffice` | app | offline-db (dev) | React dashboard |
+| `@jurnapod/backoffice` | app | shared, offline-db (dev) | React dashboard |
 | `@jurnapod/pos` | app | offline-db (dev) | React POS PWA |
 
 ---
@@ -286,13 +295,24 @@ auth   sync-core  modules-platform
 
 ### Vite build fails for POS or Backoffice
 
-**Cause**: `@jurnapod/offline-db` wasn't built before Vite started.
+**Cause**: Required internal package wasn't built before Vite started (`@jurnapod/offline-db` for POS or `@jurnapod/shared` for Backoffice).
 
 **Fix**: The `predev`/`prebuild` scripts should handle this automatically. If they didn't, run:
 ```bash
 npm run build -w @jurnapod/offline-db
+npm run build -w @jurnapod/shared
 npm run build -w @jurnapod/pos  # or backoffice
 ```
+
+### Backoffice PWA build fails with `Failed to resolve entry for package "@jurnapod/shared"`
+
+**Cause**: Backoffice consumer dependency/build order mismatch.
+
+**Fix**:
+1. Ensure `apps/backoffice/package.json` includes `"@jurnapod/shared": "0.3.0"`
+2. Build shared first: `npm run build -w @jurnapod/shared`
+3. Re-run backoffice build: `npm run build -w @jurnapod/backoffice`
+4. If lock drift suspected: run `npm install` at repo root
 
 ### Build works locally but fails in CI
 

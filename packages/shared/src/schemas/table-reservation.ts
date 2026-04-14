@@ -20,8 +20,8 @@ import {
   ReservationStatusId,
   OutletTableStatusId,
   ReservationStatusV2,
-} from '../constants/table-states';
-import { NumericIdSchema } from './common';
+} from '../constants/table-states.js';
+import { NumericIdSchema } from './common.js';
 
 // ============================================================================
 // BASE SCHEMAS

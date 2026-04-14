@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
-import { JournalLineSchema } from "./posting";
+import { JournalLineSchema } from "./posting.js";
 
 /**
  * Journal Line Response Schema

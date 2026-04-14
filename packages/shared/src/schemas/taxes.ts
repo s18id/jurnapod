@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
-import { NumericIdSchema } from "./common";
+import { NumericIdSchema } from "./common.js";
 
 const RatePercentSchema = z.coerce.number().finite().min(0).max(100);
 

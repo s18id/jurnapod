@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
-import { NumericIdSchema } from "./common";
+import { NumericIdSchema } from "./common.js";
 
 const DateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 

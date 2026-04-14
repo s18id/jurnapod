@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
-import { NumericIdSchema } from "./common";
+import { NumericIdSchema } from "./common.js";
 
 export const OutletTableStatusSchema = z.enum(["AVAILABLE", "RESERVED", "OCCUPIED", "UNAVAILABLE"]);
 

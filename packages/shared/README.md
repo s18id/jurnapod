@@ -17,6 +17,26 @@ The `@jurnapod/shared` package provides:
 npm install @jurnapod/shared
 ```
 
+## Consumer Requirements (Monorepo)
+
+When an app/package imports from `@jurnapod/shared`, ensure:
+
+1. The consumer declares an explicit dependency in `package.json`
+2. `@jurnapod/shared` is built before bundling consumers (especially Vite/PWA apps)
+
+Example (Backoffice):
+
+```json
+{
+  "dependencies": {
+    "@jurnapod/shared": "0.3.0"
+  },
+  "scripts": {
+    "prebuild": "npm run build -w @jurnapod/shared"
+  }
+}
+```
+
 ## Usage
 
 ### Schema Validation
@@ -104,7 +124,7 @@ const pullResponse = PosSyncPullResponseSchema.parse(serverResponse);
 ### Account Mapping Types
 
 ```typescript
-import { ACCOUNT_MAPPING_TYPE } from '@jurnapod/shared/constants/account-mapping-types';
+import { ACCOUNT_MAPPING_TYPE } from '@jurnapod/shared';
 
 ACCOUNT_MAPPING_TYPE.REVENUE     // 'REVENUE'
 ACCOUNT_MAPPING_TYPE.AR          // 'AR'
@@ -114,7 +134,7 @@ ACCOUNT_MAPPING_TYPE.CASH        // 'CASH'
 ### Table States
 
 ```typescript
-import { TABLE_STATE } from '@jurnapod/shared/constants/table-states';
+import { TABLE_STATE } from '@jurnapod/shared';
 
 TABLE_STATE.VACANT    // 'VACANT'
 TABLE_STATE.OCCUPIED  // 'OCCUPIED'
@@ -138,3 +158,14 @@ packages/shared/
 - [@jurnapod/api](../../apps/api) - Uses shared schemas for API validation
 - [@jurnapod/pos-sync](../../packages/pos-sync) - Uses shared schemas for sync
 - [@jurnapod/modules/accounting](../../packages/modules/accounting) - Accounting domain
+
+## Troubleshooting
+
+### `Failed to resolve entry for package "@jurnapod/shared"`
+
+Check these in order:
+
+1. Consumer has explicit dependency (`"@jurnapod/shared": "0.3.0"`)
+2. `@jurnapod/shared` build completed (`npm run build -w @jurnapod/shared`)
+3. Re-run consumer build (`npm run build -w <consumer>`)
+4. If needed, refresh lockfile from root (`npm install`)

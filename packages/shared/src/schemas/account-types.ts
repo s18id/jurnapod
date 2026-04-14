@@ -2,8 +2,8 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
-import { NumericIdSchema } from "./common";
-import { NormalBalanceSchema, ReportGroupSchema, AccountTypeSchema } from "./accounts";
+import { NumericIdSchema } from "./common.js";
+import { NormalBalanceSchema, ReportGroupSchema, AccountTypeSchema } from "./accounts.js";
 
 /**
  * Account Type Entity Response

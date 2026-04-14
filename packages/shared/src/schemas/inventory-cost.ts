@@ -3,7 +3,7 @@
 // Description: Shared Zod schemas for inventory cost tracking auditability endpoints
 
 import { z } from "zod";
-import { NumericIdSchema, MoneySchema } from "./common";
+import { NumericIdSchema, MoneySchema } from "./common.js";
 
 /**
  * Costing method enum - matches database values

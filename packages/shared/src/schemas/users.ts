@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
-import { NumericIdSchema, RoleSchema } from "./common";
+import { NumericIdSchema, RoleSchema } from "./common.js";
 
 const EmailSchema = z.string().trim().email().max(191);
 

@@ -7,7 +7,7 @@ import { MODULE_CODES, type ModuleCode, ModuleCodeSchema } from "../constants/mo
 export { MODULE_CODES, type ModuleCode };
 
 import { z } from "zod";
-import { NumericIdSchema } from "./common";
+import { NumericIdSchema } from "./common.js";
 
 export const ModuleCatalogEntrySchema = z.object({
   id: NumericIdSchema,

@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
-import { NumericIdSchema, PosStatusSchema, UUID } from "./common";
+import { NumericIdSchema, PosStatusSchema, UUID } from "./common.js";
 
 export const PosOrderServiceTypeSchema = z.enum(["TAKEAWAY", "DINE_IN"]);
 

@@ -2,9 +2,9 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
-import { NumericIdSchema } from "./common";
-import { ReservationStatusSchema } from "./reservations";
-import { OutletTableStatusSchema } from "./outlet-tables";
+import { NumericIdSchema } from "./common.js";
+import { ReservationStatusSchema } from "./reservations.js";
+import { OutletTableStatusSchema } from "./outlet-tables.js";
 
 /**
  * Item Type Taxonomy

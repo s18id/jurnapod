@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
-import { NumericIdSchema } from "./common";
+import { NumericIdSchema } from "./common.js";
 
 export const PostingRequestSchema = z.object({
   doc_type: z.string().min(1),

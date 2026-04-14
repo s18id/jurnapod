@@ -2,8 +2,8 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
-import { DocumentStatusSchema, MoneySchema, NumericIdSchema } from "./common";
-import { DateOnlySchema } from "./datetime";
+import { DocumentStatusSchema, MoneySchema, NumericIdSchema } from "./common.js";
+import { DateOnlySchema } from "./datetime.js";
 
 // Money helpers for cent-exact validation
 const MONEY_SCALE = 100;
