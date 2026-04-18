@@ -1,4 +1,4 @@
-# ADR-001: Backoffice Auth Token Centralization in `apiRequest`
+# ADR-0001: Backoffice Auth Token Centralization in `apiRequest`
 
 **Date:** 2026-04-13  
 **Status:** Accepted  
