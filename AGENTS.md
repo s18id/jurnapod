@@ -5,24 +5,23 @@
 ---
 
 ## Agent Routing
+
+> All delegation goes through `./opencode/agents/` subagents. Use `bmad-master` for quick-flow solo-dev work on small, well-bounded tasks.
+
 | When you need... | Use this agent |
 |------------------|----------------|
-| Implement a story (from spec) | `bmad-dev-story` |
-| Quick code change / bug fix | `bmad-quick-dev` |
-| Solo dev on a task | `bmad-quick-flow-solo-dev` |
-| Code review | `bmad-code-review` |
-| Edge case review | `bmad-review-edge-case-hunter` |
-| Test strategy / plan | `bmad-testarch-test-design` |
-| Generate unit/integration tests | `bmad-qa-generate-tests` |
-| Generate e2e tests | `bmad-qa-generate-e2e-tests` |
-| New feature requirements (PRD) | `bmad-create-prd` |
-| Architecture / tech design | `bmad-create-architecture` |
-| Break down requirements into stories | `bmad-create-epics-and-stories` |
-| Product management | `bmad-agent-pm` |
-| Sprint planning | `bmad-sprint-planning` |
-| Sprint status | `bmad-sprint-status` |
-| Document existing project | `bmad-document-project` |
-| Technical writing | `bmad-agent-tech-writer` |
+| Story implementation (from spec) | `bmad-dev` |
+| Quick code change / bug fix | `bmad-master` |
+| Solo dev on a small task | `bmad-master` |
+| Code review / adversarial review | `bmad-review` |
+| Edge case review | `bmad-review` |
+| Product management | `bmad-pm` |
+| Architecture / tech design | `bmad-architect` |
+| Sprint planning / story creation | `bmad-sm` |
+| Business analysis / product discovery | `bmad-analyst` |
+| QA / test generation | `bmad-qa` |
+| UX design | `bmad-ux-designer` |
+| Technical writing / documentation | `bmad-tech-writer` |
 
 ---
 

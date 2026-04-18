@@ -9,6 +9,30 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./slo": {
+      "types": "./dist/slo.d.ts",
+      "default": "./dist/slo.js"
+    },
+    "./metrics": {
+      "types": "./dist/metrics.d.ts",
+      "default": "./dist/metrics.js"
+    },
+    "./alert-config": {
+      "types": "./dist/alert-config.d.ts",
+      "default": "./dist/alert-config.js"
+    },
+    "./correlation": {
+      "types": "./dist/correlation.d.ts",
+      "default": "./dist/correlation.js"
+    },
+    "./labels": {
+      "types": "./dist/labels.d.ts",
+      "default": "./dist/labels.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "default": "./dist/runtime/index.js"
     }
   },
   "files": ["dist"],
@@ -20,15 +44,6 @@
     "test:unit": "vitest run __test__/unit",
     "test:integration": "vitest run __test__/integration",
     "test:single": "vitest run"
-  },
-  "exports": {
-    ".": "./src/index.ts",
-    "./slo": "./src/slo.ts",
-    "./metrics": "./src/metrics.ts",
-    "./alert-config": "./src/alert-config.ts",
-    "./correlation": "./src/correlation.ts",
-    "./labels": "./src/labels.ts",
-    "./runtime": "./src/runtime/index.ts"
   },
   "dependencies": {
     "prom-client": "^15.1.3",
