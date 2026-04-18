@@ -14,3 +14,4 @@ export * from "./audit-service";
 export * from "./companies";
 export * from "./feature-flags";
 export * from "./settings";
+export * from "./customers";
