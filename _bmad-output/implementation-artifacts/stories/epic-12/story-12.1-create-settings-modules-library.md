@@ -171,7 +171,7 @@ Create `apps/api/src/lib/settings-modules.test.ts` with:
 
 ## Completion Notes
 
-**Completed by:** bmad-agent-dev (delegated agent)
+**Completed by:** bmad-dev (delegated agent)
 **Completion Date:** 2026-03-28
 **Actual Effort:** ~4 hours
 

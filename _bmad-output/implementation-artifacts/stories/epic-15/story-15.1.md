@@ -86,7 +86,7 @@ Implement **Option A** (Auto-Release Wrapper) as primary solution, with Option B
 ## Dev Agent Record
 
 **Implementation Date:** 2026-03-28  
-**Agent:** bmad-agent-dev (minimax-m2.5)  
+**Agent:** bmad-dev (minimax-m2.5)  
 **Time Spent:** ~45 minutes
 
 ### Files Created/Modified

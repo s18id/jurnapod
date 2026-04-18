@@ -185,6 +185,73 @@ npm test -w @jurnapod/api
 3. When done, inspect log file with grep/cat — never rely on terminal output
 4. Keep log files out of git (they're in `.gitignore`)
 
+### Epic Kickoff Pre-Flight Gate (MANDATORY)
+
+Before starting the first story of any epic, run and record these pre-flight checks:
+
+```bash
+npm run lint -w @jurnapod/api
+npm run typecheck -w @jurnapod/api
+```
+
+If checks fail:
+- Do **not** start story implementation until blockers are triaged.
+- Classify each finding as either:
+  1. **Blocking pre-existing issue** (must fix before epic starts), or
+  2. **Tracked follow-up** (explicitly documented in epic risks/debt with owner).
+
+### Incidental Fix Scope Policy
+
+When a story encounters unrelated pre-existing issues:
+
+- **Allow in-scope incidental fix** when all are true:
+  - Change is small and low-risk (e.g., lint error, typo, clear guardrail bug)
+  - It blocks validation or safe completion of current story/epic
+  - The fix is documented in story dev notes and epic closeout notes
+
+- **Defer to follow-up** when any are true:
+  - Requires architectural redesign or broad refactor
+  - Touches multiple domains outside current acceptance criteria
+  - Cannot be validated quickly with focused tests
+
+For deferred items, create a tracked action item with owner + priority (P0/P1/P2/P3).
+
+### Canonical beforeAll seedCtx Pattern
+
+When using `getSeedSyncContext()` in integration tests, always cache it in `beforeAll`
+to eliminate async call overhead in `it()` blocks:
+
+```typescript
+// 1. Import with alias — the actual async load function
+import { getSeedSyncContext as loadSeedSyncContext } from '../../../fixtures';
+
+// 2. Suite-level variable to hold the cached context
+let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
+
+// 3. Zero-overhead wrapper — just returns the cached value
+const getSeedSyncContext = async () => seedCtx;
+
+// 4. In beforeAll — call the load function ONCE
+beforeAll(async () => {
+  seedCtx = await loadSeedSyncContext();
+});
+
+// 5. In it() blocks — use the wrapper (no async overhead)
+it('some test', async () => {
+  const ctx = await getSeedSyncContext();  // ← synchronous return
+  // use ctx.companyId, ctx.outletId, etc.
+});
+```
+
+**Why two functions?**
+- `loadSeedSyncContext()` — the actual async function that queries DB if not cached. Called once in `beforeAll`.
+- `getSeedSyncContext()` — the zero-overhead wrapper that just returns the cached `seedCtx` value. Called in every `it()` block.
+
+**Rules:**
+- Never call `loadSeedSyncContext()` inside an `it()` block — always use the wrapper
+- Always set deterministic passwords (`process.env.JP_OWNER_PASSWORD`) on login-capable test users
+- Use `resetFixtureRegistry()` in `afterAll()` to clean up
+
 ### test-fixtures.ts Library
 **Location**: `apps/api/src/lib/test-fixtures.ts`
 
@@ -410,4 +477,4 @@ _bmad-output/
 
 ---
 
-_Last Updated: 2026-04-13_
+_Last Updated: 2026-04-15_

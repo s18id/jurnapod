@@ -3,7 +3,7 @@
 ## Active Delegations
 
 ### Scope A: Story 13.3 - Refactor import.ts Route
-**Agent:** bmad-agent-dev  
+**Agent:** bmad-dev  
 **Status:** ✅ DONE  
 **File:** `apps/api/src/routes/import.ts`
 
@@ -21,7 +21,7 @@
 ---
 
 ### Scope B: Story 13.5 - Refactor inventory.ts Route
-**Agent:** bmad-agent-dev
+**Agent:** bmad-dev
 **Status:** ✅ DONE
 **File:** `apps/api/src/routes/inventory.ts`
 

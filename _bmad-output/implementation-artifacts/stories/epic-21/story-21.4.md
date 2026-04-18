@@ -5,7 +5,7 @@
 **Story Points:** 1  
 **Priority:** P2  
 **Risk:** LOW  
-**Assigned:** bmad-agent-dev
+**Assigned:** bmad-dev
 
 ---
 
@@ -27,7 +27,7 @@ Keep `/sync/check-duplicate` endpoint and document/enforce its boundary as a pre
 
 ## Sprint Plan
 
-- **Owner Role:** @bmad-agent-dev
+- **Owner Role:** @bmad-dev
 - **Estimate:** 1 SP (~0.5 day)
 - **Dependency:** Story 21.2 done
 - **Test Gate:** sync route unit + sync suite pass with semantics documentation review

@@ -225,7 +225,7 @@ Create tests for:
 
 ## Completion Notes
 
-**Completed by:** bmad-agent-dev (delegated agent)
+**Completed by:** bmad-dev (delegated agent)
 **Completion Date:** 2026-03-28
 **Actual Effort:** ~6 hours
 

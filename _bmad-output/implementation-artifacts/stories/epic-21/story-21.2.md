@@ -5,7 +5,7 @@
 **Story Points:** 3  
 **Priority:** P1  
 **Risk:** MEDIUM  
-**Assigned:** bmad-agent-dev
+**Assigned:** bmad-dev
 
 ---
 
@@ -28,7 +28,7 @@ Move sync push payload mapping functions out of route file into a dedicated adap
 
 ## Sprint Plan
 
-- **Owner Role:** @bmad-agent-dev
+- **Owner Role:** @bmad-dev
 - **Estimate:** 3 SP (~1.5 days)
 - **Dependency:** Story 21.1 done
 - **Test Gate:** push route + sync unit suites must pass before handoff

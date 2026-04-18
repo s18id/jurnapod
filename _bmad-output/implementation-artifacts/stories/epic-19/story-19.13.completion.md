@@ -103,4 +103,4 @@ Epic 19 stories 19-1 through 19-12 must be **fully implemented** before story 19
 
 ---
 
-**Verification performed by:** bmad-agent-dev (Story 19.13 implementation attempt)
+**Verification performed by:** bmad-dev (Story 19.13 implementation attempt)

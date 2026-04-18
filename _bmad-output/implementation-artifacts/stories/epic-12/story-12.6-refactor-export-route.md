@@ -168,7 +168,7 @@ Verify no SQL in route:
 
 ## Completion Notes
 
-**Completed by:** bmad-agent-dev (delegated agent)
+**Completed by:** bmad-dev (delegated agent)
 **Completion Date:** 2026-03-28
 **Actual Effort:** ~4 hours
 **Depends on:** Story 12.5 (completed)

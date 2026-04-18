@@ -1,4 +1,4 @@
-last_updated: 2026-04-14T00:00:00Z
+last_updated: 2026-04-17T12:00:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -500,3 +500,22 @@ development_status:
   42-5-beforeall-seedctx-caching: done
   42-6-final-verification: done
   epic-42-retrospective: done
+
+  # Epic 43: Action Item Completion + Production Hardening
+  # ✅ COMPLETED 2026-04-15 — lint gate cleared (sync-modules.ts catch clauses fixed)
+  epic-43: done
+  43-1-fix-intermittent-test-failures: done
+  43-2-stock-outlet-validation: done
+  43-3-telemetry-package-json: done
+  43-4-document-seedctx-pattern: done
+  43-5-final-verification: done  # ✅ all gates pass (2026-04-15)
+  epic-43-retrospective: done
+
+  # Epic 44: AR Customer Management & Invoicing Completion
+  epic-44: ready-for-dev
+  44-0-numbering-reset-verification-closeout: ready-for-dev
+  44-1-customer-master-crud: ready-for-dev
+  44-2-invoice-customer-link: ready-for-dev
+  44-3-invoice-header-discounts-alignment: ready-for-dev
+  44-4-receivables-ageing-reporting-completion: ready-for-dev
+  44-5-credit-note-customer-flow: ready-for-dev

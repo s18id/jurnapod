@@ -61,7 +61,7 @@ Skipped - retrospective is optional per team practice.
 ## Dev Agent Record
 
 **Implementation Date:** 2026-03-29  
-**Agent:** bmad-agent-dev  
+**Agent:** bmad-dev  
 **Time Spent:** ~15 minutes
 
 ### Files Created/Modified

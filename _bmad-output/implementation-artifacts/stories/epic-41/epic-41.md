@@ -169,7 +169,7 @@ Centralize backoffice bearer token resolution inside `apiRequest()` so UI layers
 
 ## Architecture Decision
 
-See `docs/adr/adr-001-auth-token-centralization.md` for full design.
+See `docs/adr/adr-0001-auth-token-centralization.md` for full design.
 
 ### Token Resolution Order (Canonical)
 
@@ -232,7 +232,7 @@ The following are NOT prop drilling - they are appropriate internal or boundary 
 
 ## Related Documentation
 
-- [ADR-001: Auth Token Centralization](../../docs/adr/adr-001-auth-token-centralization.md)
+- [ADR-0001: Auth Token Centralization](../../docs/adr/adr-0001-auth-token-centralization.md)
 - [Epic 39: Permission System Consolidation](./epic-39-sprint-plan.md)
 
 ---

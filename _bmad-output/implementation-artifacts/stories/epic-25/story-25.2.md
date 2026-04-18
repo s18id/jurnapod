@@ -250,7 +250,7 @@ npm run typecheck -w @jurnapod/api
 ## Dev Agent Record
 
 **Story:** 25.2 - Extract cash-bank domain model/types/errors/helpers to modules-treasury
-**Agent:** bmad-agent-dev
+**Agent:** bmad-dev
 **Date:** 2026-04-03
 
 ### Files Created/Modified

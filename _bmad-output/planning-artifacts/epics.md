@@ -49,5 +49,6 @@
 | Epic | Title | Status |
 |------|-------|--------|
 | Epic 40 | Backoffice Feature Completeness - API-to-UI Gap Closure | draft |
+| Epic 44 | AR Customer Management & Invoicing Completion | draft |
 
-_Last Updated: 2026-04-13_
+_Last Updated: 2026-04-15_

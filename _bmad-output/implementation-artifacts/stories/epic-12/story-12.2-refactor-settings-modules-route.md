@@ -163,7 +163,7 @@ Remove unused imports:
 
 ## Completion Notes
 
-**Completed by:** bmad-agent-dev (delegated agent)
+**Completed by:** bmad-dev (delegated agent)
 **Completion Date:** 2026-03-28
 **Actual Effort:** ~2 hours
 **Depends on:** Story 12.1 (completed)

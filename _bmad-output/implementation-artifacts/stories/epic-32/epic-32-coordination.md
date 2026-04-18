@@ -4,11 +4,11 @@
 
 | Story | Status | Owner | Commit |
 |-------|--------|-------|--------|
-| 32.1 Fiscal Year Close | ✅ Done | bmad-agent-dev | f3990b8 |
-| 32.2 Reconciliation Dashboard | ✅ Done | bmad-agent-dev | f3990b8 |
-| 32.3 Trial Balance Validation | ✅ Done | bmad-agent-dev | 2b5891e |
-| 32.4 Period Transition Audit | ✅ Done | bmad-agent-dev | 2b5891e |
-| 32.5 Roll Forward Workspace | ✅ Done | bmad-agent-dev | 5f2b4b2 |
+| 32.1 Fiscal Year Close | ✅ Done | bmad-dev | f3990b8 |
+| 32.2 Reconciliation Dashboard | ✅ Done | bmad-dev | f3990b8 |
+| 32.3 Trial Balance Validation | ✅ Done | bmad-dev | 2b5891e |
+| 32.4 Period Transition Audit | ✅ Done | bmad-dev | 2b5891e |
+| 32.5 Roll Forward Workspace | ✅ Done | bmad-dev | 5f2b4b2 |
 
 ## Post-Story Fixes
 
