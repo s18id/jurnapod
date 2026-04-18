@@ -257,8 +257,312 @@ beforeEach(async () => {
 
 ---
 
+---
+
+## beforeAll with Cached Seed Context Pattern
+
+When using `getSeedSyncContext()` in integration tests, always cache it in `beforeAll` to eliminate async call overhead in `it()` blocks:
+
+```typescript
+// 1. Import with alias — the actual async load function
+import { getSeedSyncContext as loadSeedSyncContext } from '../../../fixtures';
+
+// 2. Suite-level variable to hold the cached context
+let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
+
+// 3. Zero-overhead wrapper — just returns the cached value
+const getSeedSyncContext = async () => seedCtx;
+
+// 4. In beforeAll — call the load function ONCE
+beforeAll(async () => {
+  seedCtx = await loadSeedSyncContext();
+});
+
+// 5. In it() blocks — use the wrapper (no async overhead)
+it('some test', async () => {
+  const ctx = await getSeedSyncContext();  // ← synchronous return
+  // use ctx.companyId, ctx.outletId, etc.
+});
+
+afterAll(async () => {
+  resetFixtureRegistry();
+  await closeTestDb();
+});
+```
+
+**Why two functions?**
+- `loadSeedSyncContext()` — the actual async function that queries DB if not cached. Called once in `beforeAll`.
+- `getSeedSyncContext()` — the zero-overhead wrapper that just returns the cached `seedCtx` value. Called in every `it()` block.
+
+**Rules:**
+- Never call `loadSeedSyncContext()` inside an `it()` block — always use the wrapper
+- Always set deterministic passwords (`process.env.JP_OWNER_PASSWORD`) on login-capable test users
+- Use `resetFixtureRegistry()` in `afterAll()` to clean up
+
+---
+
+## Try/Finally for Mid-Execution Failure Cleanup
+
+When a test fails mid-execution, cleanup in `finally` ensures resources are released regardless of success or failure:
+
+```typescript
+describe('OrderService', () => {
+  let db: TestDb;
+  let companyId: number;
+
+  beforeAll(async () => {
+    db = await getTestDb();
+    const company = await createTestCompany();
+    companyId = company.id;
+  });
+
+  afterAll(async () => {
+    await cleanupTestFixtures();
+    await closeTestDb();
+  });
+
+  it('should create order', async () => {
+    let order;
+    try {
+      order = await orderService.create({
+        companyId,
+        items: [{ sku: 'TEST-001', quantity: 1 }]
+      });
+      expect(order.id).toBeDefined();
+    } finally {
+      // Cleanup even if test fails
+      if (order?.id) {
+        await db.deleteFrom('orders').where('id', '=', order.id).execute();
+      }
+    }
+  });
+
+  it('should process payment', async () => {
+    // Test code...
+  });
+});
+```
+
+**Key principle:** Use `finally` for cleanup that must run regardless of test outcome. This prevents resource leaks when assertions fail.
+
+---
+
+## Tenant Isolation Cleanup Rules
+
+All cleanup DELETE statements **MUST** scope by `company_id` and `outlet_id` to prevent cross-tenant data pollution:
+
+```typescript
+// ❌ WRONG — deletes across all tenants
+await db.deleteFrom('items').where('id', '=', itemId).execute();
+
+// ✅ CORRECT — scopes to specific tenant
+await db
+  .deleteFrom('items')
+  .where('company_id', '=', companyId)
+  .where('id', '=', itemId)
+  .execute();
+```
+
+### Multi-Tenant Cleanup Pattern
+
+```typescript
+afterAll(async () => {
+  // Clean up in correct order respecting foreign keys
+  await db.deleteFrom('inventory_transactions')
+    .where('company_id', '=', companyId)
+    .where('outlet_id', '=', outletId)
+    .execute();
+
+  await db.deleteFrom('stock')
+    .where('company_id', '=', companyId)
+    .where('outlet_id', '=', outletId)
+    .execute();
+
+  await db.deleteFrom('items')
+    .where('company_id', '=', companyId)
+    .execute();
+
+  await db.deleteFrom('outlets')
+    .where('company_id', '=', companyId)
+    .execute();
+
+  await db.updateTable('companies')
+    .set({ deleted_at: new Date() })
+    .where('id', '=', companyId)
+    .execute();
+});
+```
+
+**Rule:** Always include `company_id` in WHERE clauses. Add `outlet_id` when the resource is outlet-scoped.
+
+---
+
+## ACL Cleanup P0 Rule
+
+**CRITICAL — P0 Blocker:** Canonical system roles are immutable reference data in persistent test DBs. Deleting or modifying `module_roles` rows for system roles (`SUPER_ADMIN`, `OWNER`, `COMPANY_ADMIN`, `ADMIN`, `ACCOUNTANT`, `CASHIER`) with `company_id=NULL` corrupts the seeded ACL baseline and breaks all subsequent tests.
+
+### P0 Rules for ACL Cleanup
+
+- ❌ **BLOCKER**: Any cleanup/deletion by `role_id` alone on `module_roles` — this wipes canonical rows shared across all companies
+- ✅ **Required**: ACL cleanup must scope by `company_id` AND `role_id`: `WHERE company_id = ? AND role_id IN (?)`
+- ✅ **Required**: Integration tests should mutate **custom test roles**, not seeded system roles
+- ✅ **Required**: Use exact inserted row IDs when cleanup scope is ambiguous
+
+### Correct ACL Cleanup
+
+```typescript
+// ❌ WRONG — deletes ACL for role_id across ALL companies
+await db.deleteFrom('module_roles')
+  .where('role_id', '=', roleId)
+  .execute();
+
+// ✅ CORRECT — deletes ACL only for specific company+role
+await db.deleteFrom('module_roles')
+  .where('company_id', '=', companyId)
+  .where('role_id', '=', roleId)
+  .execute();
+```
+
+### For Custom Test Roles Only
+
+```typescript
+// Create a custom test role for ACL mutation tests
+it('should test custom ACL', async () => {
+  const testRole = await createTestRole(baseUrl, accessToken, 'CustomACLTest');
+  
+  try {
+    await setModulePermission(companyId, testRole.id, 'inventory', 'items', 15);
+    // ... test code
+  } finally {
+    // Cleanup custom role only — does not affect system roles
+    await db.deleteFrom('module_roles')
+      .where('company_id', '=', companyId)
+      .where('role_id', '=', testRole.id)
+      .execute();
+    
+    await db.deleteFrom('roles')
+      .where('id', '=', testRole.id)
+      .where('company_id', '=', companyId)  // Custom roles have company_id
+      .execute();
+  }
+});
+```
+
+**Recovery for corrupted ACL:**
+```bash
+npm run db:migrate -w @jurnapod/db
+npm run db:seed -w @jurnapod/db
+npm run db:seed:test-accounts -w @jurnapod/db
+```
+
+---
+
+## Anti-Pattern Examples
+
+### Anti-Pattern 1: Destroying Pool in afterEach
+
+```typescript
+// ❌ WRONG — destroys shared pool after EACH test
+afterEach(async () => {
+  await db.destroy();  // Test 1 passes, Tests 2-N fail with "Connection closed"
+});
+
+// Symptoms: Tests 2-N fail with errors like:
+// - "Error: Connection closed"
+// - "Error: Cannot query after connection pool closed"
+// - Sporadic timeouts
+
+// ✅ CORRECT — destroy pool once after ALL tests
+afterAll(async () => {
+  await db.destroy();
+});
+```
+
+### Anti-Pattern 2: Missing Pool Cleanup (Causes Test Hangs)
+
+```typescript
+// ❌ WRONG — no pool cleanup, tests hang indefinitely
+describe('MyTests', () => {
+  it('test 1', async () => { /* ... */ });
+  it('test 2', async () => { /* ... */ });
+  // No afterAll — process never exits
+});
+
+// ✅ CORRECT — cleanup in afterAll
+describe('MyTests', () => {
+  afterAll(async () => {
+    resetFixtureRegistry();
+    await closeTestDb();  // Closes pool, allows process to exit
+  });
+  
+  it('test 1', async () => { /* ... */ });
+  it('test 2', async () => { /* ... */ });
+});
+```
+
+### Anti-Pattern 3: ACL Cleanup Without company_id (Corrupts System Roles)
+
+```typescript
+// ❌ WRONG — deletes module_roles for role_id across ALL companies
+// This corrupts canonical system role permissions!
+await db.deleteFrom('module_roles')
+  .where('role_id', '=', roleId)
+  .execute();
+
+// Symptoms after running tests:
+// - SUPER_ADMIN can no longer access platform.users
+// - OWNER cannot manage outlets
+// - CASHIER permissions reset unexpectedly
+// - Other tests fail with unexpected 403 errors
+
+// ✅ CORRECT — scope to specific company+role
+await db.deleteFrom('module_roles')
+  .where('company_id', '=', companyId)
+  .where('role_id', '=', roleId)
+  .execute();
+```
+
+### Anti-Pattern 4: Missing Tenant Isolation in Cleanup
+
+```typescript
+// ❌ WRONG — deletes items without tenant scoping
+await db.deleteFrom('items').execute();  // DELETES ALL ITEMS FROM ALL COMPANIES!
+
+// ✅ CORRECT — scope to tenant
+await db.deleteFrom('items')
+  .where('company_id', '=', companyId)
+  .execute();
+```
+
+### Anti-Pattern 5: Not Using try/finally for Resource Cleanup
+
+```typescript
+// ❌ WRONG — no cleanup if assertion fails
+it('should create resource', async () => {
+  const resource = await createExpensiveResource();
+  expect(resource.status).toBe('active');  // If this fails...
+  // ... resource is never cleaned up
+});
+
+// ✅ CORRECT — cleanup in finally
+it('should create resource', async () => {
+  let resource;
+  try {
+    resource = await createExpensiveResource();
+    expect(resource.status).toBe('active');
+  } finally {
+    if (resource?.id) {
+      await deleteResource(resource.id);
+    }
+  }
+});
+```
+
+---
+
 ## References
 
 - [Canonical Test Directory Structure](https://github.com/jurnapod/jurnapod/blob/main/AGENTS.md#canonical-test-directory-structure)
 - [Database Fixture Standards](./fixture-standards.md)
 - [Pre-Reorganization Tool Standardization Checklist](../process/tool-standardization-checklist.md)
+- [test-fixtures.ts Library Functions](../api/src/lib/test-fixtures.ts)

@@ -347,6 +347,35 @@ When performing extraction or package migration stories (moving code from `apps/
 
 ---
 
+## Sprint Status Updates (MANDATORY — E45-A1)
+
+` sprint-status.yaml` is a **shared state file** tracking all epic and story completion across the project. It must **never be replaced wholesale**. Every edit must be append-only.
+
+**Append-Only Rule:**
+- ✅ READ the file before editing
+- ✅ APPEND only the new epic/stories section
+- ✅ PRESERVE all existing epic entries (Epics 1–N)
+- ❌ NEVER rewrite the file with partial content
+- ❌ NEVER use `replaceAll` on epic section markers
+
+**Correct edit pattern:**
+```
+# After Epic N block, add:
+  # Epic N+1: ...
+  epic-N+1: in-progress
+  N+1-1-story-name: backlog
+
+```
+
+**If sprint-status.yaml is accidentally overwritten:**
+```bash
+git checkout HEAD -- _bmad-output/implementation-artifacts/sprint-status.yaml
+```
+
+**Impact of violation:** Replacing the file destroys completion tracking for ALL prior epics. This is a P1 process failure.
+
+---
+
 ## Definition of Done (MANDATORY)
 
 Before marking ANY story as DONE:

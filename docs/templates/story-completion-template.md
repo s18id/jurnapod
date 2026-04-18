@@ -98,6 +98,28 @@
 
 ---
 
+## Dead Code Audit
+
+*Applies to extraction and consolidation stories only.*
+
+### Checklist
+
+- [ ] **Orphaned exports**: Searched for exported functions/types from deleted module that have no remaining consumers
+- [ ] **Orphaned type definitions**: Checked for types/interfaces that became unused after deletion
+- [ ] **Orphaned test files**: Identified test files that only tested the deleted code
+
+### Findings
+
+- [ ] **Clean** — No orphaned code found
+- [ ] **Found X items** — {description of findings}
+
+### Action Taken
+
+- [ ] **Deleted** — Orphaned code removed directly
+- [ ] **Action item created** — Tracked in action-items.md with ID: {AI-ID}
+
+---
+
 ## API Gaps Encountered
 
 If any API gaps were discovered during implementation:

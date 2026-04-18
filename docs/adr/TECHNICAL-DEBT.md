@@ -185,10 +185,10 @@ This document serves as the central registry for all known technical debt in the
 | Priority | Open | Resolved | Total |
 |----------|------|---------|-------|
 | P1 | 0 | 4 | 4 |
-| P2 | 0 | 18 | 18 |
+| P2 | 1 | 18 | 19 |
 | P3 | 0 | 9 | 9 |
 | P4 | 0 | 3 | 3 |
-| **Total** | **0** | **34** | **34** |
+| **Total** | **1** | **34** | **35** |
 
 ---
 
@@ -307,11 +307,43 @@ Run the [TD Health Check Template](./td-health-check-template.md) before every e
 
 ---
 
+### Epic 45: Tooling Standards & Process Documentation
+
+| ID | Description | Priority | Status | ADR/Story |
+|----|-------------|----------|--------|-----------|
+| TD-038 | 156 pre-existing `@typescript-eslint/no-explicit-any` warnings in API package | P2 | **Open** | Epic 45 Retro |
+
+**Description:** The API package has 156 `no-explicit-any` warnings that existed before Epic 45. Epic 45 introduced no new lint errors (pre-flight gate confirmed 0 new errors). This debt was not created by Epic 45 — it predates it and represents a gradual accumulation of implicit `any` casts.
+
+**Resolution:** Requires systematic audit of API package to replace implicit `any` with explicit types. No production impact, but degrades lint signal quality (156 warnings mask potential real issues).
+
+**Owner:** Tech Lead
+
+---
+
 ## Changelog
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-04-19 | Added TD-038 - 156 pre-existing no-explicit-any warnings in API package | Epic 45 Retro |
 | 2026-03-26 | Initial creation - cataloged debt from Epics 0-6 | Story 6.6 |
+| 2026-03-26 | Marked Epic 6 debt items as resolved | Story 6.6 |
+| 2026-03-26 | Fixed TD-016-019 status to RESOLVED (completed in Story 6.7) | Epic 7 Planning |
+| 2026-03-26 | Added TD-026-029 from Epic 6 retro (corrected numbering collision) | Epic 7 Planning |
+| 2026-03-26 | Added "No New TD Without Tracking" rule and TD health check reference | Story 7.1 |
+| 2026-03-26 | Resolved TD-026–029 (Epic 7 Stories 7.2–7.3) and TD-006 (Story 7.4) | Epic 7 Sprint |
+| 2026-03-28 | Resolved TD-008 and TD-009 - streaming parsers for CSV and Excel (Story 7.5) | Story 7.5 |
+| 2026-03-28 | Resolved TD-012 - Batch FK validation with single IN clause queries (Story 7.6) | Epic 7 |
+| 2026-03-28 | Resolved TD-013 - Import resume/checkpoint (Story 8.1) | Story 8.1 |
+| 2026-03-28 | Resolved TD-014 - Export backpressure handling (Story 8.2) | Story 8.2 |
+| 2026-03-28 | Resolved TD-015 - Progress persistence (Story 8.3) | Story 8.3 |
+| 2026-03-28 | Added TD-030 - Effective date filtering (P1), TD-031 - Alert retry logic (P2), TD-032 - Batch processing backfills (P2) | Epic 8 |
+| 2026-03-28 | Fixed summary statistics: P2 total corrected to 18 (was 15), P4 total corrected to 3 (was 3) | Documentation fix |
+| 2026-03-28 | Added TD-033, TD-034 - Epic 13/14 confirmation entries; updated P3 resolved count to 9 | Story 14.5 |
+| 2026-03-28 | Resolved TD-030 - Effective date filtering migration (Story 15.3) | Story 15.4 |
+| 2026-03-29 | Resolved TD-031 - Alert retry with exponential backoff (Story 16.1) | Story 16.1 |
+| 2026-03-29 | Resolved TD-032 - Batch processing utility with delays (Story 16.2) | Story 16.2 |
+| 2026-04-04 | Resolved TD-037 - API Kysely type errors (~300+ type errors) | Epic 23 API Detachment |
 | 2026-03-26 | Marked Epic 6 debt items as resolved | Story 6.6 |
 | 2026-03-26 | Fixed TD-016-019 status to RESOLVED (completed in Story 6.7) | Epic 7 Planning |
 | 2026-03-26 | Added TD-026-029 from Epic 6 retro (corrected numbering collision) | Epic 7 Planning |

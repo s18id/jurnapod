@@ -1,16 +1,45 @@
 # Vitest Config Template — Package
 
-> For `packages/*/` — uses **relative imports**, no `@/` aliases.
+> For `packages/*/` — adds `@/` and `@jurnapod/*` path alias support so tests can use the same import conventions as production code.
 
 ```typescript
 import { defineConfig } from 'vitest/config';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Resolve aliases relative to this vitest.config.ts location
+// Adjust '../' depth based on package structure (standard: packages/<name>/)
+const packageRoot = path.resolve(__dirname, '../');
 
 export default defineConfig({
   resolve: {
     extensions: ['.js', '.ts', '.tsx'],
-    // NO alias section — packages use relative imports
-    // e.g., import { db } from '../db';
-    // NOT: import { db } from '@/lib/db';
+    alias: {
+      // Package-local imports: @/ maps to <packageRoot>/src
+      // e.g., import { db } from '@/lib/db' → packages/<name>/src/lib/db
+      '@/': path.join(packageRoot, 'src'),
+
+      // Cross-package imports: @jurnapod/* maps to repo packages
+      // e.g., import { db } from '@jurnapod/db' → packages/db/src
+      '@jurnapod/shared': path.resolve(__dirname, '../../packages/shared/src'),
+      '@jurnapod/db': path.resolve(__dirname, '../../packages/db/src'),
+      '@jurnapod/auth': path.resolve(__dirname, '../../packages/auth/src'),
+      '@jurnapod/modules-accounting': path.resolve(__dirname, '../../packages/modules/accounting/src'),
+      '@jurnapod/modules-inventory': path.resolve(__dirname, '../../packages/modules/inventory/src'),
+      '@jurnapod/modules-inventory-costing': path.resolve(__dirname, '../../packages/modules/inventory-costing/src'),
+      '@jurnapod/modules-platform': path.resolve(__dirname, '../../packages/modules/platform/src'),
+      '@jurnapod/modules-sales': path.resolve(__dirname, '../../packages/modules/sales/src'),
+      '@jurnapod/modules-treasury': path.resolve(__dirname, '../../packages/modules/treasury/src'),
+      '@jurnapod/modules-reservations': path.resolve(__dirname, '../../packages/modules/reservations/src'),
+      '@jurnapod/modules-reporting': path.resolve(__dirname, '../../packages/modules/reporting/src'),
+      '@jurnapod/pos-sync': path.resolve(__dirname, '../../packages/pos-sync/src'),
+      '@jurnapod/backoffice-sync': path.resolve(__dirname, '../../packages/backoffice-sync/src'),
+      '@jurnapod/sync-core': path.resolve(__dirname, '../../packages/sync-core/src'),
+      '@jurnapod/notifications': path.resolve(__dirname, '../../packages/notifications/src'),
+      '@jurnapod/telemetry': path.resolve(__dirname, '../../packages/telemetry/src'),
+    },
   },
   test: {
     globals: true,
@@ -27,8 +56,28 @@ export default defineConfig({
 
 - **`globals: true`** — Supplies `describe`, `it`, `expect`, `vi`, etc. globally
 - **`environment: 'node'`** — Packages typically test pure logic or use `@jurnapod/db` for DB tests
-- **No aliases** — Packages must use relative imports (`../db`, `./service`). This avoids coupling to the API app's alias configuration.
+- **`@/` alias** — Maps to `<packageRoot>/src`; enables package-local imports like `@/lib/db`
+- **`@jurnapod/*` aliases** — Maps to other packages' `src` directories for cross-package imports
 - **Timeouts** — Standard 30s/30s/10s configuration
+
+## Adapting the Alias Paths
+
+The `../../packages/` depth assumes the standard structure:
+
+```
+repo-root/
+└── packages/
+    └── <package-name>/           ← your package
+        └── vitest.config.ts       ← this file (at depth 2)
+```
+
+If your package is nested differently (e.g., `packages/modules/<name>/`), adjust the `../../` path segments accordingly:
+
+| Package Location | Path to `packages/` |
+|------------------|---------------------|
+| `packages/<name>/` | `../../packages/` |
+| `packages/modules/<name>/` | `../../../packages/` |
+| `apps/<name>/` | `../../packages/` |
 
 ## Package Internal Imports
 

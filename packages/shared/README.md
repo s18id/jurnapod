@@ -141,6 +141,31 @@ TABLE_STATE.OCCUPIED  // 'OCCUPIED'
 TABLE_STATE.RESERVED  // 'RESERVED'
 ```
 
+## Canonical Permission Bits
+
+The canonical permission bit values are documented here for reference. For the full ACL model, see [AGENTS.md](../../AGENTS.md#canonical-acl--permission-model-epic-39).
+
+### Permission Bits
+
+| Bit | Name | Value | Purpose |
+|-----|------|-------|---------|
+| 1 | READ | 1 | View data and records |
+| 2 | CREATE | 2 | Create new records |
+| 4 | UPDATE | 4 | Modify existing records |
+| 8 | DELETE | 8 | Remove records |
+| 16 | ANALYZE | 16 | Reports, dashboards, analytics |
+| 32 | MANAGE | 32 | Setup, configuration, administration |
+
+### Permission Masks
+
+| Mask | Value | Binary | Permissions |
+|------|-------|--------|-------------|
+| READ | 1 | `0b000001` | View only |
+| WRITE | 6 | `0b000110` | CREATE + UPDATE |
+| CRUD | 15 | `0b001111` | READ + CREATE + UPDATE + DELETE |
+| CRUDA | 31 | `0b011111` | CRUD + ANALYZE |
+| CRUDAM | 63 | `0b111111` | Full permissions |
+
 ## Architecture
 
 ```

@@ -10,10 +10,10 @@
 | Priority | Open | Done | Won't Fix | Total |
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
-| P1 | 0 | 10 | 0 | 10 |
-| P2 | 5 | 13 | 0 | 18 |
+| P1 | 0 | 11 | 0 | 11 |
+| P2 | 2 | 17 | 0 | 19 |
 | P3 | 1 | 2 | 3 | 6 |
-| **Total** | **6** | **29** | **3** | **38** |
+| **Total** | **3** | **34** | **3** | **40** |
 
 ---
 
@@ -25,10 +25,7 @@
 
 ## P1 - High (Do Next Sprint)
 
-| ID | Action | From | Owner | Status |
-|----|--------|------|-------|--------|
-| E34-A4 | Add "zero test failures" CI gate | Epic 34 | Quinn | Done |
-| E34-A5 | Audit test fixtures for sentinel IDs (all FK constraints) | Epic 34 | Amelia | Done |
+*(empty — no open P1 items)*
 
 ---
 
@@ -38,14 +35,19 @@
 
 | ID | Action | From | Owner | Status |
 |----|--------|------|-------|--------|
-| E33-A2 | Add dead code audit step to consolidation stories | Epic 33 | Bob | Open |
-| E33-A3 | Document permission bit canonical values in shared/README | Epic 33 | Elena | Open |
-| E34-A1 | Create pre-reorganization tool standardization checklist | Epic 34 | Winston | Open |
-| E34-A2 | Build automated import path update script | Epic 34 | Barry | Open |
-| E34-A3 | Document database fixture standards | Epic 34 | Amelia | Open |
-| E34-A6 | Add vitest alias config template to all packages | Epic 34 | Winston | Open |
-| E34-A7 | Document DB cleanup hook patterns | Epic 34 | Murat | Open |
-| E34-A8 | Create lint rule unit test template | Epic 34 | Barry | Open |
+| E45-A5a | Add automated completion-note check to CI pipeline | Epic 44 | Quinn | Open |
+| E45-A5b | Enhance database compatibility testing (MySQL + MariaDB dual-DB CI) | Epic 44 | Quinn | Open |
+| E45-A2 | Create canonical sprint-status utility function | Epic 45 | Barry | Done |
+| E45-A3 | Track 156 no-explicit-any warnings as TD-038 | Epic 45 | Tech Lead | Done |
+| E45-A4 | Add sprint-status.yaml lint rule to detect wholesale replacement | Epic 45 | Winston | Done |
+| E33-A2 | Add dead code audit step to consolidation stories | Epic 33 | Bob | Done |
+| E33-A3 | Document permission bit canonical values in shared/README | Epic 33 | Elena | Done |
+| E34-A1 | Create pre-reorganization tool standardization checklist | Epic 34 | Winston | Done |
+| E34-A2 | Build automated import path update script | Epic 34 | Barry | Done |
+| E34-A3 | Document database fixture standards | Epic 34 | Amelia | Done |
+| E34-A6 | Add vitest alias config template to all packages | Epic 34 | Winston | Done |
+| E34-A7 | Document DB cleanup hook patterns | Epic 34 | Murat | Done |
+| E34-A8 | Create lint rule unit test template | Epic 34 | Barry | Done |
 | E41-A4 | Add @deprecated JSDoc to explicit accessToken arg in api-client.ts | Epic 41 | Dev | Done |
 | E41-A5 | Update project-context.md with Backoffice API Client section | Epic 41 | Tech Writer | Done |
 | E41-A8 | For future bulk migration stories: enumerate every target in story AC | Epic 41 | SM | Done |
@@ -85,6 +87,7 @@
 | E22-A2 | Establish "action item capacity" in sprint planning (20%) | Epic 22 | Epic 22 | Added action item capacity allocation to retrospective workflow |
 | E24-A2 | Establish backlog review as part of epic closeout | Epic 24 | Epic 24 | Backlog review completed 2026-04-04 |
 | E25-A1 | Finalize backlog review process in epic closeout checklist | Epic 25 | Epic 25 | Now part of every retrospective |
+| **E45-A1** | Add sprint-status.yaml append-only rule to dev story template and AGENTS.md | Epic 45 | Epic 45 | Added rule + canonical utility + validation script to prevent file overwrite |
 
 ### P2
 
@@ -103,6 +106,9 @@
 | **E40-A2** | Formal API Gap Tracking: Create process for documenting discovered API gaps | Epic 40 | Epic 40 | Added API Gaps Found table to story template |
 | **E40-A3** | Consistent Story Completion Docs: Ensure all reports have equal depth | Epic 40 | Epic 40 | Created `docs/templates/story-completion-template.md` |
 | **E40-A4** | Per-Button Permission Enforcement: Implement granular checks | Epic 40 | Epic 40 | Created `use-permission.ts` hook and `PermissionButton.tsx` component |
+| **E45-A2** | Create canonical sprint-status utility function | Epic 45 | Epic 45 | Created `scripts/update-sprint-status.ts` and `scripts/validate-sprint-status.ts` |
+| **E45-A3** | Track 156 no-explicit-any warnings as TD-038 | Epic 45 | Epic 45 | Added TD-038 to TECHNICAL-DEBT.md |
+| **E45-A4** | Add sprint-status.yaml lint/validation script | Epic 45 | Epic 45 | Created `scripts/validate-sprint-status.ts` health check |
 
 ### P3
 
@@ -177,4 +183,4 @@ Examples:
 - `E8-A1` = Epic 8, Action 1
 - `E15-A2` = Epic 15, Action 2
 
-_Last Updated: 2026-04-13T00:00:00Z_
+_Last Updated: 2026-04-19T00:00:00Z_

@@ -520,3 +520,15 @@ development_status:
   44-4-receivables-ageing-reporting-completion: done
   44-5-credit-note-customer-flow: done
   epic-44-retrospective: done
+
+  # Epic 45: Tooling Standards & Process Documentation
+  epic-45: done
+  45-1-dead-code-audit-step: done
+  45-2-permission-bits-doc: done
+  45-3-tool-checklist: done
+  45-4-import-path-script: done
+  45-5-fixture-standards: done
+  45-6-vitest-alias-template: done
+  45-7-cleanup-hooks-doc: done
+  45-8-lint-rule-test-template: done
+  epic-45-retrospective: done
