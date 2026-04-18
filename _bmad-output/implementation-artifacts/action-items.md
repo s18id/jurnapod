@@ -10,10 +10,10 @@
 | Priority | Open | Done | Won't Fix | Total |
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
-| P1 | 4 | 11 | 0 | 15 |
+| P1 | 0 | 11 | 0 | 11 |
 | P2 | 3 | 17 | 0 | 20 |
 | P3 | 1 | 2 | 3 | 6 |
-| **Total** | **8** | **34** | **3** | **45** |
+| **Total** | **4** | **34** | **3** | **41** |
 
 ---
 
@@ -25,11 +25,7 @@
 
 ## P1 - High (Do Next Sprint)
 
-| ID | Action | From | Owner | Status |
-|----|--------|------|-------|--------|
-| E46-A1 | Add sprint-status utility + validation as mandatory pre-step in story template | Epic 46 | Bob | Open |
-| E46-A2 | Limit retrospectives to MAX 2 action items with explicit owners/deadlines | Epic 46 | Bob | Open |
-| E46-A4 | Verify sprint-status.yaml integrity before marking any epic done (human gate) | Epic 46 | Bob/SM | Open |
+*(empty — no open P1 items)*
 
 ---
 
@@ -42,22 +38,6 @@
 | E45-A5a | Add automated completion-note check to CI pipeline | Epic 44 | Quinn | Open |
 | E45-A5b | Enhance database compatibility testing (MySQL + MariaDB dual-DB CI) | Epic 44 | Quinn | Open |
 | E46-A3 | Investigate automated lint warning threshold tracking in CI (>100 warnings = auto-TD) | Epic 46 | Charlie | Open |
-| E45-A2 | Create canonical sprint-status utility function | Epic 45 | Barry | Done |
-| E45-A3 | Track 156 no-explicit-any warnings as TD-038 | Epic 45 | Tech Lead | Done |
-| E45-A4 | Add sprint-status.yaml lint rule to detect wholesale replacement | Epic 45 | Winston | Done |
-| E33-A2 | Add dead code audit step to consolidation stories | Epic 33 | Bob | Done |
-| E33-A3 | Document permission bit canonical values in shared/README | Epic 33 | Elena | Done |
-| E34-A1 | Create pre-reorganization tool standardization checklist | Epic 34 | Winston | Done |
-| E34-A2 | Build automated import path update script | Epic 34 | Barry | Done |
-| E34-A3 | Document database fixture standards | Epic 34 | Amelia | Done |
-| E34-A6 | Add vitest alias config template to all packages | Epic 34 | Winston | Done |
-| E34-A7 | Document DB cleanup hook patterns | Epic 34 | Murat | Done |
-| E34-A8 | Create lint rule unit test template | Epic 34 | Barry | Done |
-| E41-A4 | Add @deprecated JSDoc to explicit accessToken arg in api-client.ts | Epic 41 | Dev | Done |
-| E41-A5 | Update project-context.md with Backoffice API Client section | Epic 41 | Tech Writer | Done |
-| E41-A8 | For future bulk migration stories: enumerate every target in story AC | Epic 41 | SM | Done |
-| E31-A1 | Document canonical test fixture pattern | Epic 31 | Tech Writer | Done |
-| E31-A2 | Add adapter deletion checklist to extraction stories | Epic 31 | Tech Writer | Done |
 
 ---
 

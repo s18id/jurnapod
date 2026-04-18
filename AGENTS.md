@@ -347,32 +347,48 @@ When performing extraction or package migration stories (moving code from `apps/
 
 ---
 
-## Sprint Status Updates (MANDATORY — E45-A1)
+## Sprint Status Updates (MANDATORY — E45-A1 / E46-A1 / E46-A4)
 
-` sprint-status.yaml` is a **shared state file** tracking all epic and story completion across the project. It must **never be replaced wholesale**. Every edit must be append-only.
+`sprint-status.yaml` is a **shared state file** tracking all epic and story completion across the project. It must **never be replaced wholesale**. Every edit must be append-only.
 
-**Append-Only Rule:**
+**Append-Only Rule (E45-A1):**
 - ✅ READ the file before editing
 - ✅ APPEND only the new epic/stories section
 - ✅ PRESERVE all existing epic entries (Epics 1–N)
 - ❌ NEVER rewrite the file with partial content
 - ❌ NEVER use `replaceAll` on epic section markers
 
-**Correct edit pattern:**
-```
-# After Epic N block, add:
-  # Epic N+1: ...
-  epic-N+1: in-progress
-  N+1-1-story-name: backlog
+**Preferred Method (E46-A1):**
+- Use `npx tsx scripts/update-sprint-status.ts --epic N --story N-X --status done` (the canonical utility)
+- This prevents overwrite by design
 
-```
-
-**If sprint-status.yaml is accidentally overwritten:**
-```bash
-git checkout HEAD -- _bmad-output/implementation-artifacts/sprint-status.yaml
-```
+**Mandatory Validation (E46-A4):**
+- Before closing any epic: run `npx tsx scripts/validate-sprint-status.ts`
+- The retrospective workflow (Step 0) enforces this check before the retro begins
+- If validation fails, restore with: `git checkout HEAD -- _bmad-output/implementation-artifacts/sprint-status.yaml`
 
 **Impact of violation:** Replacing the file destroys completion tracking for ALL prior epics. This is a P1 process failure.
+
+---
+
+## Retrospective Action Item Constraint (MANDATORY — E46-A2)
+
+Every epic retrospective generates action items. To ensure follow-through:
+
+**MAX 2 action items per retrospective:**
+- ✅ Cap generated action items at 2 per epic retro
+- ✅ Each must have an explicit owner (agent name or role)
+- ✅ Each must have a deadline ("next retro" or specific epic number)
+- ✅ Each must have a success criterion
+- ❌ Do NOT generate more than 2 — prioritize ruthlessly
+- ❌ Do NOT accept "TBD" for owner or deadline
+
+**If more than 2 candidates are identified:**
+- Pick the 2 highest-impact items for this retro
+- Move remaining candidates to `action-items.md` as backlog items (not discarded)
+- In the retro output, note which items were moved to backlog and why
+
+**Why 2?** Three consecutive retrospectives (Epics 43, 44, 45) generated un-addressed action items. Fewer items, committed with explicit ownership, beats a long list that never gets done.
 
 ---
 

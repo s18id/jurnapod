@@ -2,14 +2,14 @@
 
 Status: {ready-for-dev|in-progress|review|done}
 
-> ⚠️ **Sprint-Status Append-Only Rule (E45-A1):**
+> ⚠️ **Sprint-Status Append-Only Rule (E45-A1 / E46-A1) — MANDATORY:**
 > If this story modifies `_bmad-output/implementation-artifacts/sprint-status.yaml`:
-> - **PREFERRED**: Use `npx tsx scripts/update-sprint-status.ts --epic N --story N-X --status done` (the canonical utility)
-> - **IF editing manually**: READ the file before editing, APPEND only your epic's section, never replace the entire file
-> - **PRESERVE** all existing epic entries (Epics 1–N)
+> - **REQUIRED**: Run `npx tsx scripts/update-sprint-status.ts --epic N --story N-X --status done` (the canonical utility)
+> - **REQUIRED**: After editing, run `npx tsx scripts/validate-sprint-status.ts` to confirm file integrity
+> - **NEVER** replace the entire file — always append only
+> - **NEVER** use `replaceAll` on epic section markers
 > - If accidentally overwritten: `git checkout HEAD -- _bmad-output/implementation-artifacts/sprint-status.yaml`
-> - Never use `replaceAll` on epic section markers
-> - **Validate** after editing: `npx tsx scripts/validate-sprint-status.ts`
+> - **Retrospective workflow will check this before closing the epic** (E46-A4)
 
 ## Story
 
