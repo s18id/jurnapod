@@ -10,7 +10,6 @@ import {
   resetFixtureRegistry,
   getTestAccessToken,
   getSeedSyncContext as loadSeedSyncContext,
-  createTestItem,
   registerFixtureCleanup
 } from '../../../fixtures';
 
@@ -44,7 +43,8 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
   it('updates item name', async () => {
     const ctx = await getSeedSyncContext();
 
-    // Create item via API
+    // Create item via API - use random suffix to prevent SKU collisions in parallel
+    const skuRand = Math.random().toString(36).slice(2, 8);
     const createRes = await fetch(`${baseUrl}/api/inventory/items`, {
       method: 'POST',
       headers: {
@@ -52,7 +52,7 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `UPDATE-NAME-${Date.now()}`,
+        sku: `UPDATE-NAME-${Date.now()}-${skuRand}`,
         name: 'Original Name',
         type: 'PRODUCT'
       })
@@ -79,7 +79,8 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
   it('updates item is_active status', async () => {
     const ctx = await getSeedSyncContext();
 
-    // Create item via API
+    // Create item via API - use random suffix to prevent SKU collisions in parallel
+    const skuRand = Math.random().toString(36).slice(2, 8);
     const createRes = await fetch(`${baseUrl}/api/inventory/items`, {
       method: 'POST',
       headers: {
@@ -87,7 +88,7 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `UPDATE-ACTIVE-${Date.now()}`,
+        sku: `UPDATE-ACTIVE-${Date.now()}-${skuRand}`,
         name: 'Active Item',
         type: 'PRODUCT',
         is_active: true
@@ -126,7 +127,8 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
   it('rejects update with no fields', async () => {
     const ctx = await getSeedSyncContext();
 
-    // Create item via API
+    // Create item via API - use random suffix to prevent SKU collisions in parallel
+    const skuRand = Math.random().toString(36).slice(2, 8);
     const createRes = await fetch(`${baseUrl}/api/inventory/items`, {
       method: 'POST',
       headers: {
@@ -134,7 +136,7 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `UPDATE-EMPTY-${Date.now()}`,
+        sku: `UPDATE-EMPTY-${Date.now()}-${skuRand}`,
         name: 'Item for Empty Update',
         type: 'PRODUCT'
       })
@@ -157,6 +159,7 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
   it('rejects SKU conflict on update', async () => {
     const ctx = await getSeedSyncContext();
     const timestamp = Date.now();
+    const skuRand = Math.random().toString(36).slice(2, 8);
 
     // Create first item via API
     const createRes1 = await fetch(`${baseUrl}/api/inventory/items`, {
@@ -166,7 +169,7 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `CONFLICT1-${timestamp}`,
+        sku: `CONFLICT1-${timestamp}-${skuRand}`,
         name: 'Item 1',
         type: 'PRODUCT'
       })
@@ -183,7 +186,7 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `CONFLICT2-${timestamp}`,
+        sku: `CONFLICT2-${timestamp}-${skuRand}`,
         name: 'Item 2',
         type: 'PRODUCT'
       })
@@ -199,7 +202,7 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ sku: `CONFLICT1-${timestamp}` })
+      body: JSON.stringify({ sku: `CONFLICT1-${timestamp}-${skuRand}` })
     });
     expect(res.status).toBe(409);
   });

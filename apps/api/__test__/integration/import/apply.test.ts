@@ -45,6 +45,8 @@ describe('import.apply', { timeout: 30000 }, () => {
     await closeTestDb();
   });
 
+
+
   // Helper to upload a CSV and get uploadId
   async function uploadTestFile(entityType: string, csvContent: string): Promise<string> {
     const formData = new FormData();
@@ -132,29 +134,36 @@ describe('import.apply', { timeout: 30000 }, () => {
   });
 
   it('updates existing items via apply', async () => {
-    const timestamp = Date.now();
-    const nonce = Math.random().toString(36).slice(2, 8).toUpperCase();
-    const sku = `APPLY-UPD-${timestamp}-${nonce}`;
-    
-    // Create an existing item first (using PRODUCT type which is valid in DB)
-    const existingItem = await createTestItem(companyId, { 
-      sku, 
+    // 1. CREATE — UUID SKU guarantees uniqueness across all parallel tests
+    const itemSku = `APPLY-UPD-${crypto.randomUUID()}`;
+    const item = await createTestItem(companyId, {
+      sku: itemSku,
       name: 'Original Name',
       type: 'PRODUCT'
     });
 
-    // Precondition guard: fixture helper may return existing row on SKU conflict.
-    // Ensure this test starts from the expected original value.
-    const db = (await import('../../helpers/db')).getTestDb();
-    const beforeItem = await db.selectFrom('items')
-      .where('id', '=', existingItem.id)
-      .select('name')
+    // 2. SELECT by ID — verify item was created correctly (catches truncation, etc.)
+    const { getTestDb } = await import('../../helpers/db');
+    const db = getTestDb();
+    const before = await db.selectFrom('items')
+      .where('id', '=', item.id)
+      .select(['id', 'sku', 'name', 'item_type'])
       .executeTakeFirst();
-    expect(beforeItem?.name).toBe('Original Name');
+    expect(before?.name).toBe('Original Name');
+    expect(before?.sku).toBe(itemSku);
 
-    // Upload file with same SKU but different name
-    const uploadId = await uploadTestFile('items', 
-      `sku,name,item_type\n${sku},Updated Name,SERVICE`);
+    // 2b. SELECT by SKU — confirm the SKU is findable
+    const bySku = await db.selectFrom('items')
+      .where('sku', '=', itemSku)
+      .select(['id', 'sku', 'name'])
+      .executeTakeFirst();
+    expect(bySku).toBeDefined();
+    expect(bySku?.id).toBe(item.id);
+    expect(bySku?.sku).toBe(itemSku);
+
+    // 3. UPDATE via import using SKU
+    const csvContent = `sku,name,item_type\n${itemSku},Updated Name,SERVICE`;
+    const uploadId = await uploadTestFile('items', csvContent);
 
     const mappings = [
       { sourceColumn: 'sku', targetField: 'sku' },
@@ -164,25 +173,24 @@ describe('import.apply', { timeout: 30000 }, () => {
 
     const res = await fetch(`${baseUrl}/api/import/items/apply`, {
       method: 'POST',
-      headers: { 
+      headers: {
         'Authorization': `Bearer ${ownerToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ uploadId, mappings })
     });
 
-    expect(res.status).toBe(200);
     const body = await res.json();
+    expect(res.status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.data.created).toBe(0);
     expect(body.data.updated).toBe(1);
-    
-    // Verify item was updated in DB
+
+    // 4. VERIFY — item name changed to 'Updated Name'
     const updatedItem = await db.selectFrom('items')
-      .where('id', '=', existingItem.id)
+      .where('id', '=', item.id)
       .select('name')
       .executeTakeFirst();
-    
     expect(updatedItem?.name).toBe('Updated Name');
   });
 
