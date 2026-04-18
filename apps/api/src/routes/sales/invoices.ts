@@ -29,7 +29,8 @@ import {
   DatabaseForbiddenError,
   DatabaseReferenceError,
   InvoiceStatusError,
-  SalesAuthorizationError
+  SalesAuthorizationError,
+  DiscountExceedsSubtotalError
 } from "@jurnapod/modules-sales";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { requireAccess, type AuthContext } from "@/lib/auth-guard";
@@ -169,7 +170,7 @@ invoiceRoutes.post("/", async (c) => {
       return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
 
-    // Validate customer_id if provided - ACL check for platform.customers.READ
+    // Validate customer_id if provided - ACL check + same-company verification
     if (input.customer_id != null) {
       const customerAccessResult = await requireAccess({
         module: "platform",
@@ -180,7 +181,6 @@ invoiceRoutes.post("/", async (c) => {
         return customerAccessResult;
       }
 
-      // Also verify customer belongs to same company
       const db = getDb() as KyselySchema;
       const customerRepo = new ApiCustomerRepository(db);
       const customer = await customerRepo.findById(auth.companyId, input.customer_id);
@@ -200,7 +200,9 @@ invoiceRoutes.post("/", async (c) => {
       invoice_no: input.invoice_no,
       tax_amount: input.tax_amount,
       lines: input.lines,
-      taxes: input.taxes
+      taxes: input.taxes,
+      discount_percent: input.discount_percent ?? null,
+      discount_fixed: input.discount_fixed ?? null
     }, {
       userId: auth.userId
     });
@@ -257,6 +259,10 @@ invoiceRoutes.post("/", async (c) => {
 
     if (error instanceof InvoiceStatusError) {
       return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof DiscountExceedsSubtotalError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
     }
 
     // Handle posting errors (already caught above, but catch here for safety)
@@ -422,6 +428,10 @@ invoiceRoutes.patch("/:id", async (c) => {
 
     if (error instanceof InvoiceStatusError) {
       return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof DiscountExceedsSubtotalError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
     }
 
     console.error("PATCH /sales/invoices/:id failed", error);
@@ -739,7 +749,20 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
         }
       }
 
-      const invoice = await invoiceService.createInvoice(auth.companyId, input, {
+      const invoice = await invoiceService.createInvoice(auth.companyId, {
+        outlet_id: input.outlet_id,
+        customer_id: input.customer_id ?? null,
+        invoice_date: input.invoice_date,
+        due_date: input.due_date,
+        due_term: input.due_term,
+        client_ref: input.client_ref,
+        invoice_no: input.invoice_no,
+        tax_amount: input.tax_amount,
+        lines: input.lines,
+        taxes: input.taxes,
+        discount_percent: input.discount_percent ?? null,
+        discount_fixed: input.discount_fixed ?? null
+      }, {
         userId: auth.userId
       });
 
@@ -789,6 +812,10 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
 
       if (error instanceof InvoiceStatusError) {
         return errorResponse("CONFLICT", error.message, 409);
+      }
+
+      if (error instanceof DiscountExceedsSubtotalError) {
+        return errorResponse("INVALID_REQUEST", error.message, 400);
       }
 
       if (error instanceof Error) {

@@ -109,6 +109,7 @@ interface CreditNoteRow {
   reason: string | null;
   notes: string | null;
   amount: string | number;
+  customer_id?: number | null;
   created_by_user_id: number | null;
   updated_by_user_id: number | null;
   created_at: string;
@@ -203,6 +204,8 @@ export interface SalesDbExecutor {
     status: string;
     paymentStatus: string;
     subtotal: number;
+    discountPercent?: number | null;
+    discountFixed?: number | null;
     taxAmount: number;
     grandTotal: number;
     paidTotal: number;
@@ -239,6 +242,8 @@ export interface SalesDbExecutor {
     invoiceDate: string;
     dueDate?: string;
     subtotal: number;
+    discountPercent?: number | null;
+    discountFixed?: number | null;
     taxAmount: number;
     grandTotal: number;
     customerId?: number | null;
@@ -354,6 +359,7 @@ export interface SalesDbExecutor {
     reason?: string;
     notes?: string;
     amount: number;
+    customerId?: number | null;
     createdByUserId?: number;
   }): Promise<number>;
 
@@ -375,6 +381,7 @@ export interface SalesDbExecutor {
     reason?: string;
     notes?: string;
     amount?: number;
+    customerId?: number | null;
     updatedByUserId?: number;
   }): Promise<void>;
 

@@ -43,6 +43,8 @@ export type SalesInvoice = {
   status: InvoiceStatus;
   payment_status: PaymentStatus;
   subtotal: number;
+  discount_percent?: number | null;
+  discount_fixed?: number | null;
   tax_amount: number;
   grand_total: number;
   paid_total: number;
@@ -107,6 +109,8 @@ export type InvoiceCreateInput = {
   tax_amount: number;
   lines: InvoiceLineInput[];
   taxes?: InvoiceTaxInput[];
+  discount_percent?: number | null;
+  discount_fixed?: number | null;
 };
 
 export type PreparedInvoiceLine = {
@@ -162,5 +166,16 @@ export class InvoiceStatusError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InvoiceStatusError";
+  }
+}
+
+/**
+ * Error thrown when total header discounts exceed invoice subtotal.
+ * Routes should map this to HTTP 400 INVALID_REQUEST.
+ */
+export class DiscountExceedsSubtotalError extends Error {
+  constructor() {
+    super("Total discount cannot exceed subtotal");
+    this.name = "DiscountExceedsSubtotalError";
   }
 }

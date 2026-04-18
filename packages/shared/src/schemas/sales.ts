@@ -92,6 +92,8 @@ export const SalesInvoiceCreateRequestSchema = z.object({
   customer_id: NumericIdSchema.nullable().optional(),
   lines: z.array(SalesInvoiceLineInputSchema).min(1),
   taxes: z.array(SalesInvoiceTaxInputSchema).optional(),
+  discount_percent: z.number().finite().min(0).max(100).nullable().optional(),
+  discount_fixed: MoneyInputNonNegativeSchema.nullable().optional(),
   draft: z.boolean().optional()
 });
 
@@ -105,7 +107,9 @@ export const SalesInvoiceUpdateRequestSchema = z
     tax_amount: MoneyInputNonNegativeSchema.optional(),
     customer_id: NumericIdSchema.nullable().optional(),
     lines: z.array(SalesInvoiceLineInputSchema).min(1).optional(),
-    taxes: z.array(SalesInvoiceTaxInputSchema).optional()
+    taxes: z.array(SalesInvoiceTaxInputSchema).optional(),
+    discount_percent: z.number().finite().min(0).max(100).nullable().optional(),
+    discount_fixed: MoneyInputNonNegativeSchema.nullable().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one field must be provided"
@@ -141,6 +145,8 @@ export const SalesInvoiceSchema = z.object({
   status: SalesInvoiceStatusSchema,
   payment_status: SalesInvoicePaymentStatusSchema,
   subtotal: MoneySchema.nonnegative(),
+  discount_percent: z.number().finite().min(0).max(100).nullable().optional(),
+  discount_fixed: MoneySchema.nonnegative().nullable().optional(),
   tax_amount: MoneySchema.nonnegative(),
   grand_total: MoneySchema.nonnegative(),
   paid_total: MoneySchema.nonnegative(),
@@ -475,6 +481,7 @@ export const SalesCreditNoteCreateRequestSchema = z.object({
   reason: z.string().max(1000).optional(),
   notes: z.string().max(1000).optional(),
   amount: MoneyInputPositiveSchema,
+  customer_id: NumericIdSchema.nullable().optional(),
   lines: z.array(SalesCreditNoteLineInputSchema).min(1)
 });
 
@@ -484,6 +491,7 @@ export const SalesCreditNoteUpdateRequestSchema = z
     reason: z.string().max(1000).optional(),
     notes: z.string().max(1000).optional(),
     amount: MoneyInputPositiveSchema.optional(),
+    customer_id: NumericIdSchema.nullable().optional(),
     lines: z.array(SalesCreditNoteLineInputSchema).min(1).optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
@@ -512,6 +520,7 @@ export const SalesCreditNoteSchema = z.object({
   reason: z.string().nullable(),
   notes: z.string().nullable(),
   amount: MoneySchema.nonnegative(),
+  customer_id: NumericIdSchema.nullable().optional(),
   created_by_user_id: NumericIdSchema.nullable(),
   updated_by_user_id: NumericIdSchema.nullable(),
   created_at: z.string().datetime(),

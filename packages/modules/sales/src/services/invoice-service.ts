@@ -31,6 +31,7 @@ import type {
   SalesInvoiceTax,
   InvoiceStatusError
 } from "../types/invoices.js";
+import { DiscountExceedsSubtotalError } from "../types/invoices.js";
 import type { SalesDb, SalesDbExecutor } from "./sales-db.js";
 import { resolveDueDate } from "./order-service.js";
 
@@ -165,6 +166,8 @@ interface SalesInvoiceRow {
   status: "DRAFT" | "APPROVED" | "POSTED" | "VOID";
   payment_status: "UNPAID" | "PARTIAL" | "PAID";
   subtotal: string | number;
+  discount_percent?: string | number | null;
+  discount_fixed?: string | number | null;
   tax_amount: string | number;
   grand_total: string | number;
   paid_total: string | number;
@@ -208,6 +211,8 @@ function normalizeInvoice(row: SalesInvoiceRow): SalesInvoice {
     status: row.status,
     payment_status: row.payment_status,
     subtotal: Number(row.subtotal),
+    discount_percent: row.discount_percent != null ? Number(row.discount_percent) : undefined,
+    discount_fixed: row.discount_fixed != null ? Number(row.discount_fixed) : undefined,
     tax_amount: Number(row.tax_amount),
     grand_total: Number(row.grand_total),
     paid_total: Number(row.paid_total),
@@ -279,6 +284,8 @@ export interface InvoiceService {
       tax_amount?: number;
       lines?: InvoiceLineInput[];
       taxes?: InvoiceTaxInput[];
+      discount_percent?: number | null;
+      discount_fixed?: number | null;
     },
     actor?: MutationActor
   ): Promise<SalesInvoiceDetail | null>;
@@ -502,6 +509,24 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
         let taxAmount = normalizeMoney(input.tax_amount);
         let taxLines: Array<{ tax_rate_id: number; amount: number }> = [];
 
+        // Compute header discounts (applied AFTER line subtotals, BEFORE tax)
+        const discountPercent = input.discount_percent ?? null;
+        const discountFixed = input.discount_fixed ?? null;
+        let totalHeaderDiscount = 0;
+        if (discountPercent !== null || discountFixed !== null) {
+          const percentAmount = discountPercent !== null ? normalizeMoney((subtotal * discountPercent) / 100) : 0;
+          const fixedAmount = discountFixed !== null ? normalizeMoney(discountFixed) : 0;
+          totalHeaderDiscount = normalizeMoney(percentAmount + fixedAmount);
+        }
+
+        // Taxable = subtotal - header_discounts
+        const taxable = normalizeMoney(subtotal - totalHeaderDiscount);
+
+        // Validate discount doesn't exceed subtotal
+        if (totalHeaderDiscount > subtotal) {
+          throw new DiscountExceedsSubtotalError();
+        }
+
         if (input.taxes && input.taxes.length > 0) {
           const taxRateIds = input.taxes.map((tax) => tax.tax_rate_id);
           await validateTaxRates(executor, companyId, taxRateIds);
@@ -517,14 +542,14 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
             taxLines = defaultTaxRates
               .map((rate) => ({
                 tax_rate_id: rate.tax_rate_id,
-                amount: normalizeMoney((subtotal * rate.rate_percent) / 100)
+                amount: normalizeMoney((taxable * rate.rate_percent) / 100)
               }))
               .filter((tax) => tax.amount > 0);
             taxAmount = normalizeMoney(taxLines.reduce((acc, tax) => acc + tax.amount, 0));
           }
         }
 
-        const grandTotal = normalizeMoney(subtotal + taxAmount);
+        const grandTotal = normalizeMoney(taxable + taxAmount);
 
         const invoiceId = await executor.insertInvoice({
           companyId,
@@ -536,6 +561,8 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
           status: "DRAFT",
           paymentStatus: "UNPAID",
           subtotal,
+          discountPercent,
+          discountFixed,
           taxAmount,
           grandTotal,
           paidTotal: 0,
@@ -597,6 +624,8 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
         tax_amount?: number;
         lines?: InvoiceLineInput[];
         taxes?: InvoiceTaxInput[];
+        discount_percent?: number | null;
+        discount_fixed?: number | null;
       },
       actor?: MutationActor
     ): Promise<SalesInvoiceDetail | null> {
@@ -685,6 +714,29 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
             : Number(current.tax_amount);
         let taxLines: Array<{ tax_rate_id: number; amount: number }> | null = null;
 
+        // Compute header discounts for update
+        const discountPercent = input.discount_percent !== undefined
+          ? input.discount_percent
+          : current.discount_percent != null ? Number(current.discount_percent) : null;
+        const discountFixed = input.discount_fixed !== undefined
+          ? input.discount_fixed
+          : current.discount_fixed != null ? Number(current.discount_fixed) : null;
+
+        let totalHeaderDiscount = 0;
+        if (discountPercent !== null || discountFixed !== null) {
+          const percentAmount = discountPercent !== null ? normalizeMoney((subtotal * discountPercent) / 100) : 0;
+          const fixedAmount = discountFixed !== null ? normalizeMoney(discountFixed) : 0;
+          totalHeaderDiscount = normalizeMoney(percentAmount + fixedAmount);
+        }
+
+        // Taxable = subtotal - header_discounts
+        const taxable = normalizeMoney(subtotal - totalHeaderDiscount);
+
+        // Validate discount doesn't exceed subtotal
+        if (totalHeaderDiscount > subtotal) {
+          throw new DiscountExceedsSubtotalError();
+        }
+
         if (input.taxes !== undefined) {
           if (input.taxes.length > 0) {
             const taxRateIds = input.taxes.map((tax) => tax.tax_rate_id);
@@ -699,8 +751,20 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
             taxLines = [];
             taxAmount = 0;
           }
+        } else {
+          // Recalculate tax on taxable amount when discounts change
+          const defaultTaxRates = await getDefaultTaxRates(executor, companyId);
+          if (defaultTaxRates.length > 0 && (discountPercent !== null || discountFixed !== null)) {
+            const computedTaxLines = defaultTaxRates
+              .map((rate) => ({
+                tax_rate_id: rate.tax_rate_id,
+                amount: normalizeMoney((taxable * rate.rate_percent) / 100)
+              }))
+              .filter((tax) => tax.amount > 0);
+            taxAmount = normalizeMoney(computedTaxLines.reduce((acc, tax) => acc + tax.amount, 0));
+          }
         }
-        const grandTotal = normalizeMoney(subtotal + taxAmount);
+        const grandTotal = normalizeMoney(taxable + taxAmount);
 
         if (lineRows) {
           await executor.deleteInvoiceLines(companyId, invoiceId);
@@ -718,6 +782,8 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
           invoiceDate: nextInvoiceDate,
           dueDate: nextDueDate,
           subtotal,
+          discountPercent,
+          discountFixed,
           taxAmount,
           grandTotal,
           customerId: input.customer_id,

@@ -76,6 +76,7 @@ export type {
 
 export {
   InvoiceStatusError,
+  DiscountExceedsSubtotalError,
   INVOICE_DUE_TERM_DAYS
 } from "./types/invoices.js";
 
