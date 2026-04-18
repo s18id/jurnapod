@@ -10,10 +10,10 @@
 | Priority | Open | Done | Won't Fix | Total |
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
-| P1 | 0 | 11 | 0 | 11 |
-| P2 | 2 | 17 | 0 | 19 |
+| P1 | 4 | 11 | 0 | 15 |
+| P2 | 3 | 17 | 0 | 20 |
 | P3 | 1 | 2 | 3 | 6 |
-| **Total** | **3** | **34** | **3** | **40** |
+| **Total** | **8** | **34** | **3** | **45** |
 
 ---
 
@@ -25,7 +25,11 @@
 
 ## P1 - High (Do Next Sprint)
 
-*(empty — no open P1 items)*
+| ID | Action | From | Owner | Status |
+|----|--------|------|-------|--------|
+| E46-A1 | Add sprint-status utility + validation as mandatory pre-step in story template | Epic 46 | Bob | Open |
+| E46-A2 | Limit retrospectives to MAX 2 action items with explicit owners/deadlines | Epic 46 | Bob | Open |
+| E46-A4 | Verify sprint-status.yaml integrity before marking any epic done (human gate) | Epic 46 | Bob/SM | Open |
 
 ---
 
@@ -37,6 +41,7 @@
 |----|--------|------|-------|--------|
 | E45-A5a | Add automated completion-note check to CI pipeline | Epic 44 | Quinn | Open |
 | E45-A5b | Enhance database compatibility testing (MySQL + MariaDB dual-DB CI) | Epic 44 | Quinn | Open |
+| E46-A3 | Investigate automated lint warning threshold tracking in CI (>100 warnings = auto-TD) | Epic 46 | Charlie | Open |
 | E45-A2 | Create canonical sprint-status utility function | Epic 45 | Barry | Done |
 | E45-A3 | Track 156 no-explicit-any warnings as TD-038 | Epic 45 | Tech Lead | Done |
 | E45-A4 | Add sprint-status.yaml lint rule to detect wholesale replacement | Epic 45 | Winston | Done |
@@ -88,6 +93,9 @@
 | E24-A2 | Establish backlog review as part of epic closeout | Epic 24 | Epic 24 | Backlog review completed 2026-04-04 |
 | E25-A1 | Finalize backlog review process in epic closeout checklist | Epic 25 | Epic 25 | Now part of every retrospective |
 | **E45-A1** | Add sprint-status.yaml append-only rule to dev story template and AGENTS.md | Epic 45 | Epic 45 | Added rule + canonical utility + validation script to prevent file overwrite |
+| **E46-A1** | Add sprint-status utility + validation as mandatory pre-step in story template | Epic 46 | Epic 46 | Pending — E46 backlog |
+| **E46-A2** | Limit retrospectives to MAX 2 action items with explicit owners/deadlines | Epic 46 | Epic 46 | Pending — E46 backlog |
+| **E46-A4** | Verify sprint-status.yaml integrity before marking any epic done (human gate) | Epic 46 | Epic 46 | Pending — E46 backlog |
 
 ### P2
 
@@ -109,6 +117,7 @@
 | **E45-A2** | Create canonical sprint-status utility function | Epic 45 | Epic 45 | Created `scripts/update-sprint-status.ts` and `scripts/validate-sprint-status.ts` |
 | **E45-A3** | Track 156 no-explicit-any warnings as TD-038 | Epic 45 | Epic 45 | Added TD-038 to TECHNICAL-DEBT.md |
 | **E45-A4** | Add sprint-status.yaml lint/validation script | Epic 45 | Epic 45 | Created `scripts/validate-sprint-status.ts` health check |
+| **E46-A3** | Investigate automated lint warning threshold tracking in CI | Epic 46 | Epic 46 | Pending — E46 backlog |
 
 ### P3
 

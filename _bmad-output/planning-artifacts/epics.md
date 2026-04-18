@@ -55,7 +55,8 @@ NFR3: Templates must follow existing project conventions (AGENTS.md, existing pa
 
 | Epic | Title | Status |
 |------|-------|--------|
-| Epic 45 | Tooling Standards & Process Documentation | done |
+| Epic 45 | Tooling Standards & Process Documentation | done | |
+| Epic 46 | Purchasing / Accounts Payable | ready-for-dev | |
 
 ---
 

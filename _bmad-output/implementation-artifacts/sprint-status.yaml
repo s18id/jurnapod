@@ -532,3 +532,14 @@ development_status:
   45-7-cleanup-hooks-doc: done
   45-8-lint-rule-test-template: done
   epic-45-retrospective: done
+
+  # Epic 46: Purchasing / Accounts Payable
+  epic-46: ready-for-dev
+  46-1-supplier-master: backlog
+  46-2-exchange-rates: backlog
+  46-3-purchase-orders: backlog
+  46-4-goods-receipt: backlog
+  46-5-purchase-invoices: backlog
+  46-6-ap-payments: backlog
+  46-7-supplier-credit-notes: backlog
+  46-8-ap-aging-report: backlog
