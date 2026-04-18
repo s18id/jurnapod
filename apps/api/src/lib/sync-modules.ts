@@ -12,77 +12,134 @@ let backofficeModuleInstance: BackofficeSyncModule | null = null;
 // Store reference to POS sync module for shared lifecycle access
 let posSyncModuleInstance: PosSyncModule | null = null;
 
+// Lazy init single-flight guard for async accessor
+let posLazyInitPromise: Promise<void> | null = null;
+
+// Startup init single-flight guard
+let syncModulesInitPromise: Promise<void> | null = null;
+
+const POS_MODULE_CONFIG = {
+  module_id: "pos",
+  client_type: "POS",
+  enabled: true,
+  poll_interval_ms: 30_000
+} as const;
+
+const BACKOFFICE_MODULE_CONFIG = {
+  module_id: "backoffice",
+  client_type: "BACKOFFICE",
+  enabled: true,
+  poll_interval_ms: 120_000
+} as const;
+
+function buildSyncInitContext() {
+  return {
+    database: getDbPool(),
+    logger: console,
+    config: {
+      enableAuditLogging: true,
+      defaultRetryAttempts: 3,
+      environment: process.env.NODE_ENV || "development"
+    }
+  };
+}
+
+function createPosModule(): PosSyncModule {
+  return new PosSyncModule(POS_MODULE_CONFIG);
+}
+
+function createBackofficeModule(): BackofficeSyncModule {
+  return new BackofficeSyncModule(BACKOFFICE_MODULE_CONFIG);
+}
+
 /**
  * Initialize sync modules for the API server
+ *
+ * POS module is considered initialized as soon as registry.initialize() succeeds.
+ * Backoffice startup failures (batch processor / export scheduler) do NOT affect
+ * POS availability — they only affect the backoffice singleton.
  */
 export async function initializeSyncModules(): Promise<void> {
+  if (syncModulesInitPromise) {
+    return syncModulesInitPromise;
+  }
+
+  syncModulesInitPromise = (async () => {
   let posModule: PosSyncModule | null = null;
   let backofficeModule: BackofficeSyncModule | null = null;
+  let registryInitSucceeded = false;
 
   try {
-    // Get database pool (KyselySchema)
-    const db = getDbPool();
+    // Create and register POS sync module
+    posModule = createPosModule();
 
-  // Create and register POS sync module
-  posModule = new PosSyncModule({
-    module_id: "pos",
-    client_type: "POS",
-    enabled: true,
-    poll_interval_ms: 30_000  // 30 seconds - operational polling interval
-  });
+    // Create and register Backoffice sync module
+    backofficeModule = createBackofficeModule();
 
-  // Create and register Backoffice sync module
-  backofficeModule = new BackofficeSyncModule({
-    module_id: "backoffice",
-    client_type: "BACKOFFICE",
-    enabled: true,
-    poll_interval_ms: 120_000  // 2 minutes - operational polling interval
-  });
-
-  // Register the modules
-  syncModuleRegistry.register(posModule);
-  syncModuleRegistry.register(backofficeModule);
+    // Register the modules
+    syncModuleRegistry.register(posModule);
+    syncModuleRegistry.register(backofficeModule);
 
     // Initialize registry after modules are registered
-    await syncModuleRegistry.initialize({
-      database: db,
-      logger: console,
-      config: {
-        enableAuditLogging: true,
-        defaultRetryAttempts: 3,
-        environment: process.env.NODE_ENV || 'development'
-      }
-    });
+    await syncModuleRegistry.initialize(buildSyncInitContext());
 
-  // Start batch processor and export scheduler after module registration
-  await backofficeModule.startBatchProcessor();
-  await backofficeModule.startExportScheduler();
+    registryInitSucceeded = true;
 
-  // Publish initialized module singletons only after successful startup
-  posSyncModuleInstance = posModule;
-  backofficeModuleInstance = backofficeModule;
+    // POS singleton published immediately after registry init — backoffice
+    // startup failures must not affect POS availability.
+    posSyncModuleInstance = posModule;
 
-  console.log("✅ Sync modules initialized successfully");
-  console.log(`   - POS sync module: registered`);
-  console.log(`   - Backoffice sync module: registered`);
-  console.log(`   - Batch processor: RUNNING`);
-  console.log(`   - Export scheduler: RUNNING`);
+    // Backoffice singleton is also published here, but backoffice-specific
+    // startup (batch/export) runs below and may fail independently.
+    backofficeModuleInstance = backofficeModule;
+
+    // Start batch processor and export scheduler (backoffice-only concern).
+    // Failure here does NOT affect POS singleton or sync/push/pull availability.
+    await backofficeModule.startBatchProcessor();
+    await backofficeModule.startExportScheduler();
+
+    console.log("✅ Sync modules initialized successfully");
+    console.log(`   - POS sync module: registered`);
+    console.log(`   - Backoffice sync module: registered`);
+    console.log(`   - Batch processor: RUNNING`);
+    console.log(`   - Export scheduler: RUNNING`);
 
   } catch (error) {
-    // Ensure failed initialization never leaves stale singleton references.
-    posSyncModuleInstance = null;
-    backofficeModuleInstance = null;
+    // Clean up registry if registry init failed (no modules were ever registered).
+    if (!registryInitSucceeded) {
+      try {
+        await syncModuleRegistry.cleanup();
+      } catch (cleanupError) {
+        console.error("❌ Failed to cleanup sync registry after init failure:", cleanupError);
+      }
+    } else {
+      // Registry initialized — POS is registered and available.
+      // Only backoffice-specific resources need best-effort cleanup.
+      // posSyncModuleInstance and backofficeModuleInstance remain valid for
+      // callers that handle their own cleanup via cleanupSyncModules().
+    }
 
-    // Best-effort cleanup to avoid duplicate registrations on retries.
-    try {
-      await syncModuleRegistry.cleanup();
-    } catch (cleanupError) {
-      console.error("❌ Failed to cleanup sync registry after init failure:", cleanupError);
+    // Best-effort backoffice cleanup (POS is unaffected).
+    if (backofficeModuleInstance) {
+      try {
+        await backofficeModuleInstance.stopBatchProcessor();
+      } catch { /* best-effort */ }
+      try {
+        await backofficeModuleInstance.stopExportScheduler();
+      } catch { /* best-effort */ }
     }
 
     console.error("❌ Failed to initialize sync modules:", error);
     throw error;
+  } finally {
+    if (!posSyncModuleInstance && !backofficeModuleInstance) {
+      // failed before any usable singleton state; allow retries
+      syncModulesInitPromise = null;
+    }
   }
+  })();
+
+  return syncModulesInitPromise;
 }
 
 /**
@@ -141,39 +198,80 @@ export function getExportScheduler(): any {
 }
 
 /**
- * Initialize the PosSyncModule singleton.
- * Called during app startup via initializeSyncModules().
- */
-export async function initializePosSyncModule(): Promise<void> {
-  // Already initialized via initializeSyncModules()
-  if (posSyncModuleInstance) {
-    return;
-  }
-
-  const dbPool = getDbPool();
-  posSyncModuleInstance = new PosSyncModule({
-    module_id: "pos",
-    client_type: "POS",
-    enabled: true
-  });
-
-  await posSyncModuleInstance.initialize({
-    database: dbPool,
-    logger: console,
-    config: { env: process.env.NODE_ENV }
-  });
-
-  console.info("PosSyncModule initialized");
-}
-
-/**
- * Get the PosSyncModule instance.
- * Throws if not initialized.
+ * Synchronous safe accessor — throws if not yet initialized.
+ * Prefer getPosSyncModuleAsync() in route handlers to avoid throw-on-cold-start.
  */
 export function getPosSyncModule(): PosSyncModule {
   if (!posSyncModuleInstance) {
-    throw new Error("PosSyncModule not initialized. Call initializePosSyncModule() first.");
+    throw new Error("PosSyncModule not initialized. Call initializeSyncModules() first.");
   }
+  return posSyncModuleInstance;
+}
+
+/**
+ * Async safe accessor with single-flight lazy initialization.
+ * If initializeSyncModules() has never run, performs a minimal inline init.
+ * Safe to call from concurrent route handlers — only one init succeeds.
+ *
+ * Registers lazy-init instance in syncModuleRegistry so health/lifecycle state
+ * stays consistent with startup initialization behavior.
+ *
+ * Returns the initialized PosSyncModule instance.
+ */
+export async function getPosSyncModuleAsync(): Promise<PosSyncModule> {
+  if (posSyncModuleInstance) {
+    return posSyncModuleInstance;
+  }
+
+  if (syncModulesInitPromise) {
+    try {
+      await syncModulesInitPromise;
+    } catch {
+      // Startup may fail on backoffice while POS is still usable/published.
+    }
+
+    if (posSyncModuleInstance) {
+      return posSyncModuleInstance;
+    }
+  }
+
+  const registeredPosModule = syncModuleRegistry.getModule("pos");
+  if (registeredPosModule) {
+    posSyncModuleInstance = registeredPosModule as PosSyncModule;
+    return posSyncModuleInstance;
+  }
+
+  // Single-flight guard — initialize exactly once per lifecycle.
+  posLazyInitPromise ??= (async () => {
+    const module = createPosModule();
+    await module.initialize(buildSyncInitContext());
+
+    // Keep registry-consistent state for health checks and lifecycle introspection.
+    try {
+      syncModuleRegistry.register(module);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (!message.includes("already registered")) {
+        throw error;
+      }
+
+      const existing = syncModuleRegistry.getModule("pos");
+      if (existing) {
+        posSyncModuleInstance = existing as PosSyncModule;
+        return;
+      }
+    }
+
+    posSyncModuleInstance = module;
+    console.info("PosSyncModule lazy-initialized on demand");
+  })();
+
+  await posLazyInitPromise;
+
+  if (!posSyncModuleInstance) {
+    throw new Error("PosSyncModule not initialized. Lazy init failed.");
+  }
+
   return posSyncModuleInstance;
 }
 
@@ -211,6 +309,9 @@ export async function cleanupSyncModules(): Promise<void> {
     console.error("❌ Error cleaning up sync modules:", error);
     cleanupErrors.push(error);
   } finally {
+    // Reset lazy init guard so re-get after cleanup succeeds cleanly.
+    posLazyInitPromise = null;
+    syncModulesInitPromise = null;
     posSyncModuleInstance = null;
     backofficeModuleInstance = null;
 

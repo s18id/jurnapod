@@ -22,7 +22,7 @@ import { NumericIdSchema, SyncPullPayloadSchema } from "@jurnapod/shared";
 import { authenticateRequest, requireAccess, requireAccessForOutletQuery, type AuthContext } from "../../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../../lib/response.js";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
-import { getPosSyncModule } from "../../lib/sync-modules.js";
+import { getPosSyncModuleAsync } from "../../lib/sync-modules.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -107,7 +107,7 @@ syncPullRoutes.get("/", async (c) => {
     });
 
     // Delegate to PosSyncModule - all business logic and audit logging happens there
-    const module = getPosSyncModule();
+    const module = await getPosSyncModuleAsync();
     const pullResult = await module.handlePullSync({
       companyId: auth.companyId,
       outletId: input.outlet_id,
@@ -213,7 +213,7 @@ export function registerSyncPullRoutes(app: { openapi: OpenAPIHonoType["openapi"
         orders_cursor: url.searchParams.get("orders_cursor") ?? undefined
       });
 
-      const module = getPosSyncModule();
+      const module = await getPosSyncModuleAsync();
       const pullResult = await module.handlePullSync({
         companyId: auth.companyId,
         outletId: input.outlet_id,

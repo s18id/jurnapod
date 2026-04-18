@@ -19,7 +19,7 @@ import { errorResponse, successResponse } from "../../lib/response.js";
 import { SyncIdempotencyMetricsCollector } from "@jurnapod/sync-core";
 import { getSyncPushDbPool } from "../../lib/sync/push/db.js";
 import type { SyncPushTransactionPayload } from "../../lib/sync/push/types.js";
-import { getPosSyncModule } from "../../lib/sync-modules.js";
+import { getPosSyncModuleAsync } from "../../lib/sync-modules.js";
 import { toTransactionPush, toActiveOrderPush } from "../../lib/sync/push/adapters.js";
 import type {
   OrderUpdatePush,
@@ -101,7 +101,7 @@ syncPushRoutes.post("/", async (c) => {
     const db = dbPool;
 
     // Phase 1 + Phase 2: Use PosSyncModule — phase2 is now handled inline in pos-sync
-    const module = getPosSyncModule();
+    const module = await getPosSyncModuleAsync();
 
     const phase1Results = await module.handlePushSync({
       db: db,
@@ -270,7 +270,7 @@ export function registerSyncPushRoutes(app: { openapi: OpenAPIHonoType["openapi"
 
       const db = dbPool;
 
-      const module = getPosSyncModule();
+      const module = await getPosSyncModuleAsync();
 
       const phase1Results = await module.handlePushSync({
         db: db,

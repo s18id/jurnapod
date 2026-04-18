@@ -37,6 +37,7 @@ import { moduleRolesRoutes } from './routes/settings-module-roles.js';
 import { adminPagesRoutes, publicPagesRoutes } from './routes/settings-pages.js';
 import { settingsConfigRoutes } from './routes/settings-config.js';
 import { outletsRoutes } from './routes/outlets.js';
+import { customerRoutes } from './routes/platform/customers.js';
 import { recipesRoutes } from './routes/recipes.js';
 import { cashBankTransactionsRoutes } from './routes/cash-bank-transactions.js';
 import { suppliesRoutes } from './routes/supplies.js';
@@ -215,6 +216,9 @@ export function createApp(): Hono {
 
   // Register outlets routes
   app.route("/api/outlets", outletsRoutes);
+
+  // Register platform customer routes
+  app.route("/api/platform/customers", customerRoutes);
 
   // Register audit routes
   app.route("/api/audit", auditRoutes);
