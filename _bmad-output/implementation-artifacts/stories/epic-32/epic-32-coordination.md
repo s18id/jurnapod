@@ -12,7 +12,7 @@
 
 ## Post-Story Fixes
 
-After implementation, bmad-agent-review identified the following issues during code review:
+After implementation, bmad-review identified the following issues during code review:
 
 | ID | Severity | File | Issue |
 |----|----------|------|-------|
@@ -28,7 +28,7 @@ All fixes committed in `8c2e1cc` and `dc05502`.
 
 During Epic 32, an ADR-0014 boundary violation was caught:
 - `fiscal-years.ts` (1317 lines) was placed in `apps/api/src/lib/` — pure domain logic that belonged in `modules-accounting`
-- Discovered and resolved via bmad-agent-architect consultation
+- Discovered and resolved via bmad-architect consultation
 - Fiscal year domain extracted to `packages/modules/accounting/src/fiscal-year/`
 - API layer converted to thin adapter consuming package service
 

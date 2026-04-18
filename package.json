@@ -73,7 +73,8 @@
     "cron:email-secret:generate": "node ./scripts/cron-email-secret-generate.mjs",
     "cron:email-secret:regenerate": "node ./scripts/cron-email-secret-regenerate.mjs",
     "deploy:pos": "node scripts/deploy.mjs --app=pos",
-    "deploy:backoffice": "node scripts/deploy.mjs --app=backoffice"
+    "deploy:backoffice": "node scripts/deploy.mjs --app=backoffice",
+    "verify:story-completion": "npx tsx _bmad-output/scripts/verify-story-completion.ts"
   },
   "devDependencies": {
     "@types/bwip-js": "^3.2.3",

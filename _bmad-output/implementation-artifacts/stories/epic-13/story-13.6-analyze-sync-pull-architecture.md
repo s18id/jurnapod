@@ -122,7 +122,7 @@ Sections:
 
 ## Completion Notes
 
-**Completed by:** bmad-agent-architect (delegated agent)
+**Completed by:** bmad-architect (delegated agent)
 **Completion Date:** 2026-03-28
 **Actual Effort:** ~3 hours
 

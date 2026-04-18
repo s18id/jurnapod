@@ -109,4 +109,4 @@ npm run test:unit -w @jurnapod/api  # ✅ PASS - 1619 tests, 0 failures
 
 This is the epic completion gate. No story should be marked done until this passes.
 
-**Status:** DONE - approved by bmad-agent-review, acceptance criteria satisfied.
+**Status:** DONE - approved by bmad-review, acceptance criteria satisfied.

@@ -5,7 +5,7 @@
 **Story Points:** 2  
 **Priority:** P1  
 **Risk:** MEDIUM  
-**Assigned:** bmad-agent-review
+**Assigned:** bmad-review
 
 ---
 

@@ -38,7 +38,7 @@
 ---
 
 ### Scope C: Story 13.6 - Analyze sync/pull.ts Architecture
-**Agent:** bmad-agent-architect
+**Agent:** bmad-architect
 **Status:** ✅ DONE
 **File:** `apps/api/src/routes/sync/pull.ts`
 

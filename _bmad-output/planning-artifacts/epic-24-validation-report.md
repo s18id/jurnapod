@@ -114,7 +114,7 @@ Per the epic completion gate definition, story 24.6 remains at **REVIEW** status
 
 ## Next Steps
 
-1. Request `@bmad-agent-review` agent for final code review of Epic 24 + validation-fix changes
+1. Request `@bmad-review` agent for final code review of Epic 24 + validation-fix changes
 2. Upon approval, mark story 24.6 as DONE
 3. Mark epic-24 as DONE
 4. Update sprint-status.yaml with epic closure

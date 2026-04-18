@@ -30,7 +30,7 @@ Extract the domain model from `apps/api/src/lib/cash-bank.ts` into the new `@jur
 
 ## Status
 
-**DONE** - Approved by bmad-agent-review
+**DONE** - Approved by bmad-review
 
 ## Files to Modify
 
