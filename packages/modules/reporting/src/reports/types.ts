@@ -169,6 +169,11 @@ export type ReceivablesAgeingRow = {
   due_date: string | null;
   outstanding_amount: number | string;
   days_overdue: number | string;
+  // Customer fields (LEFT JOIN customers)
+  customer_id: number | null;
+  customer_code: string | null;
+  customer_type: number | null;
+  customer_display_name: string | null;
 };
 
 // ============================================================================
@@ -239,6 +244,8 @@ export interface ReceivablesAgeingFilter {
   outletIds?: number[];
   asOfDate?: string;
   timezone?: string;
+  /** Optional customer ID filter for drill-down endpoint */
+  customerId?: number;
 }
 
 // ============================================================================
@@ -433,7 +440,14 @@ export interface ReceivablesAgeingInvoice {
   days_overdue: number;
   outstanding_amount: number;
   age_bucket: string;
-};
+  // Customer fields (AC1)
+  customer_id: number | null;
+  customer_code: string | null;
+  customer_type: number | null;
+  customer_display_name: string | null;
+  // Overdue flag (AC2)
+  overdue: boolean;
+}
 
 /**
  * Receivables Ageing buckets

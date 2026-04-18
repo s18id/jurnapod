@@ -38,6 +38,7 @@ import {
   getGeneralLedgerDetail,
   getReceivablesAgeingReport,
   getTrialBalanceWorksheet,
+  customerExistsInCompany,
 } from "@/lib/reports";
 import {
   reportQuerySchema,
@@ -614,6 +615,94 @@ reportRoutes.get("/receivables-ageing", async (c) => {
       filters: {
         outlet_ids: outletIds,
         as_of_date: asOfDate,
+      },
+      ...result
+    });
+  } catch (error) {
+    const auth = c.get("auth") as AuthContext;
+    return handleReportError(error, startTime, auth.companyId, REPORT_TYPE);
+  }
+});
+
+// ============================================================================
+// GET /reports/receivables-ageing/customer/:customerId - Customer drill-down
+// ============================================================================
+
+reportRoutes.get("/receivables-ageing/customer/:customerId", async (c) => {
+  const startTime = Date.now();
+  const REPORT_TYPE = "receivables_ageing_customer";
+
+  try {
+    const url = new URL(c.req.raw.url);
+    const parsed = z.object({
+      outlet_id: z.coerce.number().int().positive().optional(),
+      as_of_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    }).parse({
+      outlet_id: url.searchParams.get("outlet_id") ?? undefined,
+      as_of_date: url.searchParams.get("as_of_date") ?? undefined,
+    });
+
+    const auth = c.get("auth") as AuthContext;
+
+    // Check module permission
+    const { requireAccess } = await import("@/lib/auth-guard");
+    const accessGuard = requireAccess({ module: "accounting", permission: "analyze", resource: "reports" });
+    const accessResult = await accessGuard(c.req.raw, auth);
+    if (accessResult !== null) return accessResult;
+
+    // Parse customer ID from route params
+    const customerId = z.coerce.number().int().positive().parse(c.req.param("customerId"));
+
+    // Verify customer belongs to this company
+    const customerExists = await customerExistsInCompany(auth.companyId, customerId);
+    if (!customerExists) {
+      return Response.json(
+        { success: false, error: { code: "NOT_FOUND", message: "Customer not found" } },
+        { status: 404 }
+      );
+    }
+
+    // Outlet scope resolution
+    let outletIds: number[];
+    if (parsed.outlet_id) {
+      const { userHasOutletAccess } = await import("@/lib/auth");
+      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, parsed.outlet_id);
+      if (!hasAccess) {
+        return Response.json({ success: false, error: { code: "FORBIDDEN", message: "Forbidden" } }, { status: 403 });
+      }
+      outletIds = [parsed.outlet_id];
+    } else {
+      const { listUserOutletIds } = await import("@/lib/auth");
+      outletIds = await listUserOutletIds(auth.userId, auth.companyId);
+    }
+
+    // Timezone resolution
+    const companyService = getCompanyService();
+    const company = await companyService.getCompany({ companyId: auth.companyId });
+    const timezone = company.timezone ?? "UTC";
+
+    const asOfDate = parsed.as_of_date ?? new Date().toISOString().slice(0, 10);
+
+    const result = await executeReport(
+      REPORT_TYPE as ReportType,
+      auth.companyId,
+      () => getReceivablesAgeingReport({
+        companyId: auth.companyId,
+        outletIds,
+        asOfDate,
+        timezone,
+        customerId, // filter by customer
+      }),
+      { startTime, rowCount: (r) => r.invoices.length }
+    );
+
+    emitReportSuccess(REPORT_TYPE as ReportType, auth.companyId, startTime, result.invoices.length);
+
+    return successResponse({
+      filters: {
+        outlet_ids: outletIds,
+        as_of_date: asOfDate,
+        customer_id: customerId,
       },
       ...result
     });

@@ -33,3 +33,13 @@ export function getCustomerService(): ReturnType<typeof createCustomerService> {
   const accessScopeChecker = getPlatformAccessScopeChecker();
   return createCustomerService({ db, customerRepository, accessScopeChecker });
 }
+
+/**
+ * Lightweight helper for route-layer same-company customer existence checks.
+ */
+export async function customerExistsInCompany(companyId: number, customerId: number): Promise<boolean> {
+  const db = getDb() as KyselySchema;
+  const customerRepository = new ApiCustomerRepository(db);
+  const customer = await customerRepository.findById(companyId, customerId);
+  return customer !== null;
+}

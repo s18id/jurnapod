@@ -14,6 +14,7 @@
 
 import { sql } from "kysely";
 import { getDb, type KyselySchema } from "@/lib/db";
+import { withTransactionRetry } from "@jurnapod/db";
 import { toDateTimeRangeWithTimezone } from "@/lib/date-helpers";
 import { DOCUMENT_TYPES } from "@/lib/numbering";
 import type { SalesDb, SalesDbExecutor } from "@jurnapod/modules-sales";
@@ -1797,7 +1798,7 @@ export class ApiSalesDb implements SalesDb {
 
   async withTransaction<T>(operation: (executor: SalesDbExecutor) => Promise<T>): Promise<T> {
     const db = getDb();
-    return db.transaction().execute(async (trx) => {
+    return withTransactionRetry(db, async (trx) => {
       // Set the transaction on the executor so all operations use it
       this.executor.setTransaction(trx);
       try {

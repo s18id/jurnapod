@@ -9,6 +9,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
 import { getTestDb } from '../../helpers/db';
+import { sql } from 'kysely';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -30,9 +31,43 @@ let companyId: number;
 let scopedAdminToken: string;
 let cashierToken: string;
 let companyCode: string;
+const SALES_SUITE_LOCK = 'jp_sales_invoice_suite_lock';
+
+async function acquireSalesSuiteLock() {
+  const db = getTestDb();
+  await sql`SELECT GET_LOCK(${SALES_SUITE_LOCK}, 120)`.execute(db);
+}
+
+async function releaseSalesSuiteLock() {
+  const db = getTestDb();
+  await sql`SELECT RELEASE_LOCK(${SALES_SUITE_LOCK})`.execute(db);
+}
+
+async function ensureInvoiceVisible(baseUrl: string, token: string, invoiceId: number): Promise<void> {
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const probe = await fetch(`${baseUrl}/api/sales/invoices/${invoiceId}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (probe.status === 200) {
+      return;
+    }
+
+    if (probe.status === 404 && attempt < 5) {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 100));
+      continue;
+    }
+
+    return;
+  }
+}
 
 describe('sales.invoices.update', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireSalesSuiteLock();
     baseUrl = getTestBaseUrl();
     ownerToken = await getTestAccessToken(baseUrl);
 
@@ -70,6 +105,7 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
 
   afterAll(async () => {
     resetFixtureRegistry();
+    await releaseSalesSuiteLock();
     await closeTestDb();
   });
 
@@ -109,6 +145,7 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
     const created = await createRes.json();
     expect(created.success).toBe(true);
     const invoiceId = created.data.id;
+    await ensureInvoiceVisible(baseUrl, ownerToken, invoiceId);
 
     // PATCH with new invoice_no
     const patchPayload = { invoice_no: `INV-NEW-${Date.now()}` };
@@ -159,6 +196,7 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const invoiceId = created.data.id;
+    await ensureInvoiceVisible(baseUrl, ownerToken, invoiceId);
 
     // PATCH with new dates
     const patchPayload = {
@@ -213,6 +251,7 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const invoiceId = created.data.id;
+    await ensureInvoiceVisible(baseUrl, ownerToken, invoiceId);
 
     // PATCH with due_term
     const patchPayload = { due_term: 'NET_30' };
@@ -265,6 +304,7 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const invoiceId = created.data.id;
+    await ensureInvoiceVisible(baseUrl, ownerToken, invoiceId);
 
     // PATCH with new tax_amount
     const patchPayload = { tax_amount: 2000 };
@@ -310,6 +350,7 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const invoiceId = created.data.id;
+    await ensureInvoiceVisible(baseUrl, ownerToken, invoiceId);
 
     // PATCH with empty object — should fail schema validation
     const patchRes = await fetch(`${baseUrl}/api/sales/invoices/${invoiceId}`, {
@@ -358,6 +399,7 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const invoiceId = created.data.id;
+    await ensureInvoiceVisible(baseUrl, ownerToken, invoiceId);
 
     // Scoped ADMIN user only has access to outletId, not to inaccessibleOutlet
     // Attempting to reassign the invoice to the inaccessible outlet should return 403
@@ -415,6 +457,7 @@ async function createTestCustomer(
 // =============================================================================
 describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireSalesSuiteLock();
     baseUrl = getTestBaseUrl();
     ownerToken = await getTestAccessToken(baseUrl);
 
@@ -433,6 +476,7 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
 
   afterAll(async () => {
     resetFixtureRegistry();
+    await releaseSalesSuiteLock();
     await closeTestDb();
   });
 
@@ -743,6 +787,7 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const invoiceId = created.data.id;
+    await ensureInvoiceVisible(baseUrl, ownerToken, invoiceId);
     expect(created.data.customer_id == null).toBe(true);
 
     // PATCH with customer_id
@@ -809,6 +854,7 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const invoiceId = created.data.id;
+    await ensureInvoiceVisible(baseUrl, ownerToken, invoiceId);
     expect(created.data.customer_id).toBe(customerId);
 
     // PATCH with customer_id: null to clear the link
@@ -866,6 +912,7 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const invoiceId = created.data.id;
+    await ensureInvoiceVisible(baseUrl, ownerToken, invoiceId);
 
     // PATCH with non-existent customer_id
     const nonExistentCustomerId = 99999998;
@@ -930,6 +977,7 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const invoiceId = created.data.id;
+    await ensureInvoiceVisible(baseUrl, ownerToken, invoiceId);
 
     // CASHIER has no platform.customers.READ permission
     // Try to PATCH with customer_id using CASHIER token

@@ -3,6 +3,7 @@
 
 import { getDb } from "./db";
 import { sql } from "kysely";
+import { withTransactionRetry } from "@jurnapod/db";
 
 export const DOCUMENT_TYPES = {
   SALES_INVOICE: "SALES_INVOICE",
@@ -187,7 +188,7 @@ export async function generateDocumentNumber(
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      const result = await db.transaction().execute(async (trx) => {
+      const result = await withTransactionRetry(db, async (trx) => {
         const templateRow = await sql<NumberingTemplateRow>`
           SELECT * FROM numbering_templates 
           WHERE company_id = ${companyId} AND doc_type = ${docType} AND is_active = 1 
@@ -258,7 +259,7 @@ export async function reserveDocumentNumber(
 
   const manualSeq = parseTrailingSequence(requestedNumber);
 
-  await db.transaction().execute(async (trx) => {
+  await withTransactionRetry(db, async (trx) => {
     const existingRow = await sql`
       SELECT 1 as row_exists FROM ${sql.table(tableConfig.table)}
       WHERE company_id = ${companyId} AND ${sql.raw(tableConfig.numberColumn)} = ${requestedNumber}

@@ -11,6 +11,8 @@
  * the same import paths for existing API route code.
  */
 
+import { getDb } from "@/lib/db";
+
 // Re-export all report services from the modules-reporting package
 export {
   listPosTransactions,
@@ -41,3 +43,19 @@ export type {
   WorksheetResultRow,
   ReceivablesAgeingResult,
 } from "@jurnapod/modules-reporting";
+
+/**
+ * Route helper: verify customer belongs to company.
+ * Kept in library layer to avoid direct DB access in routes.
+ */
+export async function customerExistsInCompany(companyId: number, customerId: number): Promise<boolean> {
+  const db = getDb();
+  const customer = await db
+    .selectFrom("customers")
+    .select(["id"])
+    .where("company_id", "=", companyId)
+    .where("id", "=", customerId)
+    .executeTakeFirst();
+
+  return Boolean(customer);
+}

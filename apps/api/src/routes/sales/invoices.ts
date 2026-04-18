@@ -35,9 +35,7 @@ import {
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { requireAccess, type AuthContext } from "@/lib/auth-guard";
 import { getCompanyService } from "@/lib/companies";
-import { ApiCustomerRepository } from "@/lib/modules-platform/platform-db";
-import { getDb } from "@/lib/db";
-import type { KyselySchema } from "@jurnapod/db";
+import { customerExistsInCompany } from "@/lib/customers";
 import { errorResponse, successResponse } from "@/lib/response";
 import { createApiSalesDb } from "@/lib/modules-sales/sales-db";
 import { getAccessScopeChecker } from "@/lib/modules-sales/access-scope-checker";
@@ -181,10 +179,8 @@ invoiceRoutes.post("/", async (c) => {
         return customerAccessResult;
       }
 
-      const db = getDb() as KyselySchema;
-      const customerRepo = new ApiCustomerRepository(db);
-      const customer = await customerRepo.findById(auth.companyId, input.customer_id);
-      if (!customer) {
+      const exists = await customerExistsInCompany(auth.companyId, input.customer_id);
+      if (!exists) {
         return errorResponse("NOT_FOUND", "Customer not found", 404);
       }
     }
@@ -396,10 +392,8 @@ invoiceRoutes.patch("/:id", async (c) => {
         return customerAccessResult;
       }
 
-      const db = getDb() as KyselySchema;
-      const customerRepo = new ApiCustomerRepository(db);
-      const customer = await customerRepo.findById(auth.companyId, input.customer_id);
-      if (!customer) {
+      const exists = await customerExistsInCompany(auth.companyId, input.customer_id);
+      if (!exists) {
         return errorResponse("NOT_FOUND", "Customer not found", 404);
       }
     }
@@ -741,10 +735,8 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
         }
 
         // Also verify customer belongs to same company
-        const db = getDb() as KyselySchema;
-        const customerRepo = new ApiCustomerRepository(db);
-        const customer = await customerRepo.findById(auth.companyId, input.customer_id);
-        if (!customer) {
+        const exists = await customerExistsInCompany(auth.companyId, input.customer_id);
+        if (!exists) {
           return errorResponse("NOT_FOUND", "Customer not found", 404);
         }
       }
@@ -1022,10 +1014,8 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
           return customerAccessResult;
         }
 
-        const db = getDb() as KyselySchema;
-        const customerRepo = new ApiCustomerRepository(db);
-        const customer = await customerRepo.findById(auth.companyId, input.customer_id);
-        if (!customer) {
+        const exists = await customerExistsInCompany(auth.companyId, input.customer_id);
+        if (!exists) {
           return errorResponse("NOT_FOUND", "Customer not found", 404);
         }
       }

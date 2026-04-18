@@ -7,7 +7,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
-import { closeTestDb } from '../../helpers/db';
+import { closeTestDb, getTestDb } from '../../helpers/db';
+import { sql } from 'kysely';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -17,9 +18,21 @@ import {
 let baseUrl: string;
 let ownerToken: string;
 let outletId: number;
+const SALES_SUITE_LOCK = 'jp_sales_invoice_suite_lock';
+
+async function acquireSalesSuiteLock() {
+  const db = getTestDb();
+  await sql`SELECT GET_LOCK(${SALES_SUITE_LOCK}, 120)`.execute(db);
+}
+
+async function releaseSalesSuiteLock() {
+  const db = getTestDb();
+  await sql`SELECT RELEASE_LOCK(${SALES_SUITE_LOCK})`.execute(db);
+}
 
 describe('sales.invoices.discounts', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireSalesSuiteLock();
     baseUrl = getTestBaseUrl();
     ownerToken = await getTestAccessToken(baseUrl);
 
@@ -29,6 +42,7 @@ describe('sales.invoices.discounts', { timeout: 30000 }, () => {
 
   afterAll(async () => {
     resetFixtureRegistry();
+    await releaseSalesSuiteLock();
     await closeTestDb();
   });
 
@@ -63,8 +77,31 @@ describe('sales.invoices.discounts', { timeout: 30000 }, () => {
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body.success).toBe(true);
+    const invoiceId = Number(body.data.id);
+
+    // Ensure invoice is visible before caller issues PATCH in parallel-suite runs.
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const probe = await fetch(`${baseUrl}/api/sales/invoices/${invoiceId}`, {
+        headers: {
+          'Authorization': `Bearer ${ownerToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (probe.status === 200) {
+        break;
+      }
+
+      if (probe.status === 404 && attempt < 5) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 100));
+        continue;
+      }
+
+      break;
+    }
+
     return {
-      id: body.data.id,
+      id: invoiceId,
       subtotal: Number(body.data.subtotal),
       tax_amount: Number(body.data.tax_amount),
       grand_total: Number(body.data.grand_total)
@@ -394,6 +431,22 @@ describe('sales.invoices.discounts - OpenAPI handler', { timeout: 30000 }, () =>
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const invoiceId = created.data.id;
+
+    // Ensure invoice is visible before PATCH under parallel suite execution.
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const probe = await fetch(`${baseUrl}/api/sales/invoices/${invoiceId}`, {
+        headers: {
+          'Authorization': `Bearer ${ownerToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (probe.status === 200) break;
+      if (probe.status === 404 && attempt < 5) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 100));
+        continue;
+      }
+      break;
+    }
 
     // PATCH with excessive discount
     const patchRes = await fetch(`${baseUrl}/api/sales/invoices/${invoiceId}`, {

@@ -6,7 +6,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
-import { closeTestDb } from '../../helpers/db';
+import { closeTestDb, getTestDb } from '../../helpers/db';
+import { sql } from 'kysely';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -24,6 +25,17 @@ let outletId: number;
 let companyId: number;
 let companyCode: string;
 let cashierToken: string;
+const SALES_SUITE_LOCK = 'jp_sales_invoice_suite_lock';
+
+async function acquireSalesSuiteLock() {
+  const db = getTestDb();
+  await sql`SELECT GET_LOCK(${SALES_SUITE_LOCK}, 120)`.execute(db);
+}
+
+async function releaseSalesSuiteLock() {
+  const db = getTestDb();
+  await sql`SELECT RELEASE_LOCK(${SALES_SUITE_LOCK})`.execute(db);
+}
 
 // =============================================================================
 // Helper: Create a simple posted invoice for credit note testing
@@ -67,15 +79,30 @@ async function createPostedInvoice(withCustomerId: number | null): Promise<numbe
   const invoiceId = created.data.id;
 
   // Post the invoice
-  const postRes = await fetch(`${baseUrl}/api/sales/invoices/${invoiceId}/post`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${ownerToken}`,
-      'Content-Type': 'application/json'
-    }
-  });
+  let postRes: Response | null = null;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    postRes = await fetch(`${baseUrl}/api/sales/invoices/${invoiceId}/post`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
 
-  expect(postRes.status).toBe(200);
+    if (postRes.status === 200) {
+      break;
+    }
+
+    // Transient under parallel suites: 404 right after create or 409 lock wait
+    if ((postRes.status === 404 || postRes.status === 409) && attempt < 5) {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 150));
+      continue;
+    }
+
+    break;
+  }
+
+  expect(postRes?.status).toBe(200);
   return invoiceId;
 }
 
@@ -110,6 +137,7 @@ function createCreditNotePayload(invoiceId: number, customerId?: number | null) 
 // =============================================================================
 describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireSalesSuiteLock();
     baseUrl = getTestBaseUrl();
     ownerToken = await getTestAccessToken(baseUrl);
 
@@ -128,6 +156,7 @@ describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }
 
   afterAll(async () => {
     resetFixtureRegistry();
+    await releaseSalesSuiteLock();
     await closeTestDb();
   });
 

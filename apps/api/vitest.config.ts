@@ -31,7 +31,7 @@ export default defineConfig({
     testTimeout: 120000,
     hookTimeout: 120000,
     teardownTimeout: 30000,
-    // Use threads pool — max 2 workers prevents memory exhaustion
+    // Use threads pool — max 4 workers for performance
     pool: 'threads',
     maxWorkers: 4,
     minWorkers: 1,

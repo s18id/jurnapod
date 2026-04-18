@@ -763,6 +763,7 @@ export async function getReceivablesAgeingReport(filter: ReceivablesAgeingFilter
   }
 
   const outletInClause = sql.join(outletIds.map(id => sql`${id}`));
+  const customerFilterClause = filter.customerId != null ? sql` AND i.customer_id = ${filter.customerId}` : sql``;
   const query = sql`SELECT i.id AS invoice_id,
             i.invoice_no,
             i.outlet_id,
@@ -770,13 +771,19 @@ export async function getReceivablesAgeingReport(filter: ReceivablesAgeingFilter
             i.invoice_date,
             i.due_date,
             (i.grand_total - i.paid_total) AS outstanding_amount,
-            DATEDIFF(${asOfDate}, COALESCE(i.due_date, i.invoice_date)) AS days_overdue
+            DATEDIFF(${asOfDate}, COALESCE(i.due_date, i.invoice_date)) AS days_overdue,
+            i.customer_id,
+            c.code AS customer_code,
+            c.type AS customer_type,
+            COALESCE(c.company_name, c.display_name) AS customer_display_name
      FROM sales_invoices i
       LEFT JOIN outlets o ON o.id = i.outlet_id
+      LEFT JOIN customers c ON c.id = i.customer_id
      WHERE i.company_id = ${filter.companyId}
        AND i.status = 'POSTED'
        AND (i.grand_total - i.paid_total) > 0
        AND i.outlet_id IN (${outletInClause})
+       ${customerFilterClause}
      ORDER BY days_overdue DESC, i.invoice_date ASC, i.id ASC`;
   const result = await query.execute(db);
   const rows = result.rows as ReceivablesAgeingRow[];
@@ -804,6 +811,9 @@ export async function getReceivablesAgeingReport(filter: ReceivablesAgeingFilter
 
     buckets[ageBucket] += outstandingAmount;
 
+    // Overdue flag: true when days_overdue > 0 (due_date has passed)
+    const overdue = daysOverdue > 0;
+
     return {
       invoice_id: Number(row.invoice_id),
       invoice_no: row.invoice_no,
@@ -813,7 +823,12 @@ export async function getReceivablesAgeingReport(filter: ReceivablesAgeingFilter
       due_date: row.due_date ? toIsoDate(row.due_date) : null,
       days_overdue: daysOverdue,
       outstanding_amount: outstandingAmount,
-      age_bucket: ageBucket
+      age_bucket: ageBucket,
+      customer_id: row.customer_id ? Number(row.customer_id) : null,
+      customer_code: row.customer_code ?? null,
+      customer_type: row.customer_type ? Number(row.customer_type) : null,
+      customer_display_name: row.customer_display_name ?? null,
+      overdue
     };
   });
 
