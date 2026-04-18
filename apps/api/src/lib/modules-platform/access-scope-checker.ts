@@ -8,7 +8,8 @@
  * using the API's auth infrastructure.
  */
 
-import type { AccessScopeChecker } from "@jurnapod/modules-platform/src/users/interfaces/access-scope-checker.js";
+import type { AccessScopeChecker } from "@jurnapod/modules-platform";
+import { type ModulePermission } from "@jurnapod/auth";
 import { authClient } from "@/lib/auth-client.js";
 
 /**
@@ -22,7 +23,7 @@ import { authClient } from "@/lib/auth-client.js";
  */
 function mapPlatformPermissionToAuthParams(
   permission: string
-): { module: string; resource: string; permission: string } | null {
+): { module: string; resource: string; permission: ModulePermission } | null {
   // Parse permission string like "platform.customers.READ"
   const parts = permission.split(".");
   if (parts.length !== 3) {
@@ -33,7 +34,7 @@ function mapPlatformPermissionToAuthParams(
   const module = "platform";
 
   // Map READ -> read, CREATE -> create, etc.
-  const permissionMap: Record<string, string> = {
+  const permissionMap: Record<string, ModulePermission> = {
     READ: "read",
     CREATE: "create",
     UPDATE: "update",
