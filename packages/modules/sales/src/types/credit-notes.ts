@@ -35,6 +35,7 @@ export type SalesCreditNoteDetail = {
   reason: string | null;
   notes: string | null;
   amount: number;
+  customer_id?: number | null;
   created_by_user_id: number | null;
   updated_by_user_id: number | null;
   created_at: string;
@@ -60,6 +61,7 @@ export type CreateCreditNoteInput = {
   reason?: string;
   notes?: string;
   amount: number;
+  customer_id?: number | null;
   lines: CreditNoteLineInput[];
 };
 
@@ -68,6 +70,7 @@ export type UpdateCreditNoteInput = {
   reason?: string;
   notes?: string;
   amount?: number;
+  customer_id?: number | null;
   lines?: CreditNoteLineInput[];
 };
 

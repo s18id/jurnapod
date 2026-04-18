@@ -82,6 +82,8 @@ export {
   getOrCreateTestCashierForPermission,
   loginForTest,
   createTestRole,
+  createTestCustomer,
+  createTestCustomerForCompany,
   type CompanyFixture,
   type OutletFixture,
   type UserFixture,

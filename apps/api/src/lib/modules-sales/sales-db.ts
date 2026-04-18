@@ -75,6 +75,8 @@ interface SalesInvoiceRow {
   status: "DRAFT" | "APPROVED" | "POSTED" | "VOID";
   payment_status: "UNPAID" | "PARTIAL" | "PAID";
   subtotal: string | number;
+  discount_percent?: string | number | null;
+  discount_fixed?: string | number | null;
   tax_amount: string | number;
   grand_total: string | number;
   paid_total: string | number;
@@ -128,6 +130,8 @@ function normalizeInvoice(row: SalesInvoiceRow): SalesInvoice {
     status: row.status,
     payment_status: row.payment_status,
     subtotal: Number(row.subtotal),
+    discount_percent: row.discount_percent != null ? Number(row.discount_percent) : undefined,
+    discount_fixed: row.discount_fixed != null ? Number(row.discount_fixed) : undefined,
     tax_amount: Number(row.tax_amount),
     grand_total: Number(row.grand_total),
     paid_total: Number(row.paid_total),
@@ -348,7 +352,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     const forUpdateClause = forUpdate ? sql` FOR UPDATE` : sql``;
     const rows = await sql`
       SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, due_date, status, payment_status,
-              subtotal, tax_amount, grand_total, paid_total, customer_id,
+              subtotal, discount_percent, discount_fixed, tax_amount, grand_total, paid_total, customer_id,
               approved_by_user_id, approved_at,
               created_by_user_id, updated_by_user_id, created_at, updated_at
        FROM sales_invoices
@@ -406,6 +410,8 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     status: string;
     paymentStatus: string;
     subtotal: number;
+    discountPercent?: number | null;
+    discountFixed?: number | null;
     taxAmount: number;
     grandTotal: number;
     paidTotal: number;
@@ -422,6 +428,8 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
         status,
         payment_status,
         subtotal,
+        discount_percent,
+        discount_fixed,
         tax_amount,
         grand_total,
         paid_total,
@@ -438,6 +446,8 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
         ${input.status},
         ${input.paymentStatus},
         ${input.subtotal},
+        ${input.discountPercent ?? null},
+        ${input.discountFixed ?? null},
         ${input.taxAmount},
         ${input.grandTotal},
         ${input.paidTotal},
@@ -515,6 +525,8 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     invoiceDate: string;
     dueDate?: string;
     subtotal: number;
+    discountPercent?: number | null;
+    discountFixed?: number | null;
     taxAmount: number;
     grandTotal: number;
     customerId?: number | null;
@@ -526,6 +538,8 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
            invoice_date = ${input.invoiceDate},
            due_date = ${input.dueDate},
            subtotal = ${input.subtotal},
+           discount_percent = ${input.discountPercent ?? null},
+           discount_fixed = ${input.discountFixed ?? null},
            tax_amount = ${input.taxAmount},
            grand_total = ${input.grandTotal},
            customer_id = ${input.customerId ?? null},
@@ -1143,6 +1157,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     reason: string | null;
     notes: string | null;
     amount: number;
+    customer_id?: number | null;
     created_by_user_id: number | null;
     updated_by_user_id: number | null;
     created_at: string;
@@ -1159,12 +1174,11 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
   } | null> {
     const forUpdateClause = forUpdate ? sql` FOR UPDATE` : sql``;
     const rows = await sql`SELECT id, company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
-            client_ref, status, reason, notes, amount, created_by_user_id, updated_by_user_id,
+            client_ref, status, reason, notes, amount, customer_id, created_by_user_id, updated_by_user_id,
             created_at, updated_at
      FROM sales_credit_notes
      WHERE company_id = ${companyId} AND id = ${creditNoteId}
-     ${forUpdateClause}
-     LIMIT 1`.execute(this._getDb());
+     LIMIT 1${forUpdateClause}`.execute(this._getDb());
 
     if (rows.rows.length === 0) {
       return null;
@@ -1182,6 +1196,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
       reason: string | null;
       notes: string | null;
       amount: string | number;
+      customer_id?: number | null;
       created_by_user_id: number | null;
       updated_by_user_id: number | null;
       created_at: string;
@@ -1205,6 +1220,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
       reason: creditNote.reason ?? null,
       notes: creditNote.notes ?? null,
       amount: Number(creditNote.amount),
+      customer_id: creditNote.customer_id != null ? Number(creditNote.customer_id) : undefined,
       created_by_user_id: creditNote.created_by_user_id ?? null,
       updated_by_user_id: creditNote.updated_by_user_id ?? null,
       created_at: creditNote.created_at,
@@ -1377,14 +1393,15 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     reason?: string;
     notes?: string;
     amount: number;
+    customerId?: number | null;
     createdByUserId?: number;
   }): Promise<number> {
     const result = await sql`INSERT INTO sales_credit_notes (
         company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
-        status, client_ref, reason, notes, amount, created_by_user_id, updated_by_user_id
+        status, client_ref, reason, notes, amount, customer_id, created_by_user_id, updated_by_user_id
       ) VALUES (${input.companyId}, ${input.outletId}, ${input.invoiceId}, ${input.creditNoteNo}, ${input.creditNoteDate},
         ${input.status}, ${input.clientRef ?? null}, ${input.reason ?? null}, ${input.notes ?? null},
-        ${input.amount}, ${input.createdByUserId ?? null}, ${input.createdByUserId ?? null})`.execute(this._getDb());
+        ${input.amount}, ${input.customerId ?? null}, ${input.createdByUserId ?? null}, ${input.createdByUserId ?? null})`.execute(this._getDb());
 
     return Number(result.insertId);
   }
@@ -1412,6 +1429,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     reason?: string;
     notes?: string;
     amount?: number;
+    customerId?: number | null;
     updatedByUserId?: number;
   }): Promise<void> {
     const updates: Array<ReturnType<typeof sql>> = [sql`updated_by_user_id = ${input.updatedByUserId ?? null}`, sql`updated_at = CURRENT_TIMESTAMP`];
@@ -1430,6 +1448,10 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
 
     if (input.amount !== undefined) {
       updates.push(sql`amount = ${input.amount}`);
+    }
+
+    if (input.customerId !== undefined) {
+      updates.push(sql`customer_id = ${input.customerId}`);
     }
 
     await sql`UPDATE sales_credit_notes SET ${sql.join(updates, sql`, `)} WHERE company_id = ${input.companyId} AND id = ${input.creditNoteId}`.execute(this._getDb());
@@ -1468,6 +1490,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     reason: string | null;
     notes: string | null;
     amount: number;
+    customer_id?: number | null;
     created_by_user_id: number | null;
     updated_by_user_id: number | null;
     created_at: string;
@@ -1513,7 +1536,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     const offset = filters.offset ?? 0;
 
     const rows = await sql`SELECT id, company_id, outlet_id, invoice_id, credit_note_no, credit_note_date,
-            client_ref, status, reason, notes, amount, created_by_user_id, updated_by_user_id,
+            client_ref, status, reason, notes, amount, customer_id, created_by_user_id, updated_by_user_id,
             created_at, updated_at
      FROM sales_credit_notes
      WHERE ${whereClause}
@@ -1532,6 +1555,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
       reason: string | null;
       notes: string | null;
       amount: number;
+      customer_id?: number | null;
       created_by_user_id: number | null;
       updated_by_user_id: number | null;
       created_at: string;
@@ -1559,6 +1583,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
       reason: string | null;
       notes: string | null;
       amount: string | number;
+      customer_id?: number | null;
       created_by_user_id: number | null;
       updated_by_user_id: number | null;
       created_at: string;
@@ -1577,6 +1602,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
         reason: row.reason ?? null,
         notes: row.notes ?? null,
         amount: Number(row.amount),
+        customer_id: row.customer_id != null ? Number(row.customer_id) : undefined,
         created_by_user_id: row.created_by_user_id ?? null,
         updated_by_user_id: row.updated_by_user_id ?? null,
         created_at: row.created_at,

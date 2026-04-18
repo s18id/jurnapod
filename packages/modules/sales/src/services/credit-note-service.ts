@@ -175,13 +175,19 @@ export function createCreditNoteService(deps: CreditNoteServiceDeps): CreditNote
       if (!invoice) {
         throw new DatabaseReferenceError("Invoice not found or not posted");
       }
-      const invoiceData = invoice as { status?: string; outlet_id?: number };
+      const invoiceData = invoice as { status?: string; outlet_id?: number; customer_id?: number | null };
       if (invoiceData.status !== "POSTED") {
         throw new DatabaseReferenceError("Invoice not found or not posted");
       }
       if (invoiceData.outlet_id !== input.outlet_id) {
         throw new DatabaseReferenceError("Invoice outlet mismatch");
       }
+
+      // Strict inheritance: when source invoice has a customer, ALWAYS inherit from invoice.
+      // The request body customer_id is only used when the invoice has no customer.
+      const inheritedCustomerId = invoiceData.customer_id != null
+        ? invoiceData.customer_id
+        : input.customer_id ?? null;
 
       // Compute remaining credit capacity
       const capacity = await executor.getCreditNoteCapacity(companyId, input.invoice_id);
@@ -220,6 +226,7 @@ export function createCreditNoteService(deps: CreditNoteServiceDeps): CreditNote
         reason: input.reason,
         notes: input.notes,
         amount: normalizedAmount,
+        customerId: inheritedCustomerId,
         createdByUserId: actor?.userId
       });
 
@@ -332,6 +339,7 @@ export function createCreditNoteService(deps: CreditNoteServiceDeps): CreditNote
         reason: input.reason,
         notes: input.notes,
         amount: input.amount !== undefined ? normalizeMoney(input.amount) : undefined,
+        customerId: input.customer_id,
         updatedByUserId: actor?.userId
       });
 

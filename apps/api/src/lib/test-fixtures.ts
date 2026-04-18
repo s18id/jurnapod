@@ -484,6 +484,125 @@ export async function createTestUser(
 }
 
 // ============================================================================
+// Customer Fixtures
+// ============================================================================
+
+/**
+ * Create a test customer via API.
+ * Uses the platform/customers endpoint so ACL and validation are respected.
+ *
+ * @param baseUrl - The base URL of the test server
+ * @param accessToken - Valid access token for authentication
+ * @param companyId - Company ID for the customer
+ * @param code - Unique customer code (will be truncated to 32 chars)
+ * @param displayName - Display name for the customer
+ * @param options - Optional settings
+ * @param options.type - Customer type (default: 'PERSON')
+ * @param options.email - Email address
+ * @param options.phone - Phone number
+ * @returns Customer ID
+ */
+export async function createTestCustomer(
+  baseUrl: string,
+  accessToken: string,
+  companyId: number,
+  code: string,
+  displayName: string,
+  options?: Partial<{
+    type: string;
+    email: string;
+    phone: string;
+    companyName: string;
+    taxId: string;
+  }>
+): Promise<number> {
+  const normalizedCode = code.slice(0, 32);
+
+  const res = await fetch(`${baseUrl}/api/platform/customers`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${accessToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      company_id: companyId,
+      code: normalizedCode,
+      type: options?.type ?? "PERSON",
+      display_name: displayName,
+      email: options?.email ?? null,
+      phone: options?.phone ?? null,
+      company_name: options?.companyName ?? null,
+      tax_id: options?.taxId ?? null
+    })
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to create customer: ${res.status} ${await res.text()}`);
+  }
+
+  const result = await res.json();
+  return result.data.id;
+}
+
+/**
+ * Create a test customer in a specific company for cross-company scenarios.
+ * Uses canonical fixture-library setup so test files avoid ad-hoc SQL.
+ *
+ * @param baseUrl - The base URL of the test server
+ * @param accessToken - Valid access token (for the target company)
+ * @param companyId - Company ID for the customer
+ * @param code - Unique customer code
+ * @param displayName - Display name for the customer
+ * @param options - Optional settings
+ * @returns Customer ID
+ */
+export async function createTestCustomerForCompany(
+  _baseUrl: string,
+  _accessToken: string,
+  companyId: number,
+  code: string,
+  displayName: string,
+  options?: Partial<{
+    type: string;
+    email: string;
+    phone: string;
+  }>
+): Promise<number> {
+  // Deterministic cross-company fixture path: create directly through canonical test fixture library
+  // (tests should not do raw SQL themselves; fixture library centralizes setup invariants).
+  const db = getDb();
+  const normalizedCode = code.slice(0, 32);
+  const now = new Date();
+
+  const result = await db
+    .insertInto("customers")
+    .values({
+      company_id: companyId,
+      code: normalizedCode,
+      type: options?.type === "BUSINESS" ? 2 : 1,
+      display_name: displayName,
+      company_name: null,
+      tax_id: null,
+      phone: options?.phone ?? null,
+      email: options?.email ?? null,
+      address_line1: null,
+      address_line2: null,
+      city: null,
+      postal_code: null,
+      notes: null,
+      deleted_at: null,
+      is_active: 1,
+      created_by_user_id: null,
+      updated_by_user_id: null,
+      created_at: now,
+      updated_at: now,
+    })
+    .executeTakeFirst();
+
+  return Number(result.insertId);
+}
+
+// ============================================================================
 // Item Fixtures
 // ============================================================================
 

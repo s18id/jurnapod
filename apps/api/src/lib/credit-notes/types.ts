@@ -24,6 +24,7 @@ export type SalesCreditNoteRow = RowDataPacket & {
   reason?: string | null;
   notes?: string | null;
   amount: string | number;
+  customer_id?: number | null;
   created_by_user_id?: number | null;
   updated_by_user_id?: number | null;
   created_at: string;
@@ -62,6 +63,7 @@ export interface SalesCreditNoteDetail {
   reason: string | null;
   notes: string | null;
   amount: number;
+  customer_id?: number | null;
   created_by_user_id: number | null;
   updated_by_user_id: number | null;
   created_at: string;

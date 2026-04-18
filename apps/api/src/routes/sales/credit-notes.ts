@@ -30,7 +30,11 @@ import {
 } from "@/lib/credit-notes";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { errorResponse, successResponse } from "@/lib/response";
+import { requireAccess } from "@/lib/auth-guard";
+import { getDb } from "@/lib/db";
+import { ApiCustomerRepository } from "@/lib/modules-platform/platform-db";
 import type { AuthContext } from "@/lib/auth-guard";
+import type { KyselySchema } from "@jurnapod/db";
 
 const creditNoteRoutes = new Hono();
 
@@ -141,6 +145,25 @@ creditNoteRoutes.post("/", async (c) => {
       return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
 
+    // Validate customer_id if provided - ACL check for platform.customers.READ + same-company
+    if (input.customer_id != null) {
+      const customerAccessResult = await requireAccess({
+        module: "platform",
+        resource: "customers",
+        permission: "read"
+      })(c.req.raw, auth);
+      if (customerAccessResult !== null) {
+        return customerAccessResult;
+      }
+
+      const db = getDb() as KyselySchema;
+      const customerRepo = new ApiCustomerRepository(db);
+      const customer = await customerRepo.findById(auth.companyId, input.customer_id);
+      if (!customer) {
+        return errorResponse("NOT_FOUND", "Customer not found", 404);
+      }
+    }
+
     const creditNote = await createCreditNote(auth.companyId, {
       outlet_id: input.outlet_id,
       invoice_id: input.invoice_id,
@@ -149,6 +172,7 @@ creditNoteRoutes.post("/", async (c) => {
       reason: input.reason,
       notes: input.notes,
       amount: input.amount,
+      customer_id: input.customer_id,
       lines: input.lines
     }, { userId: auth.userId });
 
@@ -213,11 +237,34 @@ creditNoteRoutes.patch("/:id", async (c) => {
       return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
 
+    // Guard any customer_id mutation (assign, clear) with platform.customers.READ.
+    // If customer_id is explicitly null (clearing), skip the existence check — only enforce permission.
+    if (input.customer_id !== undefined) {
+      const customerAccessResult = await requireAccess({
+        module: "platform",
+        resource: "customers",
+        permission: "read"
+      })(c.req.raw, auth);
+      if (customerAccessResult !== null) {
+        return customerAccessResult;
+      }
+
+      if (input.customer_id !== null) {
+        const db = getDb() as KyselySchema;
+        const customerRepo = new ApiCustomerRepository(db);
+        const customer = await customerRepo.findById(auth.companyId, input.customer_id);
+        if (!customer) {
+          return errorResponse("NOT_FOUND", "Customer not found", 404);
+        }
+      }
+    }
+
     const updatedCreditNote = await updateCreditNote(auth.companyId, creditNoteId, {
       credit_note_date: input.credit_note_date,
       reason: input.reason,
       notes: input.notes,
       amount: input.amount,
+      customer_id: input.customer_id,
       lines: input.lines
     }, { userId: auth.userId });
 
@@ -589,6 +636,25 @@ export function registerSalesCreditNoteRoutes(app: { openapi: OpenAPIHonoType["o
         return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
+      // Validate customer_id if provided - ACL check for platform.customers.READ + same-company
+      if (input.customer_id != null) {
+        const customerAccessResult = await requireAccess({
+          module: "platform",
+          resource: "customers",
+          permission: "read"
+        })(c.req.raw, auth);
+        if (customerAccessResult !== null) {
+          return customerAccessResult;
+        }
+
+        const db = getDb() as KyselySchema;
+        const customerRepo = new ApiCustomerRepository(db);
+        const customer = await customerRepo.findById(auth.companyId, input.customer_id);
+        if (!customer) {
+          return errorResponse("NOT_FOUND", "Customer not found", 404);
+        }
+      }
+
       const creditNote = await createCreditNote(auth.companyId, {
         outlet_id: input.outlet_id,
         invoice_id: input.invoice_id,
@@ -597,6 +663,7 @@ export function registerSalesCreditNoteRoutes(app: { openapi: OpenAPIHonoType["o
         reason: input.reason,
         notes: input.notes,
         amount: input.amount,
+        customer_id: input.customer_id,
         lines: input.lines
       }, { userId: auth.userId });
 
@@ -705,11 +772,34 @@ export function registerSalesCreditNoteRoutes(app: { openapi: OpenAPIHonoType["o
         return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
+      // Guard any customer_id mutation (assign, clear) with platform.customers.READ.
+      // If customer_id is explicitly null (clearing), skip the existence check — only enforce permission.
+      if (input.customer_id !== undefined) {
+        const customerAccessResult = await requireAccess({
+          module: "platform",
+          resource: "customers",
+          permission: "read"
+        })(c.req.raw, auth);
+        if (customerAccessResult !== null) {
+          return customerAccessResult;
+        }
+
+        if (input.customer_id !== null) {
+          const db = getDb() as KyselySchema;
+          const customerRepo = new ApiCustomerRepository(db);
+          const customer = await customerRepo.findById(auth.companyId, input.customer_id);
+          if (!customer) {
+            return errorResponse("NOT_FOUND", "Customer not found", 404);
+          }
+        }
+      }
+
       const updatedCreditNote = await updateCreditNote(auth.companyId, creditNoteId, {
         credit_note_date: input.credit_note_date,
         reason: input.reason,
         notes: input.notes,
         amount: input.amount,
+        customer_id: input.customer_id,
         lines: input.lines
       }, { userId: auth.userId });
 
@@ -735,6 +825,7 @@ export function registerSalesCreditNoteRoutes(app: { openapi: OpenAPIHonoType["o
       return errorResponse("INTERNAL_SERVER_ERROR", "Credit note update failed", 500);
     }
   }) as any);
+
 
   // POST /sales/credit-notes/:id/post - Post credit note
   const postCreditNoteRoute = createRoute({

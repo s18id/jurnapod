@@ -66,6 +66,7 @@ export async function createCreditNote(
     reason?: string;
     notes?: string;
     amount: number;
+    customer_id?: number | null;
     lines: CreditNoteLineInput[];
   },
   actor?: MutationActor
@@ -97,6 +98,7 @@ export async function updateCreditNote(
     reason?: string;
     notes?: string;
     amount?: number;
+    customer_id?: number | null;
     lines?: CreditNoteLineInput[];
   },
   actor?: MutationActor
