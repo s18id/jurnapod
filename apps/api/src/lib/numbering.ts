@@ -8,7 +8,8 @@ export const DOCUMENT_TYPES = {
   SALES_INVOICE: "SALES_INVOICE",
   SALES_PAYMENT: "SALES_PAYMENT",
   SALES_ORDER: "SALES_ORDER",
-  CREDIT_NOTE: "CREDIT_NOTE"
+  CREDIT_NOTE: "CREDIT_NOTE",
+  SALES_CUSTOMER: "SALES_CUSTOMER"
 } as const;
 
 export type DocumentType = (typeof DOCUMENT_TYPES)[keyof typeof DOCUMENT_TYPES];
@@ -17,13 +18,16 @@ const TABLE_CONFIG: Record<DocumentType, { table: string; numberColumn: string }
   SALES_INVOICE: { table: "sales_invoices", numberColumn: "invoice_no" },
   SALES_PAYMENT: { table: "sales_payments", numberColumn: "payment_no" },
   SALES_ORDER: { table: "sales_orders", numberColumn: "order_no" },
-  CREDIT_NOTE: { table: "sales_credit_notes", numberColumn: "credit_note_no" }
+  CREDIT_NOTE: { table: "sales_credit_notes", numberColumn: "credit_note_no" },
+  SALES_CUSTOMER: { table: "customers", numberColumn: "code" }
 };
 
 export const RESET_PERIODS = {
   NEVER: "NEVER",
   YEARLY: "YEARLY",
-  MONTHLY: "MONTHLY"
+  MONTHLY: "MONTHLY",
+  WEEKLY: "WEEKLY",
+  DAILY: "DAILY"
 } as const;
 
 export type ResetPeriod = (typeof RESET_PERIODS)[keyof typeof RESET_PERIODS];
@@ -115,24 +119,60 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-function needsReset(lastReset: string | null, resetPeriod: ResetPeriod, now: Date): boolean {
+/**
+ * Get ISO week number and year for a date.
+ * ISO week 1 is the week containing the first Thursday of the year.
+ * Monday is the first day of the week.
+ */
+export function getISOWeek(date: Date): { year: number; week: number } {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const dayNum = d.getDay() || 7;
+  d.setDate(d.getDate() + 4 - dayNum);
+  const yearStart = new Date(d.getFullYear(), 0, 1);
+  const weekNum = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return { year: d.getFullYear(), week: weekNum };
+}
+
+/**
+ * Check if two dates are the same calendar day (local timezone).
+ */
+export function isSameDayLocal(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+}
+
+export function needsReset(lastReset: string | null, resetPeriod: ResetPeriod, now: Date): boolean {
   if (resetPeriod === "NEVER" || !lastReset) {
     return false;
   }
-  
+
   const lastResetDate = new Date(lastReset);
-  
+  if (Number.isNaN(lastResetDate.getTime())) {
+    return false;
+  }
+
   if (resetPeriod === "YEARLY") {
     return lastResetDate.getFullYear() !== now.getFullYear();
   }
-  
+
   if (resetPeriod === "MONTHLY") {
     return (
       lastResetDate.getFullYear() !== now.getFullYear() ||
       lastResetDate.getMonth() !== now.getMonth()
     );
   }
-  
+
+  if (resetPeriod === "WEEKLY") {
+    const lastWeek = getISOWeek(lastResetDate);
+    const currentWeek = getISOWeek(now);
+    return lastWeek.year !== currentWeek.year || lastWeek.week !== currentWeek.week;
+  }
+
+  if (resetPeriod === "DAILY") {
+    return !isSameDayLocal(lastResetDate, now);
+  }
+
   return false;
 }
 
@@ -274,7 +314,8 @@ const DEFAULT_TEMPLATES: Array<{
   { docType: DOCUMENT_TYPES.SALES_INVOICE, pattern: "INV/{{yy}}{{mm}}/{{seq4}}", resetPeriod: RESET_PERIODS.MONTHLY },
   { docType: DOCUMENT_TYPES.SALES_PAYMENT, pattern: "PAY/{{yy}}{{mm}}/{{seq4}}", resetPeriod: RESET_PERIODS.MONTHLY },
   { docType: DOCUMENT_TYPES.SALES_ORDER, pattern: "SO/{{yy}}{{mm}}/{{seq4}}", resetPeriod: RESET_PERIODS.MONTHLY },
-  { docType: DOCUMENT_TYPES.CREDIT_NOTE, pattern: "CN/{{yy}}{{mm}}/{{seq4}}", resetPeriod: RESET_PERIODS.MONTHLY }
+  { docType: DOCUMENT_TYPES.CREDIT_NOTE, pattern: "CN/{{yy}}{{mm}}/{{seq4}}", resetPeriod: RESET_PERIODS.MONTHLY },
+  { docType: DOCUMENT_TYPES.SALES_CUSTOMER, pattern: "CUST/{{yyyy}}/{{seq4}}", resetPeriod: RESET_PERIODS.YEARLY }
 ];
 
 export async function initializeDefaultTemplates(companyId: number): Promise<void> {
