@@ -206,6 +206,7 @@ export interface SalesDbExecutor {
     taxAmount: number;
     grandTotal: number;
     paidTotal: number;
+    customerId?: number | null;
     createdByUserId?: number;
   }): Promise<number>;
 
@@ -240,6 +241,7 @@ export interface SalesDbExecutor {
     subtotal: number;
     taxAmount: number;
     grandTotal: number;
+    customerId?: number | null;
     updatedByUserId?: number;
   }): Promise<void>;
 

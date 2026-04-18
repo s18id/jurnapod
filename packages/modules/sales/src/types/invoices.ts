@@ -46,6 +46,7 @@ export type SalesInvoice = {
   tax_amount: number;
   grand_total: number;
   paid_total: number;
+  customer_id?: number | null;
   approved_by_user_id?: number | null;
   approved_at?: string | null;
   created_by_user_id?: number | null;
@@ -93,6 +94,19 @@ export type InvoiceLineInput = {
 export type InvoiceTaxInput = {
   tax_rate_id: number;
   amount: number;
+};
+
+export type InvoiceCreateInput = {
+  outlet_id: number;
+  customer_id?: number | null;
+  client_ref?: string;
+  invoice_no?: string;
+  invoice_date: string;
+  due_date?: string;
+  due_term?: InvoiceDueTerm;
+  tax_amount: number;
+  lines: InvoiceLineInput[];
+  taxes?: InvoiceTaxInput[];
 };
 
 export type PreparedInvoiceLine = {

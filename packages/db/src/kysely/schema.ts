@@ -87,12 +87,40 @@ export interface ArchiveSyncDataVersions {
   updated_at: Generated<Date | null>;
 }
 
+export interface ArchiveSyncOperations {
+  archived_at: Generated<Date | null>;
+  company_id: number;
+  completed_at: Generated<Date | null>;
+  created_at: Generated<Date | null>;
+  data_version_after: Generated<number | null>;
+  data_version_before: Generated<number | null>;
+  duration_ms: Generated<number | null>;
+  error_message: Generated<string | null>;
+  id: number;
+  operation_type: "BATCH" | "PULL" | "PUSH" | "RECONCILE";
+  outlet_id: Generated<number | null>;
+  records_processed: Generated<number | null>;
+  request_id: string;
+  result_summary: Generated<string | null>;
+  started_at: Date;
+  status: "CANCELLED" | "FAILED" | "RUNNING" | "SUCCESS";
+  sync_module: "BACKOFFICE" | "POS";
+  tier: "ADMIN" | "ANALYTICS" | "MASTER" | "OPERATIONAL" | "REALTIME";
+}
+
 export interface ArchiveSyncTierVersions {
   archived_at: Generated<Date | null>;
   company_id: number;
   current_version: Generated<number | null>;
   last_updated_at: Generated<Date | null>;
   tier: "ADMIN" | "ANALYTICS" | "MASTER" | "OPERATIONAL" | "REALTIME";
+}
+
+export interface ArchiveUserOutlets {
+  archived_at: Generated<Date | null>;
+  created_at: Generated<Date | null>;
+  outlet_id: number;
+  user_id: number;
 }
 
 export interface AssetDepreciationPlans {
@@ -368,6 +396,29 @@ export interface CostLayerConsumption {
   unit_cost: Decimal;
 }
 
+export interface Customers {
+  address_line1: Generated<string | null>;
+  address_line2: Generated<string | null>;
+  city: Generated<string | null>;
+  code: string;
+  company_id: number;
+  company_name: Generated<string | null>;
+  created_at: Generated<Date>;
+  created_by_user_id: Generated<number | null>;
+  deleted_at: Generated<Date | null>;
+  display_name: string;
+  email: Generated<string | null>;
+  id: Generated<number>;
+  is_active: Generated<number>;
+  notes: Generated<string | null>;
+  phone: Generated<string | null>;
+  postal_code: Generated<string | null>;
+  tax_id: Generated<string | null>;
+  type: Generated<number>;
+  updated_at: Generated<Date>;
+  updated_by_user_id: Generated<number | null>;
+}
+
 export interface DataImports {
   accounts_file_name: string;
   allocations_file_name: string;
@@ -448,6 +499,25 @@ export interface FeatureFlags {
   updated_at: Generated<Date>;
 }
 
+export interface FiscalYearCloseRequests {
+  close_request_id: string;
+  company_id: number;
+  completed_at_ts: Generated<number | null>;
+  created_at_ts: number;
+  failure_code: Generated<string | null>;
+  failure_message: Generated<string | null>;
+  fiscal_year_id: number;
+  fiscal_year_status_after: string;
+  fiscal_year_status_before: string;
+  id: Generated<number>;
+  requested_at_ts: number;
+  requested_by_user_id: number;
+  result_json: Generated<string | null>;
+  started_at_ts: Generated<number | null>;
+  status: Generated<string>;
+  updated_at_ts: number;
+}
+
 export interface FiscalYears {
   code: string;
   company_id: number;
@@ -460,25 +530,6 @@ export interface FiscalYears {
   status: Generated<string>;
   updated_at: Generated<Date>;
   updated_by_user_id: Generated<number | null>;
-}
-
-export interface FiscalYearCloseRequests {
-  id: Generated<number>;
-  company_id: number;
-  fiscal_year_id: number;
-  close_request_id: string;
-  status: "PENDING" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED";
-  fiscal_year_status_before: string;
-  fiscal_year_status_after: string;
-  result_json: string | null;
-  failure_code: string | null;
-  failure_message: string | null;
-  requested_by_user_id: number;
-  requested_at_ts: number;
-  started_at_ts: number | null;
-  completed_at_ts: number | null;
-  created_at_ts: number;
-  updated_at_ts: number;
 }
 
 export interface FixedAssetBooks {
@@ -1582,7 +1633,9 @@ export interface DB {
   accounts: Accounts;
   analytics_insights: AnalyticsInsights;
   archive_sync_data_versions: ArchiveSyncDataVersions;
+  archive_sync_operations: ArchiveSyncOperations;
   archive_sync_tier_versions: ArchiveSyncTierVersions;
+  archive_user_outlets: ArchiveUserOutlets;
   asset_depreciation_plans: AssetDepreciationPlans;
   asset_depreciation_runs: AssetDepreciationRuns;
   audit_logs: AuditLogs;
@@ -1601,13 +1654,14 @@ export interface DB {
   company_payment_method_mappings_view: CompanyPaymentMethodMappingsView;
   company_tax_defaults: CompanyTaxDefaults;
   cost_layer_consumption: CostLayerConsumption;
+  customers: Customers;
   data_imports: DataImports;
   email_outbox: EmailOutbox;
   email_tokens: EmailTokens;
   export_files: ExportFiles;
   feature_flags: FeatureFlags;
-  fiscal_years: FiscalYears;
   fiscal_year_close_requests: FiscalYearCloseRequests;
+  fiscal_years: FiscalYears;
   fixed_asset_books: FixedAssetBooks;
   fixed_asset_categories: FixedAssetCategories;
   fixed_asset_disposals: FixedAssetDisposals;

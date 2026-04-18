@@ -32,7 +32,9 @@ export * from "./constants/table-states.js";
 export * from "./constants/rbac.js";
 export * from "./constants/modules.js";
 export * from "./constants/resources.js";
+export * from "./constants/customers.js";
 export * from "./schemas/table-reservation.js";
+export * from "./schemas/customers.js";
 
 // Client types and utilities
 export * from "./client.js";

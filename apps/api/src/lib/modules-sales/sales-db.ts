@@ -348,7 +348,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     const forUpdateClause = forUpdate ? sql` FOR UPDATE` : sql``;
     const rows = await sql`
       SELECT id, company_id, outlet_id, invoice_no, client_ref, invoice_date, due_date, status, payment_status,
-              subtotal, tax_amount, grand_total, paid_total,
+              subtotal, tax_amount, grand_total, paid_total, customer_id,
               approved_by_user_id, approved_at,
               created_by_user_id, updated_by_user_id, created_at, updated_at
        FROM sales_invoices
@@ -409,6 +409,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     taxAmount: number;
     grandTotal: number;
     paidTotal: number;
+    customerId?: number | null;
     createdByUserId?: number;
   }): Promise<number> {
     const result = await sql`INSERT INTO sales_invoices (
@@ -424,6 +425,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
         tax_amount,
         grand_total,
         paid_total,
+        customer_id,
         created_by_user_id,
         updated_by_user_id
       ) VALUES (
@@ -439,6 +441,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
         ${input.taxAmount},
         ${input.grandTotal},
         ${input.paidTotal},
+        ${input.customerId ?? null},
         ${input.createdByUserId ?? null},
         ${input.createdByUserId ?? null}
       )`.execute(this._getDb());
@@ -514,6 +517,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     subtotal: number;
     taxAmount: number;
     grandTotal: number;
+    customerId?: number | null;
     updatedByUserId?: number;
   }): Promise<void> {
     await sql`UPDATE sales_invoices
@@ -524,6 +528,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
            subtotal = ${input.subtotal},
            tax_amount = ${input.taxAmount},
            grand_total = ${input.grandTotal},
+           customer_id = ${input.customerId ?? null},
            updated_by_user_id = ${input.updatedByUserId ?? null},
            updated_at = CURRENT_TIMESTAMP
        WHERE company_id = ${input.companyId}

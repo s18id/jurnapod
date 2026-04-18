@@ -84,13 +84,13 @@ const LOCK_WAIT_TIMEOUT_PHRASE = 'lock wait timeout exceeded';
 /**
  * Default maximum retry attempts for deadlock handling.
  */
-const DEFAULT_MAX_ATTEMPTS = 5;
+const DEFAULT_MAX_ATTEMPTS = 10;
 
 /**
  * Default initial delay in milliseconds for deadlock retry backoff.
  * Higher values help reduce contention under heavy parallel load.
  */
-const DEFAULT_INITIAL_DELAY_MS = 100;
+const DEFAULT_INITIAL_DELAY_MS = 200;
 
 /**
  * Execute a callback within a transaction, retrying on MySQL deadlocks.

@@ -23,6 +23,7 @@ import type {
   InvoiceLineInput,
   InvoiceTaxInput,
   InvoiceDueTerm,
+  InvoiceCreateInput,
   MutationActor,
   ItemLookup,
   SalesInvoice,
@@ -167,6 +168,7 @@ interface SalesInvoiceRow {
   tax_amount: string | number;
   grand_total: string | number;
   paid_total: string | number;
+  customer_id?: number | null;
   approved_by_user_id?: number | null;
   approved_at?: string | null;
   created_by_user_id?: number | null;
@@ -209,6 +211,7 @@ function normalizeInvoice(row: SalesInvoiceRow): SalesInvoice {
     tax_amount: Number(row.tax_amount),
     grand_total: Number(row.grand_total),
     paid_total: Number(row.paid_total),
+    customer_id: row.customer_id != null ? Number(row.customer_id) : undefined,
     approved_by_user_id: row.approved_by_user_id ? Number(row.approved_by_user_id) : undefined,
     approved_at: row.approved_at ?? undefined,
     created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : undefined,
@@ -259,17 +262,7 @@ export interface InvoiceService {
 
   createInvoice(
     companyId: number,
-    input: {
-      outlet_id: number;
-      client_ref?: string;
-      invoice_no?: string;
-      invoice_date: string;
-      due_date?: string;
-      due_term?: InvoiceDueTerm;
-      tax_amount: number;
-      lines: InvoiceLineInput[];
-      taxes?: InvoiceTaxInput[];
-    },
+    input: InvoiceCreateInput,
     actor?: MutationActor
   ): Promise<SalesInvoiceDetail>;
 
@@ -278,6 +271,7 @@ export interface InvoiceService {
     invoiceId: number,
     input: {
       outlet_id?: number;
+      customer_id?: number | null;
       invoice_no?: string;
       invoice_date?: string;
       due_date?: string;
@@ -446,17 +440,7 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
 
     async createInvoice(
       companyId: number,
-      input: {
-        outlet_id: number;
-        client_ref?: string;
-        invoice_no?: string;
-        invoice_date: string;
-        due_date?: string;
-        due_term?: InvoiceDueTerm;
-        tax_amount: number;
-        lines: InvoiceLineInput[];
-        taxes?: InvoiceTaxInput[];
-      },
+      input: InvoiceCreateInput,
       actor?: MutationActor
     ): Promise<SalesInvoiceDetail> {
       return withTransaction(async (executor) => {
@@ -555,6 +539,7 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
           taxAmount,
           grandTotal,
           paidTotal: 0,
+          customerId: input.customer_id ?? null,
           createdByUserId: actor?.userId
         });
 
@@ -604,6 +589,7 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
       invoiceId: number,
       input: {
         outlet_id?: number;
+        customer_id?: number | null;
         invoice_no?: string;
         invoice_date?: string;
         due_date?: string;
@@ -734,6 +720,7 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
           subtotal,
           taxAmount,
           grandTotal,
+          customerId: input.customer_id,
           updatedByUserId: actor?.userId
         });
 

@@ -24,7 +24,7 @@ import {
   type StockAdjustmentInput
 } from "../lib/stock.js";
 import { authenticateRequest, requireAccess, type AuthContext } from "../lib/auth-guard.js";
-import { type RoleCode } from "../lib/auth.js";
+import { type RoleCode, userHasOutletAccess } from "../lib/auth.js";
 import { successResponse, errorResponse } from "../lib/response.js";
 import { telemetryMiddleware } from "../middleware/telemetry.js";
 import { NumericIdSchema } from "@jurnapod/shared";
@@ -128,7 +128,7 @@ stockRoutes.use(authMiddleware);
  * Validates that the outlet exists and belongs to the company
  */
 async function requireOutletAccess(c: Context, next: () => Promise<void>): Promise<void | Response> {
-  void c.get("auth"); // Validate auth is set
+  const auth = c.get("auth");
   const outletId = c.req.param("outletId");
   
   if (!outletId) {
@@ -145,10 +145,15 @@ async function requireOutletAccess(c: Context, next: () => Promise<void>): Promi
       { status: 400 }
     );
   }
-  
-  // TODO: Add outlet validation against company's outlets if needed
-  // For now, we trust the auth context's companyId
-  
+
+  const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, outletIdNum);
+  if (!hasAccess) {
+    return c.json(
+      { success: false, error: { code: 'FORBIDDEN', message: 'Outlet not accessible' } },
+      403
+    );
+  }
+
   await next();
 }
 

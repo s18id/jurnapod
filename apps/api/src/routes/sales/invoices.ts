@@ -28,15 +28,18 @@ import {
   DatabaseConflictError,
   DatabaseForbiddenError,
   DatabaseReferenceError,
-  InvoiceStatusError
+  InvoiceStatusError,
+  SalesAuthorizationError
 } from "@jurnapod/modules-sales";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
-import { requireAccess } from "@/lib/auth-guard";
+import { requireAccess, type AuthContext } from "@/lib/auth-guard";
+import { getCompanyService } from "@/lib/companies";
+import { ApiCustomerRepository } from "@/lib/modules-platform/platform-db";
+import { getDb } from "@/lib/db";
+import type { KyselySchema } from "@jurnapod/db";
 import { errorResponse, successResponse } from "@/lib/response";
-import type { AuthContext } from "@/lib/auth-guard";
 import { createApiSalesDb } from "@/lib/modules-sales/sales-db";
 import { getAccessScopeChecker } from "@/lib/modules-sales/access-scope-checker";
-import { getCompanyService } from "@/lib/companies";
 
 const invoiceRoutes = new Hono();
 
@@ -53,20 +56,6 @@ const numberingTemplateConflictMessage =
 
 // Company service for fetching company details (e.g., timezone)
 const companyService = getCompanyService();
-
-// Helper to parse outlet_id from request body for auth guard
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function _parseOutletIdFromBody(request: Request): Promise<number | null> {
-  try {
-    const payload = await request.clone().json();
-    if (payload && typeof payload.outlet_id === "number") {
-      return payload.outlet_id;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
 
 // ============================================================================
 // GET /sales/invoices - List invoices with filtering
@@ -180,8 +169,39 @@ invoiceRoutes.post("/", async (c) => {
       return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
 
+    // Validate customer_id if provided - ACL check for platform.customers.READ
+    if (input.customer_id != null) {
+      const customerAccessResult = await requireAccess({
+        module: "platform",
+        resource: "customers",
+        permission: "read"
+      })(c.req.raw, auth);
+      if (customerAccessResult !== null) {
+        return customerAccessResult;
+      }
+
+      // Also verify customer belongs to same company
+      const db = getDb() as KyselySchema;
+      const customerRepo = new ApiCustomerRepository(db);
+      const customer = await customerRepo.findById(auth.companyId, input.customer_id);
+      if (!customer) {
+        return errorResponse("NOT_FOUND", "Customer not found", 404);
+      }
+    }
+
     // Create invoice in DRAFT status
-    const invoice = await invoiceService.createInvoice(auth.companyId, input, {
+    const invoice = await invoiceService.createInvoice(auth.companyId, {
+      outlet_id: input.outlet_id,
+      customer_id: input.customer_id ?? null,
+      invoice_date: input.invoice_date,
+      due_date: input.due_date,
+      due_term: input.due_term,
+      client_ref: input.client_ref,
+      invoice_no: input.invoice_no,
+      tax_amount: input.tax_amount,
+      lines: input.lines,
+      taxes: input.taxes
+    }, {
       userId: auth.userId
     });
 
@@ -213,6 +233,10 @@ invoiceRoutes.post("/", async (c) => {
       throw error;
     }
   } catch (error) {
+    if (error instanceof SalesAuthorizationError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+
     if (error instanceof DatabaseForbiddenError) {
       return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
@@ -258,6 +282,16 @@ invoiceRoutes.get("/:id", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
+    const accessResult = await requireAccess({
+      module: "sales",
+      permission: "read",
+      resource: "invoices"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
     const invoiceId = NumericIdSchema.parse(c.req.param("id"));
 
     const invoice = await invoiceService.getInvoice(auth.companyId, invoiceId, {
@@ -279,11 +313,17 @@ invoiceRoutes.get("/:id", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid invoice ID", 400);
     }
 
+    if (error instanceof SalesAuthorizationError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+
     console.error("GET /sales/invoices/:id failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Invoice request failed", 500);
   }
 });
 
+// ============================================================================
+// OpenAPI Route Registration (for use with OpenAPIHono)
 // ============================================================================
 // PATCH /sales/invoices/:id - Update invoice
 // ============================================================================
@@ -292,6 +332,16 @@ invoiceRoutes.patch("/:id", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
+    const accessResult = await requireAccess({
+      module: "sales",
+      permission: "update",
+      resource: "invoices"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
     const invoiceId = NumericIdSchema.parse(c.req.param("id"));
 
     let payload: unknown;
@@ -301,8 +351,7 @@ invoiceRoutes.patch("/:id", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
-    // For now, use the same schema as create (simplified)
-    // TODO: Create proper update schema
+    // Use update schema with current mutable fields (outlet_id, invoice_no, dates, lines, taxes)
     const input = SalesInvoiceUpdateRequestSchema.parse(payload);
 
     // Validate user can access the existing invoice outlet before allowing update
@@ -330,6 +379,25 @@ invoiceRoutes.patch("/:id", async (c) => {
       }
     }
 
+    // Validate customer_id if being updated to a non-null value
+    if (input.customer_id !== undefined && input.customer_id !== null) {
+      const customerAccessResult = await requireAccess({
+        module: "platform",
+        resource: "customers",
+        permission: "read"
+      })(c.req.raw, auth);
+      if (customerAccessResult !== null) {
+        return customerAccessResult;
+      }
+
+      const db = getDb() as KyselySchema;
+      const customerRepo = new ApiCustomerRepository(db);
+      const customer = await customerRepo.findById(auth.companyId, input.customer_id);
+      if (!customer) {
+        return errorResponse("NOT_FOUND", "Customer not found", 404);
+      }
+    }
+
     const updatedInvoice = await invoiceService.updateInvoice(auth.companyId, invoiceId, input, {
       userId: auth.userId
     });
@@ -342,6 +410,10 @@ invoiceRoutes.patch("/:id", async (c) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+    }
+
+    if (error instanceof SalesAuthorizationError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
     }
 
     if (error instanceof DatabaseForbiddenError) {
@@ -365,6 +437,16 @@ invoiceRoutes.post("/:id/post", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
+    const accessResult = await requireAccess({
+      module: "sales",
+      permission: "update",
+      resource: "invoices"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
     const invoiceId = NumericIdSchema.parse(c.req.param("id"));
 
     // Check if invoice exists and user has access
@@ -392,6 +474,10 @@ invoiceRoutes.post("/:id/post", async (c) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid invoice ID", 400);
+    }
+
+    if (error instanceof SalesAuthorizationError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
     }
 
     if (error instanceof DatabaseForbiddenError) {
@@ -633,6 +719,26 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
         return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
+      // Validate customer_id if provided - ACL check for platform.customers.READ
+      if (input.customer_id != null) {
+        const customerAccessResult = await requireAccess({
+          module: "platform",
+          resource: "customers",
+          permission: "read"
+        })(c.req.raw, auth);
+        if (customerAccessResult !== null) {
+          return customerAccessResult;
+        }
+
+        // Also verify customer belongs to same company
+        const db = getDb() as KyselySchema;
+        const customerRepo = new ApiCustomerRepository(db);
+        const customer = await customerRepo.findById(auth.companyId, input.customer_id);
+        if (!customer) {
+          return errorResponse("NOT_FOUND", "Customer not found", 404);
+        }
+      }
+
       const invoice = await invoiceService.createInvoice(auth.companyId, input, {
         userId: auth.userId
       });
@@ -659,6 +765,10 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
         throw error;
       }
     } catch (error) {
+      if (error instanceof SalesAuthorizationError) {
+        return errorResponse("FORBIDDEN", error.message, 403);
+      }
+
       if (error instanceof DatabaseForbiddenError) {
         return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
@@ -705,7 +815,7 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
     security: [{ BearerAuth: [] }],
     request: {
       params: zodOpenApi.object({
-        id: zodOpenApi.string().openapi({ description: "Invoice ID" }),
+        id: zodOpenApi.string().regex(/^\d+$/).openapi({ description: "Invoice ID" }),
       }),
     },
     responses: {
@@ -737,6 +847,16 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
     const auth = c.get("auth");
 
     try {
+      const accessResult = await requireAccess({
+        module: "sales",
+        permission: "read",
+        resource: "invoices"
+      })(c.req.raw, auth);
+
+      if (accessResult !== null) {
+        return accessResult;
+      }
+
       const invoiceId = NumericIdSchema.parse(c.req.param("id"));
 
       const invoice = await invoiceService.getInvoice(auth.companyId, invoiceId, {
@@ -757,6 +877,10 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
         return errorResponse("INVALID_REQUEST", "Invalid invoice ID", 400);
       }
 
+      if (error instanceof SalesAuthorizationError) {
+        return errorResponse("FORBIDDEN", error.message, 403);
+      }
+
       console.error("GET /sales/invoices/:id failed", error);
       return errorResponse("INTERNAL_SERVER_ERROR", "Invoice request failed", 500);
     }
@@ -772,7 +896,7 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
     security: [{ BearerAuth: [] }],
     request: {
       params: zodOpenApi.object({
-        id: zodOpenApi.string().openapi({ description: "Invoice ID" }),
+        id: zodOpenApi.string().regex(/^\d+$/).openapi({ description: "Invoice ID" }),
       }),
       body: {
         content: {
@@ -815,6 +939,16 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
     const auth = c.get("auth");
 
     try {
+      const accessResult = await requireAccess({
+        module: "sales",
+        permission: "update",
+        resource: "invoices"
+      })(c.req.raw, auth);
+
+      if (accessResult !== null) {
+        return accessResult;
+      }
+
       const invoiceId = NumericIdSchema.parse(c.req.param("id"));
 
       let payload: unknown;
@@ -842,10 +976,30 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
         return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
+      // Validate outlet access if outlet_id is being changed
       if (input.outlet_id !== undefined) {
         const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, input.outlet_id);
         if (!hasAccess) {
           return errorResponse("FORBIDDEN", "Forbidden", 403);
+        }
+      }
+
+      // Validate customer_id if being updated to a non-null value
+      if (input.customer_id !== undefined && input.customer_id !== null) {
+        const customerAccessResult = await requireAccess({
+          module: "platform",
+          resource: "customers",
+          permission: "read"
+        })(c.req.raw, auth);
+        if (customerAccessResult !== null) {
+          return customerAccessResult;
+        }
+
+        const db = getDb() as KyselySchema;
+        const customerRepo = new ApiCustomerRepository(db);
+        const customer = await customerRepo.findById(auth.companyId, input.customer_id);
+        if (!customer) {
+          return errorResponse("NOT_FOUND", "Customer not found", 404);
         }
       }
 
@@ -861,6 +1015,10 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
     } catch (error) {
       if (error instanceof z.ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+      }
+
+      if (error instanceof SalesAuthorizationError) {
+        return errorResponse("FORBIDDEN", error.message, 403);
       }
 
       if (error instanceof DatabaseForbiddenError) {
@@ -886,7 +1044,7 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
     security: [{ BearerAuth: [] }],
     request: {
       params: zodOpenApi.object({
-        id: zodOpenApi.string().openapi({ description: "Invoice ID" }),
+        id: zodOpenApi.string().regex(/^\d+$/).openapi({ description: "Invoice ID" }),
       }),
     },
     responses: {
@@ -922,6 +1080,16 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
     const auth = c.get("auth");
 
     try {
+      const accessResult = await requireAccess({
+        module: "sales",
+        permission: "update",
+        resource: "invoices"
+      })(c.req.raw, auth);
+
+      if (accessResult !== null) {
+        return accessResult;
+      }
+
       const invoiceId = NumericIdSchema.parse(c.req.param("id"));
 
       const invoice = await invoiceService.getInvoice(auth.companyId, invoiceId, {
@@ -948,6 +1116,10 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
     } catch (error) {
       if (error instanceof z.ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid invoice ID", 400);
+      }
+
+      if (error instanceof SalesAuthorizationError) {
+        return errorResponse("FORBIDDEN", error.message, 403);
       }
 
       if (error instanceof DatabaseForbiddenError) {

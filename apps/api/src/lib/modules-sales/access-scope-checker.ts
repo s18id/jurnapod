@@ -22,30 +22,42 @@ import { authClient } from "@/lib/auth-client.js";
 /**
  * Map sales permissions to auth module permissions.
  * 
- * Sales module uses its own permission strings (e.g., "sales:create")
- * which are mapped to the auth module's permission bitmask.
+ * Sales module uses its own permission strings (e.g., "sales:create_invoice")
+ * which are mapped to the auth module's permission bitmask with resource.
+ * 
+ * Canonical resources from roles.defaults.json:
+ * - sales.invoices
+ * - sales.orders
+ * - sales.payments
+ * 
+ * Note: credit_notes have no dedicated canonical resource in the current ACL model.
+ * Best-compatible mapping: credit_note operations map to sales.invoices because
+ * credit notes are invoice reversals and should follow invoice access boundaries.
  */
 function mapSalesPermissionToModulePermission(
   permission: string
-): { module: string; permission: ModulePermission } | null {
-  const permissionMap: Record<string, { module: string; permission: ModulePermission }> = {
-    // Sales order permissions
-    "sales:create": { module: "sales", permission: "create" },
-    "sales:update": { module: "sales", permission: "update" },
-    "sales:read": { module: "sales", permission: "read" },
-    "sales:cancel": { module: "sales", permission: "delete" },
-    // Invoice permissions
-    "sales:create_invoice": { module: "sales", permission: "create" },
-    "sales:update_invoice": { module: "sales", permission: "update" },
-    "sales:read_invoice": { module: "sales", permission: "read" },
-    // Payment permissions
-    "payments:create": { module: "payments", permission: "create" },
-    "payments:read": { module: "payments", permission: "read" },
-    "payments:update": { module: "payments", permission: "update" },
-    "payments:post": { module: "payments", permission: "update" },
-    // Credit note permissions
-    "credit_notes:create": { module: "credit_notes", permission: "create" },
-    "credit_notes:read": { module: "credit_notes", permission: "read" },
+): { module: string; resource: string; permission: ModulePermission } | null {
+  const permissionMap: Record<string, { module: string; resource: string; permission: ModulePermission }> = {
+    // Sales order permissions - map to sales.orders
+    "sales:create": { module: "sales", resource: "orders", permission: "create" },
+    "sales:update": { module: "sales", resource: "orders", permission: "update" },
+    "sales:read": { module: "sales", resource: "orders", permission: "read" },
+    "sales:cancel": { module: "sales", resource: "orders", permission: "delete" },
+    // Invoice permissions - map to sales.invoices
+    "sales:create_invoice": { module: "sales", resource: "invoices", permission: "create" },
+    "sales:update_invoice": { module: "sales", resource: "invoices", permission: "update" },
+    "sales:read_invoice": { module: "sales", resource: "invoices", permission: "read" },
+    // Payment permissions - map to sales.payments (payments module doesn't exist in ACL)
+    "payments:create": { module: "sales", resource: "payments", permission: "create" },
+    "payments:read": { module: "sales", resource: "payments", permission: "read" },
+    "payments:update": { module: "sales", resource: "payments", permission: "update" },
+    "payments:post": { module: "sales", resource: "payments", permission: "update" },
+    // Credit note permissions - map to sales.invoices (best-compatible; no credit_notes resource exists)
+    "credit_notes:create": { module: "sales", resource: "invoices", permission: "create" },
+    "credit_notes:read": { module: "sales", resource: "invoices", permission: "read" },
+    "credit_notes:update": { module: "sales", resource: "invoices", permission: "update" },
+    "credit_notes:post": { module: "sales", resource: "invoices", permission: "update" },
+    "credit_notes:void": { module: "sales", resource: "invoices", permission: "delete" },
   };
 
   return permissionMap[permission] ?? null;
@@ -72,18 +84,16 @@ export class ApiAccessScopeChecker implements AccessScopeChecker {
     // Map sales permission to auth module/permission
     const mapped = mapSalesPermissionToModulePermission(permission);
     if (!mapped) {
-      throw new SalesAuthorizationError(
-        `Unknown permission: ${permission}`,
-        "FORBIDDEN"
-      );
+      throw new Error(`Unsupported sales permission mapping: ${permission}`);
     }
 
-    // Check using the auth client's RBAC
+    // Check using the auth client's RBAC with resource for strict ACL
     const hasPermission = await authClient.rbac.canManageCompanyDefaults(
       actorUserId,
       companyId,
       mapped.module,
-      mapped.permission
+      mapped.permission,
+      mapped.resource
     );
 
     if (!hasPermission) {
@@ -109,10 +119,7 @@ export class ApiAccessScopeChecker implements AccessScopeChecker {
     // Map sales permission to auth module/permission
     const mapped = mapSalesPermissionToModulePermission(permission);
     if (!mapped) {
-      throw new SalesAuthorizationError(
-        `Unknown permission: ${permission}`,
-        "FORBIDDEN"
-      );
+      throw new Error(`Unsupported sales permission mapping: ${permission}`);
     }
 
     // First check outlet-level access
@@ -129,13 +136,14 @@ export class ApiAccessScopeChecker implements AccessScopeChecker {
       );
     }
 
-    // Then check module permission
+    // Then check module permission with resource for strict ACL
     const checkResult = await authClient.rbac.checkAccess({
       userId: actorUserId,
       companyId,
       outletId,
       module: mapped.module,
       permission: mapped.permission,
+      resource: mapped.resource,
     });
 
     if (!checkResult || !checkResult.hasPermission) {

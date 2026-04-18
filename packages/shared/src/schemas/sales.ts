@@ -89,6 +89,7 @@ export const SalesInvoiceCreateRequestSchema = z.object({
   due_date: DateOnlySchema.optional(),
   due_term: SalesInvoiceDueTermSchema.optional(),
   tax_amount: MoneyInputNonNegativeSchema.default(0),
+  customer_id: NumericIdSchema.nullable().optional(),
   lines: z.array(SalesInvoiceLineInputSchema).min(1),
   taxes: z.array(SalesInvoiceTaxInputSchema).optional(),
   draft: z.boolean().optional()
@@ -102,6 +103,7 @@ export const SalesInvoiceUpdateRequestSchema = z
     due_date: DateOnlySchema.optional(),
     due_term: SalesInvoiceDueTermSchema.optional(),
     tax_amount: MoneyInputNonNegativeSchema.optional(),
+    customer_id: NumericIdSchema.nullable().optional(),
     lines: z.array(SalesInvoiceLineInputSchema).min(1).optional(),
     taxes: z.array(SalesInvoiceTaxInputSchema).optional()
   })
@@ -142,6 +144,7 @@ export const SalesInvoiceSchema = z.object({
   tax_amount: MoneySchema.nonnegative(),
   grand_total: MoneySchema.nonnegative(),
   paid_total: MoneySchema.nonnegative(),
+  customer_id: NumericIdSchema.nullable().optional(),
   approved_by_user_id: NumericIdSchema.nullable().optional(),
   approved_at: z.string().datetime().nullable().optional(),
   created_by_user_id: NumericIdSchema.nullable().optional(),
