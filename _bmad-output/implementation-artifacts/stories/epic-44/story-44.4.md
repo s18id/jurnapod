@@ -1,6 +1,6 @@
 # Story 44.4: Receivables Ageing Reporting Completion
 
-**Status:** planned
+**Status:** done
 **Priority:** P1
 
 ## Story
@@ -104,13 +104,13 @@ Compute in SQL: `due_date < CURDATE()` (MySQL) or in TypeScript after fetching. 
 
 ## Tasks / Subtasks
 
-- [ ] Update reporting receivables-ageing query to join customers
-- [ ] Extend report response with customer fields and overdue flag
-- [ ] Add overdue flag calculation (SQL or TypeScript)
-- [ ] Add drill-down endpoint `/reports/receivables-ageing/customer/:customerId`
-- [ ] Confirm backoffice type compatibility/update type mappings
-- [ ] Create integration tests
-- [ ] Run typecheck, lint, and tests
+- [x] Update reporting receivables-ageing query to join customers
+- [x] Extend report response with customer fields and overdue flag
+- [x] Add overdue flag calculation (SQL or TypeScript)
+- [x] Add drill-down endpoint `/reports/receivables-ageing/customer/:customerId`
+- [x] Confirm backoffice type compatibility/update type mappings
+- [x] Create integration tests
+- [x] Run typecheck, lint, and tests
 
 ## Files to Modify
 
@@ -153,13 +153,13 @@ npm run test:integration -w @jurnapod/api
 
 ## Technical Debt Review
 
-- [ ] No shortcuts taken that require follow‑up
-- [ ] No `TODO`/`FIXME` comments left in production code
-- [ ] No `as any` casts added without justification
-- [ ] No deprecated functions used
-- [ ] No N+1 query patterns introduced
-- [ ] No in‑memory state introduced
-- [ ] Integration tests included
+- [x] No shortcuts taken that require follow‑up
+- [x] No `TODO`/`FIXME` comments left in production code
+- [x] No `as any` casts added without justification
+- [x] No deprecated functions used
+- [x] No N+1 query patterns introduced
+- [x] No in‑memory state introduced
+- [x] Integration tests included
 
 ## ADR References
 

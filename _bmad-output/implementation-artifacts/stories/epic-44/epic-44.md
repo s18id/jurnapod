@@ -1,9 +1,9 @@
 # Epic 44: AR Customer Management & Invoicing Completion
 
-**Status:** planned
+**Status:** done
 **Theme:** AR Customer Management & Invoicing Completion
-**Started:** TBD
-**Completed:** TBD
+**Started:** 2026-04-15
+**Completed:** 2026-04-18
 
 ## Context
 

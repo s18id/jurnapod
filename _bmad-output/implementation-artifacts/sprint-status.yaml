@@ -1,4 +1,4 @@
-last_updated: 2026-04-17T12:00:00Z
+last_updated: 2026-04-18T06:30:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -512,10 +512,11 @@ development_status:
   epic-43-retrospective: done
 
   # Epic 44: AR Customer Management & Invoicing Completion
-  epic-44: ready-for-dev
-  44-0-numbering-reset-verification-closeout: ready-for-dev
-  44-1-customer-master-crud: ready-for-dev
-  44-2-invoice-customer-link: ready-for-dev
-  44-3-invoice-header-discounts-alignment: ready-for-dev
-  44-4-receivables-ageing-reporting-completion: ready-for-dev
-  44-5-credit-note-customer-flow: ready-for-dev
+  epic-44: done
+  44-0-numbering-reset-verification-closeout: done
+  44-1-customer-master-crud: done
+  44-2-invoice-customer-link: done
+  44-3-invoice-header-discounts-alignment: done
+  44-4-receivables-ageing-reporting-completion: done
+  44-5-credit-note-customer-flow: done
+  epic-44-retrospective: done

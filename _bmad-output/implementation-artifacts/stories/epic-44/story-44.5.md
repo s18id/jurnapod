@@ -1,6 +1,6 @@
 # Story 44.5: Credit Note Customer Flow
 
-**Status:** planned
+**Status:** done
 **Priority:** P1
 
 ## Story
@@ -101,12 +101,12 @@ Credit notes (`sales_credit_notes`) currently have no `customer_id` column. When
 
 ## Tasks / Subtasks
 
-- [ ] Write migration for `customer_id` column
-- [ ] Update shared Zod schemas
-- [ ] Update `credit-note-service` create method to inherit customer from invoice
-- [ ] Add ACL check in route handler for customer assignment
-- [ ] Create integration tests
-- [ ] Run typecheck, lint, and tests
+- [x] Write migration for `customer_id` column
+- [x] Update shared Zod schemas
+- [x] Update `credit-note-service` create method to inherit customer from invoice
+- [x] Add ACL check in route handler for customer assignment
+- [x] Create integration tests
+- [x] Run typecheck, lint, and tests
 
 ## Files to Modify
 
@@ -150,13 +150,13 @@ npm run test:integration -w @jurnapod/api
 
 ## Technical Debt Review
 
-- [ ] No shortcuts taken that require follow‑up
-- [ ] No `TODO`/`FIXME` comments left in production code
-- [ ] No `as any` casts added without justification
-- [ ] No deprecated functions used
-- [ ] No N+1 query patterns introduced
-- [ ] No in‑memory state introduced
-- [ ] Integration tests included
+- [x] No shortcuts taken that require follow‑up
+- [x] No `TODO`/`FIXME` comments left in production code
+- [x] No `as any` casts added without justification
+- [x] No deprecated functions used
+- [x] No N+1 query patterns introduced
+- [x] No in‑memory state introduced
+- [x] Integration tests included
 
 ## ADR References
 

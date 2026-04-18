@@ -1,6 +1,6 @@
 # Story 44.3: Invoice Header Discounts Alignment
 
-**Status:** planned
+**Status:** done
 **Priority:** P1
 
 ## Story
@@ -112,13 +112,13 @@ Epic 44 initially assumed invoice discount columns were missing. Current schema 
 
 ## Tasks / Subtasks
 
-- [ ] Verify schema baseline in target environments
-- [ ] Create fallback guarded migration only if columns are missing
-- [ ] Update/align shared Zod schemas
-- [ ] Update invoice service behavior for discount validation and calculations
-- [ ] Ensure API layer maps/returns discount fields consistently
-- [ ] Add/update integration tests
-- [ ] Run typecheck, lint, and tests
+- [x] Verify schema baseline in target environments
+- [x] Create fallback guarded migration only if columns are missing
+- [x] Update/align shared Zod schemas
+- [x] Update invoice service behavior for discount validation and calculations
+- [x] Ensure API layer maps/returns discount fields consistently
+- [x] Add/update integration tests
+- [x] Run typecheck, lint, and tests
 
 ## Files to Modify
 
@@ -161,13 +161,13 @@ None (can run parallel with 44.1).
 
 ## Technical Debt Review
 
-- [ ] No shortcuts taken that require follow‑up
-- [ ] No `TODO`/`FIXME` comments left in production code
-- [ ] No `as any` casts added without justification
-- [ ] No deprecated functions used
-- [ ] No N+1 query patterns introduced
-- [ ] No in‑memory state introduced
-- [ ] Integration tests included
+- [x] No shortcuts taken that require follow‑up
+- [x] No `TODO`/`FIXME` comments left in production code
+- [x] No `as any` casts added without justification
+- [x] No deprecated functions used
+- [x] No N+1 query patterns introduced
+- [x] No in‑memory state introduced
+- [x] Integration tests included
 
 ## ADR References
 
