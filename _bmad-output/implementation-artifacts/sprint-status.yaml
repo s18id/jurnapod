@@ -534,11 +534,11 @@ development_status:
   epic-45-retrospective: done
 
   # Epic 46: Purchasing / Accounts Payable
-  epic-46: ready-for-dev
-  46-1-supplier-master: backlog
-  46-2-exchange-rates: backlog
-  46-3-purchase-orders: backlog
-  46-4-goods-receipt: backlog
+  epic-46: in-progress
+  46-1-supplier-master: done
+  46-2-exchange-rates: done
+  46-3-purchase-orders: done
+  46-4-goods-receipt: done
   46-5-purchase-invoices: backlog
   46-6-ap-payments: backlog
   46-7-supplier-credit-notes: backlog

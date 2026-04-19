@@ -1,43 +1,17 @@
-# Story 46.7 Completion Note
+# Story 46.7 — Supplier Credit Notes — Completion Status
 
-**Epic:** Epic 46 — Purchasing / Accounts Payable
-**Story:** 46.7 — Supplier Credit Notes
-**Status:** done
+## Status
+- **Current:** backlog (not implemented)
+- **Sprint status source of truth:** `_bmad-output/implementation-artifacts/sprint-status.yaml` (`46-7-supplier-credit-notes: backlog`)
 
-## What Was Done
+## Note
 
-- [Created purchase credit implementation]
-- [Implemented credit → AP reduction + journal reversal]
-- [Implemented FIFO matching]
-- [Wrote integration tests]
+This file replaces an earlier placeholder template that incorrectly implied completion.
 
-## Acceptance Criteria Evidence
+No completion evidence is recorded yet for Story 46.7.
 
-**AC1: Credit Note Creation** — [pass/fail with evidence]
-**AC2: Credit Note Application** — [pass/fail with evidence]
-**AC3: Credit Note vs PI Matching** — [pass/fail with evidence]
-**AC4: Credit Note Partial Application** — [pass/fail with evidence]
-**AC5: ACL Enforcement** — [pass/fail with evidence]
-
-## Files Created/Modified
-
-| File | Action | Notes |
-|------|--------|-------|
-| | | |
-
-## Validation Commands Run
-
-```bash
-npm run typecheck -w @jurnapod/api   # Result: [pass/fail]
-npm run lint -w @jurnapod/api         # Result: [pass/fail]
-npm run test:unit -w @jurnapod/api   # Result: [pass/fail]
-```
-
-## Journal Verification
-
-- Total debits = total credits: [pass/fail]
-- Credit amount = journal batch total: [pass/fail]
-
-## Open Items / Technical Debt
-
-- [None / List any new TD items]
+When implementation starts, update this file with:
+- acceptance-criteria evidence
+- files created/modified
+- validation command outputs
+- open risks/technical debt

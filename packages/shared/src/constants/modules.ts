@@ -7,7 +7,7 @@ import { z } from "zod";
  * Access modules — used in RBAC authorization checks.
  * These are the resources/domains that can have permissions assigned.
  * 
- * 7 Canonical Modules: platform, pos, sales, inventory, accounting, treasury, reservations
+ * 8 Canonical Modules: platform, pos, sales, inventory, accounting, treasury, reservations, purchasing
  */
 export const MODULE_CODES = [
   "platform",
@@ -16,7 +16,8 @@ export const MODULE_CODES = [
   "inventory",
   "accounting",
   "treasury",
-  "reservations"
+  "reservations",
+  "purchasing"
 ] as const;
 
 export type ModuleCode = typeof MODULE_CODES[number];
@@ -29,7 +30,7 @@ export const ModuleCodeSchema = z.enum(MODULE_CODES);
  */
 export const FEATURE_MODULE_CODES = [
   "platform", "pos", "sales", "inventory",
-  "accounting", "treasury", "reservations"
+  "accounting", "treasury", "reservations", "purchasing"
 ] as const;
 
 export type FeatureModuleCode = typeof FEATURE_MODULE_CODES[number];

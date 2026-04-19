@@ -1,6 +1,6 @@
 # Story 46.2: Exchange Rate Table
 
-Status: backlog
+Status: done
 
 ## Story
 
@@ -54,12 +54,12 @@ Story 46.2 adds the `exchange_rates` table and API. Exchange rates are company-s
 
 ## Tasks / Subtasks
 
-- [ ] Create `exchange_rates` table migration
-- [ ] Add ACL resource `purchasing.exchange_rates`
-- [ ] Implement exchange rate routes (CRUD)
-- [ ] Implement `getExchangeRate(companyId, currencyCode, date)` utility function
-- [ ] Write integration tests for rate lookup
-- [ ] Write integration tests for ACL enforcement
+- [x] Create `exchange_rates` table migration
+- [x] Add ACL resource `purchasing.exchange_rates`
+- [x] Implement exchange rate routes (CRUD)
+- [x] Implement `getExchangeRate(companyId, currencyCode, date)` utility function
+- [x] Write integration tests for rate lookup
+- [x] Write integration tests for ACL enforcement
 
 ---
 
@@ -76,7 +76,7 @@ Story 46.2 adds the `exchange_rates` table and API. Exchange rates are company-s
 |------|--------|-------------|
 | `packages/db/src/kysely/schema.ts` | Modify | Add exchange_rates table |
 | `packages/shared/src/schemas/purchasing.ts` | Modify | Add exchange rate schemas |
-| `packages/auth/src/acls.ts` | Modify | Add exchange_rates resource |
+| `packages/auth/src/**/*` | Modify | Align exchange-rate permissions with the approved ACL mapping |
 
 ---
 
@@ -110,5 +110,5 @@ curl "/api/purchasing/exchange-rates/lookup?currency_code=USD&date=2026-04-19" \
 
 ## Technical Debt Review
 
-- [ ] No shortcuts taken that require follow-up
-- [ ] No `as any` casts added without justification
+- [x] No shortcuts taken that require follow-up
+- [x] No `as any` casts added without justification

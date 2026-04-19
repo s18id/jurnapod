@@ -51,6 +51,7 @@ import { adminDashboardRoutes } from './routes/admin-dashboards/index.js';
 import { adminRunbookRoutes } from './routes/admin-runbook.js';
 import { auditRoutes } from './routes/audit.js';
 import { swaggerRoutes } from './routes/swagger.js';
+import { purchasingRoutes } from './routes/purchasing/index.js';
 
 const HTTP_LOG_ENABLED = process.env.JP_HTTP_LOG === "1";
 
@@ -219,6 +220,9 @@ export function createApp(): Hono {
 
   // Register platform customer routes
   app.route("/api/platform/customers", customerRoutes);
+
+  // Register purchasing supplier routes
+  app.route("/api/purchasing", purchasingRoutes);
 
   // Register audit routes
   app.route("/api/audit", auditRoutes);

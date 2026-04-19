@@ -14,6 +14,8 @@ So that AP is recognized and GL journal entries are created in base currency.
 
 Story 46.5 adds the Purchase Invoice (PI) entity. This is the financial document — when a PI is posted, it creates journal entries. The PI amount is in the supplier's currency, converted to company base currency at the PI date's exchange rate for journal posting.
 
+For Epic 46 MVP, line prices are tax-exclusive and GL posting is split into: debit inventory/expense for net, debit recoverable input tax for tax, and credit AP trade for gross. Rounding is performed per line in base currency, then summed to document totals.
+
 **Dependencies:** Story 46.1 (supplier), Story 46.2 (exchange rates), Story 46.3 (PO), Story 46.4 (GR)
 
 ---
@@ -32,8 +34,12 @@ Story 46.5 adds the Purchase Invoice (PI) entity. This is the financial document
 - Looks up exchange rate: `getExchangeRate(companyId, supplier.currency, pi_date)`
 - If no rate found → 400 error with message about missing exchange rate
 - Creates journal batch with lines:
-  - Per line: `D: Inventory/COGS (base_amount)` `C: AP Trade (base_amount)`
-- `base_amount = line.qty * line.unit_price * exchange_rate`
+  - Per line: `D: Inventory/Expense (base_net_amount)`
+  - Per line with tax: `D: Recoverable Input Tax (base_tax_amount)`
+  - Per line/document total: `C: AP Trade (base_gross_amount)`
+- `base_net_amount = line.qty * line.unit_price * exchange_rate`
+- `base_tax_amount = base_net_amount * tax_rate`
+- `base_gross_amount = base_net_amount + base_tax_amount`
 - PI status → POSTED
 - Returns the journal batch ID in the response
 
@@ -54,18 +60,24 @@ Story 46.5 adds the Purchase Invoice (PI) entity. This is the financial document
 **Then** the post is blocked with 400 error (credit limit exceeded — must reduce amount or wait for payment),
 **And** 80-100% utilization → warning logged but not blocked.
 
-**AC6: AP Trade Account**
-**Given** a company has a default AP trade account configured in `company_settings`,
+**AC6: AP Trade Account Configuration**
+**Given** a company has a default AP trade account configured in purchasing settings,
 **When** a PI is posted,
-**Then** the AP Trade credit entry uses the company's configured AP trade account_id.
+**Then** the AP Trade credit entry uses the configured `purchasing_default_ap_account_id`.
 **If** no AP trade account is configured → 400 error at first PI post (blocks until configured).
 
-**AC7: Tenant Isolation**
+**AC7: Tax Account Configuration**
+**Given** a PI line has tax,
+**When** the PI is posted,
+**Then** the recoverable input tax debit uses the configured tax control account from tax-rate configuration,
+**And** posting fails if the tax account mapping is missing.
+
+**AC8: Tenant Isolation**
 **Given** PI records exist for multiple companies,
 **When** any company queries its PIs,
 **Then** only that company's PIs are returned (company_id enforcement).
 
-**AC8: ACL Enforcement**
+**AC9: ACL Enforcement**
 **Given** a user without `purchasing.invoices` CREATE permission,
 **When** they attempt to create/post a PI,
 **Then** they receive 403.
@@ -79,7 +91,8 @@ Story 46.5 adds the Purchase Invoice (PI) entity. This is the financial document
 - [ ] Implement PI routes (create, post, void, list)
 - [ ] Call `getExchangeRate()` in PI posting
 - [ ] Call `createJournalBatch()` for GL posting
-- [ ] Check company_settings for AP trade account_id
+- [ ] Add purchasing settings field for `purchasing_default_ap_account_id`
+- [ ] Resolve recoverable input tax account from tax-rate configuration
 - [ ] Implement credit limit enforcement at post time
 - [ ] Write integration tests for PI → journal creation
 - [ ] Write integration tests for currency conversion (with different rates)
@@ -100,7 +113,7 @@ Story 46.5 adds the Purchase Invoice (PI) entity. This is the financial document
 |------|--------|-------------|
 | `packages/db/src/kysely/schema.ts` | Modify | Add purchase_invoices, purchase_invoice_lines |
 | `packages/shared/src/schemas/purchasing.ts` | Modify | Add PI schemas |
-| `packages/auth/src/acls.ts` | Modify | Add invoices resource |
+| `packages/auth/src/**/*` | Modify | Align invoices permissions with the approved ACL mapping |
 | `apps/api/src/lib/sales-posting.ts` | Modify | (if shared journal posting pattern can be reused) |
 
 ---
@@ -118,7 +131,7 @@ curl -X POST /api/purchasing/invoices/1/post \
   -H "Authorization: Bearer $TOKEN"
 # Expected: 200 with {"journal_batch_id": 123, "status": "POSTED"}
 
-# Verify journal lines (D: Inventory/COGS, C: AP Trade, both in base EUR)
+# Verify journal lines (D: Inventory/Expense, D: Recoverable Input Tax, C: AP Trade, all in base EUR)
 curl /api/journals/batches/123 -H "Authorization: Bearer $TOKEN"
 
 # Missing exchange rate test
@@ -129,12 +142,13 @@ curl /api/journals/batches/123 -H "Authorization: Bearer $TOKEN"
 
 ## Dev Notes
 
-- PI line `unit_price` is in supplier currency
-- `base_amount = qty * unit_price * exchange_rate` — all in BigInt (cents) for journal
-- Journal: one batch per PI post, multiple lines per batch (one D/C pair per PI line)
-- `company_settings.ap_trade_account_id` must exist before first PI post
+- PI line `unit_price` is tax-exclusive and in supplier currency
+- Round in base currency per line, then sum to document totals
+- Journal: one batch per PI post, with debits for net/tax and credit for AP total
+- Add `purchasing_default_ap_account_id` to purchasing settings rather than inventing an unrelated company_settings key
 - PI status: DRAFT → POSTED → VOID
 - VOID on PI creates reversal journal batch (same accounts, opposite signs)
+- Credit limit enforcement starts here because posted PI creates real AP exposure
 
 ---
 

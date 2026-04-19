@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+/// <reference types="node" />
 
 /**
  * Sprint Status Health Check
@@ -16,8 +17,8 @@
  *   2 = file not found
  */
 
-import { readFileSync } from "fs";
-import { resolve } from "path";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const SPRINT_STATUS_PATH = resolve(
   process.cwd(),

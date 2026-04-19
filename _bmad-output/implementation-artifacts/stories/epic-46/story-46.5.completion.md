@@ -1,46 +1,17 @@
-# Story 46.5 Completion Note
+# Story 46.5 — Purchase Invoices — Completion Status
 
-**Epic:** Epic 46 — Purchasing / Accounts Payable
-**Story:** 46.5 — Purchase Invoices
-**Status:** done
+## Status
+- **Current:** backlog (not implemented)
+- **Sprint status source of truth:** `_bmad-output/implementation-artifacts/sprint-status.yaml` (`46-5-purchase-invoices: backlog`)
 
-## What Was Done
+## Note
 
-- [Created PI implementation]
-- [Implemented currency conversion + journal posting]
-- [Implemented credit limit enforcement]
-- [Wrote integration tests for journal balancing]
+This file replaces an earlier placeholder template that incorrectly implied completion.
 
-## Acceptance Criteria Evidence
+No completion evidence is recorded yet for Story 46.5.
 
-**AC1: PI Creation** — [pass/fail with evidence]
-**AC2: PI Posting (Journal Creation)** — [pass/fail with evidence]
-**AC3: Currency Conversion** — [pass/fail with evidence]
-**AC4: PI Matching to PO/GR** — [pass/fail with evidence]
-**AC5: Credit Limit Enforcement at PI Post** — [pass/fail with evidence]
-**AC6: AP Trade Account** — [pass/fail with evidence]
-**AC7: Tenant Isolation** — [pass/fail with evidence]
-**AC8: ACL Enforcement** — [pass/fail with evidence]
-
-## Files Created/Modified
-
-| File | Action | Notes |
-|------|--------|-------|
-| | | |
-
-## Validation Commands Run
-
-```bash
-npm run typecheck -w @jurnapod/api   # Result: [pass/fail]
-npm run lint -w @jurnapod/api         # Result: [pass/fail]
-npm run test:unit -w @jurnapod/api   # Result: [pass/fail]
-```
-
-## Journal Verification
-
-- Total debits = total credits: [pass/fail]
-- PI line amounts sum = journal batch total: [pass/fail]
-
-## Open Items / Technical Debt
-
-- [None / List any new TD items]
+When implementation starts, update this file with:
+- acceptance-criteria evidence
+- files created/modified
+- validation command outputs
+- open risks/technical debt

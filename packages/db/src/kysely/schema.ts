@@ -1398,6 +1398,118 @@ export interface StaticPages {
   updated_by_user_id: Generated<number | null>;
 }
 
+export interface ExchangeRates {
+  company_id: number;
+  created_at: Generated<Date>;
+  created_by_user_id: Generated<number | null>;
+  currency_code: string;
+  effective_date: Date;
+  id: Generated<number>;
+  is_active: Generated<number>;
+  notes: Generated<string | null>;
+  rate: Decimal;
+  updated_at: Generated<Date>;
+  updated_by_user_id: Generated<number | null>;
+}
+
+export interface GoodsReceiptLines {
+  company_id: number;
+  created_at: Generated<Date>;
+  description: Generated<string | null>;
+  id: Generated<number>;
+  item_id: Generated<number | null>;
+  line_no: number;
+  over_receipt_allowed: Generated<number>;
+  po_line_id: Generated<number | null>;
+  qty: Decimal;
+  receipt_id: number;
+  unit: Generated<string | null>;
+  updated_at: Generated<Date>;
+}
+
+export interface GoodsReceipts {
+  company_id: number;
+  created_at: Generated<Date>;
+  created_by_user_id: Generated<number | null>;
+  id: Generated<number>;
+  notes: Generated<string | null>;
+  receipt_date: Generated<Date>;
+  reference_number: string;
+  status: Generated<number>;
+  supplier_id: number;
+  updated_at: Generated<Date>;
+  updated_by_user_id: Generated<number | null>;
+}
+
+export interface SupplierContacts {
+  created_at: Generated<Date>;
+  email: Generated<string | null>;
+  id: Generated<number>;
+  is_primary: Generated<number>;
+  name: string;
+  notes: Generated<string | null>;
+  phone: Generated<string | null>;
+  role: Generated<string | null>;
+  supplier_id: number;
+  updated_at: Generated<Date>;
+}
+
+export interface PurchaseOrderLines {
+  company_id: number;
+  created_at: Generated<Date>;
+  description: Generated<string | null>;
+  id: Generated<number>;
+  item_id: Generated<number | null>;
+  line_no: number;
+  line_total: Decimal;
+  order_id: number;
+  qty: Decimal;
+  received_qty: Generated<Decimal>;
+  tax_rate: Generated<Decimal>;
+  unit_price: Decimal;
+  updated_at: Generated<Date>;
+}
+
+export interface PurchaseOrders {
+  company_id: number;
+  created_at: Generated<Date>;
+  created_by_user_id: Generated<number | null>;
+  currency_code: Generated<string>;
+  expected_date: Generated<Date | null>;
+  id: Generated<number>;
+  notes: Generated<string | null>;
+  order_date: Generated<Date>;
+  order_no: string;
+  status: Generated<number>;
+  supplier_id: number;
+  total_amount: Generated<Decimal>;
+  updated_at: Generated<Date>;
+  updated_by_user_id: Generated<number | null>;
+}
+
+export interface Suppliers {
+  address_line1: Generated<string | null>;
+  address_line2: Generated<string | null>;
+  city: Generated<string | null>;
+  company_id: number;
+  country: Generated<string | null>;
+  code: string;
+  created_at: Generated<Date>;
+  created_by_user_id: Generated<number | null>;
+  credit_limit: Generated<Decimal>;
+  currency: string;
+  email: Generated<string | null>;
+  id: Generated<number>;
+  is_active: Generated<number>;
+  name: string;
+  notes: Generated<string | null>;
+  payment_terms_days: Generated<number | null>;
+  phone: Generated<string | null>;
+  postal_code: Generated<string | null>;
+  updated_at: Generated<Date>;
+  updated_by_user_id: Generated<number | null>;
+}
+
 export interface Supplies {
   company_id: number;
   created_at: Generated<Date>;
@@ -1695,7 +1807,11 @@ export interface DB {
   payment_method_mappings: PaymentMethodMappings;
   platform_settings: PlatformSettings;
   pos_item_cancellations: PosItemCancellations;
+  purchase_order_lines: PurchaseOrderLines;
+  purchase_orders: PurchaseOrders;
   pos_order_snapshot_lines: PosOrderSnapshotLines;
+  goods_receipts: GoodsReceipts;
+  goods_receipt_lines: GoodsReceiptLines;
   pos_order_snapshots: PosOrderSnapshots;
   pos_order_updates: PosOrderUpdates;
   pos_sync_metadata: PosSyncMetadata;
@@ -1722,6 +1838,9 @@ export interface DB {
   settings_numbers: SettingsNumbers;
   settings_strings: SettingsStrings;
   static_pages: StaticPages;
+  exchange_rates: ExchangeRates;
+  supplier_contacts: SupplierContacts;
+  suppliers: Suppliers;
   supplies: Supplies;
   sync_audit_events: SyncAuditEvents;
   sync_versions: SyncVersions;

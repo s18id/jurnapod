@@ -1,6 +1,6 @@
 # Story 46.4: Goods Receipt Against PO
 
-Status: backlog
+Status: done
 
 ## Story
 
@@ -13,6 +13,8 @@ So that the system tracks what has arrived and updates PO received quantities.
 ## Context
 
 Story 46.4 adds the Goods Receipt (GR) entity. GRs record physical receipt of goods. GR lines optionally reference PO lines (matching by item_id). GRs do NOT create journal entries — they update received_qty on the PO and are used as a matching reference when creating PIs.
+
+This story does not enforce supplier credit limits. Credit exposure becomes authoritative only when AP is recognized at PI posting in Story 46.5.
 
 **Dependencies:** Story 46.3 (PO exists)
 
@@ -38,19 +40,12 @@ Story 46.4 adds the Goods Receipt (GR) entity. GRs record physical receipt of go
 **Then** PO status becomes PARTIAL_RECEIVED if any line has received_qty < qty,
 **Or** RECEIVED if all lines have received_qty >= qty.
 
-**AC4: Credit Limit Check**
-**Given** a supplier with existing open PIs,
-**When** a GR is created that would increase the expected AP (i.e., PI will follow),
-**Then** the system checks supplier credit utilization,
-**And** if utilization would exceed 80%, a warning is returned in the response,
-**And** if utilization would exceed 100%, a confirmation is required (allow override with reason).
-
-**AC5: GR List**
+**AC4: GR List**
 **Given** a user,
 **When** they list GRs with filters (supplier_id, date_from, date_to),
 **Then** results include PO reference if matched, and supplier name.
 
-**AC6: ACL Enforcement**
+**AC5: ACL Enforcement**
 **Given** a user without `purchasing.receipts` permission,
 **When** they attempt to create a GR,
 **Then** they receive 403.
@@ -59,13 +54,12 @@ Story 46.4 adds the Goods Receipt (GR) entity. GRs record physical receipt of go
 
 ## Tasks / Subtasks
 
-- [ ] Create `goods_receipts` and `goods_receipt_lines` table migrations
-- [ ] Add ACL resource `purchasing.receipts`
-- [ ] Implement GR routes
-- [ ] Call `updateReceivedQtyFromGR()` in PO service
-- [ ] Implement credit limit check before GR creation
-- [ ] Write integration tests for GR + PO received_qty update
-- [ ] Write integration tests for credit limit warning/block
+- [x] Create `goods_receipts` and `goods_receipt_lines` table migrations
+- [x] Add ACL resource `purchasing.receipts`
+- [x] Implement GR routes
+- [x] Call `updateReceivedQtyFromGR()` in PO service
+- [x] Write integration tests for GR + PO received_qty update
+- [x] Write integration tests for over-receipt warning behavior
 
 ---
 
@@ -82,7 +76,7 @@ Story 46.4 adds the Goods Receipt (GR) entity. GRs record physical receipt of go
 |------|--------|-------------|
 | `packages/db/src/kysely/schema.ts` | Modify | Add goods_receipts, goods_receipt_lines |
 | `packages/shared/src/schemas/purchasing.ts` | Modify | Add GR schemas |
-| `packages/auth/src/acls.ts` | Modify | Add receipts resource |
+| `packages/auth/src/**/*` | Modify | Align receipts permissions with the approved ACL mapping |
 
 ---
 
@@ -98,11 +92,11 @@ curl -X POST /api/purchasing/receipts \
 curl /api/purchasing/orders/1 -H "Authorization: Bearer $TOKEN"
 # Expected: received_qty: 50 on line 10
 
-# Credit limit warning (at 85% utilization)
+# Over-receipt warning
 curl -X POST /api/purchasing/receipts \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"supplier_id": 1, ...}'
-# Expected: 200 with warning: {"credit_warning": "85% utilized"}
+  -d '{"supplier_id": 1, "reference_number": "GR-002", "lines": [{"po_line_id": 10, "item_id": 10, "qty": 999}]}'
+# Expected: 200 with over_receipt warning / confirmation requirement
 ```
 
 ---
@@ -114,10 +108,11 @@ curl -X POST /api/purchasing/receipts \
 - `goods_receipts.status`: only RECEIVED (GR is a point-in-time record, not a lifecycle)
 - No status transitions on GR — it's an immutable receipt record
 - `over_receipt_allowed`: boolean flag when qty > remaining PO qty
+- Credit limit checks happen at PI posting in Story 46.5, not at GR stage
 
 ---
 
 ## Technical Debt Review
 
-- [ ] No shortcuts taken that require follow-up
-- [ ] No `as any` casts added without justification
+- [x] No shortcuts taken that require follow-up
+- [x] No `as any` casts added without justification

@@ -43,7 +43,8 @@ export const ModuleConfigSchemaMap = {
   inventory: InventoryModuleConfigSchema,
   accounting: GenericModuleConfigSchema,
   treasury: GenericModuleConfigSchema,
-  reservations: GenericModuleConfigSchema
+  reservations: GenericModuleConfigSchema,
+  purchasing: GenericModuleConfigSchema
 } as const satisfies Record<ModuleCode, z.ZodTypeAny>;
 
 // POS explicit settings schema

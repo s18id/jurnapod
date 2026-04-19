@@ -1,6 +1,6 @@
 # Story 46.3: Purchase Orders CRUD
 
-Status: backlog
+Status: done
 
 ## Story
 
@@ -65,13 +65,13 @@ Story 46.3 adds the Purchase Order (PO) entity. POs are company-scoped, linked t
 
 ## Tasks / Subtasks
 
-- [ ] Create `purchase_orders` and `purchase_order_lines` table migrations
-- [ ] Add ACL resource `purchasing.orders`
-- [ ] Implement PO routes (CRUD + status transitions)
-- [ ] Implement `updateReceivedQtyFromGR()` called by GR creation
-- [ ] Implement PO list with filters
-- [ ] Write integration tests for PO lifecycle
-- [ ] Write integration tests for received_qty update from GR
+- [x] Create `purchase_orders` and `purchase_order_lines` table migrations
+- [x] Add ACL resource `purchasing.orders`
+- [x] Implement PO routes (CRUD + status transitions)
+- [x] Implement `updateReceivedQtyFromGR()` called by GR creation
+- [x] Implement PO list with filters
+- [x] Write integration tests for PO lifecycle
+- [x] Write integration tests for received_qty update from GR
 
 ---
 
@@ -88,7 +88,7 @@ Story 46.3 adds the Purchase Order (PO) entity. POs are company-scoped, linked t
 |------|--------|-------------|
 | `packages/db/src/kysely/schema.ts` | Modify | Add purchase_orders, purchase_order_lines |
 | `packages/shared/src/schemas/purchasing.ts` | Modify | Add PO schemas |
-| `packages/auth/src/acls.ts` | Modify | Add orders resource |
+| `packages/auth/src/**/*` | Modify | Align order permissions with the approved ACL mapping |
 
 ---
 
@@ -127,3 +127,13 @@ curl "/api/purchasing/orders?supplier_id=1&status=SENT" \
 - [ ] No shortcuts taken that require follow-up
 - [ ] No `as any` casts added without justification
 - [ ] No N+1 query patterns introduced
+
+## Review Findings (Resolved / Deferred)
+
+- [x] [Review][Fixed] Floating-point monetary math replaced with BigInt scaled decimal logic
+- [x] [Review][Fixed] `received_qty >= qty` comparison moved to precise scaled decimal comparison
+- [x] [Review][Fixed] `parseFloat` NaN-risk paths removed from core monetary calculations
+- [x] [Review][Fixed] `PurchaseOrderLines.company_id` schema type corrected to `number`
+- [x] [Review][Defer] FK constraints for some paths remain app-layer due to production DB type mismatch investigation
+- [x] [Review][Defer] currency_code normalization against canonical currency registry deferred to follow-up
+- [x] [Review][Defer] Audit logging improvements deferred (pre-existing pattern)

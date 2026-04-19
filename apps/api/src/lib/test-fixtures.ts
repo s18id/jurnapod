@@ -272,10 +272,10 @@ export async function createTestCompanyMinimal(
 ): Promise<CompanyFixture> {
   const db = getDb();
   const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-  
+
   const code = options?.code ?? `TEST-CO-${runId}`.slice(0, 20).toUpperCase();
   const name = options?.name ?? `Test Company ${runId}`;
-  
+
   try {
     const company = await createCompanyBasic({
       code,
@@ -283,7 +283,83 @@ export async function createTestCompanyMinimal(
       timezone: options?.timezone ?? "Asia/Jakarta",
       currency_code: options?.currency_code ?? "IDR"
     });
-    
+
+    // Seed purchasing.suppliers and purchasing.exchange_rates ACL for new company
+    // so integration tests with resource-level ACL don't fail with 403.
+    // Only seed for system roles (SUPER_ADMIN, OWNER, COMPANY_ADMIN get CRUDAM=63,
+    // ADMIN/ACCOUNTANT get CRUDA=31, CASHIER gets 0).
+    // This mirrors migrations 0169 and 0171 but for companies created during tests.
+    await sql`
+      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
+      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing',
+        CASE
+          WHEN ${true} THEN 'suppliers'
+          ELSE 'suppliers'
+        END as resource,
+        CASE r.code
+          WHEN 'SUPER_ADMIN' THEN 63
+          WHEN 'OWNER' THEN 63
+          WHEN 'COMPANY_ADMIN' THEN 63
+          WHEN 'ADMIN' THEN 31
+          WHEN 'ACCOUNTANT' THEN 31
+          WHEN 'CASHIER' THEN 0
+          ELSE 0
+        END as permission_mask
+      FROM roles r
+      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
+    `.execute(db);
+
+    // Also seed purchasing.exchange_rates ACL
+    await sql`
+      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
+      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing', 'exchange_rates',
+        CASE r.code
+          WHEN 'SUPER_ADMIN' THEN 63
+          WHEN 'OWNER' THEN 63
+          WHEN 'COMPANY_ADMIN' THEN 63
+          WHEN 'ADMIN' THEN 31
+          WHEN 'ACCOUNTANT' THEN 31
+          WHEN 'CASHIER' THEN 0
+          ELSE 0
+        END as permission_mask
+      FROM roles r
+      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
+    `.execute(db);
+
+    // Also seed purchasing.orders ACL
+    await sql`
+      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
+      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing', 'orders',
+        CASE r.code
+          WHEN 'SUPER_ADMIN' THEN 63
+          WHEN 'OWNER' THEN 63
+          WHEN 'COMPANY_ADMIN' THEN 63
+          WHEN 'ADMIN' THEN 31
+          WHEN 'ACCOUNTANT' THEN 31
+          WHEN 'CASHIER' THEN 0
+          ELSE 0
+        END as permission_mask
+      FROM roles r
+      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
+    `.execute(db);
+
+    // Also seed purchasing.receipts ACL
+    await sql`
+      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
+      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing', 'receipts',
+        CASE r.code
+          WHEN 'SUPER_ADMIN' THEN 63
+          WHEN 'OWNER' THEN 63
+          WHEN 'COMPANY_ADMIN' THEN 63
+          WHEN 'ADMIN' THEN 31
+          WHEN 'ACCOUNTANT' THEN 31
+          WHEN 'CASHIER' THEN 0
+          ELSE 0
+        END as permission_mask
+      FROM roles r
+      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
+    `.execute(db);
+
     createdFixtures.companies.push(company);
     return company;
   } catch (error: unknown) {

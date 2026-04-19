@@ -1,27 +1,12 @@
 #!/usr/bin/env tsx
+/// <reference types="node" />
 
 /**
  * Canonical Sprint Status Update Utility
- *
- * Safely updates sprint-status.yaml without overwriting existing epic data.
- * Use this instead of manually editing the file.
- *
- * Usage:
- *   npx tsx scripts/update-sprint-status.ts --epic 45 --story 45-1-my-story --status done
- *   npx tsx scripts/update-sprint-status.ts --epic 45 --status in-progress
- *
- * Rules:
- *   - ALWAYS read existing file before modifying
- *   - APPEND only — never replace the entire file
- *   - Preserve all existing epic sections
- *   - Epic-level status updates update the epic header only
- *
- * Recovery if file is accidentally overwritten:
- *   git checkout HEAD -- _bmad-output/implementation-artifacts/sprint-status.yaml
  */
 
-import { readFileSync, writeFileSync } from "fs";
-import { resolve } from "path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const SPRINT_STATUS_PATH = resolve(
   process.cwd(),
@@ -58,12 +43,18 @@ function validateArgs(args: CliArgs): void {
   const errors: string[] = [];
 
   if (!args.epic) errors.push("--epic is required (e.g., 45)");
-  if (!args.story && !args.epicStatus)
+  if (!args.story && !args.epicStatus) {
     errors.push("--story or --epic-status is required");
-  if (args.story && !args.status)
+  }
+  if (args.story && !args.status) {
     errors.push("--status is required when updating a story");
-  if (args.status && !["backlog", "ready-for-dev", "in-progress", "review", "done"].includes(args.status))
-    errors.push(`--status must be one of: backlog, ready-for-dev, in-progress, review, done`);
+  }
+  if (
+    args.status &&
+    !["backlog", "ready-for-dev", "in-progress", "review", "done"].includes(args.status)
+  ) {
+    errors.push("--status must be one of: backlog, ready-for-dev, in-progress, review, done");
+  }
 
   if (errors.length > 0) {
     console.error("Validation errors:");
@@ -77,71 +68,132 @@ function readSprintStatus(): string {
     return readFileSync(SPRINT_STATUS_PATH, "utf-8");
   } catch {
     console.error(`Error: Could not read ${SPRINT_STATUS_PATH}`);
-    console.error("Has the file been deleted? Run: git checkout HEAD -- _bmad-output/implementation-artifacts/sprint-status.yaml");
+    console.error(
+      "Has the file been deleted? Run: git checkout HEAD -- _bmad-output/implementation-artifacts/sprint-status.yaml"
+    );
     process.exit(1);
   }
 }
 
-function buildStoryLine(epic: string, story: string, status: string): string {
-  const indentation = "  ";
-  return `${indentation}${epic}-${story}: ${status}`;
+function buildStoryLine(storyKey: string, status: string): string {
+  return `  ${storyKey}: ${status}`;
+}
+
+function findEpicSectionEnd(lines: string[], epicHeaderIdx: number): number {
+  for (let i = epicHeaderIdx + 1; i < lines.length; i++) {
+    if (/^\s*#\s*Epic\s+\d+:/.test(lines[i])) return i;
+  }
+  return lines.length;
+}
+
+function getEpicStatusIndex(lines: string[], epic: string, sectionStart: number, sectionEnd: number): number {
+  const pattern = new RegExp(`^\\s*epic-${epic}:`);
+  for (let i = sectionStart; i < sectionEnd; i++) {
+    if (pattern.test(lines[i])) return i;
+  }
+  return -1;
+}
+
+function getStoryKeysForEpic(lines: string[], sectionStart: number, sectionEnd: number): string[] {
+  const storyKeys: string[] = [];
+  const storyPattern = /^\s*(\d+-[^:]+):/;
+
+  for (let i = sectionStart; i < sectionEnd; i++) {
+    const match = lines[i].match(storyPattern);
+    if (match) storyKeys.push(match[1]);
+  }
+
+  return storyKeys;
+}
+
+function normalizeStoryInput(epic: string, story: string): string {
+  const value = story.trim();
+
+  if (value.length === 0) {
+    console.error("Error: --story cannot be empty");
+    process.exit(1);
+  }
+
+  if (value === epic) {
+    console.error(`Error: --story '${value}' is invalid for epic ${epic}.`);
+    console.error("Use --epic-status for epic-level updates, or pass a story key like '46-4' or '46-4-goods-receipt'.");
+    process.exit(1);
+  }
+
+  if (value.startsWith(`${epic}-`)) return value;
+  return `${epic}-${value}`;
+}
+
+function resolveStoryKey(epic: string, story: string, existingKeys: string[]): string {
+  const normalized = normalizeStoryInput(epic, story);
+
+  // 1) exact key match
+  if (existingKeys.includes(normalized)) return normalized;
+
+  // 2) prefix match (e.g., 46-4 -> 46-4-goods-receipt)
+  const prefixMatches = existingKeys.filter((k) => k.startsWith(`${normalized}-`));
+  if (prefixMatches.length === 1) return prefixMatches[0];
+
+  if (prefixMatches.length > 1) {
+    console.error(`\n❌ Error: Multiple existing keys match '${story}':`);
+    prefixMatches.forEach((m) => console.error(`  - ${m}`));
+    console.error("\nUse the full key via --story to disambiguate.");
+    process.exit(1);
+  }
+
+  // 3) no match -> create normalized key
+  return normalized;
 }
 
 function updateSprintStatus(content: string, args: CliArgs): string {
   const epic = args.epic!;
   const lines = content.split("\n");
 
-  // Validate that this epic section exists
   const epicHeaderPattern = new RegExp(`^\\s*#\\s*Epic\\s+${epic}:`);
   const epicHeaderIdx = lines.findIndex((l) => epicHeaderPattern.test(l));
 
   if (epicHeaderIdx === -1) {
     console.error(`Error: Epic ${epic} section not found in sprint-status.yaml`);
-    console.error("Available epics:");
-    lines
-      .filter((l) => l.match(/^##?\s*Epic\s+\d+:/))
-      .forEach((l) => console.error(`  ${l.trim()}`));
     process.exit(1);
   }
 
-  // Check if file was likely overwritten (too few lines for known epics)
-  // Count ALL epic comment headers, not just this epic's header
   const anyEpicHeaderPattern = /^\s*#\s*Epic\s+\d+:/;
   const totalEpicHeaders = lines.filter((l) => anyEpicHeaderPattern.test(l)).length;
-  // Warn if we see "epic-1:" but have far fewer epic headers than expected (~45)
   if (totalEpicHeaders < 10 && content.includes("epic-1:")) {
     console.warn("⚠️  Warning: This file appears to be missing many epic sections.");
     console.warn("⚠️  It may have been accidentally overwritten.");
     console.warn("⚠️  Run: git checkout HEAD -- _bmad-output/implementation-artifacts/sprint-status.yaml");
-    console.warn("⚠️  Then re-run this script.\n");
-    if (!args.dryRun) {
-      process.exit(1);
-    }
+    if (!args.dryRun) process.exit(1);
+  }
+
+  const sectionStart = epicHeaderIdx + 1;
+  const sectionEnd = findEpicSectionEnd(lines, epicHeaderIdx);
+  const epicStatusIdx = getEpicStatusIndex(lines, epic, sectionStart, sectionEnd);
+
+  if (epicStatusIdx === -1) {
+    console.error(`Error: Could not find epic-${epic} status line within Epic ${epic} section.`);
+    console.error("Please repair sprint-status.yaml structure before updating stories.");
+    process.exit(1);
   }
 
   if (args.status && args.story) {
-    // Update a story status
-    const storyPattern = new RegExp(`^\\s*${epic}-${args.story}:`);
+    const storyKeys = getStoryKeysForEpic(lines, sectionStart, sectionEnd);
+    const targetKey = resolveStoryKey(epic, args.story, storyKeys);
+
+    const escapedKey = targetKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const storyPattern = new RegExp(`^\\s*${escapedKey}:`);
     const storyIdx = lines.findIndex((l) => storyPattern.test(l));
 
     if (storyIdx === -1) {
-      // Story doesn't exist — append it after the epic header and epic status
-      // Find the line after the epic status line
-      const epicStatusPattern = new RegExp(`^\\s*epic-${epic}(?::|\\s)`);
-      let insertIdx = lines.findIndex((l) => epicStatusPattern.test(l));
-      if (insertIdx === -1) {
-        // Fallback: insert after epic header
-        insertIdx = epicHeaderIdx;
+      // append within section, after last story key if any, else after epic status line
+      let insertIdx = epicStatusIdx + 1;
+      for (let i = epicStatusIdx + 1; i < sectionEnd; i++) {
+        if (/^\s*\d+-[^:]+:/.test(lines[i])) {
+          insertIdx = i + 1;
+        }
       }
-      // Find the next non-comment, non-empty line after epic status
-      while (
-        insertIdx + 1 < lines.length &&
-        (lines[insertIdx + 1].trim().startsWith("#") || lines[insertIdx + 1].trim() === "")
-      ) {
-        insertIdx++;
-      }
-      insertIdx++; // Move past the epic status line itself
-      const newLine = buildStoryLine(epic, args.story, args.status);
+
+      const newLine = buildStoryLine(targetKey, args.status);
       if (args.dryRun) {
         console.log(`[DRY RUN] Would add story: ${newLine}`);
       } else {
@@ -149,7 +201,6 @@ function updateSprintStatus(content: string, args: CliArgs): string {
         console.log(`✅ Added story: ${newLine}`);
       }
     } else {
-      // Update existing story
       const oldLine = lines[storyIdx];
       const newLine = oldLine.replace(/:.+$/, `: ${args.status}`);
       if (oldLine !== newLine) {
@@ -166,15 +217,6 @@ function updateSprintStatus(content: string, args: CliArgs): string {
   }
 
   if (args.epicStatus) {
-    // Update epic-level status
-    const epicStatusPattern = new RegExp(`^(\\s*epic-${epic})(?::|(\\s))`);
-    const epicStatusIdx = lines.findIndex((l) => epicStatusPattern.test(l));
-
-    if (epicStatusIdx === -1) {
-      console.error(`Error: Could not find epic-${epic} status line`);
-      process.exit(1);
-    }
-
     const oldLine = lines[epicStatusIdx];
     const newLine = oldLine.replace(/:.+$/, `: ${args.epicStatus}`);
     if (oldLine !== newLine) {
@@ -199,30 +241,11 @@ function main() {
     console.log(`
 Sprint Status Update Utility
 
-Safely update sprint-status.yaml without overwriting existing data.
-
 Usage:
-  npx tsx scripts/update-sprint-status.ts --epic 45 --story 45-1-my-story --status done
-  npx tsx scripts/update-sprint-status.ts --epic 45 --epic-status done
-  npx tsx scripts/update-sprint-status.ts --epic 45 --story 45-1-my-story --status done --dry-run
-
-Options:
-  --epic N          Epic number (required)
-  --story ID         Story ID within epic (e.g., 45-1-my-story)
-  --status STATUS    New status for the story (backlog|ready-for-dev|in-progress|review|done)
-  --epic-status      New status for the epic itself
-  --dry-run          Show what would change without modifying the file
-  --help, -h        Show this help message
-
-Recovery:
-  If sprint-status.yaml is accidentally overwritten:
-  git checkout HEAD -- _bmad-output/implementation-artifacts/sprint-status.yaml
-
-Rules:
-  - ALWAYS reads existing file before modifying
-  - APPENDS story entries — never replaces the file
-  - PRESERVES all existing epic sections
-  - Exits with error if file appears to have been overwritten (too few epics)
+  npx tsx scripts/update-sprint-status.ts --epic 46 --story 46-4 --status done
+  npx tsx scripts/update-sprint-status.ts --epic 46 --story 4 --status done
+  npx tsx scripts/update-sprint-status.ts --epic 46 --story 46-4-goods-receipt --status done
+  npx tsx scripts/update-sprint-status.ts --epic 46 --epic-status done
 `);
     process.exit(0);
   }
@@ -239,7 +262,7 @@ Rules:
   if (args.dryRun) {
     console.log("\n[DRY RUN] No changes written. Use without --dry-run to apply.");
   } else {
-    console.log(`\n✅ sprint-status.yaml updated successfully.`);
+    console.log("\n✅ sprint-status.yaml updated successfully.");
     console.log(`   File: ${SPRINT_STATUS_PATH}`);
   }
 }

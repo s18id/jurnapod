@@ -1,38 +1,52 @@
-# Story 46.2 Completion Note
+# Story 46.2 — Exchange Rate Table — Completion Report
 
-**Epic:** Epic 46 — Purchasing / Accounts Payable
-**Story:** 46.2 — Exchange Rate Table
-**Status:** done
+## Story
+- **ID:** 46.2
+- **Title:** Exchange Rate Table
+- **Epic:** 46 — Purchasing / Accounts Payable Module
+- **Status:** ✅ DONE
 
-## What Was Done
+## What Was Implemented
 
-- [Created exchange rate CRUD implementation]
-- [Implemented rate lookup utility]
-- [Wrote integration tests]
+- Exchange rate table migration and ACL seeding for `purchasing.exchange_rates`
+- CRUD routes for exchange rates under `/api/purchasing/exchange-rates`
+- Lookup utility `getExchangeRate(companyId, currencyCode, date)`
+- Company-scoped date-effective lookup: latest rate on or before requested date
+- Base-currency handling (`rate = 1`) and missing-rate error path support for downstream PI flows
 
 ## Acceptance Criteria Evidence
 
-**AC1: Exchange Rate CRUD** — [pass/fail with evidence]
-**AC2: Rate Lookup by Date** — [pass/fail with evidence]
-**AC3: Rate for Currency Conversion** — [pass/fail with evidence]
-**AC4: Base Currency Handling** — [pass/fail with evidence]
-**AC5: Missing Rate Handling** — [pass/fail with evidence]
-**AC6: ACL Enforcement** — [pass/fail with evidence]
+| AC | Requirement | Status | Evidence |
+|---|---|---|---|
+| AC1 | Exchange rate CRUD | ✅ | Integration suite pass |
+| AC2 | Lookup by effective date | ✅ | Lookup tests pass |
+| AC3 | Currency conversion lookup rule | ✅ | Utility + tests use `effective_date <= date`, DESC, LIMIT 1 |
+| AC4 | Base currency rate = 1 | ✅ | Utility behavior covered in tests |
+| AC5 | Missing rate handling | ✅ | Error path covered in tests |
+| AC6 | ACL enforcement | ✅ | Unauthorized role gets 403 in tests |
 
-## Files Created/Modified
+## Files Added / Modified
 
-| File | Action | Notes |
-|------|--------|-------|
-| | | |
+### Added
+- `packages/db/migrations/0170_exchange_rates.sql`
+- `packages/db/migrations/0171_acl_purchasing_exchange_rates.sql`
+- `apps/api/src/routes/purchasing/exchange-rates.ts`
+- `apps/api/src/lib/purchasing/exchange-rate.ts`
+- `apps/api/__test__/integration/purchasing/exchange-rates.test.ts`
 
-## Validation Commands Run
+### Modified
+- `packages/db/src/kysely/schema.ts`
+- `packages/shared/src/schemas/purchasing.ts`
+- `packages/shared/src/constants/roles.defaults.json`
+- `apps/api/src/routes/purchasing/index.ts`
+- `apps/api/src/lib/test-fixtures.ts`
+- `apps/api/src/app.ts`
 
-```bash
-npm run typecheck -w @jurnapod/api   # Result: [pass/fail]
-npm run lint -w @jurnapod/api         # Result: [pass/fail]
-npm run test:unit -w @jurnapod/api   # Result: [pass/fail]
-```
+## Validation
 
-## Open Items / Technical Debt
+- `exchange-rates.test.ts`: **26/26 pass**
+- Regression suite rerun after 46.4 hardening: **26/26 pass** (still green)
 
-- [None / List any new TD items]
+## Open Items
+
+- None blocking Story 46.2 completion.

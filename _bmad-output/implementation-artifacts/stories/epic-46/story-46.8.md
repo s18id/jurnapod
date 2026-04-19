@@ -77,7 +77,7 @@ Story 46.8 adds the AP Aging report. This is a read-only report showing outstand
 
 | File | Action | Description |
 |------|--------|-------------|
-| `packages/auth/src/acls.ts` | Modify | Add reports resource with ANALYZE |
+| `packages/auth/src/**/*` | Modify | Align reports permissions with the approved ACL mapping |
 
 ---
 
@@ -125,6 +125,7 @@ curl /api/purchasing/reports/ap-aging \
 - Amounts in supplier currency converted to base for aggregation using the same rate as the PI
 - Report is read-only — no modifications
 - ANALYZE permission on `purchasing.reports` = can view the report
+- Story 46.1 must add `supplier.payment_terms_days`; otherwise this report cannot compute supplier-specific due dates
 
 ---
 
