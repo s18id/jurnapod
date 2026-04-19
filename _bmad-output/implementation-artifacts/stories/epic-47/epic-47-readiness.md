@@ -194,3 +194,16 @@ Wave 1 cannot start until all are true:
 2. Reconciliation settings contract (A1) is locked and implementation checklist includes fail-closed behavior.
 3. Story checklists include explicit temporal/immutability rules from A3.
 4. `@bmad-review` gate returns **no unresolved P0/P1**.
+
+**Latest gate state:** `@bmad-review` currently returns **FAIL** (unresolved P0/P1).  
+Wave 1 implementation remains blocked until blocker fixes are implemented and gate is re-run.
+
+---
+
+## 10) Delegation Pack Reference
+
+Execution-ready micro-scope prompts are documented in:
+
+- `_bmad-output/implementation-artifacts/coordination/2026-04-19-epic-47-micro-scope-delegation-pack.md`
+
+This pack includes Wave 0 + Wave 1 prompts, hard stop conditions, and required evidence per scope.
