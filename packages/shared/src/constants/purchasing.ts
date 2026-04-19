@@ -77,3 +77,41 @@ export function toPurchaseInvoiceStatusCode(
 export function toPurchaseInvoiceStatusLabel(code: number): keyof typeof PURCHASE_INVOICE_STATUS {
   return PURCHASE_INVOICE_STATUS_LABEL[code] ?? "DRAFT";
 }
+
+// =============================================================================
+// AP Payment Statuses
+// =============================================================================
+
+/**
+ * AP payment statuses (API labels -> DB tinyint codes)
+ *
+ * DB storage rule: use TINYINT for status/state columns.
+ * DRAFT=10, POSTED=20, VOID=90
+ */
+export const AP_PAYMENT_STATUS = {
+  DRAFT: 10,
+  POSTED: 20,
+  VOID: 90,
+} as const;
+
+export const AP_PAYMENT_STATUS_LABEL: Record<number, keyof typeof AP_PAYMENT_STATUS> = {
+  10: "DRAFT",
+  20: "POSTED",
+  90: "VOID",
+};
+
+export const AP_PAYMENT_STATUS_VALUES = [
+  "DRAFT",
+  "POSTED",
+  "VOID",
+] as const;
+
+export function toApPaymentStatusCode(
+  status: string,
+): number | undefined {
+  return AP_PAYMENT_STATUS[status as keyof typeof AP_PAYMENT_STATUS];
+}
+
+export function toApPaymentStatusLabel(code: number): keyof typeof AP_PAYMENT_STATUS {
+  return AP_PAYMENT_STATUS_LABEL[code] ?? "DRAFT";
+}

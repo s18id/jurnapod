@@ -16,6 +16,7 @@ import { exchangeRateRoutes } from "./exchange-rates.js";
 import { orderRoutes } from "./purchase-orders.js";
 import { receiptRoutes } from "./goods-receipts.js";
 import { invoiceRoutes } from "./purchase-invoices.js";
+import { paymentRoutes } from "./ap-payments.js";
 
 const purchasingRoutes = new Hono();
 
@@ -36,5 +37,8 @@ purchasingRoutes.route("/receipts", receiptRoutes);
 
 // Mount purchase invoice routes
 purchasingRoutes.route("/invoices", invoiceRoutes);
+
+// Mount AP payment routes
+purchasingRoutes.route("/payments", paymentRoutes);
 
 export { purchasingRoutes };

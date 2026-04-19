@@ -377,6 +377,23 @@ export async function createTestCompanyMinimal(
       WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
     `.execute(db);
 
+    // Also seed purchasing.payments ACL
+    await sql`
+      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
+      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing', 'payments',
+        CASE r.code
+          WHEN 'SUPER_ADMIN' THEN 63
+          WHEN 'OWNER' THEN 63
+          WHEN 'COMPANY_ADMIN' THEN 63
+          WHEN 'ADMIN' THEN 31
+          WHEN 'ACCOUNTANT' THEN 31
+          WHEN 'CASHIER' THEN 0
+          ELSE 0
+        END as permission_mask
+      FROM roles r
+      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
+    `.execute(db);
+
     createdFixtures.companies.push(company);
     return company;
   } catch (error: unknown) {

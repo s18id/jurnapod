@@ -80,6 +80,36 @@ export interface AnalyticsInsights {
   severity: Generated<"CRITICAL" | "INFO" | "WARNING">;
 }
 
+export interface ApPaymentLines {
+  ap_payment_id: number;
+  created_at: Generated<Date>;
+  id: Generated<number>;
+  line_no: number;
+  purchase_invoice_id: number;
+  allocation_amount: Decimal;
+  description: Generated<string | null>;
+  updated_at: Generated<Date>;
+}
+
+export interface ApPayments {
+  bank_account_id: number;
+  company_id: number;
+  created_at: Generated<Date>;
+  created_by_user_id: Generated<number | null>;
+  description: Generated<string | null>;
+  id: Generated<number>;
+  journal_batch_id: Generated<number | null>;
+  payment_date: Date;
+  payment_no: string;
+  posted_at: Generated<Date | null>;
+  posted_by_user_id: Generated<number | null>;
+  status: Generated<number>;
+  supplier_id: number;
+  updated_at: Generated<Date>;
+  voided_at: Generated<Date | null>;
+  voided_by_user_id: Generated<number | null>;
+}
+
 export interface ArchiveSyncDataVersions {
   archived_at: Generated<Date | null>;
   company_id: number;
@@ -1788,6 +1818,8 @@ export interface DB {
   account_types: AccountTypes;
   accounts: Accounts;
   analytics_insights: AnalyticsInsights;
+  ap_payment_lines: ApPaymentLines;
+  ap_payments: ApPayments;
   archive_sync_data_versions: ArchiveSyncDataVersions;
   archive_sync_operations: ArchiveSyncOperations;
   archive_sync_tier_versions: ArchiveSyncTierVersions;

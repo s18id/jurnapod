@@ -3,7 +3,7 @@
 
 import { z } from "zod";
 import { NumericIdSchema } from "./common.js";
-import { PURCHASE_ORDER_STATUS_VALUES, PURCHASE_INVOICE_STATUS_VALUES } from "../constants/purchasing.js";
+import { PURCHASE_ORDER_STATUS_VALUES, PURCHASE_INVOICE_STATUS_VALUES, AP_PAYMENT_STATUS_VALUES } from "../constants/purchasing.js";
 
 /**
  * Currency code schema (ISO 4217)
@@ -479,3 +479,93 @@ export type PurchaseInvoiceListQuery = z.infer<typeof PurchaseInvoiceListQuerySc
 export type PurchaseInvoiceResponse = z.infer<typeof PurchaseInvoiceResponseSchema>;
 export type PurchaseInvoiceLine = z.infer<typeof PurchaseInvoiceLineSchema>;
 export type PurchaseInvoiceLineResponse = z.infer<typeof PurchaseInvoiceLineResponseSchema>;
+
+// =============================================================================
+// AP Payment Schemas
+// =============================================================================
+
+export const ApPaymentStatusSchema = z.enum(AP_PAYMENT_STATUS_VALUES);
+export type ApPaymentStatus = z.infer<typeof ApPaymentStatusSchema>;
+
+/**
+ * AP payment line item schema (create)
+ */
+export const ApPaymentLineCreateSchema = z.object({
+  purchase_invoice_id: NumericIdSchema,
+  allocation_amount: z.string().trim()
+    .regex(/^\d+(\.\d{1,4})?$/, "Allocation amount must be positive decimal")
+    .refine((value) => {
+      const [integer, fraction = ""] = value.split(".");
+      const scaled = BigInt(integer) * 10000n + BigInt((fraction + "0000").slice(0, 4));
+      return scaled > 0n;
+    }, "Allocation amount must be greater than zero"),
+  description: z.string().trim().max(1000).nullable().optional()
+});
+
+/**
+ * AP payment create request schema
+ */
+export const ApPaymentCreateSchema = z.object({
+  payment_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format").transform((d) => new Date(d)),
+  bank_account_id: NumericIdSchema,
+  supplier_id: NumericIdSchema,
+  description: z.string().trim().max(1000).nullable().optional(),
+  lines: z.array(ApPaymentLineCreateSchema).min(1, "At least one line item is required")
+});
+
+/**
+ * AP payment list query schema
+ */
+export const ApPaymentListQuerySchema = z.object({
+  supplier_id: NumericIdSchema.optional(),
+  status: ApPaymentStatusSchema.optional(),
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).transform((d) => new Date(d)).optional(),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).transform((d) => new Date(d)).optional(),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+  offset: z.coerce.number().int().nonnegative().default(0)
+});
+
+/**
+ * AP payment line response schema
+ */
+export const ApPaymentLineResponseSchema = z.object({
+  id: NumericIdSchema,
+  line_no: z.number().int(),
+  purchase_invoice_id: NumericIdSchema,
+  allocation_amount: z.string().trim(),
+  description: z.string().trim().nullable(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime()
+});
+
+/**
+ * AP payment response schema
+ */
+export const ApPaymentResponseSchema = z.object({
+  id: NumericIdSchema,
+  company_id: NumericIdSchema,
+  payment_no: z.string().trim(),
+  payment_date: z.string().datetime(),
+  bank_account_id: NumericIdSchema,
+  supplier_id: NumericIdSchema,
+  description: z.string().trim().nullable(),
+  status: ApPaymentStatusSchema,
+  journal_batch_id: NumericIdSchema.nullable(),
+  posted_at: z.string().datetime().nullable(),
+  posted_by_user_id: NumericIdSchema.nullable(),
+  voided_at: z.string().datetime().nullable(),
+  voided_by_user_id: NumericIdSchema.nullable(),
+  created_by_user_id: NumericIdSchema.nullable(),
+  updated_by_user_id: NumericIdSchema.nullable(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+  lines: z.array(ApPaymentLineResponseSchema).optional(),
+  supplier_name: z.string().trim().nullable().optional()
+});
+
+// Type exports for AP payments
+export type ApPaymentCreate = z.infer<typeof ApPaymentCreateSchema>;
+export type ApPaymentListQuery = z.infer<typeof ApPaymentListQuerySchema>;
+export type ApPaymentResponse = z.infer<typeof ApPaymentResponseSchema>;
+export type ApPaymentLineCreate = z.infer<typeof ApPaymentLineCreateSchema>;
+export type ApPaymentLineResponse = z.infer<typeof ApPaymentLineResponseSchema>;

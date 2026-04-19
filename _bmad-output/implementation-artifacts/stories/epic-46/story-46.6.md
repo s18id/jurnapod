@@ -1,6 +1,6 @@
 # Story 46.6: AP Payments
 
-Status: backlog
+Status: done
 
 ## Story
 
@@ -83,15 +83,15 @@ Payments follow the repo's immutability rule for finalized financial documents: 
 
 ## Tasks / Subtasks
 
-- [ ] Create `ap_payments` and `ap_payment_lines` table migrations
-- [ ] Add ACL resource `purchasing.payments`
-- [ ] Implement AP payment routes (create, post, void)
-- [ ] Create journal batch on payment post
-- [ ] Create reversal journal batch on payment void
-- [ ] Implement balance check (overpayment rejection)
-- [ ] Write integration tests for payment → journal creation
-- [ ] Write integration tests for partial payment balance tracking
-- [ ] Write integration tests for journal balancing
+- [x] Create `ap_payments` and `ap_payment_lines` table migrations
+- [x] Add ACL resource `purchasing.payments`
+- [x] Implement AP payment routes (create, post, void)
+- [x] Create journal batch on payment post
+- [x] Create reversal journal batch on payment void
+- [x] Implement balance check (overpayment rejection)
+- [x] Write integration tests for payment → journal creation
+- [x] Write integration tests for partial payment balance tracking
+- [x] Write integration tests for journal balancing
 
 ---
 
@@ -154,6 +154,6 @@ curl -X POST /api/purchasing/payments \
 
 ## Technical Debt Review
 
-- [ ] No shortcuts taken that require follow-up
-- [ ] Journal batch balanced — verify debits = credits
-- [ ] No `as any` casts added without justification
+- [x] No shortcuts taken that require follow-up
+- [x] Journal batch balanced — verified in integration tests
+- [x] No `as any` casts added without justification

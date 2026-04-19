@@ -540,6 +540,6 @@ development_status:
   46-3-purchase-orders: done
   46-4-goods-receipt: done
   46-5-purchase-invoices: done
-  46-6-ap-payments: backlog
+  46-6-ap-payments: done
   46-7-supplier-credit-notes: backlog
   46-8-ap-aging-report: backlog
