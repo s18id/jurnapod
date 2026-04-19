@@ -163,10 +163,10 @@ apReconciliationRoutes.get("/summary", async (c) => {
   try {
     const auth = c.get("auth");
 
-    // ACL: module='accounting', resource='journals', permission='analyze'
+    // ACL: module='purchasing', resource='reports', permission='analyze'
     const accessResult = await requireAccess({
-      module: "accounting",
-      resource: "journals",
+      module: "purchasing",
+      resource: "reports",
       permission: "analyze",
     })(c.req.raw, auth);
 

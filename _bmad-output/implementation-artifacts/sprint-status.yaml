@@ -1,4 +1,4 @@
-last_updated: 2026-04-18T06:30:00Z
+last_updated: 2026-04-19T09:34:35Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -545,8 +545,8 @@ development_status:
   46-8-ap-aging-report: done
 
   # Epic 47: AP Reconciliation & Period Close Controls
-  epic-47: backlog
-  47-1-ap-gl-reconciliation-summary: backlog
+  epic-47: in-progress
+  47-1-ap-gl-reconciliation-summary: done
   47-2-reconciliation-drilldown-variance: backlog
   47-3-supplier-statement-matching: backlog
   47-4-ap-exception-worklist: backlog

@@ -63,12 +63,14 @@ Story 47.1 provides a high‑level summary; Story 47.2 delivers the detailed dri
 **Then** they can download a CSV containing all variance line items with full attribution data.
 
 **AC7: API Endpoints**
-**Given** a user with `accounting.journals` ANALYZE permission,
+**Given** a user with `purchasing.reports` ANALYZE permission,
 **When** they call:
-- `GET /api/accounting/ap-reconciliation/drilldown?as_of_date=YYYY-MM-DD`
-- `GET /api/accounting/ap-reconciliation/gl-detail?as_of_date=YYYY-MM-DD`
-- `GET /api/accounting/ap-reconciliation/ap-detail?as_of_date=YYYY-MM-DD`
+- `GET /api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=YYYY-MM-DD`
+- `GET /api/purchasing/reports/ap-reconciliation/gl-detail?as_of_date=YYYY-MM-DD`
+- `GET /api/purchasing/reports/ap-reconciliation/ap-detail?as_of_date=YYYY-MM-DD`
 **Then** each endpoint returns the appropriate structured detail.
+
+**Canonical ACL mapping for this story:** `purchasing.reports` + `ANALYZE` for drilldown, GL detail, AP detail, and export.
 
 ---
 
@@ -100,7 +102,7 @@ Story 47.1 provides a high‑level summary; Story 47.2 delivers the detailed dri
 |------|-------------|
 | `packages/modules/accounting/src/services/ap-reconciliation-drilldown-service.ts` | Drill‑down attribution logic |
 | `packages/modules/accounting/src/types/ap-reconciliation.ts` | Type definitions for drill‑down categories |
-| `apps/api/src/routes/accounting/ap-reconciliation-drilldown.ts` | Drill‑down API routes |
+| `apps/api/src/routes/purchasing/reports/ap-reconciliation.ts` | Drill‑down API routes |
 | `apps/api/__test__/integration/accounting/ap-reconciliation-drilldown.test.ts` | Integration tests |
 
 ## Files to Modify
@@ -108,7 +110,7 @@ Story 47.1 provides a high‑level summary; Story 47.2 delivers the detailed dri
 | File | Action | Description |
 |------|--------|-------------|
 | `packages/modules/accounting/src/services/ap-reconciliation-service.ts` | Modify | Extend to call drill‑down service |
-| `apps/api/src/routes/accounting/ap-reconciliation.ts` | Modify | Add drill‑down, GL‑detail, AP‑detail endpoints |
+| `apps/api/src/routes/purchasing/reports/ap-reconciliation.ts` | Modify | Add drill‑down, GL‑detail, AP‑detail endpoints |
 | `packages/shared/src/schemas/ap-reconciliation.ts` | Modify | Add drill‑down response schemas |
 
 ---
@@ -117,19 +119,19 @@ Story 47.1 provides a high‑level summary; Story 47.2 delivers the detailed dri
 
 ```bash
 # Get full drill‑down
-curl "/api/accounting/ap-reconciliation/drilldown?as_of_date=2025-04-19" \
+curl "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2025-04-19" \
   -H "Authorization: Bearer $TOKEN"
 
 # Get GL detail only
-curl "/api/accounting/ap-reconciliation/gl-detail?as_of_date=2025-04-19" \
+curl "/api/purchasing/reports/ap-reconciliation/gl-detail?as_of_date=2025-04-19" \
   -H "Authorization: Bearer $TOKEN"
 
 # Get AP detail only
-curl "/api/accounting/ap-reconciliation/ap-detail?as_of_date=2025-04-19" \
+curl "/api/purchasing/reports/ap-reconciliation/ap-detail?as_of_date=2025-04-19" \
   -H "Authorization: Bearer $TOKEN"
 
 # Export CSV
-curl "/api/accounting/ap-reconciliation/export?as_of_date=2025-04-19&format=csv" \
+curl "/api/purchasing/reports/ap-reconciliation/export?as_of_date=2025-04-19&format=csv" \
   -H "Authorization: Bearer $TOKEN" -o variance.csv
 ```
 

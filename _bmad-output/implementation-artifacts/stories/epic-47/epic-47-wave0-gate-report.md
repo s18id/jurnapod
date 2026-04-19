@@ -134,6 +134,15 @@
 - **Gate verdict:** ✅ **GO for Wave 1 (Conditional)**
 - **Reason:** No unresolved P0/P1 blockers remain for Wave 0 entry.
 
+### Contract alignment addendum
+
+- Canonical route namespace frozen to: `/api/purchasing/reports/ap-reconciliation/*`
+- Deprecated compatibility alias allowed short-term: `/api/accounting/ap-reconciliation/*` (max 1 release cycle / 30 days)
+- ACL freeze:
+  - settings read/write: `accounting.accounts` + `MANAGE`
+  - summary/drilldown/detail/export/snapshot reads: `purchasing.reports` + `ANALYZE`
+  - snapshot create: `purchasing.reports` + `CREATE`
+
 ### Remaining non-blocking follow-ups
 
 - **P1 pre-Story-47.6 condition:** implement snapshot immutability/versioning persistence (migration + service enforcement) before Story 47.6 execution.

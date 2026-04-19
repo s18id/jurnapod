@@ -67,17 +67,23 @@ Reconciliation results are point‑in‑time calculations that can change as new
 **AC7: API Endpoints**
 **Given** appropriate permissions,
 **When** the user calls:
-- `POST /api/accounting/ap-reconciliation/snapshots` (create snapshot for a given `as_of_date`)
-- `GET /api/accounting/ap-reconciliation/snapshots` (list with filters)
-- `GET /api/accounting/ap-reconciliation/snapshots/{id}` (retrieve one)
-- `GET /api/accounting/ap-reconciliation/snapshots/{id}/compare?with={other_id}` (compare two)
-- `GET /api/accounting/ap-reconciliation/snapshots/{id}/export?format=pdf` (export)
+- `POST /api/purchasing/reports/ap-reconciliation/snapshots` (create snapshot for a given `as_of_date`)
+- `GET /api/purchasing/reports/ap-reconciliation/snapshots` (list with filters)
+- `GET /api/purchasing/reports/ap-reconciliation/snapshots/{id}` (retrieve one)
+- `GET /api/purchasing/reports/ap-reconciliation/snapshots/{id}/compare?with={other_id}` (compare two)
+- `GET /api/purchasing/reports/ap-reconciliation/snapshots/{id}/export?format=pdf` (export)
 **Then** each endpoint returns the expected data.
+
+**Canonical ACL mapping for this story:**
+- `POST /snapshots`: `purchasing.reports` + `CREATE`
+- `GET /snapshots*` (list/get/compare/export): `purchasing.reports` + `ANALYZE`
 
 **AC8: Retention Policy**
 **Given** snapshots accumulate over time,
 **When** a snapshot is older than a configurable retention period (e.g., 7 years),
 **Then** it may be archived (moved to cold storage) but never deleted.
+
+**Versioning policy note:** snapshot versioning is append-only per (`company_id`, `as_of_date`) and must follow the design in `story-47.6-snapshot-immutability-design.md`.
 
 ---
 
@@ -111,7 +117,7 @@ Reconciliation results are point‑in‑time calculations that can change as new
 | `packages/db/migrations/0XXX_ap_reconciliation_audit_trail.sql` | audit trail table migration |
 | `packages/shared/src/schemas/ap-reconciliation-snapshots.ts` | Zod schemas for snapshot types |
 | `packages/modules/accounting/src/services/ap-reconciliation-snapshot-service.ts` | Snapshot and audit logic |
-| `apps/api/src/routes/accounting/ap-reconciliation-snapshots.ts` | Snapshot API routes |
+| `apps/api/src/routes/purchasing/reports/ap-reconciliation.ts` | Snapshot API routes |
 | `apps/api/__test__/integration/accounting/ap-reconciliation-snapshots.test.ts` | Integration tests |
 
 ## Files to Modify
@@ -130,20 +136,20 @@ Reconciliation results are point‑in‑time calculations that can change as new
 
 ```bash
 # Create a manual snapshot
-curl -X POST /api/accounting/ap-reconciliation/snapshots \
+curl -X POST /api/purchasing/reports/ap-reconciliation/snapshots \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"as_of_date": "2025-04-19"}'
 
 # List snapshots
-curl "/api/accounting/ap-reconciliation/snapshots?start_date=2025-04-01&end_date=2025-04-30" \
+curl "/api/purchasing/reports/ap-reconciliation/snapshots?start_date=2025-04-01&end_date=2025-04-30" \
   -H "Authorization: Bearer $TOKEN"
 
 # Compare two snapshots
-curl "/api/accounting/ap-reconciliation/snapshots/1001/compare?with=1002" \
+curl "/api/purchasing/reports/ap-reconciliation/snapshots/1001/compare?with=1002" \
   -H "Authorization: Bearer $TOKEN"
 
 # Export snapshot as PDF
-curl "/api/accounting/ap-reconciliation/snapshots/1001/export?format=pdf" \
+curl "/api/purchasing/reports/ap-reconciliation/snapshots/1001/export?format=pdf" \
   -H "Authorization: Bearer $TOKEN" -o snapshot.pdf
 ```
 

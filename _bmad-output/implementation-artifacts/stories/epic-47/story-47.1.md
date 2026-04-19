@@ -1,6 +1,6 @@
 # Story 47.1: AP↔GL Reconciliation Summary
 
-Status: backlog
+Status: done
 
 ## Story
 
@@ -14,7 +14,9 @@ So that I can identify discrepancies between accounts payable subledger and gene
 
 Epic 47 establishes AP reconciliation and period close controls. Story 47.1 delivers the reconciliation summary dashboard, showing AP subledger balance vs GL control account balance as of a company-local business date cutoff. Reconciliation uses a configurable AP control account set (not a hardcoded single account) to support multi-currency and multi-bank setups.
 
-**Cutoff semantics:** `as_of_date` represents company-local business date (midnight in company timezone). All AP transactions posted on or before this date are included; GL journal entries with `effective_date` ≤ `as_of_date` are included.
+**Cutoff semantics:** `as_of_date` represents company-local business date. Timezone resolution is `outlet.timezone` → `company.timezone` (no UTC fallback). AP transactions with `invoice_date` ≤ `as_of_date` are included; GL journal entries with `effective_date` ≤ `as_of_date` are included.
+
+**FX semantics:** AP conversion to base currency uses the rate effective on transaction date (`effective_date <= transaction_date`, latest applicable rate).
 
 **Dependencies:** Epic 46 (Purchasing/AP) must be complete, as AP subledger data comes from purchase invoices (46.5), AP payments (46.6), and supplier credit notes (46.7).
 
@@ -50,8 +52,8 @@ Epic 47 establishes AP reconciliation and period close controls. Story 47.1 deli
 **And** GL amounts (already in base currency) are compared accordingly.
 
 **AC5: API Endpoint & Response Format**
-**Given** a user with `accounting.journals` ANALYZE permission,
-**When** they call `GET /api/accounting/ap-reconciliation/summary?as_of_date=YYYY-MM-DD`,
+**Given** a user with `purchasing.reports` ANALYZE permission,
+**When** they call `GET /api/purchasing/reports/ap-reconciliation/summary?as_of_date=YYYY-MM-DD`,
 **Then** they receive a JSON response containing:
 - `ap_balance` (decimal)
 - `gl_balance` (decimal)
@@ -59,6 +61,10 @@ Epic 47 establishes AP reconciliation and period close controls. Story 47.1 deli
 - `as_of_date` (date)
 - `account_set` (array of account IDs used)
 - `calculation_timestamp` (ISO 8601)
+
+**Canonical ACL mapping for this story:**
+- Settings read/write: `accounting.accounts` + `MANAGE`
+- Summary read: `purchasing.reports` + `ANALYZE`
 
 **AC6: Tenant Isolation**
 **Given** Company A and Company B both have AP data,
@@ -74,7 +80,7 @@ Epic 47 establishes AP reconciliation and period close controls. Story 47.1 deli
 - [ ] Implement AP subledger balance query (open invoices + credit notes - prepayments)
 - [ ] Implement GL control account balance query (journal lines for account set)
 - [ ] Build reconciliation summary service with cutoff date logic
-- [ ] Create `/api/accounting/ap-reconciliation/summary` endpoint
+- [ ] Create `/api/purchasing/reports/ap-reconciliation/summary` endpoint
 - [ ] Write integration tests for summary calculation
 - [ ] Write integration tests for multi‑currency conversion
 - [ ] Write integration tests for tenant isolation
@@ -95,7 +101,7 @@ Epic 47 establishes AP reconciliation and period close controls. Story 47.1 deli
 | `packages/db/migrations/0XXX_ap_reconciliation_settings.sql` | AP reconciliation settings table |
 | `packages/shared/src/schemas/ap-reconciliation.ts` | Zod schemas for reconciliation types |
 | `packages/modules/accounting/src/services/ap-reconciliation-service.ts` | Reconciliation calculation logic |
-| `apps/api/src/routes/accounting/ap-reconciliation.ts` | Reconciliation API routes |
+| `apps/api/src/routes/purchasing/reports/ap-reconciliation.ts` | Reconciliation API routes |
 | `apps/api/__test__/integration/accounting/ap-reconciliation-summary.test.ts` | Integration tests |
 
 ## Files to Modify
@@ -105,7 +111,7 @@ Epic 47 establishes AP reconciliation and period close controls. Story 47.1 deli
 | `packages/db/src/kysely/schema.ts` | Modify | Add ApReconciliationSettings type |
 | `packages/shared/src/index.ts` | Modify | Export AP reconciliation schemas |
 | `packages/shared/src/constants/modules.ts` | Modify | Add `accounting.ap_reconciliation` permission entry |
-| `apps/api/src/app.ts` | Modify | Register `/api/accounting/ap-reconciliation` routes |
+| `apps/api/src/routes/purchasing/reports/index.ts` | Modify | Register `/api/purchasing/reports/ap-reconciliation` routes |
 
 ---
 
@@ -113,12 +119,12 @@ Epic 47 establishes AP reconciliation and period close controls. Story 47.1 deli
 
 ```bash
 # Configure AP control account set
-curl -X PUT /api/accounting/ap-reconciliation/settings \
+curl -X PUT /api/purchasing/reports/ap-reconciliation/settings \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"account_ids": [101, 102]}'
 
 # Get reconciliation summary
-curl "/api/accounting/ap-reconciliation/summary?as_of_date=2025-04-19" \
+curl "/api/purchasing/reports/ap-reconciliation/summary?as_of_date=2025-04-19" \
   -H "Authorization: Bearer $TOKEN"
 
 # Expected response shape:

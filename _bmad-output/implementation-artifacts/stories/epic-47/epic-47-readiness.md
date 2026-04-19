@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-19
 **Prepared by:** BMAD build agent
-**Status:** Ready with blockers tracked
+**Status:** Wave 0 cleared; Wave 1 ready (conditional gates per batch)
 
 ---
 
@@ -42,11 +42,11 @@ Validation evidence:
 
 | Story | Title | Depends On | Ready? |
 |------|-------|------------|--------|
-| 47.1 | AP↔GL Reconciliation Summary | Epic 46 complete | ⚠️ Needs reconciliation settings contract + fiscal-period table decision |
+| 47.1 | AP↔GL Reconciliation Summary | Epic 46 complete | ✅ Ready for hardening/closure |
 | 47.2 | Reconciliation Drilldown & Variance Attribution | 47.1 | ⏸️ Blocked by 47.1 |
-| 47.3 | Supplier Statement Matching (Manual MVP) | 47.2 | ⚠️ Needs `supplier_statements` schema |
-| 47.4 | AP Exception Worklist | 47.1, 47.2, 47.3 | ⚠️ Needs `ap_exceptions` schema |
-| 47.5 | Period Close Guardrails for AP | Epic 32 + period status data | ⚠️ Needs fiscal period schema alignment |
+| 47.3 | Supplier Statement Matching (Manual MVP) | 47.2 | ✅ Schema available; waits dependency chain |
+| 47.4 | AP Exception Worklist | 47.1, 47.2, 47.3 | ✅ Schema available; waits dependency chain |
+| 47.5 | Period Close Guardrails for AP | Epic 32 + period status data | ✅ Schema available; depends on Epic 32 integration path |
 | 47.6 | Reconciliation Snapshot & Audit Trail | 47.1–47.5 | ⏸️ Depends on earlier stories |
 
 ---
@@ -56,14 +56,17 @@ Validation evidence:
 ### Available now
 - `fiscal_years` table available for fixture setup.
 - `settings_strings` can store reconciliation config key/value for test setup (`ap_reconciliation_account_ids`).
+- `fiscal_periods` migration landed (`0186_fiscal_periods.sql`).
+- `supplier_statements` migration landed (`0187_supplier_statements.sql`).
+- `ap_exceptions` migration landed (`0188_ap_exceptions.sql`).
 
-### Blockers to resolve before implementing dependent stories
-1. **`fiscal_periods` table missing**
-   - Impacts Story 47.1 cutoff + Story 47.5 period-close guardrails.
-2. **`supplier_statements` table missing**
-   - Impacts Story 47.3.
-3. **`ap_exceptions` table missing**
-   - Impacts Story 47.4.
+### Open readiness constraints (post-migration)
+1. **Route/contract namespace alignment**
+   - Canonical path frozen to `/api/purchasing/reports/ap-reconciliation/*`.
+2. **ACL mapping alignment in story docs**
+   - Report endpoints use `purchasing.reports` + `ANALYZE`; settings use `accounting.accounts` + `MANAGE`.
+3. **Snapshot enforcement before Story 47.6 coding**
+   - Must implement append-only persistence/immutability per design note.
 
 ---
 
@@ -82,14 +85,14 @@ These functions make story-level setup deterministic and avoid ad-hoc SQL in tes
 
 ## 5) Pre-Epic 47 Execution Plan
 
-### Phase A — Story 47.1 enablement
-1. Finalize AP reconciliation settings storage contract (key names + shape).
-2. Add missing migration(s) for period granularity if `fiscal_periods` is required.
-3. Implement summary endpoint with strict company scoping and base-currency reconciliation rules.
+### Phase A — Story 47.1 hardening
+1. Align docs/routes to canonical namespace and ACL mapping.
+2. Stabilize summary endpoint behavior (tenant scoping, cutoff, FX, fail-closed behavior).
+3. Lock integration evidence for timezone and cross-tenant controls.
 
-### Phase B — Story 47.3/47.4 schema gates
-1. Add migrations for `supplier_statements` and `ap_exceptions`.
-2. Add ACL + route scaffolding only after schema lands.
+### Phase B — Story 47.2/47.3/47.4 delivery chain
+1. Implement drilldown/attribution (47.2) first.
+2. Implement supplier statements (47.3), then exceptions worklist (47.4).
 
 ### Phase C — Period-close enforcement
 1. Reuse Epic 32 period-close semantics.
@@ -108,14 +111,15 @@ These functions make story-level setup deterministic and avoid ad-hoc SQL in tes
 
 ## 7) Go/No-Go
 
-**Go for Story 47.1 prep work** ✅
+**Go for Story 47.1 hardening** ✅
 - Existing action items complete.
 - Key regression protections in place.
+- Wave 0 blockers resolved with migration package and re-review evidence.
 
 **Conditional go for Stories 47.3/47.4/47.5** ⚠️
-- Requires schema migrations for missing tables and/or period model alignment.
+- Requires dependency-order execution and per-batch review gates.
 
-**Recommendation:** Start Epic 47 with Story 47.1 only, while parallelizing migration design for 47.3/47.4/47.5.
+**Recommendation:** Execute micro-scope batches in order (B1→B2A/B2B→B3→B4→B5) with hard P0/P1 stop gates.
 
 ---
 
@@ -172,10 +176,10 @@ These functions make story-level setup deterministic and avoid ad-hoc SQL in tes
 - Mutable-forward-only settings: reconciliation account set, tolerances, guardrail policy.
 - Historical snapshots must not change when settings change.
 
-**A3 ambiguities flagged for story clarifications:**
-- exchange-rate effective-window semantics
-- outlet-vs-company timezone behavior for AP reconciliation boundaries
-- snapshot versioning/retention policy
+**A3 ambiguities resolved for execution:**
+- exchange-rate effective-window semantics: latest rate where `effective_date <= transaction_date`
+- timezone behavior: `outlet.timezone -> company.timezone`, no UTC fallback
+- snapshot versioning/retention policy: append-only per (`company_id`,`as_of_date`), archive-not-delete
 
 **A3 P0/P1 risk highlights:**
 - **P0:** `fiscal_periods` dependency missing for period-close guardrails.
@@ -188,15 +192,14 @@ These functions make story-level setup deterministic and avoid ad-hoc SQL in tes
 
 ## 9) Updated No-P0/P1 Entry Criteria for Wave 1
 
-Wave 1 cannot start until all are true:
+Wave 1 batch progression cannot continue unless all are true:
 
 1. `fiscal_periods` migration package is designed and accepted (portable/rerunnable).
 2. Reconciliation settings contract (A1) is locked and implementation checklist includes fail-closed behavior.
 3. Story checklists include explicit temporal/immutability rules from A3.
-4. `@bmad-review` gate returns **no unresolved P0/P1**.
+4. `@bmad-review` gate returns **no unresolved P0/P1** per batch.
 
-**Latest gate state:** `@bmad-review` currently returns **FAIL** (unresolved P0/P1).  
-Wave 1 implementation remains blocked until blocker fixes are implemented and gate is re-run.
+**Latest gate state:** `@bmad-review` Wave 0 re-review returns **GO (Conditional)** with no unresolved P0/P1 blockers for Wave 1 start.
 
 ---
 

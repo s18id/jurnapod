@@ -119,9 +119,11 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
     const ownerRoleId = await getRoleIdByCode("OWNER");
     await assignUserGlobalRole(ownerUser.id, ownerRoleId);
 
-    // Set up accounting.permissions for owner
+    // Set up permissions for owner
+    // Settings: accounting.accounts MANAGE
     await setModulePermission(testCompanyId, ownerRoleId, "accounting", "accounts", 63, { allowSystemRoleMutation: true });
-    await setModulePermission(testCompanyId, ownerRoleId, "accounting", "journals", 63, { allowSystemRoleMutation: true });
+    // Summary: purchasing.reports ANALYZE
+    await setModulePermission(testCompanyId, ownerRoleId, "purchasing", "reports", 63, { allowSystemRoleMutation: true });
     await setModulePermission(testCompanyId, ownerRoleId, "purchasing", "invoices", 63, { allowSystemRoleMutation: true });
     await setModulePermission(testCompanyId, ownerRoleId, "purchasing", "payments", 63, { allowSystemRoleMutation: true });
     await setModulePermission(testCompanyId, ownerRoleId, "purchasing", "exchange_rates", 63, { allowSystemRoleMutation: true });
@@ -340,8 +342,8 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
         });
         const ownerRoleId = await getRoleIdByCode("OWNER");
         await assignUserGlobalRole(noApUser.id, ownerRoleId);
-        await setModulePermission(noApCompanyId, ownerRoleId, "accounting", "journals", 63, { allowSystemRoleMutation: true });
         await setModulePermission(noApCompanyId, ownerRoleId, "accounting", "accounts", 63, { allowSystemRoleMutation: true });
+        await setModulePermission(noApCompanyId, ownerRoleId, "purchasing", "reports", 63, { allowSystemRoleMutation: true });
 
         const noApToken = await loginForTest(baseUrl, noApCompany.code, noApEmail, "TestPassword123!");
 
@@ -374,10 +376,10 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
         });
         const ownerRoleId = await getRoleIdByCode("OWNER");
         await assignUserGlobalRole(tzUser.id, ownerRoleId);
-        await setModulePermission(tzCompany.id, ownerRoleId, "accounting", "journals", 63, {
+        await setModulePermission(tzCompany.id, ownerRoleId, "accounting", "accounts", 63, {
           allowSystemRoleMutation: true,
         });
-        await setModulePermission(tzCompany.id, ownerRoleId, "accounting", "accounts", 63, {
+        await setModulePermission(tzCompany.id, ownerRoleId, "purchasing", "reports", 63, {
           allowSystemRoleMutation: true,
         });
 
@@ -623,7 +625,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
       const ownerRoleId = await getRoleIdByCode("OWNER");
       await assignUserGlobalRole(nyUser.id, ownerRoleId);
       await setModulePermission(nyCompany.id, ownerRoleId, "accounting", "accounts", 63, { allowSystemRoleMutation: true });
-      await setModulePermission(nyCompany.id, ownerRoleId, "accounting", "journals", 63, { allowSystemRoleMutation: true });
+      await setModulePermission(nyCompany.id, ownerRoleId, "purchasing", "reports", 63, { allowSystemRoleMutation: true });
       await setModulePermission(nyCompany.id, ownerRoleId, "purchasing", "invoices", 63, { allowSystemRoleMutation: true });
 
       // Create purchasing accounts for NY company
@@ -718,7 +720,6 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
       const ownerRoleId = await getRoleIdByCode("OWNER");
       await assignUserGlobalRole(company2User.id, ownerRoleId);
       await setModulePermission(testCompany2Id, ownerRoleId, "accounting", "accounts", 63, { allowSystemRoleMutation: true });
-      await setModulePermission(testCompany2Id, ownerRoleId, "accounting", "journals", 63, { allowSystemRoleMutation: true });
       await setModulePermission(testCompany2Id, ownerRoleId, "purchasing", "invoices", 63, { allowSystemRoleMutation: true });
 
       const company2 = await sql`SELECT code FROM companies WHERE id = ${testCompany2Id}`.execute(db);
