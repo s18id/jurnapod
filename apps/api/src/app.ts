@@ -52,6 +52,7 @@ import { adminRunbookRoutes } from './routes/admin-runbook.js';
 import { auditRoutes } from './routes/audit.js';
 import { swaggerRoutes } from './routes/swagger.js';
 import { purchasingRoutes } from './routes/purchasing/index.js';
+import { apExceptionRoutes } from './routes/accounting/ap-exceptions.js';
 
 const HTTP_LOG_ENABLED = process.env.JP_HTTP_LOG === "1";
 
@@ -193,6 +194,9 @@ export function createApp(): Hono {
   // Register remaining route groups
   app.route("/api/roles", rolesRoutes);
   app.route("/api/journals", journalRoutes);
+
+  // Register AP exception routes
+  app.route("/api/accounting/ap-exceptions", apExceptionRoutes);
   app.route("/api/reports", reportRoutes);
   app.route("/api/accounts", accountRoutes);
   app.route("/api/companies", companyRoutes);

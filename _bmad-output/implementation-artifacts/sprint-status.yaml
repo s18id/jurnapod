@@ -549,6 +549,6 @@ development_status:
   47-1-ap-gl-reconciliation-summary: done
   47-2-reconciliation-drilldown-variance: done
   47-3-supplier-statement-matching: done
-  47-4-ap-exception-worklist: backlog
+  47-4-ap-exception-worklist: done
   47-5-period-close-guardrails-ap: backlog
   47-6-reconciliation-snapshot-audit-trail: backlog

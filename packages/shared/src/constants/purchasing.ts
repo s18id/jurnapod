@@ -217,3 +217,83 @@ export const SUPPLIER_STATEMENT_ERROR_CODES = {
   ALREADY_RECONCILED: "SUPPLIER_STATEMENT_ALREADY_RECONCILED",
   DUPLICATE: "SUPPLIER_STATEMENT_DUPLICATE",
 } as const;
+
+// =============================================================================
+// AP Exception Constants (Story 47.4)
+// =============================================================================
+
+/**
+ * AP exception types (int enum) — mirrors migration 0188 taxonomy.
+ * DB storage: TINYINT UNSIGNED column `type`.
+ * FIX(47.4-WP-A): Canonical int-enum for internal AP exception classification.
+ */
+export const AP_EXCEPTION_TYPE = {
+  DISPUTE: 1,
+  VARIANCE: 2,
+  MISMATCH: 3,
+  DUPLICATE: 4,
+} as const;
+
+/** Reverse lookup: int code -> label */
+export const AP_EXCEPTION_TYPE_LABEL: Record<number, keyof typeof AP_EXCEPTION_TYPE> = {
+  1: "DISPUTE",
+  2: "VARIANCE",
+  3: "MISMATCH",
+  4: "DUPLICATE",
+};
+
+export const AP_EXCEPTION_TYPE_VALUES = ["DISPUTE", "VARIANCE", "MISMATCH", "DUPLICATE"] as const;
+
+/**
+ * AP exception status (int enum) — mirrors migration 0188 taxonomy.
+ * DB storage: TINYINT UNSIGNED column `status`.
+ * FIX(47.4-WP-A): Canonical int-enum for AP exception lifecycle state.
+ */
+export const AP_EXCEPTION_STATUS = {
+  OPEN: 1,
+  ASSIGNED: 2,
+  RESOLVED: 3,
+  DISMISSED: 4,
+} as const;
+
+/** Reverse lookup: int code -> label */
+export const AP_EXCEPTION_STATUS_LABEL: Record<number, keyof typeof AP_EXCEPTION_STATUS> = {
+  1: "OPEN",
+  2: "ASSIGNED",
+  3: "RESOLVED",
+  4: "DISMISSED",
+};
+
+export const AP_EXCEPTION_STATUS_VALUES = ["OPEN", "ASSIGNED", "RESOLVED", "DISMISSED"] as const;
+
+/**
+ * Convert AP exception type string label to int code.
+ * FIX(47.4-WP-A): API/story layer uses string labels; DB uses int codes.
+ */
+export function toApExceptionTypeCode(type: string): number | undefined {
+  return AP_EXCEPTION_TYPE[type as keyof typeof AP_EXCEPTION_TYPE];
+}
+
+/**
+ * Convert int code to AP exception type string label.
+ * FIX(47.4-WP-A): Maps DB int code back to API-compatible string.
+ */
+export function toApExceptionTypeLabel(code: number): keyof typeof AP_EXCEPTION_TYPE {
+  return AP_EXCEPTION_TYPE_LABEL[code] ?? "VARIANCE";
+}
+
+/**
+ * Convert AP exception status string label to int code.
+ * FIX(47.4-WP-A): API/story layer uses string labels; DB uses int codes.
+ */
+export function toApExceptionStatusCode(status: string): number | undefined {
+  return AP_EXCEPTION_STATUS[status as keyof typeof AP_EXCEPTION_STATUS];
+}
+
+/**
+ * Convert int code to AP exception status string label.
+ * FIX(47.4-WP-A): Maps DB int code back to API-compatible string.
+ */
+export function toApExceptionStatusLabel(code: number): keyof typeof AP_EXCEPTION_STATUS {
+  return AP_EXCEPTION_STATUS_LABEL[code] ?? "OPEN";
+}

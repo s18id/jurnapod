@@ -7,7 +7,9 @@ import {
   PURCHASE_ORDER_STATUS_VALUES,
   PURCHASE_INVOICE_STATUS_VALUES,
   AP_PAYMENT_STATUS_VALUES,
-  PURCHASE_CREDIT_STATUS_VALUES
+  PURCHASE_CREDIT_STATUS_VALUES,
+  AP_EXCEPTION_TYPE_VALUES,
+  AP_EXCEPTION_STATUS_VALUES
 } from "../constants/purchasing.js";
 import { PURCHASING_AP_TRANSACTION_TYPES } from "../constants/doc-types.js";
 
@@ -967,3 +969,86 @@ export type SupplierStatementListQuery = z.infer<typeof SupplierStatementListQue
 export type SupplierStatementResponse = z.infer<typeof SupplierStatementResponseSchema>;
 export type ReconcileQuery = z.infer<typeof ReconcileQuerySchema>;
 export type ReconcileResult = z.infer<typeof ReconcileResultSchema>;
+
+// =============================================================================
+// AP Exception Schemas (Story 47.4)
+// =============================================================================
+
+/**
+ * AP exception type enum — mirrors AP_EXCEPTION_TYPE_VALUES.
+ * FIX(47.4-WP-A): Story-facing string labels mapped to int codes via helpers.
+ */
+export const ApExceptionTypeSchema = z.enum(AP_EXCEPTION_TYPE_VALUES);
+export type ApExceptionType = z.infer<typeof ApExceptionTypeSchema>;
+
+/**
+ * AP exception status enum — mirrors AP_EXCEPTION_STATUS_VALUES.
+ * FIX(47.4-WP-A): Story-facing string labels mapped to int codes via helpers.
+ */
+export const ApExceptionStatusSchema = z.enum(AP_EXCEPTION_STATUS_VALUES);
+export type ApExceptionStatus = z.infer<typeof ApExceptionStatusSchema>;
+
+/**
+ * AP exception worklist query schema — filters + pagination for GET worklist.
+ * FIX(47.4-WP-A): Supports filter by type, status, supplier; cursor-based pagination.
+ */
+export const ApExceptionWorklistQuerySchema = z.object({
+  type: ApExceptionTypeSchema.optional(),
+  status: ApExceptionStatusSchema.optional(),
+  supplier_id: NumericIdSchema.optional(),
+  search: z.string().trim().max(255).optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+});
+
+export type ApExceptionWorklistQuery = z.infer<typeof ApExceptionWorklistQuerySchema>;
+
+/**
+ * AP exception assign payload schema.
+ * Assigns an exception to a user for investigation/resolution.
+ * FIX(47.4-WP-A): Assign workflow requires target user_id.
+ */
+export const ApExceptionAssignPayloadSchema = z.object({
+  assigned_to_user_id: NumericIdSchema,
+});
+
+export type ApExceptionAssignPayload = z.infer<typeof ApExceptionAssignPayloadSchema>;
+
+/**
+ * AP exception resolve payload schema.
+ * Marks an exception as resolved or dismissed with required note.
+ * FIX(47.4-WP-A): Resolution note is required for audit trail.
+ */
+export const ApExceptionResolvePayloadSchema = z.object({
+  status: z.enum(["RESOLVED", "DISMISSED"]),
+  resolution_note: z.string().trim().min(1, "Resolution note is required").max(2000),
+});
+
+export type ApExceptionResolvePayload = z.infer<typeof ApExceptionResolvePayloadSchema>;
+
+/**
+ * AP exception response schema — returned by worklist and detail endpoints.
+ */
+export const ApExceptionResponseSchema = z.object({
+  id: NumericIdSchema,
+  company_id: NumericIdSchema,
+  exception_key: z.string().trim(),
+  type: ApExceptionTypeSchema,
+  source_type: z.string().trim(),
+  source_id: NumericIdSchema,
+  supplier_id: NumericIdSchema.nullable(),
+  variance_amount: z.string().trim().nullable(),
+  currency_code: z.string().trim().length(3).nullable(),
+  detected_at: z.string().datetime(),
+  due_date: z.string().nullable(),
+  assigned_to_user_id: NumericIdSchema.nullable(),
+  assigned_at: z.string().datetime().nullable(),
+  status: ApExceptionStatusSchema,
+  resolved_at: z.string().datetime().nullable(),
+  resolved_by_user_id: NumericIdSchema.nullable(),
+  resolution_note: z.string().trim().nullable(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+});
+
+export type ApExceptionResponse = z.infer<typeof ApExceptionResponseSchema>;

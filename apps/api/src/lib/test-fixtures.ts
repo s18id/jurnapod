@@ -1527,97 +1527,221 @@ export async function createTestSupplierStatement(
 // AP Exception Fixtures (Epic 47.4)
 // ============================================================================
 
+// FIX(47.4-WP-B): Canonical int-enum values for ap_exceptions.type and .status.
+// Migration 0188 uses TINYINT columns; string labels are for API compatibility only.
+export const AP_EXCEPTION_TYPE = {
+  DISPUTE: 1,
+  VARIANCE: 2,
+  MISMATCH: 3,
+  DUPLICATE: 4,
+} as const;
+export type APExceptionTypeKey = keyof typeof AP_EXCEPTION_TYPE;
+export type APExceptionTypeValue = (typeof AP_EXCEPTION_TYPE)[APExceptionTypeKey];
+
+export const AP_EXCEPTION_STATUS = {
+  OPEN: 1,
+  ASSIGNED: 2,
+  RESOLVED: 3,
+  DISMISSED: 4,
+} as const;
+export type APExceptionStatusKey = keyof typeof AP_EXCEPTION_STATUS;
+export type APExceptionStatusValue = (typeof AP_EXCEPTION_STATUS)[APExceptionStatusKey];
+
 export type APExceptionFixture = {
   id: number;
   companyId: number;
+  // FIX(47.4-WP-B): exception_key is required (unique per company, used for idempotent upsert)
+  exceptionKey: string;
+  // FIX(47.4-WP-B): type/status are now int enums matching migration 0188 schema
+  type: APExceptionTypeValue;
+  sourceType: string;
+  sourceId: number;
   supplierId: number | null;
-  exceptionType: "MISMATCH" | "OVER_LIMIT" | "UNRECONCILED";
-  amount: string;
-  currency: string;
-  status: "OPEN" | "RESOLVED";
+  // FIX(47.4-WP-B): column is variance_amount, not amount
+  varianceAmount: string;
+  // FIX(47.4-WP-B): column is currency_code, not currency
+  currencyCode: string;
+  detectedAt: string;
+  dueDate: string | null;
+  assignedToUserId: number | null;
+  assignedAt: string | null;
+  status: APExceptionStatusValue;
+  resolvedAt: string | null;
+  resolvedByUserId: number | null;
+  resolutionNote: string | null;
 };
 
 /**
  * Create a test AP exception for Epic 47.4 (AP exception worklist).
  * Story linkage: 47.4 - AP exception worklist.
  *
- * NOTE: ap_exceptions table does not exist yet. This fixture will fail until
- * a migration creates the table. Schema gap documented in Epic 47 story spec.
+ * FIX(47.4-WP-B): Aligns with migration 0188_ap_exceptions.sql schema.
+ * Canonical internal representation uses int enums for type/status;
+ * caller-facing options accept string labels for ergonomics.
+ * Internal INSERT maps option fields to real DB column names
+ * (variance_amount, currency_code, exception_key, source_type, source_id).
  *
  * @param companyId - Company ID
  * @param options - Exception options
+ * @param options.exceptionKey - Deterministic idempotency key (e.g., SHA256 of source context)
+ * @param options.type - Exception type enum value (AP_EXCEPTION_TYPE.DISPUTE|VARIANCE|MISMATCH|DUPLICATE)
+ * @param options.sourceType - Source document type (e.g., 'INVOICE', 'PAYMENT')
+ * @param options.sourceId - Source document ID
  * @param options.supplierId - Optional supplier ID
- * @param options.exceptionType - Exception type: 'MISMATCH' | 'OVER_LIMIT' | 'UNRECONCILED' (default: 'UNRECONCILED')
- * @param options.amount - Amount as string decimal
- * @param options.currency - ISO currency code (default: 'IDR')
- * @param options.status - 'OPEN' | 'RESOLVED' (default: 'OPEN')
- * @returns AP exception fixture with id, companyId, exceptionType, amount, status
+ * @param options.varianceAmount - Variance amount as string decimal (maps to variance_amount col)
+ * @param options.currencyCode - ISO currency code (maps to currency_code col)
+ * @param options.dueDate - Optional due date string ('YYYY-MM-DD')
+ * @param options.status - Exception status enum value (AP_EXCEPTION_STATUS.OPEN|ASSIGNED|RESOLVED|DISMISSED)
+ * @returns AP exception fixture with all schema-aligned fields
  */
 export async function createTestAPException(
   companyId: number,
   options?: Partial<{
+    exceptionKey: string;
+    type: APExceptionTypeValue;
+    sourceType: string;
+    sourceId: number;
     supplierId: number;
-    exceptionType: "MISMATCH" | "OVER_LIMIT" | "UNRECONCILED";
-    amount: string;
-    currency: string;
-    status: "OPEN" | "RESOLVED";
+    varianceAmount: string;
+    currencyCode: string;
+    dueDate: string;
+    status: APExceptionStatusValue;
   }>
 ): Promise<APExceptionFixture> {
   const db = getDb();
+  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
 
-  // Check if ap_exceptions table exists before attempting insert
-  const tableCheck = await sql`SELECT COUNT(*) as cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'ap_exceptions'`.execute(db);
-  const tableExists = Number((tableCheck.rows[0] as { cnt: number }).cnt) > 0;
+  // FIX(47.4-WP-B): exception_key is required; auto-generate if not provided.
+  // Pattern mirrors idempotency key design: use source context to derive deterministic key.
+  const exceptionKey =
+    options?.exceptionKey ?? `EXC-${runId}-${Math.random().toString(36).slice(2, 8)}`;
 
-  if (!tableExists) {
-    throw new Error(
-      "ap_exceptions table does not exist. Schema gap: Story 47.4 requires an ap_exceptions table " +
-      "(typically: id, company_id, supplier_id, exception_type, amount, currency, status). " +
-      "This fixture will work once a migration creates the table."
-    );
+  // FIX(47.4-WP-B): Map string-friendly options to int enums (migration 0188 canonical).
+  const type = options?.type ?? AP_EXCEPTION_TYPE.VARIANCE;
+  const sourceType = options?.sourceType ?? "INVOICE";
+  const sourceId = options?.sourceId ?? 0;
+  const supplierId = options?.supplierId ?? null;
+  const varianceAmount = options?.varianceAmount ?? "0.0000";
+  const currencyCode = options?.currencyCode ?? "IDR";
+  const dueDate = options?.dueDate ?? null;
+  const status = options?.status ?? AP_EXCEPTION_STATUS.OPEN;
+
+  // Validate type is a known int enum value
+  if (!Object.values(AP_EXCEPTION_TYPE).includes(type)) {
+    throw new Error(`Invalid AP exception type: ${type}. Use AP_EXCEPTION_TYPE values.`);
   }
 
-  const supplierId = options?.supplierId ?? null;
-  const exceptionType = options?.exceptionType ?? "UNRECONCILED";
-  const amount = options?.amount ?? "0.00";
-  const currency = options?.currency ?? "IDR";
-  const status = options?.status ?? "OPEN";
+  // Validate status is a known int enum value
+  if (!Object.values(AP_EXCEPTION_STATUS).includes(status)) {
+    throw new Error(`Invalid AP exception status: ${status}. Use AP_EXCEPTION_STATUS values.`);
+  }
 
   try {
     await sql`
-      INSERT INTO ap_exceptions (company_id, supplier_id, exception_type, amount, currency, status, created_at, updated_at)
-      VALUES (${companyId}, ${supplierId}, ${exceptionType}, ${amount}, ${currency}, ${status}, NOW(), NOW())
+      INSERT INTO ap_exceptions (
+        company_id, exception_key, type, source_type, source_id, supplier_id,
+        variance_amount, currency_code, due_date, status, created_at, updated_at
+      )
+      VALUES (
+        ${companyId}, ${exceptionKey}, ${type}, ${sourceType}, ${sourceId}, ${supplierId},
+        ${varianceAmount}, ${currencyCode}, ${dueDate}, ${status}, NOW(), NOW()
+      )
     `.execute(db);
 
-    const result = await sql`SELECT id, company_id, supplier_id, exception_type, amount, currency, status FROM ap_exceptions WHERE company_id = ${companyId} ORDER BY id DESC LIMIT 1`.execute(db);
+    const result = await sql`
+      SELECT id, company_id, exception_key, type, source_type, source_id, supplier_id,
+             variance_amount, currency_code, detected_at, due_date,
+             assigned_to_user_id, assigned_at, status, resolved_at, resolved_by_user_id, resolution_note
+      FROM ap_exceptions
+      WHERE company_id = ${companyId} AND exception_key = ${exceptionKey}
+      LIMIT 1
+    `.execute(db);
+
     if (result.rows.length === 0) {
-      throw new Error(`Failed to create AP exception for company ${companyId}`);
+      throw new Error(`Failed to create AP exception for company ${companyId} with key ${exceptionKey}`);
     }
-    const row = result.rows[0] as { id: number; company_id: number; supplier_id: number | null; exception_type: string; amount: string; currency: string; status: string };
+
+    const row = result.rows[0] as {
+      id: number; company_id: number; exception_key: string; type: number;
+      source_type: string; source_id: number; supplier_id: number | null;
+      variance_amount: string; currency_code: string; detected_at: Date;
+      due_date: Date | null; assigned_to_user_id: number | null; assigned_at: Date | null;
+      status: number; resolved_at: Date | null; resolved_by_user_id: number | null; resolution_note: string | null;
+    };
+
     const fixture: APExceptionFixture = {
       id: Number(row.id),
       companyId: Number(row.company_id),
+      exceptionKey: row.exception_key,
+      type: row.type as APExceptionTypeValue,
+      sourceType: row.source_type,
+      sourceId: Number(row.source_id),
       supplierId: row.supplier_id !== null ? Number(row.supplier_id) : null,
-      exceptionType: row.exception_type as "MISMATCH" | "OVER_LIMIT" | "UNRECONCILED",
-      amount: String(row.amount),
-      currency: String(row.currency),
-      status: row.status as "OPEN" | "RESOLVED",
+      varianceAmount: String(row.variance_amount),
+      currencyCode: String(row.currency_code),
+      detectedAt: row.detected_at instanceof Date ? row.detected_at.toISOString() : String(row.detected_at),
+      dueDate: row.due_date
+        ? (row.due_date instanceof Date ? row.due_date.toISOString().split("T")[0] : String(row.due_date))
+        : null,
+      assignedToUserId: row.assigned_to_user_id !== null ? Number(row.assigned_to_user_id) : null,
+      assignedAt: row.assigned_at
+        ? (row.assigned_at instanceof Date ? row.assigned_at.toISOString() : String(row.assigned_at))
+        : null,
+      status: row.status as APExceptionStatusValue,
+      resolvedAt: row.resolved_at
+        ? (row.resolved_at instanceof Date ? row.resolved_at.toISOString() : String(row.resolved_at))
+        : null,
+      resolvedByUserId: row.resolved_by_user_id !== null ? Number(row.resolved_by_user_id) : null,
+      resolutionNote: row.resolution_note ?? null,
     };
+
     return fixture;
   } catch (error: unknown) {
     const mysqlErr = error as { code?: string };
     if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
-      const result = await sql`SELECT id, company_id, supplier_id, exception_type, amount, currency, status FROM ap_exceptions WHERE company_id = ${companyId} ORDER BY id DESC LIMIT 1`.execute(db);
+      // Idempotent: fetch existing row for the same exception_key
+      const result = await sql`
+        SELECT id, company_id, exception_key, type, source_type, source_id, supplier_id,
+               variance_amount, currency_code, detected_at, due_date,
+               assigned_to_user_id, assigned_at, status, resolved_at, resolved_by_user_id, resolution_note
+        FROM ap_exceptions
+        WHERE company_id = ${companyId} AND exception_key = ${exceptionKey}
+        LIMIT 1
+      `.execute(db);
+
       if (result.rows.length > 0) {
-        const row = result.rows[0] as { id: number; company_id: number; supplier_id: number | null; exception_type: string; amount: string; currency: string; status: string };
+        const row = result.rows[0] as {
+          id: number; company_id: number; exception_key: string; type: number;
+          source_type: string; source_id: number; supplier_id: number | null;
+          variance_amount: string; currency_code: string; detected_at: Date;
+          due_date: Date | null; assigned_to_user_id: number | null; assigned_at: Date | null;
+          status: number; resolved_at: Date | null; resolved_by_user_id: number | null; resolution_note: string | null;
+        };
+
         return {
           id: Number(row.id),
           companyId: Number(row.company_id),
+          exceptionKey: row.exception_key,
+          type: row.type as APExceptionTypeValue,
+          sourceType: row.source_type,
+          sourceId: Number(row.source_id),
           supplierId: row.supplier_id !== null ? Number(row.supplier_id) : null,
-          exceptionType: row.exception_type as "MISMATCH" | "OVER_LIMIT" | "UNRECONCILED",
-          amount: String(row.amount),
-          currency: String(row.currency),
-          status: row.status as "OPEN" | "RESOLVED",
+          varianceAmount: String(row.variance_amount),
+          currencyCode: String(row.currency_code),
+          detectedAt: row.detected_at instanceof Date ? row.detected_at.toISOString() : String(row.detected_at),
+          dueDate: row.due_date
+            ? (row.due_date instanceof Date ? row.due_date.toISOString().split("T")[0] : String(row.due_date))
+            : null,
+          assignedToUserId: row.assigned_to_user_id !== null ? Number(row.assigned_to_user_id) : null,
+          assignedAt: row.assigned_at
+            ? (row.assigned_at instanceof Date ? row.assigned_at.toISOString() : String(row.assigned_at))
+            : null,
+          status: row.status as APExceptionStatusValue,
+          resolvedAt: row.resolved_at
+            ? (row.resolved_at instanceof Date ? row.resolved_at.toISOString() : String(row.resolved_at))
+            : null,
+          resolvedByUserId: row.resolved_by_user_id !== null ? Number(row.resolved_by_user_id) : null,
+          resolutionNote: row.resolution_note ?? null,
         };
       }
     }
