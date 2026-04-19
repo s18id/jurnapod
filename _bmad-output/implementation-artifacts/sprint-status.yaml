@@ -534,7 +534,7 @@ development_status:
   epic-45-retrospective: done
 
   # Epic 46: Purchasing / Accounts Payable
-  epic-46: in-progress
+  epic-46: done
   46-1-supplier-master: done
   46-2-exchange-rates: done
   46-3-purchase-orders: done
@@ -542,4 +542,13 @@ development_status:
   46-5-purchase-invoices: done
   46-6-ap-payments: done
   46-7-supplier-credit-notes: done
-  46-8-ap-aging-report: backlog
+  46-8-ap-aging-report: done
+
+  # Epic 47: AP Reconciliation & Period Close Controls
+  epic-47: backlog
+  47-1-ap-gl-reconciliation-summary: backlog
+  47-2-reconciliation-drilldown-variance: backlog
+  47-3-supplier-statement-matching: backlog
+  47-4-ap-exception-worklist: backlog
+  47-5-period-close-guardrails-ap: backlog
+  47-6-reconciliation-snapshot-audit-trail: backlog

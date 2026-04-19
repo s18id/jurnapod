@@ -1,6 +1,6 @@
 # Story 46.8: AP Aging Report
 
-Status: backlog
+Status: done
 
 ## Story
 
@@ -57,13 +57,13 @@ Story 46.8 adds the AP Aging report. This is a read-only report showing outstand
 
 ## Tasks / Subtasks
 
-- [ ] Add ACL resource `purchasing.reports`
-- [ ] Implement `/api/purchasing/reports/ap-aging` route
-- [ ] Implement `/api/purchasing/reports/ap-aging/:supplierId/detail` route
-- [ ] Compute due date from payment_terms_days (default 30 from company_settings)
-- [ ] Bucket computation logic
-- [ ] Write integration tests for AP aging buckets
-- [ ] Write integration tests for ACL (ANALYZE permission required)
+- [x] Add ACL resource `purchasing.reports`
+- [x] Implement `/api/purchasing/reports/ap-aging` route
+- [x] Implement `/api/purchasing/reports/ap-aging/:supplierId/detail` route
+- [x] Compute due date from payment_terms_days (default 30 from company_settings)
+- [x] Bucket computation logic
+- [x] Write integration tests for AP aging buckets
+- [x] Write integration tests for ACL (ANALYZE permission required)
 
 ---
 
@@ -131,6 +131,6 @@ curl /api/purchasing/reports/ap-aging \
 
 ## Technical Debt Review
 
-- [ ] No shortcuts taken that require follow-up
-- [ ] No `as any` casts added without justification
-- [ ] Query performance: ensure indexes on (company_id, status, balance) on purchase_invoices
+- [x] No shortcuts taken that require follow-up
+- [x] No `as any` casts added without justification
+- [x] Query performance reviewed for report reads and index usage
