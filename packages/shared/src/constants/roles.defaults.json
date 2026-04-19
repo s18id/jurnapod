@@ -31,7 +31,8 @@
       "purchasing.suppliers": 63,
       "purchasing.exchange_rates": 63,
       "purchasing.orders": 63,
-      "purchasing.receipts": 63
+      "purchasing.receipts": 63,
+      "purchasing.invoices": 63
     },
     "OWNER": {
       "platform.companies": 5,
@@ -59,7 +60,8 @@
       "purchasing.suppliers": 63,
       "purchasing.exchange_rates": 63,
       "purchasing.orders": 63,
-      "purchasing.receipts": 63
+      "purchasing.receipts": 63,
+      "purchasing.invoices": 63
     },
     "COMPANY_ADMIN": {
       "platform.companies": 0,
@@ -86,7 +88,8 @@
       "reservations.tables": 63,
       "purchasing.suppliers": 63,
       "purchasing.exchange_rates": 63,
-      "purchasing.orders": 63
+      "purchasing.orders": 63,
+      "purchasing.invoices": 63
     },
     "ADMIN": {
       "platform.companies": 0,
@@ -114,7 +117,8 @@
       "purchasing.suppliers": 31,
       "purchasing.exchange_rates": 31,
       "purchasing.orders": 31,
-      "purchasing.receipts": 31
+      "purchasing.receipts": 31,
+      "purchasing.invoices": 31
     },
     "CASHIER": {
       "platform.companies": 0,
@@ -142,7 +146,8 @@
       "purchasing.suppliers": 0,
       "purchasing.exchange_rates": 0,
       "purchasing.orders": 0,
-      "purchasing.receipts": 0
+      "purchasing.receipts": 0,
+      "purchasing.invoices": 0
     },
     "ACCOUNTANT": {
       "platform.companies": 0,
@@ -170,7 +175,8 @@
       "purchasing.suppliers": 31,
       "purchasing.exchange_rates": 31,
       "purchasing.orders": 31,
-      "purchasing.receipts": 31
+      "purchasing.receipts": 31,
+      "purchasing.invoices": 31
     }
   }
 }

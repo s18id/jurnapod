@@ -53,6 +53,7 @@ export interface PurchasingModuleSettings {
   purchasing_approval_workflow: boolean;
   purchasing_default_tax_rate_id: number | null;
   purchasing_default_expense_account_id: number | null;
+  purchasing_default_ap_account_id: number | null;
   purchasing_credit_limit_enabled: boolean;
 }
 
@@ -156,6 +157,7 @@ export async function listCompanyModulesExtended(
     purchasing_approval_workflow: number;
     purchasing_default_tax_rate_id: number | null;
     purchasing_default_expense_account_id: number | null;
+    purchasing_default_ap_account_id: number | null;
     purchasing_credit_limit_enabled: number;
   }>`
     SELECT 
@@ -171,7 +173,7 @@ export async function listCompanyModulesExtended(
       cm.sales_default_price_list_id, cm.sales_default_income_account_id,
       cm.purchasing_enabled, cm.purchasing_approval_workflow,
       cm.purchasing_default_tax_rate_id, cm.purchasing_default_expense_account_id,
-      cm.purchasing_credit_limit_enabled
+      cm.purchasing_default_ap_account_id, cm.purchasing_credit_limit_enabled
     FROM modules m
     INNER JOIN company_modules cm ON cm.module_id = m.id
     WHERE cm.company_id = ${companyId}
@@ -217,6 +219,7 @@ export async function listCompanyModulesExtended(
       purchasing_approval_workflow: Boolean(row.purchasing_approval_workflow),
       purchasing_default_tax_rate_id: row.purchasing_default_tax_rate_id,
       purchasing_default_expense_account_id: row.purchasing_default_expense_account_id,
+      purchasing_default_ap_account_id: row.purchasing_default_ap_account_id,
       purchasing_credit_limit_enabled: Boolean(row.purchasing_credit_limit_enabled)
     } : null
   }));
@@ -362,6 +365,7 @@ export async function updateCompanyModuleExplicit(
     if (ps.purchasing_approval_workflow !== undefined) updates.push(`purchasing_approval_workflow = ${ps.purchasing_approval_workflow ? 1 : 0}`);
     if (ps.purchasing_default_tax_rate_id !== undefined) updates.push(`purchasing_default_tax_rate_id = ${ps.purchasing_default_tax_rate_id}`);
     if (ps.purchasing_default_expense_account_id !== undefined) updates.push(`purchasing_default_expense_account_id = ${ps.purchasing_default_expense_account_id}`);
+    if (ps.purchasing_default_ap_account_id !== undefined) updates.push(`purchasing_default_ap_account_id = ${ps.purchasing_default_ap_account_id}`);
     if (ps.purchasing_credit_limit_enabled !== undefined) updates.push(`purchasing_credit_limit_enabled = ${ps.purchasing_credit_limit_enabled ? 1 : 0}`);
   }
 

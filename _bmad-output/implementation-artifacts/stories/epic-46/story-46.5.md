@@ -1,6 +1,6 @@
 # Story 46.5: Purchase Invoices
 
-Status: backlog
+Status: done
 
 ## Story
 

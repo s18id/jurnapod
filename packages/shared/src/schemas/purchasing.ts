@@ -3,7 +3,7 @@
 
 import { z } from "zod";
 import { NumericIdSchema } from "./common.js";
-import { PURCHASE_ORDER_STATUS_VALUES } from "../constants/purchasing.js";
+import { PURCHASE_ORDER_STATUS_VALUES, PURCHASE_INVOICE_STATUS_VALUES } from "../constants/purchasing.js";
 
 /**
  * Currency code schema (ISO 4217)
@@ -376,3 +376,106 @@ export type GoodsReceiptCreate = z.infer<typeof GoodsReceiptCreateSchema>;
 export type GoodsReceiptResponse = z.infer<typeof GoodsReceiptResponseSchema>;
 export type GoodsReceiptListQuery = z.infer<typeof GoodsReceiptListQuerySchema>;
 export type GoodsReceiptLine = z.infer<typeof GoodsReceiptLineSchema>;
+
+// =============================================================================
+// Purchase Invoice Schemas
+// =============================================================================
+
+export const PurchaseInvoiceStatusSchema = z.enum(PURCHASE_INVOICE_STATUS_VALUES);
+export type PurchaseInvoiceStatus = z.infer<typeof PurchaseInvoiceStatusSchema>;
+
+/**
+ * Purchase invoice line item schema
+ */
+export const PurchaseInvoiceLineSchema = z.object({
+  item_id: NumericIdSchema.nullable().optional(),
+  description: z.string().trim().min(1).max(255),
+  qty: z.string().trim().regex(/^\d+(\.\d{1,4})?$/, "Qty must be positive decimal"),
+  unit_price: z.string().trim().regex(/^\d+(\.\d{1,4})?$/, "Unit price must be positive decimal"),
+  tax_rate_id: NumericIdSchema.nullable().optional(),
+  line_type: z.enum(["ITEM", "SERVICE", "FREIGHT", "TAX", "DISCOUNT"]).default("ITEM")
+});
+
+/**
+ * Purchase invoice create request schema
+ */
+export const PurchaseInvoiceCreateSchema = z.object({
+  supplier_id: NumericIdSchema,
+  invoice_no: z.string().trim().min(1).max(64),
+  invoice_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format").transform((d) => new Date(d)),
+  due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).transform((d) => new Date(d)).nullable().optional(),
+  reference_number: z.string().trim().max(64).nullable().optional(),
+  currency_code: CurrencyCodeSchema.optional().default("IDR"),
+  exchange_rate: z.string().trim().regex(/^\d+(\.\d{1,8})?$/).default("1.00000000"),
+  notes: z.string().trim().max(1000).nullable().optional(),
+  lines: z.array(PurchaseInvoiceLineSchema).min(1, "At least one line item is required")
+});
+
+/**
+ * Purchase invoice list query schema
+ */
+export const PurchaseInvoiceListQuerySchema = z.object({
+  supplier_id: NumericIdSchema.optional(),
+  status: PurchaseInvoiceStatusSchema.optional(),
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).transform((d) => new Date(d)).optional(),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).transform((d) => new Date(d)).optional(),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+  offset: z.coerce.number().int().nonnegative().default(0)
+});
+
+/**
+ * Purchase invoice line response schema
+ */
+export const PurchaseInvoiceLineResponseSchema = z.object({
+  id: NumericIdSchema,
+  line_no: z.number().int(),
+  line_type: z.string().trim(),
+  item_id: NumericIdSchema.nullable(),
+  description: z.string().trim(),
+  qty: z.string().trim(),
+  unit_price: z.string().trim(),
+  line_total: z.string().trim(),
+  tax_rate_id: NumericIdSchema.nullable(),
+  tax_amount: z.string().trim(),
+  po_line_id: NumericIdSchema.nullable(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime()
+});
+
+/**
+ * Purchase invoice response schema
+ */
+export const PurchaseInvoiceResponseSchema = z.object({
+  id: NumericIdSchema,
+  company_id: NumericIdSchema,
+  supplier_id: NumericIdSchema,
+  invoice_no: z.string().trim(),
+  invoice_date: z.string().datetime(),
+  due_date: z.string().datetime().nullable(),
+  reference_number: z.string().trim().nullable(),
+  status: PurchaseInvoiceStatusSchema,
+  currency_code: z.string().trim().length(3),
+  exchange_rate: z.string().trim(),
+  subtotal: z.string().trim(),
+  tax_amount: z.string().trim(),
+  grand_total: z.string().trim(),
+  notes: z.string().trim().max(1000).nullable(),
+  journal_batch_id: NumericIdSchema.nullable(),
+  posted_at: z.string().datetime().nullable(),
+  posted_by_user_id: NumericIdSchema.nullable(),
+  voided_at: z.string().datetime().nullable(),
+  voided_by_user_id: NumericIdSchema.nullable(),
+  created_by_user_id: NumericIdSchema.nullable(),
+  updated_by_user_id: NumericIdSchema.nullable(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+  lines: z.array(PurchaseInvoiceLineResponseSchema).optional(),
+  supplier_name: z.string().trim().nullable().optional()
+});
+
+// Type exports for purchase invoices
+export type PurchaseInvoiceCreate = z.infer<typeof PurchaseInvoiceCreateSchema>;
+export type PurchaseInvoiceListQuery = z.infer<typeof PurchaseInvoiceListQuerySchema>;
+export type PurchaseInvoiceResponse = z.infer<typeof PurchaseInvoiceResponseSchema>;
+export type PurchaseInvoiceLine = z.infer<typeof PurchaseInvoiceLineSchema>;
+export type PurchaseInvoiceLineResponse = z.infer<typeof PurchaseInvoiceLineResponseSchema>;

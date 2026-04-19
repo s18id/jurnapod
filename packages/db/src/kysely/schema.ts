@@ -1454,6 +1454,50 @@ export interface SupplierContacts {
   updated_at: Generated<Date>;
 }
 
+export interface PurchaseInvoiceLines {
+  company_id: number;
+  created_at: Generated<Date>;
+  description: string;
+  id: Generated<number>;
+  invoice_id: number;
+  item_id: Generated<number | null>;
+  line_no: number;
+  line_total: Decimal;
+  line_type: Generated<string>;
+  po_line_id: Generated<number | null>;
+  qty: Decimal;
+  tax_amount: Generated<Decimal>;
+  tax_rate_id: Generated<number | null>;
+  unit_price: Decimal;
+  updated_at: Generated<Date>;
+}
+
+export interface PurchaseInvoices {
+  company_id: number;
+  created_at: Generated<Date>;
+  created_by_user_id: Generated<number | null>;
+  currency_code: Generated<string>;
+  due_date: Generated<Date | null>;
+  exchange_rate: Generated<Decimal>;
+  grand_total: Generated<Decimal>;
+  id: Generated<number>;
+  invoice_date: Date;
+  invoice_no: string;
+  journal_batch_id: Generated<number | null>;
+  notes: Generated<string | null>;
+  posted_at: Generated<Date | null>;
+  posted_by_user_id: Generated<number | null>;
+  reference_number: Generated<string | null>;
+  status: Generated<number>;
+  subtotal: Generated<Decimal>;
+  supplier_id: number;
+  tax_amount: Generated<Decimal>;
+  updated_at: Generated<Date>;
+  updated_by_user_id: Generated<number | null>;
+  voided_at: Generated<Date | null>;
+  voided_by_user_id: Generated<number | null>;
+}
+
 export interface PurchaseOrderLines {
   company_id: number;
   created_at: Generated<Date>;
@@ -1807,6 +1851,8 @@ export interface DB {
   payment_method_mappings: PaymentMethodMappings;
   platform_settings: PlatformSettings;
   pos_item_cancellations: PosItemCancellations;
+  purchase_invoice_lines: PurchaseInvoiceLines;
+  purchase_invoices: PurchaseInvoices;
   purchase_order_lines: PurchaseOrderLines;
   purchase_orders: PurchaseOrders;
   pos_order_snapshot_lines: PosOrderSnapshotLines;

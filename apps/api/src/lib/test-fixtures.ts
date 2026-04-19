@@ -360,6 +360,23 @@ export async function createTestCompanyMinimal(
       WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
     `.execute(db);
 
+    // Also seed purchasing.invoices ACL
+    await sql`
+      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
+      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing', 'invoices',
+        CASE r.code
+          WHEN 'SUPER_ADMIN' THEN 63
+          WHEN 'OWNER' THEN 63
+          WHEN 'COMPANY_ADMIN' THEN 63
+          WHEN 'ADMIN' THEN 31
+          WHEN 'ACCOUNTANT' THEN 31
+          WHEN 'CASHIER' THEN 0
+          ELSE 0
+        END as permission_mask
+      FROM roles r
+      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
+    `.execute(db);
+
     createdFixtures.companies.push(company);
     return company;
   } catch (error: unknown) {
@@ -676,6 +693,136 @@ export async function createTestCustomerForCompany(
     .executeTakeFirst();
 
   return Number(result.insertId);
+}
+
+// ============================================================================
+// Supplier Fixtures
+// ============================================================================
+
+export type SupplierFixture = {
+  id: number;
+  company_id: number;
+  code: string;
+  name: string;
+};
+
+/**
+ * Create a test supplier directly via DB (no API call needed).
+ * Used for purchasing tests that need a valid supplier_id.
+ *
+ * @param companyId - Parent company ID
+ * @param options - Partial supplier options
+ * @returns Supplier fixture with id, company_id, code, name
+ */
+export async function createTestSupplier(
+  companyId: number,
+  options?: Partial<{
+    code: string;
+    name: string;
+    currency: string;
+    isActive: boolean;
+  }>
+): Promise<SupplierFixture> {
+  const db = getDb();
+  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+
+  const code = options?.code ?? `TEST-SUP-${runId}`.slice(0, 20).toUpperCase();
+  const name = options?.name ?? `Test Supplier ${runId}`;
+  const currency = options?.currency ?? "IDR";
+
+  try {
+    await sql`
+      INSERT INTO suppliers (company_id, code, name, currency, is_active, created_at, updated_at)
+      VALUES (${companyId}, ${code}, ${name}, ${currency}, ${options?.isActive ?? 1}, NOW(), NOW())
+    `.execute(db);
+
+    const result = await sql`SELECT id, company_id, code, name FROM suppliers WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
+    if (result.rows.length === 0) {
+      throw new Error(`Failed to create supplier with code ${code}`);
+    }
+    const row = result.rows[0] as { id: number; company_id: number; code: string; name: string };
+    const supplier: SupplierFixture = {
+      id: Number(row.id),
+      company_id: Number(row.company_id),
+      code: row.code,
+      name: row.name,
+    };
+    return supplier;
+  } catch (error: unknown) {
+    // Handle duplicate - fetch existing
+    const mysqlErr = error as { code?: string };
+    if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
+      const result = await sql`SELECT id, company_id, code, name FROM suppliers WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
+      if (result.rows.length > 0) {
+        const row = result.rows[0] as { id: number; company_id: number; code: string; name: string };
+        return {
+          id: Number(row.id),
+          company_id: Number(row.company_id),
+          code: row.code,
+          name: row.name,
+        };
+      }
+    }
+    throw error;
+  }
+}
+
+/**
+ * Create test accounts needed for purchasing (AP and expense).
+ * Uses the accounts service to create proper account records.
+ *
+ * @param companyId - Parent company ID
+ * @param options - Partial account options
+ * @returns Object with ap_account_id and expense_account_id
+ */
+export async function createTestPurchasingAccounts(
+  companyId: number,
+  options?: Partial<{
+    apAccountName: string;
+    expenseAccountName: string;
+  }>
+): Promise<{ ap_account_id: number; expense_account_id: number }> {
+  const db = getDb();
+  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+
+  // Find the purchasing module id
+  const purchasingModuleResult = await sql`SELECT id FROM modules WHERE code = 'purchasing' LIMIT 1`.execute(db);
+  if (purchasingModuleResult.rows.length === 0) {
+    throw new Error('Purchasing module not found');
+  }
+  const purchasingModuleId = Number((purchasingModuleResult.rows[0] as { id: number }).id);
+
+  // Create AP account (creditor/payable type)
+  const apAccountCode = `TEST-AP-${runId}`.slice(0, 20);
+  const apAccountName = options?.apAccountName ?? `Test AP Account ${runId}`;
+
+  const apResult = await sql`
+    INSERT INTO accounts (company_id, code, name, type_name, is_active, is_payable, created_at, updated_at)
+    VALUES (${companyId}, ${apAccountCode}, ${apAccountName}, 'CREDITOR', 1, 1, NOW(), NOW())
+  `.execute(db);
+  const apAccountId = Number((apResult as any).insertId);
+
+  // Create Expense account
+  const expenseAccountCode = `TEST-EXP-${runId}`.slice(0, 20);
+  const expenseAccountName = options?.expenseAccountName ?? `Test Expense Account ${runId}`;
+
+  const expenseResult = await sql`
+    INSERT INTO accounts (company_id, code, name, type_name, is_active, is_payable, created_at, updated_at)
+    VALUES (${companyId}, ${expenseAccountCode}, ${expenseAccountName}, 'EXPENSE', 1, 0, NOW(), NOW())
+  `.execute(db);
+  const expenseAccountId = Number((expenseResult as any).insertId);
+
+  // Upsert company_modules entry for purchasing with the AP and expense accounts
+  await sql`
+    INSERT INTO company_modules (company_id, module_id, enabled, config_json, updated_at,
+      purchasing_default_ap_account_id, purchasing_default_expense_account_id)
+    VALUES (${companyId}, ${purchasingModuleId}, 1, '{}', CURRENT_TIMESTAMP, ${apAccountId}, ${expenseAccountId})
+    ON DUPLICATE KEY UPDATE
+      purchasing_default_ap_account_id = ${apAccountId},
+      purchasing_default_expense_account_id = ${expenseAccountId}
+  `.execute(db);
+
+  return { ap_account_id: apAccountId, expense_account_id: expenseAccountId };
 }
 
 // ============================================================================
