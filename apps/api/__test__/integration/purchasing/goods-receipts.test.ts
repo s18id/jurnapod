@@ -14,6 +14,7 @@ import {
   getSeedSyncContext,
   getOrCreateTestCashierForPermission,
   createTestItem,
+  createTestSupplier,
 } from '../../fixtures';
 
 let baseUrl: string;
@@ -517,19 +518,12 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     });
 
     // Try to create GR with supplier_id = 2 (different supplier)
-    const db = getTestDb();
-    // First create supplier 2 if not exists
-    const supplier2IdResult = await sql<{ id: number }>`
-      SELECT id FROM suppliers WHERE company_id = ${cashierCompanyId} AND id != 1 LIMIT 1
-    `.execute(db);
-    let supplier2Id = supplier2IdResult.rows[0]?.id;
-    if (!supplier2Id) {
-      const insertResult = await sql`
-        INSERT INTO suppliers (company_id, code, name, currency)
-        VALUES (${cashierCompanyId}, 'SUP-${Date.now()}', 'Test Supplier 2', 'IDR')
-      `.execute(db);
-      supplier2Id = Number((insertResult as any).insertId);
-    }
+    const supplier2 = await createTestSupplier(cashierCompanyId, {
+      code: `SUP-${Date.now()}`.slice(0, 20),
+      name: 'Test Supplier 2',
+      currency: 'IDR',
+    });
+    const supplier2Id = supplier2.id;
 
     const grRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {
       method: 'POST',

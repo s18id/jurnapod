@@ -10,7 +10,6 @@ import { closeTestDb, getTestDb } from '../../helpers/db';
 import { sql } from 'kysely';
 import {
   resetFixtureRegistry,
-  getSeedSyncContext,
   getOrCreateTestCashierForPermission,
   createTestCompanyMinimal,
   createTestUser,
@@ -32,10 +31,6 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
 
-    // Use seeded sync context for authentication and company setup
-    const seedContext = await getSeedSyncContext();
-    testCompanyId = seedContext.companyId;
-
     // We need an OWNER token that has purchasing.invoices permissions
     // The seeded company may not have this ACL, so we need to set it up
     // Get the owner user from seeded context and ensure proper ACL
@@ -43,6 +38,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
     // First, create a test company with proper ACL seeding
     // This ensures purchasing.invoices ACL is seeded for all roles
     const testCompany = await createTestCompanyMinimal();
+    testCompanyId = testCompany.id;
 
     // Create an OWNER user with known password
     const testEmail = `pi-owner-${Date.now()}@example.com`;
@@ -58,6 +54,9 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
 
     // Set purchasing.invoices CRUDAM (63) for OWNER role
     await setModulePermission(testCompany.id, ownerRoleId, 'purchasing', 'invoices', 63, { allowSystemRoleMutation: true });
+
+    // Set purchasing.exchange_rates CRUDAM (63) for OWNER role — needed for FX regression test
+    await setModulePermission(testCompany.id, ownerRoleId, 'purchasing', 'exchange_rates', 63, { allowSystemRoleMutation: true });
 
     // Create a supplier for this test company
     const supplier = await createTestSupplier(testCompany.id, {
@@ -96,6 +95,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
       await sql`DELETE FROM purchase_invoices WHERE company_id = ${testCompanyId}`.execute(db);
       await sql`DELETE FROM journal_lines WHERE company_id = ${testCompanyId}`.execute(db);
       await sql`DELETE FROM journal_batches WHERE company_id = ${testCompanyId}`.execute(db);
+      await sql`DELETE FROM exchange_rates WHERE company_id = ${testCompanyId}`.execute(db);
     } catch (e) {
       // ignore cleanup errors
     }
@@ -370,6 +370,119 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
     const postBody = await postRes.json();
     expect(postBody.success).toBe(false);
     expect(postBody.error.code).toBe('EXCHANGE_RATE_MISSING');
+  });
+
+  // -------------------------------------------------------------------------
+  // Regression: monetary conversion formula (E46-A1)
+  // Catches P0 bug: dividing by rate instead of multiplying.
+  // Formula: base_amount = original_amount * exchange_rate
+  // -------------------------------------------------------------------------
+  it('posts PI with non-IDR currency and verifies base amount = original * rate', async () => {
+    const db = getTestDb();
+
+    // 1. Create exchange rate via API for test company: 1 USD = 15000 IDR
+    const fxDate = `2026-04-${(10 + (Date.now() % 15)).toString().padStart(2, '0')}`;
+    const createRateRes = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        company_id: testCompanyId,
+        currency_code: 'USD',
+        rate: '15000.00000000',
+        effective_date: fxDate,
+      })
+    });
+    expect(createRateRes.status).toBe(201);
+
+    // 2. Create a PI in USD: qty=2, unit_price=100 USD -> line_total = 200 USD
+    const invoiceNo = `PI-FX-${Date.now() % 100000}`;
+    const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        supplier_id: testSupplierId,
+        invoice_no: invoiceNo,
+        invoice_date: fxDate,
+        currency_code: 'USD',
+        exchange_rate: '15000.00000000',
+        lines: [
+          { description: 'FX regression line', qty: '2', unit_price: '100.0000', line_type: 'SERVICE' }
+        ]
+      })
+    });
+    expect(createRes.status).toBe(201);
+    const created = await createRes.json();
+    const piId = created.data.id;
+    // original line_total = 200.0000 USD, grand_total = 200.0000 USD
+    expect(created.data.subtotal).toBe('200.0000');
+    expect(created.data.grand_total).toBe('200.0000');
+
+    // 3. Post the PI
+    const postRes = await fetch(`${baseUrl}/api/purchasing/invoices/${piId}/post`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    expect(postRes.status).toBe(200);
+    const postBody = await postRes.json();
+    const batchId = postBody.data.journal_batch_id;
+    expect(batchId).toBeDefined();
+    expect(batchId).toBeGreaterThan(0);
+
+    // 4. Verify: base_amount = original_amount * exchange_rate
+    // 200 USD * 15000 = 3,000,000 IDR
+    const journalLines = await sql`
+      SELECT account_id, debit, credit, description
+      FROM journal_lines
+      WHERE journal_batch_id = ${batchId}
+        AND company_id = ${testCompanyId}
+      ORDER BY debit DESC, credit DESC
+    `.execute(db);
+
+    expect(journalLines.rows.length).toBeGreaterThan(0);
+
+    // Sum all debits — must equal 200 * 15000 = 3,000,000
+    const toScaledBigInt = (value: string, scale = 4): bigint => {
+      const negative = value.startsWith('-');
+      const normalized = negative ? value.slice(1) : value;
+      const [integerPart, fractionalRaw = ''] = normalized.split('.');
+      const fractional = `${fractionalRaw}${'0'.repeat(scale)}`.slice(0, scale);
+      const scaled = BigInt(`${integerPart || '0'}${fractional}`);
+      return negative ? -scaled : scaled;
+    };
+
+    let totalDebitsScaled = 0n;
+    let totalCreditsScaled = 0n;
+    for (const line of journalLines.rows as Array<{ debit: string; credit: string }>) {
+      totalDebitsScaled += toScaledBigInt(line.debit, 4);
+      totalCreditsScaled += toScaledBigInt(line.credit, 4);
+    }
+
+    // Expected: 200 * 15000 = 3,000,000 → scaled by 10000 = 30,000,000,000
+    const expectedScaled = BigInt('2000000') * BigInt('150000000') / 10000n;
+    expect(totalDebitsScaled).toBe(expectedScaled);
+    expect(totalDebitsScaled).toBe(totalCreditsScaled); // journal balanced
+
+    // 5. Also verify via PI record that exchange_rate was saved correctly
+    const getRes = await fetch(`${baseUrl}/api/purchasing/invoices/${piId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    expect(getRes.status).toBe(200);
+    const getBody = await getRes.json();
+    expect(getBody.data.exchange_rate).toBe('15000.00000000');
+    expect(getBody.data.status).toBe('POSTED');
   });
 
   // -------------------------------------------------------------------------

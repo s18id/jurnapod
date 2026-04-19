@@ -878,6 +878,41 @@ export async function createTestPurchasingAccounts(
 }
 
 /**
+ * Configure purchasing module settings for a company.
+ *
+ * Sets `purchasing_default_ap_account_id` and `purchasing_default_expense_account_id`
+ * on `company_modules` for the purchasing module.
+ */
+export async function createTestPurchasingSettings(
+  companyId: number,
+  apAccountId: number,
+  expenseAccountId: number
+): Promise<{ company_id: number; ap_account_id: number; expense_account_id: number }> {
+  const db = getDb();
+
+  const purchasingModuleResult = await sql`SELECT id FROM modules WHERE code = 'purchasing' LIMIT 1`.execute(db);
+  if (purchasingModuleResult.rows.length === 0) {
+    throw new Error('Purchasing module not found');
+  }
+  const purchasingModuleId = Number((purchasingModuleResult.rows[0] as { id: number }).id);
+
+  await sql`
+    INSERT INTO company_modules (company_id, module_id, enabled, config_json, updated_at,
+      purchasing_default_ap_account_id, purchasing_default_expense_account_id)
+    VALUES (${companyId}, ${purchasingModuleId}, 1, '{}', CURRENT_TIMESTAMP, ${apAccountId}, ${expenseAccountId})
+    ON DUPLICATE KEY UPDATE
+      purchasing_default_ap_account_id = ${apAccountId},
+      purchasing_default_expense_account_id = ${expenseAccountId}
+  `.execute(db);
+
+  return {
+    company_id: companyId,
+    ap_account_id: apAccountId,
+    expense_account_id: expenseAccountId,
+  };
+}
+
+/**
  * Create a test BANK/CASH account for AP payment scenarios.
  */
 export async function createTestBankAccount(
@@ -1151,6 +1186,443 @@ export async function setTestItemLowStockThreshold(
         .execute();
     });
   });
+}
+
+// ============================================================================
+// Fiscal Year Fixtures (Epic 47 - AP Reconciliation)
+// ============================================================================
+
+export type FiscalYearFixture = {
+  id: number;
+  company_id: number;
+  year: number;
+  startDate: string;
+  endDate: string;
+  status: "OPEN" | "CLOSED";
+};
+
+/**
+ * Create a test fiscal year for Epic 47 (cutoff date handling, period close guardrails).
+ * Story linkage: 47.1 (cutoff date handling), 47.5 (period close guardrails).
+ *
+ * @param companyId - Parent company ID
+ * @param options - Fiscal year options
+ * @param options.year - Fiscal year number (e.g., 2026)
+ * @param options.startDate - Start date in 'YYYY-MM-DD' format
+ * @param options.endDate - End date in 'YYYY-MM-DD' format
+ * @param options.status - 'OPEN' | 'CLOSED' (default: 'OPEN')
+ * @returns Fiscal year fixture with id, year, startDate, endDate, status
+ */
+export async function createTestFiscalYear(
+  companyId: number,
+  options?: Partial<{
+    year: number;
+    startDate: string;
+    endDate: string;
+    status: "OPEN" | "CLOSED";
+  }>
+): Promise<FiscalYearFixture> {
+  const db = getDb();
+  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+
+  const year = options?.year ?? new Date().getFullYear();
+  const code = `FY${year}-${runId}`.slice(0, 32);
+  const name = `Fiscal Year ${year}`;
+  const startDate = options?.startDate ?? `${year}-01-01`;
+  const endDate = options?.endDate ?? `${year}-12-31`;
+  const status = options?.status ?? "OPEN";
+
+  try {
+    await sql`
+      INSERT INTO fiscal_years (company_id, code, name, start_date, end_date, status, created_at, updated_at)
+      VALUES (${companyId}, ${code}, ${name}, ${startDate}, ${endDate}, ${status}, NOW(), NOW())
+    `.execute(db);
+
+    const result = await sql`SELECT id, code, name, start_date, end_date, status FROM fiscal_years WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
+    if (result.rows.length === 0) {
+      throw new Error(`Failed to create fiscal year with code ${code}`);
+    }
+    const row = result.rows[0] as { id: number; code: string; name: string; start_date: Date; end_date: Date; status: string };
+    const fixture: FiscalYearFixture = {
+      id: Number(row.id),
+      company_id: companyId,
+      year,
+      startDate: row.start_date instanceof Date ? row.start_date.toISOString().split("T")[0] : String(row.start_date),
+      endDate: row.end_date instanceof Date ? row.end_date.toISOString().split("T")[0] : String(row.end_date),
+      status: row.status as "OPEN" | "CLOSED",
+    };
+    return fixture;
+  } catch (error: unknown) {
+    const mysqlErr = error as { code?: string };
+    if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
+      const result = await sql`SELECT id, code, name, start_date, end_date, status FROM fiscal_years WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
+      if (result.rows.length > 0) {
+        const row = result.rows[0] as { id: number; code: string; name: string; start_date: Date; end_date: Date; status: string };
+        return {
+          id: Number(row.id),
+          company_id: companyId,
+          year,
+          startDate: row.start_date instanceof Date ? row.start_date.toISOString().split("T")[0] : String(row.start_date),
+          endDate: row.end_date instanceof Date ? row.end_date.toISOString().split("T")[0] : String(row.end_date),
+          status: row.status as "OPEN" | "CLOSED",
+        };
+      }
+    }
+    throw error;
+  }
+}
+
+// ============================================================================
+// Fiscal Period Fixtures (Epic 47)
+// ============================================================================
+
+export type FiscalPeriodFixture = {
+  id: number;
+  fiscalYearId: number;
+  periodNumber: number;
+  startDate: string;
+  endDate: string;
+  status: "OPEN" | "CLOSED";
+};
+
+/**
+ * Create a test fiscal period for Epic 47 (cutoff date handling, period close guardrails).
+ * Story linkage: 47.1 (cutoff date handling), 47.5 (period close guardrails).
+ *
+ * NOTE: fiscal_periods table does not exist yet. This fixture will fail until migration 0180
+ * (or similar) creates the table. Schema gap documented in Epic 47 story spec.
+ *
+ * @param fiscalYearId - Parent fiscal year ID
+ * @param options - Period options
+ * @param options.periodNumber - Period within fiscal year (1-12)
+ * @param options.startDate - Start date in 'YYYY-MM-DD' format
+ * @param options.endDate - End date in 'YYYY-MM-DD' format
+ * @param options.status - 'OPEN' | 'CLOSED' (default: 'OPEN')
+ * @returns Fiscal period fixture with id, fiscalYearId, periodNumber, startDate, endDate, status
+ */
+export async function createTestFiscalPeriod(
+  fiscalYearId: number,
+  options?: Partial<{
+    periodNumber: number;
+    startDate: string;
+    endDate: string;
+    status: "OPEN" | "CLOSED";
+  }>
+): Promise<FiscalPeriodFixture> {
+  const db = getDb();
+
+  // Check if fiscal_periods table exists before attempting insert
+  const tableCheck = await sql`SELECT COUNT(*) as cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'fiscal_periods'`.execute(db);
+  const tableExists = Number((tableCheck.rows[0] as { cnt: number }).cnt) > 0;
+
+  if (!tableExists) {
+    throw new Error(
+      "fiscal_periods table does not exist. Schema gap: Story 47.1/47.5 requires a fiscal_periods table " +
+      "(typically: id, fiscal_year_id, period_number, start_date, end_date, status). " +
+      "This fixture will work once migration 0180 (or similar) creates the table."
+    );
+  }
+
+  const periodNumber = options?.periodNumber ?? 1;
+  // Derive default dates from fiscal year if not provided
+  const fyResult = await sql`SELECT start_date, end_date FROM fiscal_years WHERE id = ${fiscalYearId} LIMIT 1`.execute(db);
+  let startDate = options?.startDate ?? "2026-01-01";
+  let endDate = options?.endDate ?? "2026-01-31";
+
+  if (fyResult.rows.length > 0) {
+    const fyRow = fyResult.rows[0] as { start_date: Date; end_date: Date };
+    if (!options?.startDate) {
+      startDate = fyRow.start_date instanceof Date ? fyRow.start_date.toISOString().split("T")[0] : String(fyRow.start_date);
+    }
+    if (!options?.endDate) {
+      endDate = fyRow.end_date instanceof Date ? fyRow.end_date.toISOString().split("T")[0] : String(fyRow.end_date);
+    }
+  }
+
+  const status = options?.status ?? "OPEN";
+
+  try {
+    await sql`
+      INSERT INTO fiscal_periods (fiscal_year_id, period_number, start_date, end_date, status, created_at, updated_at)
+      VALUES (${fiscalYearId}, ${periodNumber}, ${startDate}, ${endDate}, ${status}, NOW(), NOW())
+    `.execute(db);
+
+    const result = await sql`SELECT id, fiscal_year_id, period_number, start_date, end_date, status FROM fiscal_periods WHERE fiscal_year_id = ${fiscalYearId} AND period_number = ${periodNumber} LIMIT 1`.execute(db);
+    if (result.rows.length === 0) {
+      throw new Error(`Failed to create fiscal period for fiscal_year_id ${fiscalYearId}`);
+    }
+    const row = result.rows[0] as { id: number; fiscal_year_id: number; period_number: number; start_date: Date; end_date: Date; status: string };
+    const fixture: FiscalPeriodFixture = {
+      id: Number(row.id),
+      fiscalYearId: Number(row.fiscal_year_id),
+      periodNumber: Number(row.period_number),
+      startDate: row.start_date instanceof Date ? row.start_date.toISOString().split("T")[0] : String(row.start_date),
+      endDate: row.end_date instanceof Date ? row.end_date.toISOString().split("T")[0] : String(row.end_date),
+      status: row.status as "OPEN" | "CLOSED",
+    };
+    return fixture;
+  } catch (error: unknown) {
+    const mysqlErr = error as { code?: string };
+    if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
+      const result = await sql`SELECT id, fiscal_year_id, period_number, start_date, end_date, status FROM fiscal_periods WHERE fiscal_year_id = ${fiscalYearId} AND period_number = ${periodNumber} LIMIT 1`.execute(db);
+      if (result.rows.length > 0) {
+        const row = result.rows[0] as { id: number; fiscal_year_id: number; period_number: number; start_date: Date; end_date: Date; status: string };
+        return {
+          id: Number(row.id),
+          fiscalYearId: Number(row.fiscal_year_id),
+          periodNumber: Number(row.period_number),
+          startDate: row.start_date instanceof Date ? row.start_date.toISOString().split("T")[0] : String(row.start_date),
+          endDate: row.end_date instanceof Date ? row.end_date.toISOString().split("T")[0] : String(row.end_date),
+          status: row.status as "OPEN" | "CLOSED",
+        };
+      }
+    }
+    throw error;
+  }
+}
+
+// ============================================================================
+// AP Reconciliation Settings Fixtures (Epic 47.1)
+// ============================================================================
+
+export type APReconciliationSettingsFixture = {
+  companyId: number;
+  accountIds: number[];
+};
+
+/**
+ * Create AP reconciliation account settings for Epic 47.1 (configurable AP control account set).
+ * Story linkage: 47.1 AC1 - configurable AP control account set (not hardcoded single account).
+ *
+ * Implementation uses settings_strings table with JSON array storage.
+ * Key: 'ap_reconciliation_account_ids', Value: JSON array of account IDs.
+ * This approach supports multiple AP control accounts as required by the story spec.
+ *
+ * @param companyId - Company ID
+ * @param accountIds - Array of GL account IDs that form the AP control account set
+ * @param options - Optional settings
+ * @param options.description - Optional description (stored in settings_strings as metadata)
+ * @returns AP reconciliation settings fixture with companyId and accountIds
+ */
+export async function createTestAPReconciliationSettings(
+  companyId: number,
+  accountIds: number[],
+  options?: Partial<{
+    description: string;
+  }>
+): Promise<APReconciliationSettingsFixture> {
+  const db = getDb();
+  const settingKey = "ap_reconciliation_account_ids";
+  const settingValue = JSON.stringify(accountIds);
+
+  // Upsert into settings_strings
+  await sql`
+    INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value, created_at, updated_at)
+    VALUES (${companyId}, NULL, ${settingKey}, ${settingValue}, NOW(), NOW())
+    ON DUPLICATE KEY UPDATE setting_value = ${settingValue}, updated_at = NOW()
+  `.execute(db);
+
+  return {
+    companyId,
+    accountIds,
+  };
+}
+
+// ============================================================================
+// Supplier Statement Fixtures (Epic 47.3)
+// ============================================================================
+
+export type SupplierStatementFixture = {
+  id: number;
+  companyId: number;
+  supplierId: number;
+  statementDate: string;
+  closingBalance: string;
+  currency: string;
+};
+
+/**
+ * Create a test supplier statement for Epic 47.3 (manual supplier statement entry).
+ * Story linkage: 47.3 - manual supplier statement entry.
+ *
+ * NOTE: supplier_statements table does not exist yet. This fixture will fail until
+ * a migration creates the table. Schema gap documented in Epic 47 story spec.
+ *
+ * @param companyId - Company ID
+ * @param supplierId - Supplier ID
+ * @param options - Statement options
+ * @param options.statementDate - Statement date in 'YYYY-MM-DD' format
+ * @param options.closingBalance - Closing balance as string decimal (e.g., '1500.00')
+ * @param options.currency - ISO currency code (default: 'IDR')
+ * @returns Supplier statement fixture with id, companyId, supplierId, statementDate, closingBalance, currency
+ */
+export async function createTestSupplierStatement(
+  companyId: number,
+  supplierId: number,
+  options?: Partial<{
+    statementDate: string;
+    closingBalance: string;
+    currency: string;
+  }>
+): Promise<SupplierStatementFixture> {
+  const db = getDb();
+
+  // Check if supplier_statements table exists before attempting insert
+  const tableCheck = await sql`SELECT COUNT(*) as cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'supplier_statements'`.execute(db);
+  const tableExists = Number((tableCheck.rows[0] as { cnt: number }).cnt) > 0;
+
+  if (!tableExists) {
+    throw new Error(
+      "supplier_statements table does not exist. Schema gap: Story 47.3 requires a supplier_statements table " +
+      "(typically: id, company_id, supplier_id, statement_date, closing_balance, currency). " +
+      "This fixture will work once a migration creates the table."
+    );
+  }
+
+  const statementDate = options?.statementDate ?? new Date().toISOString().split("T")[0];
+  const closingBalance = options?.closingBalance ?? "0.00";
+  const currency = options?.currency ?? "IDR";
+
+  try {
+    await sql`
+      INSERT INTO supplier_statements (company_id, supplier_id, statement_date, closing_balance, currency, created_at, updated_at)
+      VALUES (${companyId}, ${supplierId}, ${statementDate}, ${closingBalance}, ${currency}, NOW(), NOW())
+    `.execute(db);
+
+    const result = await sql`SELECT id, company_id, supplier_id, statement_date, closing_balance, currency FROM supplier_statements WHERE company_id = ${companyId} AND supplier_id = ${supplierId} ORDER BY id DESC LIMIT 1`.execute(db);
+    if (result.rows.length === 0) {
+      throw new Error(`Failed to create supplier statement for supplier ${supplierId}`);
+    }
+    const row = result.rows[0] as { id: number; company_id: number; supplier_id: number; statement_date: Date; closing_balance: string; currency: string };
+    const fixture: SupplierStatementFixture = {
+      id: Number(row.id),
+      companyId: Number(row.company_id),
+      supplierId: Number(row.supplier_id),
+      statementDate: row.statement_date instanceof Date ? row.statement_date.toISOString().split("T")[0] : String(row.statement_date),
+      closingBalance: String(row.closing_balance),
+      currency: String(row.currency),
+    };
+    return fixture;
+  } catch (error: unknown) {
+    const mysqlErr = error as { code?: string };
+    if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
+      const result = await sql`SELECT id, company_id, supplier_id, statement_date, closing_balance, currency FROM supplier_statements WHERE company_id = ${companyId} AND supplier_id = ${supplierId} ORDER BY id DESC LIMIT 1`.execute(db);
+      if (result.rows.length > 0) {
+        const row = result.rows[0] as { id: number; company_id: number; supplier_id: number; statement_date: Date; closing_balance: string; currency: string };
+        return {
+          id: Number(row.id),
+          companyId: Number(row.company_id),
+          supplierId: Number(row.supplier_id),
+          statementDate: row.statement_date instanceof Date ? row.statement_date.toISOString().split("T")[0] : String(row.statement_date),
+          closingBalance: String(row.closing_balance),
+          currency: String(row.currency),
+        };
+      }
+    }
+    throw error;
+  }
+}
+
+// ============================================================================
+// AP Exception Fixtures (Epic 47.4)
+// ============================================================================
+
+export type APExceptionFixture = {
+  id: number;
+  companyId: number;
+  supplierId: number | null;
+  exceptionType: "MISMATCH" | "OVER_LIMIT" | "UNRECONCILED";
+  amount: string;
+  currency: string;
+  status: "OPEN" | "RESOLVED";
+};
+
+/**
+ * Create a test AP exception for Epic 47.4 (AP exception worklist).
+ * Story linkage: 47.4 - AP exception worklist.
+ *
+ * NOTE: ap_exceptions table does not exist yet. This fixture will fail until
+ * a migration creates the table. Schema gap documented in Epic 47 story spec.
+ *
+ * @param companyId - Company ID
+ * @param options - Exception options
+ * @param options.supplierId - Optional supplier ID
+ * @param options.exceptionType - Exception type: 'MISMATCH' | 'OVER_LIMIT' | 'UNRECONCILED' (default: 'UNRECONCILED')
+ * @param options.amount - Amount as string decimal
+ * @param options.currency - ISO currency code (default: 'IDR')
+ * @param options.status - 'OPEN' | 'RESOLVED' (default: 'OPEN')
+ * @returns AP exception fixture with id, companyId, exceptionType, amount, status
+ */
+export async function createTestAPException(
+  companyId: number,
+  options?: Partial<{
+    supplierId: number;
+    exceptionType: "MISMATCH" | "OVER_LIMIT" | "UNRECONCILED";
+    amount: string;
+    currency: string;
+    status: "OPEN" | "RESOLVED";
+  }>
+): Promise<APExceptionFixture> {
+  const db = getDb();
+
+  // Check if ap_exceptions table exists before attempting insert
+  const tableCheck = await sql`SELECT COUNT(*) as cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'ap_exceptions'`.execute(db);
+  const tableExists = Number((tableCheck.rows[0] as { cnt: number }).cnt) > 0;
+
+  if (!tableExists) {
+    throw new Error(
+      "ap_exceptions table does not exist. Schema gap: Story 47.4 requires an ap_exceptions table " +
+      "(typically: id, company_id, supplier_id, exception_type, amount, currency, status). " +
+      "This fixture will work once a migration creates the table."
+    );
+  }
+
+  const supplierId = options?.supplierId ?? null;
+  const exceptionType = options?.exceptionType ?? "UNRECONCILED";
+  const amount = options?.amount ?? "0.00";
+  const currency = options?.currency ?? "IDR";
+  const status = options?.status ?? "OPEN";
+
+  try {
+    await sql`
+      INSERT INTO ap_exceptions (company_id, supplier_id, exception_type, amount, currency, status, created_at, updated_at)
+      VALUES (${companyId}, ${supplierId}, ${exceptionType}, ${amount}, ${currency}, ${status}, NOW(), NOW())
+    `.execute(db);
+
+    const result = await sql`SELECT id, company_id, supplier_id, exception_type, amount, currency, status FROM ap_exceptions WHERE company_id = ${companyId} ORDER BY id DESC LIMIT 1`.execute(db);
+    if (result.rows.length === 0) {
+      throw new Error(`Failed to create AP exception for company ${companyId}`);
+    }
+    const row = result.rows[0] as { id: number; company_id: number; supplier_id: number | null; exception_type: string; amount: string; currency: string; status: string };
+    const fixture: APExceptionFixture = {
+      id: Number(row.id),
+      companyId: Number(row.company_id),
+      supplierId: row.supplier_id !== null ? Number(row.supplier_id) : null,
+      exceptionType: row.exception_type as "MISMATCH" | "OVER_LIMIT" | "UNRECONCILED",
+      amount: String(row.amount),
+      currency: String(row.currency),
+      status: row.status as "OPEN" | "RESOLVED",
+    };
+    return fixture;
+  } catch (error: unknown) {
+    const mysqlErr = error as { code?: string };
+    if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
+      const result = await sql`SELECT id, company_id, supplier_id, exception_type, amount, currency, status FROM ap_exceptions WHERE company_id = ${companyId} ORDER BY id DESC LIMIT 1`.execute(db);
+      if (result.rows.length > 0) {
+        const row = result.rows[0] as { id: number; company_id: number; supplier_id: number | null; exception_type: string; amount: string; currency: string; status: string };
+        return {
+          id: Number(row.id),
+          companyId: Number(row.company_id),
+          supplierId: row.supplier_id !== null ? Number(row.supplier_id) : null,
+          exceptionType: row.exception_type as "MISMATCH" | "OVER_LIMIT" | "UNRECONCILED",
+          amount: String(row.amount),
+          currency: String(row.currency),
+          status: row.status as "OPEN" | "RESOLVED",
+        };
+      }
+    }
+    throw error;
+  }
 }
 
 // ============================================================================

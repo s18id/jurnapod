@@ -19,6 +19,7 @@ import {
   createTestSupplier,
   createTestPurchasingAccounts,
   getOrCreateTestCashierForPermission,
+  createTestBankAccount,
 } from '../../fixtures';
 
 let baseUrl: string;
@@ -34,28 +35,6 @@ let postedPi2Id: number;  // PI for full payment tests
 let postedPi3Id: number;  // PI for multi-line payment tests
 
 describe('purchasing.ap-payments', { timeout: 30000 }, () => {
-  async function createBankOrCashAccount(
-    companyId: number,
-    options?: { typeName?: string; isActive?: number }
-  ): Promise<number> {
-    const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-    const code = `TEST-BA-${runId}`.slice(0, 20);
-    const result = await sql`
-      INSERT INTO accounts (company_id, code, name, type_name, is_active, is_payable, created_at, updated_at)
-      VALUES (
-        ${companyId},
-        ${code},
-        ${`Test ${options?.typeName ?? 'BANK'} Account ${runId}`},
-        ${options?.typeName ?? 'BANK'},
-        ${options?.isActive ?? 1},
-        0,
-        NOW(),
-        NOW()
-      )
-    `.execute(getTestDb());
-    return Number((result as any).insertId);
-  }
-
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
 
@@ -92,7 +71,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
     expenseAccountId = accounts.expense_account_id;
 
     // Create a bank account for payments
-    bankAccountId = await createBankOrCashAccount(testCompanyId, { typeName: 'BANK', isActive: 1 });
+    bankAccountId = await createTestBankAccount(testCompanyId, { typeName: 'BANK', isActive: true });
 
     // Login with known password to get token
     ownerToken = await loginForTest(baseUrl, testCompany.code, testEmail, 'TestPassword123!');
@@ -820,7 +799,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
   });
 
   it('returns 400 when bank account type is not BANK/CASH', async () => {
-    const invalidAccountId = await createBankOrCashAccount(testCompanyId, { typeName: 'EXPENSE', isActive: 1 });
+    const invalidAccountId = expenseAccountId;
 
     const res = await fetch(`${baseUrl}/api/purchasing/payments`, {
       method: 'POST',
@@ -844,7 +823,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
   });
 
   it('returns 400 when bank account is inactive', async () => {
-    const inactiveBankId = await createBankOrCashAccount(testCompanyId, { typeName: 'BANK', isActive: 0 });
+    const inactiveBankId = await createTestBankAccount(testCompanyId, { typeName: 'BANK', isActive: false });
 
     const res = await fetch(`${baseUrl}/api/purchasing/payments`, {
       method: 'POST',
@@ -1256,7 +1235,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
   });
 
   it('returns 400 on post when bank account is deactivated after draft creation', async () => {
-    const draftBankId = await createBankOrCashAccount(testCompanyId, { typeName: 'BANK', isActive: 1 });
+    const draftBankId = await createTestBankAccount(testCompanyId, { typeName: 'BANK', isActive: true });
 
     const createRes = await fetch(`${baseUrl}/api/purchasing/payments`, {
       method: 'POST',
