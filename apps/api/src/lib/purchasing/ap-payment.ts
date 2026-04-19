@@ -13,6 +13,7 @@ import type { KyselySchema } from "@jurnapod/db";
 import { sql } from "kysely";
 import {
   AP_PAYMENT_STATUS,
+  PURCHASE_CREDIT_STATUS,
   PURCHASE_INVOICE_STATUS,
   type ApPaymentLineResponse,
 } from "@jurnapod/shared";
@@ -276,8 +277,18 @@ async function computePIOpenAmount(
       AND ap.status = ${AP_PAYMENT_STATUS.POSTED}
   `.execute(db);
 
+  const creditedResult = await sql<{ total: string }>`
+    SELECT COALESCE(SUM(pca.applied_amount), 0) as total
+    FROM purchase_credit_applications pca
+    INNER JOIN purchase_credits pc ON pc.id = pca.purchase_credit_id
+    WHERE pca.purchase_invoice_id = ${invoiceId}
+      AND pca.company_id = ${companyId}
+      AND pc.status IN (${PURCHASE_CREDIT_STATUS.PARTIAL}, ${PURCHASE_CREDIT_STATUS.APPLIED})
+  `.execute(db);
+
   const paidAmount = toScaled4(String(paidResult.rows[0]?.total ?? "0"));
-  return baseGrandTotal - paidAmount;
+  const creditedAmount = toScaled4(String(creditedResult.rows[0]?.total ?? "0"));
+  return baseGrandTotal - paidAmount - creditedAmount;
 }
 
 // =============================================================================

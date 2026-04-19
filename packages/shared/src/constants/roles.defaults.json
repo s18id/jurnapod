@@ -33,7 +33,9 @@
       "purchasing.orders": 63,
       "purchasing.receipts": 63,
       "purchasing.invoices": 63,
-      "purchasing.payments": 63
+      "purchasing.payments": 63,
+      "purchasing.credits": 63,
+      "purchasing.reports": 63
     },
     "OWNER": {
       "platform.companies": 5,
@@ -63,7 +65,9 @@
       "purchasing.orders": 63,
       "purchasing.receipts": 63,
       "purchasing.invoices": 63,
-      "purchasing.payments": 63
+      "purchasing.payments": 63,
+      "purchasing.credits": 63,
+      "purchasing.reports": 63
     },
     "COMPANY_ADMIN": {
       "platform.companies": 0,
@@ -92,7 +96,9 @@
       "purchasing.exchange_rates": 63,
       "purchasing.orders": 63,
       "purchasing.invoices": 63,
-      "purchasing.payments": 63
+      "purchasing.payments": 63,
+      "purchasing.credits": 63,
+      "purchasing.reports": 63
     },
     "ADMIN": {
       "platform.companies": 0,
@@ -122,7 +128,9 @@
       "purchasing.orders": 31,
       "purchasing.receipts": 31,
       "purchasing.invoices": 31,
-      "purchasing.payments": 31
+      "purchasing.payments": 31,
+      "purchasing.credits": 31,
+      "purchasing.reports": 31
     },
     "CASHIER": {
       "platform.companies": 0,
@@ -152,7 +160,9 @@
       "purchasing.orders": 0,
       "purchasing.receipts": 0,
       "purchasing.invoices": 0,
-      "purchasing.payments": 0
+      "purchasing.payments": 0,
+      "purchasing.credits": 0,
+      "purchasing.reports": 0
     },
     "ACCOUNTANT": {
       "platform.companies": 0,
@@ -182,7 +192,9 @@
       "purchasing.orders": 31,
       "purchasing.receipts": 31,
       "purchasing.invoices": 31,
-      "purchasing.payments": 31
+      "purchasing.payments": 31,
+      "purchasing.credits": 31,
+      "purchasing.reports": 31
     }
   }
 }

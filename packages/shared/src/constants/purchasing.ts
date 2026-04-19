@@ -115,3 +115,44 @@ export function toApPaymentStatusCode(
 export function toApPaymentStatusLabel(code: number): keyof typeof AP_PAYMENT_STATUS {
   return AP_PAYMENT_STATUS_LABEL[code] ?? "DRAFT";
 }
+
+// =============================================================================
+// Purchase Credit Statuses
+// =============================================================================
+
+/**
+ * Purchase credit statuses (API labels -> DB tinyint codes)
+ *
+ * DB storage rule: use TINYINT for status/state columns.
+ * DRAFT=10, PARTIAL=20, APPLIED=30, VOID=90
+ */
+export const PURCHASE_CREDIT_STATUS = {
+  DRAFT: 10,
+  PARTIAL: 20,
+  APPLIED: 30,
+  VOID: 90,
+} as const;
+
+export const PURCHASE_CREDIT_STATUS_LABEL: Record<number, keyof typeof PURCHASE_CREDIT_STATUS> = {
+  10: "DRAFT",
+  20: "PARTIAL",
+  30: "APPLIED",
+  90: "VOID",
+};
+
+export const PURCHASE_CREDIT_STATUS_VALUES = [
+  "DRAFT",
+  "PARTIAL",
+  "APPLIED",
+  "VOID",
+] as const;
+
+export function toPurchaseCreditStatusCode(
+  status: string,
+): number | undefined {
+  return PURCHASE_CREDIT_STATUS[status as keyof typeof PURCHASE_CREDIT_STATUS];
+}
+
+export function toPurchaseCreditStatusLabel(code: number): keyof typeof PURCHASE_CREDIT_STATUS {
+  return PURCHASE_CREDIT_STATUS_LABEL[code] ?? "DRAFT";
+}

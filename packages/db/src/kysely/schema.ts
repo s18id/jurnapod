@@ -1502,6 +1502,53 @@ export interface PurchaseInvoiceLines {
   updated_at: Generated<Date>;
 }
 
+export interface PurchaseCreditApplications {
+  applied_amount: Decimal;
+  applied_at: Generated<Date>;
+  company_id: number;
+  created_at: Generated<Date>;
+  id: Generated<number>;
+  purchase_credit_id: number;
+  purchase_credit_line_id: number;
+  purchase_invoice_id: number;
+}
+
+export interface PurchaseCreditLines {
+  created_at: Generated<Date>;
+  description: Generated<string | null>;
+  id: Generated<number>;
+  item_id: Generated<number | null>;
+  line_amount: Decimal;
+  line_no: number;
+  purchase_credit_id: number;
+  purchase_invoice_id: Generated<number | null>;
+  purchase_invoice_line_id: Generated<number | null>;
+  qty: Decimal;
+  reason: Generated<string | null>;
+  unit_price: Decimal;
+  updated_at: Generated<Date>;
+}
+
+export interface PurchaseCredits {
+  applied_amount: Generated<Decimal>;
+  company_id: number;
+  created_at: Generated<Date>;
+  created_by_user_id: Generated<number | null>;
+  credit_date: Date;
+  credit_no: string;
+  description: Generated<string | null>;
+  id: Generated<number>;
+  journal_batch_id: Generated<number | null>;
+  posted_at: Generated<Date | null>;
+  posted_by_user_id: Generated<number | null>;
+  status: Generated<number>;
+  supplier_id: number;
+  total_credit_amount: Generated<Decimal>;
+  updated_at: Generated<Date>;
+  voided_at: Generated<Date | null>;
+  voided_by_user_id: Generated<number | null>;
+}
+
 export interface PurchaseInvoices {
   company_id: number;
   created_at: Generated<Date>;
@@ -1884,6 +1931,9 @@ export interface DB {
   platform_settings: PlatformSettings;
   pos_item_cancellations: PosItemCancellations;
   purchase_invoice_lines: PurchaseInvoiceLines;
+  purchase_credit_applications: PurchaseCreditApplications;
+  purchase_credit_lines: PurchaseCreditLines;
+  purchase_credits: PurchaseCredits;
   purchase_invoices: PurchaseInvoices;
   purchase_order_lines: PurchaseOrderLines;
   purchase_orders: PurchaseOrders;

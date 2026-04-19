@@ -86,6 +86,7 @@ export {
   createTestCustomerForCompany,
   createTestSupplier,
   createTestPurchasingAccounts,
+  createTestBankAccount,
   type CompanyFixture,
   type OutletFixture,
   type UserFixture,

@@ -3,7 +3,12 @@
 
 import { z } from "zod";
 import { NumericIdSchema } from "./common.js";
-import { PURCHASE_ORDER_STATUS_VALUES, PURCHASE_INVOICE_STATUS_VALUES, AP_PAYMENT_STATUS_VALUES } from "../constants/purchasing.js";
+import {
+  PURCHASE_ORDER_STATUS_VALUES,
+  PURCHASE_INVOICE_STATUS_VALUES,
+  AP_PAYMENT_STATUS_VALUES,
+  PURCHASE_CREDIT_STATUS_VALUES
+} from "../constants/purchasing.js";
 
 /**
  * Currency code schema (ISO 4217)
@@ -569,3 +574,92 @@ export type ApPaymentListQuery = z.infer<typeof ApPaymentListQuerySchema>;
 export type ApPaymentResponse = z.infer<typeof ApPaymentResponseSchema>;
 export type ApPaymentLineCreate = z.infer<typeof ApPaymentLineCreateSchema>;
 export type ApPaymentLineResponse = z.infer<typeof ApPaymentLineResponseSchema>;
+
+// =============================================================================
+// Purchase Credit Schemas
+// =============================================================================
+
+export const PurchaseCreditStatusSchema = z.enum(PURCHASE_CREDIT_STATUS_VALUES);
+export type PurchaseCreditStatus = z.infer<typeof PurchaseCreditStatusSchema>;
+
+export const PurchaseCreditLineCreateSchema = z.object({
+  purchase_invoice_id: NumericIdSchema.nullable().optional(),
+  purchase_invoice_line_id: NumericIdSchema.nullable().optional(),
+  item_id: NumericIdSchema.nullable().optional(),
+  description: z.string().trim().max(1000).nullable().optional(),
+  qty: z.string().trim().regex(/^\d+(\.\d{1,4})?$/, "Qty must be positive decimal"),
+  unit_price: z.string().trim().regex(/^\d+(\.\d{1,4})?$/, "Unit price must be positive decimal"),
+  reason: z.string().trim().max(255).nullable().optional()
+});
+
+export const PurchaseCreditCreateSchema = z.object({
+  supplier_id: NumericIdSchema,
+  credit_no: z.string().trim().min(1).max(64),
+  credit_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format").transform((d) => new Date(d)),
+  description: z.string().trim().max(1000).nullable().optional(),
+  lines: z.array(PurchaseCreditLineCreateSchema).min(1, "At least one line item is required")
+});
+
+export const PurchaseCreditListQuerySchema = z.object({
+  supplier_id: NumericIdSchema.optional(),
+  status: PurchaseCreditStatusSchema.optional(),
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).transform((d) => new Date(d)).optional(),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).transform((d) => new Date(d)).optional(),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+  offset: z.coerce.number().int().nonnegative().default(0)
+});
+
+export const PurchaseCreditLineResponseSchema = z.object({
+  id: NumericIdSchema,
+  line_no: z.number().int(),
+  purchase_invoice_id: NumericIdSchema.nullable(),
+  purchase_invoice_line_id: NumericIdSchema.nullable(),
+  item_id: NumericIdSchema.nullable(),
+  description: z.string().trim().nullable(),
+  qty: z.string().trim(),
+  unit_price: z.string().trim(),
+  line_amount: z.string().trim(),
+  reason: z.string().trim().nullable(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime()
+});
+
+export const PurchaseCreditApplicationResponseSchema = z.object({
+  id: NumericIdSchema,
+  purchase_credit_line_id: NumericIdSchema,
+  purchase_invoice_id: NumericIdSchema,
+  applied_amount: z.string().trim(),
+  applied_at: z.string().datetime(),
+  created_at: z.string().datetime()
+});
+
+export const PurchaseCreditResponseSchema = z.object({
+  id: NumericIdSchema,
+  company_id: NumericIdSchema,
+  supplier_id: NumericIdSchema,
+  credit_no: z.string().trim(),
+  credit_date: z.string().datetime(),
+  description: z.string().trim().nullable(),
+  status: PurchaseCreditStatusSchema,
+  total_credit_amount: z.string().trim(),
+  applied_amount: z.string().trim(),
+  remaining_amount: z.string().trim(),
+  journal_batch_id: NumericIdSchema.nullable(),
+  posted_at: z.string().datetime().nullable(),
+  posted_by_user_id: NumericIdSchema.nullable(),
+  voided_at: z.string().datetime().nullable(),
+  voided_by_user_id: NumericIdSchema.nullable(),
+  created_by_user_id: NumericIdSchema.nullable(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+  supplier_name: z.string().trim().nullable().optional(),
+  lines: z.array(PurchaseCreditLineResponseSchema).optional(),
+  applications: z.array(PurchaseCreditApplicationResponseSchema).optional()
+});
+
+export type PurchaseCreditCreate = z.infer<typeof PurchaseCreditCreateSchema>;
+export type PurchaseCreditListQuery = z.infer<typeof PurchaseCreditListQuerySchema>;
+export type PurchaseCreditResponse = z.infer<typeof PurchaseCreditResponseSchema>;
+export type PurchaseCreditLineCreate = z.infer<typeof PurchaseCreditLineCreateSchema>;
+export type PurchaseCreditLineResponse = z.infer<typeof PurchaseCreditLineResponseSchema>;
+export type PurchaseCreditApplicationResponse = z.infer<typeof PurchaseCreditApplicationResponseSchema>;

@@ -1,6 +1,6 @@
 # Story 46.7: Supplier Credit Notes
 
-Status: backlog
+Status: done
 
 ## Story
 
@@ -61,14 +61,14 @@ Story 46.7 adds purchase credit notes (AP credits). These are supplier-issued cr
 
 ## Tasks / Subtasks
 
-- [ ] Create `purchase_credits` and `purchase_credit_lines` table migrations
-- [ ] Add ACL resource `purchasing.credits`
-- [ ] Implement credit note routes (create, post/apply, void, list)
-- [ ] Create journal batch on credit application
-- [ ] Create reversal journal batch on credit void
-- [ ] Implement FIFO PI matching when no specific PI referenced
-- [ ] Write integration tests for credit note → journal creation
-- [ ] Write integration tests for partial application
+- [x] Create `purchase_credits` and `purchase_credit_lines` table migrations
+- [x] Add ACL resource `purchasing.credits`
+- [x] Implement credit note routes (create, post/apply, void, list)
+- [x] Create journal batch on credit application
+- [x] Create reversal journal batch on credit void
+- [x] Implement FIFO PI matching when no specific PI referenced
+- [x] Write integration tests for credit note → journal creation
+- [x] Write integration tests for partial application
 
 ---
 
@@ -121,6 +121,6 @@ curl /api/journals/batches/125 -H "Authorization: Bearer $TOKEN"
 
 ## Technical Debt Review
 
-- [ ] No shortcuts taken that require follow-up
-- [ ] Journal batch balanced
-- [ ] No `as any` casts added without justification
+- [x] No shortcuts taken that require follow-up
+- [x] Journal batch balanced
+- [x] No `as any` casts added without justification

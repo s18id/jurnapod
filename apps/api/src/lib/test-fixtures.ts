@@ -394,6 +394,40 @@ export async function createTestCompanyMinimal(
       WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
     `.execute(db);
 
+    // Also seed purchasing.credits ACL
+    await sql`
+      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
+      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing', 'credits',
+        CASE r.code
+          WHEN 'SUPER_ADMIN' THEN 63
+          WHEN 'OWNER' THEN 63
+          WHEN 'COMPANY_ADMIN' THEN 63
+          WHEN 'ADMIN' THEN 31
+          WHEN 'ACCOUNTANT' THEN 31
+          WHEN 'CASHIER' THEN 0
+          ELSE 0
+        END as permission_mask
+      FROM roles r
+      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
+    `.execute(db);
+
+    // Also seed purchasing.reports ACL
+    await sql`
+      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
+      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing', 'reports',
+        CASE r.code
+          WHEN 'SUPER_ADMIN' THEN 63
+          WHEN 'OWNER' THEN 63
+          WHEN 'COMPANY_ADMIN' THEN 63
+          WHEN 'ADMIN' THEN 31
+          WHEN 'ACCOUNTANT' THEN 31
+          WHEN 'CASHIER' THEN 0
+          ELSE 0
+        END as permission_mask
+      FROM roles r
+      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
+    `.execute(db);
+
     createdFixtures.companies.push(company);
     return company;
   } catch (error: unknown) {
@@ -738,6 +772,7 @@ export async function createTestSupplier(
     name: string;
     currency: string;
     isActive: boolean;
+    paymentTermsDays: number;
   }>
 ): Promise<SupplierFixture> {
   const db = getDb();
@@ -749,8 +784,8 @@ export async function createTestSupplier(
 
   try {
     await sql`
-      INSERT INTO suppliers (company_id, code, name, currency, is_active, created_at, updated_at)
-      VALUES (${companyId}, ${code}, ${name}, ${currency}, ${options?.isActive ?? 1}, NOW(), NOW())
+      INSERT INTO suppliers (company_id, code, name, currency, payment_terms_days, is_active, created_at, updated_at)
+      VALUES (${companyId}, ${code}, ${name}, ${currency}, ${options?.paymentTermsDays ?? null}, ${options?.isActive ?? 1}, NOW(), NOW())
     `.execute(db);
 
     const result = await sql`SELECT id, company_id, code, name FROM suppliers WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
@@ -840,6 +875,35 @@ export async function createTestPurchasingAccounts(
   `.execute(db);
 
   return { ap_account_id: apAccountId, expense_account_id: expenseAccountId };
+}
+
+/**
+ * Create a test BANK/CASH account for AP payment scenarios.
+ */
+export async function createTestBankAccount(
+  companyId: number,
+  options?: Partial<{
+    code: string;
+    name: string;
+    typeName: "BANK" | "CASH";
+    isActive: boolean;
+  }>
+): Promise<number> {
+  const db = getDb();
+  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  const code = options?.code ?? `TEST-BA-${runId}`.slice(0, 20).toUpperCase();
+  const name = options?.name ?? `Test ${options?.typeName ?? "BANK"} Account ${runId}`;
+
+  const result = await sql`
+    INSERT INTO accounts (company_id, code, name, type_name, is_active, is_payable, created_at, updated_at)
+    VALUES (${companyId}, ${code}, ${name}, ${options?.typeName ?? "BANK"}, ${options?.isActive ?? true ? 1 : 0}, 0, NOW(), NOW())
+  `.execute(db);
+
+  const accountId = Number((result as { insertId?: number }).insertId ?? 0);
+  if (!accountId) {
+    throw new Error("Failed to create test bank account");
+  }
+  return accountId;
 }
 
 // ============================================================================
