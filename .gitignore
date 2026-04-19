@@ -32,6 +32,8 @@ _bmad
 
 # Uploaded files (images, exports, etc.)
 uploads/
-test-logs/
 
+
+test-logs/
+.opencode-logs/
 *.tar.gz

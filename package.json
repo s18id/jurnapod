@@ -28,7 +28,8 @@
     "dev:stop": "npm run dev:kill:all",
     "dev:restart": "npm run dev:stop && npm run dev",
     "typecheck": "npm run typecheck -ws --if-present",
-    "lint": "npm run lint -ws --if-present",
+    "lint:status-columns": "node scripts/validate-status-columns.mjs",
+    "lint": "npm run lint:status-columns && npm run lint -ws --if-present",
     "lint:docs:responses": "node scripts/lint-docs-responses.mjs",
     "dev:pos": "npm run dev -w @jurnapod/pos -- --host=0.0.0.0",
     "dev:api": "npm run dev -w @jurnapod/api",
@@ -78,6 +79,7 @@
   },
   "devDependencies": {
     "@types/bwip-js": "^3.2.3",
+    "@types/node": "^25.6.0",
     "@typescript-eslint/eslint-plugin": "^8.57.2",
     "@typescript-eslint/parser": "^8.57.2",
     "concurrently": "^9.2.1",

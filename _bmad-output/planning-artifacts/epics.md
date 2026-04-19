@@ -57,6 +57,7 @@ NFR3: Templates must follow existing project conventions (AGENTS.md, existing pa
 |------|-------|--------|
 | Epic 45 | Tooling Standards & Process Documentation | done | |
 | Epic 46 | Purchasing / Accounts Payable | ready-for-dev | |
+| Epic 47 | AP Reconciliation & Period Close Controls | backlog | |
 
 ---
 
@@ -232,3 +233,25 @@ So that custom lint rules are validated before introduction and do not regress.
 - [ ] No production code modified
 - [ ] Sprint retrospective captures any new action items
 - [ ] `sprint-status.yaml` updated for Epic 45
+
+---
+
+## Epic 47: AP Reconciliation & Period Close Controls
+
+**Goal:** Establish robust reconciliation between Accounts Payable subledger and General Ledger control accounts, with period‑close guardrails, supplier‑statement matching, and a complete audit trail for financial compliance.
+
+### Story Summary
+
+- **47.1 AP↔GL Reconciliation Summary:** Dashboard showing AP vs GL balance as of a company‑local cutoff date, using configurable AP control account set.
+- **47.2 Reconciliation Drilldown & Variance Attribution:** Detailed breakdown of variances into timing differences, posting errors, missing transactions, and rounding.
+- **47.3 Supplier Statement Matching (manual entry MVP):** Manual entry of supplier statement balances and comparison to AP subledger per supplier.
+- **47.4 AP Exception Worklist:** Consolidated view of all reconciliation exceptions (variances, mismatches, disputes) with assignment and resolution tracking.
+- **47.5 Period Close Guardrails for AP:** Block AP transactions in closed periods with high‑privilege override and audit trail.
+- **47.6 Reconciliation Snapshot & Audit Trail:** Immutable snapshots of reconciliation results with versioned audit trail for historical verification.
+
+**Key Decisions:**
+- Cutoff semantics: company‑local business date (`as_of_date` local midnight)
+- GL reconciliation source: configured AP control account set (not hardcoded single account)
+- Closed period policy: blocked by default, explicit high‑privilege audited override path only
+- Supplier statement ingestion: manual entry MVP (no file import)
+- Status/state columns: use `TINYINT` for any new schema

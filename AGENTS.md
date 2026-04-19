@@ -432,7 +432,7 @@ Before marking ANY story as DONE:
 
 ## Canonical ACL & Permission Model (Epic 39)
 
-### 7 Canonical Modules
+### 8 Canonical Modules
 
 | Module | Description |
 |--------|-------------|
@@ -442,6 +442,7 @@ Before marking ANY story as DONE:
 | `inventory` | Items, stock movements, costing |
 | `accounting` | Journals, accounts, fiscal years |
 | `treasury` | Cash/bank transactions, accounts |
+| `purchasing` | Suppliers, purchase orders, receipts, AP invoices/payments/credits |
 | `reservations` | Bookings, tables |
 
 ### Permission Bits
@@ -502,14 +503,14 @@ requireAccess({ module: 'inventory', permission: 'READ' })
 
 ### Role Permission Matrix
 
-| Role | platform | accounting | inventory | treasury | sales | pos | reservations |
-|------|----------|------------|-----------|----------|-------|-----|--------------|
-| SUPER_ADMIN | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) |
-| OWNER | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) |
-| COMPANY_ADMIN | CRUDA (31) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) |
-| ADMIN | READ (1) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) |
-| ACCOUNTANT | READ (1) | CRUDA (31) | READ (1) | READ (1) | READ (1) | READ (1) | 0 |
-| CASHIER | 0 | 0 | 0 | 0 | 0 | CRUDA (31) | CRUDA (31) |
+| Role | platform | accounting | inventory | treasury | sales | pos | purchasing | reservations |
+|------|----------|------------|-----------|----------|-------|-----|------------|--------------|
+| SUPER_ADMIN | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) |
+| OWNER | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) |
+| COMPANY_ADMIN | CRUDA (31) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) |
+| ADMIN | READ (1) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) |
+| ACCOUNTANT | READ (1) | CRUDA (31) | READ (1) | READ (1) | READ (1) | READ (1) | CRUDA (31) | 0 |
+| CASHIER | 0 | 0 | 0 | 0 | 0 | CRUDA (31) | 0 | CRUDA (31) |
 
 **Key Rules:**
 - `reports` module removed — use `ANALYZE` on source modules (e.g., `sales.ANALYZE` for sales reports)
@@ -524,6 +525,7 @@ requireAccess({ module: 'inventory', permission: 'READ' })
 **treasury**: transactions, accounts
 **sales**: invoices, orders, payments
 **pos**: transactions, config
+**purchasing**: suppliers, exchange_rates, orders, receipts, invoices, payments, credits, reports
 **reservations**: bookings, tables
 
 ---
