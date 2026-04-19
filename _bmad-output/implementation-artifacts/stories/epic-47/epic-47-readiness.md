@@ -116,3 +116,81 @@ These functions make story-level setup deterministic and avoid ad-hoc SQL in tes
 - Requires schema migrations for missing tables and/or period model alignment.
 
 **Recommendation:** Start Epic 47 with Story 47.1 only, while parallelizing migration design for 47.3/47.4/47.5.
+
+---
+
+## 8) Wave 0 Agent Findings (Detailed)
+
+### A1 — Reconciliation Settings Contract Freeze (`@bmad-architect`)
+
+**Decisions frozen:**
+- Canonical settings storage uses `settings_strings` with:
+  - `setting_key = ap_reconciliation_account_ids`
+  - `setting_value = JSON array of account IDs`
+  - company-scoped (`company_id`, `outlet_id=NULL`)
+- `account_ids` validation: integer, unique, min 1, max 50.
+- Tenant ownership: every account in set must belong to authenticated `company_id` and be AP-control compatible.
+- Absent-setting behavior: explicit compatibility bridge to `purchasing_default_ap_account_id` if valid; otherwise fail closed with explicit error.
+
+**A1 P0/P1 risk highlights:**
+- **P0:** wrong FX semantics in reconciliation (`base != original * rate`).
+- **P1:** cross-tenant account leakage if ownership validation is skipped.
+- **P1:** silent fallback ambiguity if unset settings auto-resolve without explicit source.
+
+**A1 status:** ✅ Conditional Go.
+
+### A2 — Schema/Migration Blockers (`@bmad-architect`)
+
+**Schema requirements confirmed:**
+1. `fiscal_periods` (required for Story 47.5 closed-period enforcement; supports 47.1/47.6 cutoff logic)
+2. `supplier_statements` (required for 47.3)
+3. `ap_exceptions` (required for 47.4)
+
+**Migration sequencing:**
+1. `fiscal_periods`
+2. `supplier_statements`
+3. `ap_exceptions`
+
+**Portability strategy:**
+- guarded DDL with `information_schema` checks
+- rerunnable additive migrations only
+- no non-portable `ADD COLUMN IF NOT EXISTS`
+
+**A2 P0/P1 risk highlights:**
+- **P1:** tenant leakage if `company_id` and scoped indexes are missing.
+- **P1:** deploy instability with non-rerunnable migration design.
+- **P1:** duplicate exception inflation without deterministic idempotency key.
+
+**A2 status:** ✅ Conditional Go.
+
+### A3 — ER + Temporal/Immutability Review (`@bmad-analyst`)
+
+**Core decisions:**
+- Timezone precedence: `outlet.timezone` → `company.timezone` (no UTC fallback).
+- Cutoff inclusion: `<= as_of_date` means through end of local business day.
+- Locked-at-posting fields: transaction amounts, exchange-rate used, GL mapping, supplier reference, transaction date.
+- Mutable-forward-only settings: reconciliation account set, tolerances, guardrail policy.
+- Historical snapshots must not change when settings change.
+
+**A3 ambiguities flagged for story clarifications:**
+- exchange-rate effective-window semantics
+- outlet-vs-company timezone behavior for AP reconciliation boundaries
+- snapshot versioning/retention policy
+
+**A3 P0/P1 risk highlights:**
+- **P0:** `fiscal_periods` dependency missing for period-close guardrails.
+- **P1:** off-by-one reconciliation errors from timezone ambiguity.
+- **P1:** mutable config impacting historical interpretation without snapshot locking.
+
+**A3 status:** ✅ Conditional Go (after blocker closure).
+
+---
+
+## 9) Updated No-P0/P1 Entry Criteria for Wave 1
+
+Wave 1 cannot start until all are true:
+
+1. `fiscal_periods` migration package is designed and accepted (portable/rerunnable).
+2. Reconciliation settings contract (A1) is locked and implementation checklist includes fail-closed behavior.
+3. Story checklists include explicit temporal/immutability rules from A3.
+4. `@bmad-review` gate returns **no unresolved P0/P1**.
