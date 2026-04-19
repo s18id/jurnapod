@@ -156,3 +156,38 @@ export function toPurchaseCreditStatusCode(
 export function toPurchaseCreditStatusLabel(code: number): keyof typeof PURCHASE_CREDIT_STATUS {
   return PURCHASE_CREDIT_STATUS_LABEL[code] ?? "DRAFT";
 }
+
+// =============================================================================
+// AP Reconciliation Constants (Epic 47)
+// =============================================================================
+
+/**
+ * Settings key for AP reconciliation account IDs.
+ * Stored in settings_strings table with outlet_id = NULL (company-level).
+ */
+export const AP_RECONCILIATION_ACCOUNT_IDS_KEY = "ap_reconciliation_account_ids" as const;
+
+/**
+ * Creditor/Liability account type names that qualify as AP-control compatible.
+ * Used for validating account_ids in AP reconciliation settings.
+ */
+export const AP_CONTROL_ACCOUNT_TYPE_NAMES = [
+  "CREDITOR",
+  "CREDITORS",
+  "ACCOUNTS_PAYABLE",
+  "TRADE_CREDITORS",
+  "SUPPLIER_CREDITORS",
+  "LIABILITY",
+  "CURRENT_LIABILITY",
+  "TRADE_LIABILITY",
+] as const;
+
+/**
+ * Error codes for AP Reconciliation
+ */
+export const AP_RECONCILIATION_ERROR_CODES = {
+  SETTINGS_REQUIRED: "AP_RECONCILIATION_SETTINGS_REQUIRED",
+  INVALID_ACCOUNT: "AP_RECONCILIATION_INVALID_ACCOUNT",
+  CROSS_TENANT_ACCOUNT: "AP_RECONCILIATION_CROSS_TENANT_ACCOUNT",
+  TIMEZONE_REQUIRED: "AP_RECONCILIATION_TIMEZONE_REQUIRED",
+} as const;

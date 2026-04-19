@@ -6,24 +6,45 @@ import { z } from "zod";
 
 /**
  * Datetime and Date validation schemas
- * 
+ *
  * Standards:
  * - RFC 3339 datetime with timezone offset: 2026-03-16T17:30:00+07:00
  * - Date-only format for boundaries: YYYY-MM-DD (interpreted in company timezone)
+ *
+ * Quick selection guide:
+ * - Use `DateOnlySchema` for business dates without time (invoice_date, posting period boundaries).
+ * - Use `RfcDateTimeSchema` for exact instants with offset (`*_at` API fields).
+ * - Use `toUtcInstant()` when converting external RFC3339 datetime input to canonical UTC ISO.
+ * - Use `toMysqlDateTime()` when persisting strict RFC3339 input into MySQL DATETIME text.
+ * - Use `toMysqlDateTimeFromDateLike()` only for internal/legacy Date-like values.
+ * - Use `resolveEventTime()` for flexible inputs (`at`, `ts`, or `date+timezone`) in domain logic.
+ *
+ * Date-only vs datetime:
+ * - Date-only means "calendar day in business timezone", not an instant.
+ * - Datetime means "exact instant in time", usually normalized to UTC for storage/transport.
+ * - Never treat a date-only string as UTC midnight unless that is explicitly your business rule.
  */
 
 /**
  * RFC 3339 datetime with timezone offset
- * Use for: precise timestamps, transaction times, audit logs
+ * Use for: precise timestamps, transaction times, audit logs, API `*_at` fields
  * Format: 2026-03-16T17:30:00+07:00
+ *
+ * Example accepted values:
+ * - 2026-03-16T17:30:00Z
+ * - 2026-03-16T17:30:00+07:00
  */
 export const RfcDateTimeSchema = z.string().datetime({ offset: true });
 
 /**
  * Date-only format YYYY-MM-DD
- * Use for: date boundaries, fiscal periods, reporting ranges
- * Interpretation: Based on company timezone settings
+ * Use for: date boundaries, fiscal periods, due-date rules, reporting ranges
+ * Interpretation: calendar date in company/business timezone context
  * Format: 2026-03-16
+ *
+ * Important:
+ * - This is not a timestamp and carries no timezone or hour/minute component.
+ * - Convert to a UTC instant only when you also know the business timezone.
  */
 export const DateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
@@ -35,7 +56,8 @@ export const TimezoneSchema = z.string().trim().max(64);
 
 /**
  * Date range query parameters
- * Use for: report filtering, list queries with date boundaries
+ * Use for: report/list filtering where boundaries are business dates.
+ * `date_from` and `date_to` should be interpreted in company timezone.
  */
 export const DateRangeQuerySchema = z.object({
   date_from: DateOnlySchema.optional(),
@@ -59,7 +81,8 @@ export type DateRangeWithTimezone = z.infer<typeof DateRangeWithTimezoneSchema>;
 
 /**
  * Normalize MySQL or any datetime to RFC 3339 UTC ISO string
- * Use this when returning datetime values in API responses
+ * Use this when returning datetime values in API responses.
+ * Nullable-safe variant: returns `null` for `null`/`undefined` input.
  * @param value - MySQL datetime ("2026-03-16 17:16:16"), Date object, or ISO string
  * @returns UTC ISO string (e.g., "2026-03-16T10:16:16.000Z") or null if input is null/undefined
  */
@@ -172,6 +195,10 @@ export function isValidDateTime(value: string): boolean {
 
 /**
  * Validate YYYY-MM-DD date format
+ *
+ * Use this to validate date-only user input before timezone-aware conversion.
+ * This rejects overflow dates (e.g. 2026-02-30).
+ *
  * @param value - String to validate
  * @returns true if valid date
  */
@@ -410,6 +437,12 @@ function normalizeDateWithTime(
  *
  * @param event - Event time descriptor.
  * @param event.timezone - Company IANA timezone; required when deriving from `*_date`.
+ *
+ * Recommended usage:
+ * - If your input is `*_at` (exact timestamp), pass `at`.
+ * - If your input is epoch milliseconds, pass `ts`.
+ * - If your input is a date-only business field, pass `date + timezone` (+ optional hour/minute).
+ *
  * @returns UTC ISO string.
  *
  * @example

@@ -80,6 +80,28 @@ export interface AnalyticsInsights {
   severity: Generated<"CRITICAL" | "INFO" | "WARNING">;
 }
 
+export interface ApExceptions {
+  assigned_at: Generated<Date | null>;
+  assigned_to_user_id: Generated<number | null>;
+  company_id: number;
+  created_at: Generated<Date>;
+  currency_code: Generated<string | null>;
+  detected_at: Date;
+  due_date: Generated<Date | null>;
+  exception_key: string;
+  id: Generated<number>;
+  resolution_note: Generated<string | null>;
+  resolved_at: Generated<Date | null>;
+  resolved_by_user_id: Generated<number | null>;
+  source_id: number;
+  source_type: string;
+  status: Generated<number>;
+  supplier_id: Generated<number | null>;
+  type: number;
+  updated_at: Generated<Date>;
+  variance_amount: Generated<Decimal | null>;
+}
+
 export interface ApPaymentLines {
   ap_payment_id: number;
   created_at: Generated<Date>;
@@ -546,6 +568,20 @@ export interface FiscalYearCloseRequests {
   started_at_ts: Generated<number | null>;
   status: Generated<string>;
   updated_at_ts: number;
+}
+
+export interface FiscalPeriods {
+  closed_at: Generated<Date | null>;
+  closed_by_user_id: Generated<number | null>;
+  company_id: number;
+  created_at: Generated<Date>;
+  end_date: Date;
+  fiscal_year_id: number;
+  id: Generated<number>;
+  period_no: number;
+  start_date: Date;
+  status: Generated<number>;
+  updated_at: Generated<Date>;
 }
 
 export interface FiscalYears {
@@ -1484,6 +1520,21 @@ export interface SupplierContacts {
   updated_at: Generated<Date>;
 }
 
+export interface SupplierStatements {
+  closing_balance: Generated<Decimal>;
+  company_id: number;
+  created_at: Generated<Date>;
+  created_by_user_id: Generated<number | null>;
+  currency_code: string;
+  id: Generated<number>;
+  reconciled_at: Generated<Date | null>;
+  reconciled_by_user_id: Generated<number | null>;
+  statement_date: Date;
+  status: Generated<number>;
+  supplier_id: number;
+  updated_at: Generated<Date>;
+}
+
 export interface PurchaseInvoiceLines {
   company_id: number;
   created_at: Generated<Date>;
@@ -1865,6 +1916,7 @@ export interface DB {
   account_types: AccountTypes;
   accounts: Accounts;
   analytics_insights: AnalyticsInsights;
+  ap_exceptions: ApExceptions;
   ap_payment_lines: ApPaymentLines;
   ap_payments: ApPayments;
   archive_sync_data_versions: ArchiveSyncDataVersions;
@@ -1896,6 +1948,7 @@ export interface DB {
   export_files: ExportFiles;
   feature_flags: FeatureFlags;
   fiscal_year_close_requests: FiscalYearCloseRequests;
+  fiscal_periods: FiscalPeriods;
   fiscal_years: FiscalYears;
   fixed_asset_books: FixedAssetBooks;
   fixed_asset_categories: FixedAssetCategories;
@@ -1968,6 +2021,7 @@ export interface DB {
   static_pages: StaticPages;
   exchange_rates: ExchangeRates;
   supplier_contacts: SupplierContacts;
+  supplier_statements: SupplierStatements;
   suppliers: Suppliers;
   supplies: Supplies;
   sync_audit_events: SyncAuditEvents;

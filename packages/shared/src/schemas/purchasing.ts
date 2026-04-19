@@ -663,3 +663,55 @@ export type PurchaseCreditResponse = z.infer<typeof PurchaseCreditResponseSchema
 export type PurchaseCreditLineCreate = z.infer<typeof PurchaseCreditLineCreateSchema>;
 export type PurchaseCreditLineResponse = z.infer<typeof PurchaseCreditLineResponseSchema>;
 export type PurchaseCreditApplicationResponse = z.infer<typeof PurchaseCreditApplicationResponseSchema>;
+
+// =============================================================================
+// AP Reconciliation Schemas (Epic 47)
+// =============================================================================
+
+/**
+ * AP Reconciliation Settings Update Schema
+ * Body for PUT /purchasing/reports/ap-reconciliation/settings
+ */
+export const APReconciliationSettingsUpdateSchema = z.object({
+  account_ids: z
+    .array(z.number().int().positive())
+    .min(1, "At least one account is required")
+    .max(50, "Maximum 50 accounts allowed")
+    .refine((arr) => new Set(arr).size === arr.length, {
+      message: "Account IDs must be unique",
+    }),
+});
+
+/**
+ * AP Reconciliation Settings Response Schema
+ */
+export const APReconciliationSettingsResponseSchema = z.object({
+  account_ids: z.array(z.number().int().positive()),
+  source: z.enum(["settings", "fallback_company_default", "none"]),
+});
+
+/**
+ * AP Reconciliation Summary Query Schema
+ */
+export const APReconciliationSummaryQuerySchema = z.object({
+  as_of_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format"),
+});
+
+/**
+ * AP Reconciliation Summary Response Schema
+ */
+export const APReconciliationSummaryResponseSchema = z.object({
+  as_of_date: z.string(),
+  ap_subledger_balance: z.string(),
+  gl_control_balance: z.string(),
+  variance: z.string(),
+  configured_account_ids: z.array(z.number().int().positive()),
+  account_source: z.enum(["settings", "fallback_company_default", "none"]),
+  currency: z.string(),
+});
+
+// Type exports for AP Reconciliation
+export type APReconciliationSettingsUpdate = z.infer<typeof APReconciliationSettingsUpdateSchema>;
+export type APReconciliationSettingsResponse = z.infer<typeof APReconciliationSettingsResponseSchema>;
+export type APReconciliationSummaryQuery = z.infer<typeof APReconciliationSummaryQuerySchema>;
+export type APReconciliationSummaryResponse = z.infer<typeof APReconciliationSummaryResponseSchema>;
