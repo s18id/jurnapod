@@ -886,3 +886,84 @@ export type APReconciliationDrilldownResponse = z.infer<typeof APReconciliationD
 export type APReconciliationGLDetailResponse = z.infer<typeof APReconciliationGLDetailResponseSchema>;
 export type APReconciliationAPDetailResponse = z.infer<typeof APReconciliationAPDetailResponseSchema>;
 export type APReconciliationExportQuery = z.infer<typeof APReconciliationExportQuerySchema>;
+
+// =============================================================================
+// Supplier Statement Schemas (Story 47.3)
+// =============================================================================
+
+/**
+ * Supplier statement create request schema
+ */
+export const SupplierStatementCreateSchema = z.object({
+  supplier_id: NumericIdSchema,
+  statement_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format"),
+  closing_balance: z.string().trim().regex(/^-?\d+(\.\d{1,4})?$/, "Closing balance must be decimal (positive or negative)"),
+  currency_code: z.string().trim().length(3).toUpperCase(),
+});
+
+/**
+ * Supplier statement list query schema
+ */
+export const SupplierStatementListQuerySchema = z.object({
+  supplier_id: NumericIdSchema.optional(),
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  status: z.enum(["PENDING", "RECONCILED"]).optional(),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+  offset: z.coerce.number().int().nonnegative().default(0),
+}).refine(
+  (val) => !val.date_from || !val.date_to || val.date_from <= val.date_to,
+  { message: "date_from must be less than or equal to date_to", path: ["date_from"] }
+);
+
+/**
+ * Supplier statement response schema
+ */
+export const SupplierStatementResponseSchema = z.object({
+  id: NumericIdSchema,
+  company_id: NumericIdSchema,
+  supplier_id: NumericIdSchema,
+  statement_date: z.string(),
+  closing_balance: z.string().trim(),
+  currency_code: z.string().trim().length(3),
+  status: z.enum(["PENDING", "RECONCILED"]),
+  reconciled_at: z.string().datetime().nullable(),
+  reconciled_by_user_id: NumericIdSchema.nullable(),
+  created_by_user_id: NumericIdSchema.nullable(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+});
+
+/**
+ * Reconcile query schema
+ */
+export const ReconcileQuerySchema = z.object({
+  tolerance: z
+    .string()
+    .trim()
+    .regex(/^\d+(\.\d{1,4})?$/)
+    .refine((v) => Number(v) > 0, "Tolerance must be > 0")
+    .optional(),
+});
+
+/**
+ * Reconcile result schema
+ */
+export const ReconcileResultSchema = z.object({
+  statement_id: NumericIdSchema,
+  supplier_id: NumericIdSchema,
+  statement_date: z.string(),
+  statement_balance: z.string().trim(),
+  subledger_balance: z.string().trim(),
+  variance: z.string().trim(),
+  variance_within_tolerance: z.boolean(),
+  tolerance: z.string().trim(),
+  currency_code: z.string().trim().length(3),
+});
+
+// Type exports for supplier statements
+export type SupplierStatementCreate = z.infer<typeof SupplierStatementCreateSchema>;
+export type SupplierStatementListQuery = z.infer<typeof SupplierStatementListQuerySchema>;
+export type SupplierStatementResponse = z.infer<typeof SupplierStatementResponseSchema>;
+export type ReconcileQuery = z.infer<typeof ReconcileQuerySchema>;
+export type ReconcileResult = z.infer<typeof ReconcileResultSchema>;

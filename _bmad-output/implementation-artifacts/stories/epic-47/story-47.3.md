@@ -1,6 +1,6 @@
 # Story 47.3: Supplier Statement Matching (Manual Entry MVP)
 
-Status: backlog
+Status: done
 
 ## Story
 

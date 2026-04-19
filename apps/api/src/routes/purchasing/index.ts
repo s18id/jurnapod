@@ -19,6 +19,7 @@ import { invoiceRoutes } from "./purchase-invoices.js";
 import { paymentRoutes } from "./ap-payments.js";
 import { creditRoutes } from "./purchase-credits.js";
 import { purchasingReportRoutes } from "./reports/index.js";
+import { supplierStatementRoutes } from "./supplier-statements.js";
 
 const purchasingRoutes = new Hono();
 
@@ -48,5 +49,8 @@ purchasingRoutes.route("/credits", creditRoutes);
 
 // Mount purchasing report routes
 purchasingRoutes.route("/reports", purchasingReportRoutes);
+
+// Mount supplier statement routes
+purchasingRoutes.route("/supplier-statements", supplierStatementRoutes);
 
 export { purchasingRoutes };

@@ -1438,7 +1438,7 @@ export type SupplierStatementFixture = {
   supplierId: number;
   statementDate: string;
   closingBalance: string;
-  currency: string;
+  currencyCode: string;
 };
 
 /**
@@ -1453,8 +1453,8 @@ export type SupplierStatementFixture = {
  * @param options - Statement options
  * @param options.statementDate - Statement date in 'YYYY-MM-DD' format
  * @param options.closingBalance - Closing balance as string decimal (e.g., '1500.00')
- * @param options.currency - ISO currency code (default: 'IDR')
- * @returns Supplier statement fixture with id, companyId, supplierId, statementDate, closingBalance, currency
+ * @param options.currencyCode - ISO currency code (default: 'IDR')
+ * @returns Supplier statement fixture with id, companyId, supplierId, statementDate, closingBalance, currencyCode
  */
 export async function createTestSupplierStatement(
   companyId: number,
@@ -1462,7 +1462,7 @@ export async function createTestSupplierStatement(
   options?: Partial<{
     statementDate: string;
     closingBalance: string;
-    currency: string;
+    currencyCode: string;
   }>
 ): Promise<SupplierStatementFixture> {
   const db = getDb();
@@ -1474,48 +1474,48 @@ export async function createTestSupplierStatement(
   if (!tableExists) {
     throw new Error(
       "supplier_statements table does not exist. Schema gap: Story 47.3 requires a supplier_statements table " +
-      "(typically: id, company_id, supplier_id, statement_date, closing_balance, currency). " +
+      "(typically: id, company_id, supplier_id, statement_date, closing_balance, currency_code). " +
       "This fixture will work once a migration creates the table."
     );
   }
 
   const statementDate = options?.statementDate ?? new Date().toISOString().split("T")[0];
   const closingBalance = options?.closingBalance ?? "0.00";
-  const currency = options?.currency ?? "IDR";
+  const currencyCode = options?.currencyCode ?? "IDR";
 
   try {
     await sql`
-      INSERT INTO supplier_statements (company_id, supplier_id, statement_date, closing_balance, currency, created_at, updated_at)
-      VALUES (${companyId}, ${supplierId}, ${statementDate}, ${closingBalance}, ${currency}, NOW(), NOW())
+      INSERT INTO supplier_statements (company_id, supplier_id, statement_date, closing_balance, currency_code, created_at, updated_at)
+      VALUES (${companyId}, ${supplierId}, ${statementDate}, ${closingBalance}, ${currencyCode}, NOW(), NOW())
     `.execute(db);
 
-    const result = await sql`SELECT id, company_id, supplier_id, statement_date, closing_balance, currency FROM supplier_statements WHERE company_id = ${companyId} AND supplier_id = ${supplierId} ORDER BY id DESC LIMIT 1`.execute(db);
+    const result = await sql`SELECT id, company_id, supplier_id, statement_date, closing_balance, currency_code FROM supplier_statements WHERE company_id = ${companyId} AND supplier_id = ${supplierId} ORDER BY id DESC LIMIT 1`.execute(db);
     if (result.rows.length === 0) {
       throw new Error(`Failed to create supplier statement for supplier ${supplierId}`);
     }
-    const row = result.rows[0] as { id: number; company_id: number; supplier_id: number; statement_date: Date; closing_balance: string; currency: string };
+    const row = result.rows[0] as { id: number; company_id: number; supplier_id: number; statement_date: Date; closing_balance: string; currency_code: string };
     const fixture: SupplierStatementFixture = {
       id: Number(row.id),
       companyId: Number(row.company_id),
       supplierId: Number(row.supplier_id),
       statementDate: row.statement_date instanceof Date ? row.statement_date.toISOString().split("T")[0] : String(row.statement_date),
       closingBalance: String(row.closing_balance),
-      currency: String(row.currency),
+      currencyCode: String(row.currency_code),
     };
     return fixture;
   } catch (error: unknown) {
     const mysqlErr = error as { code?: string };
     if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
-      const result = await sql`SELECT id, company_id, supplier_id, statement_date, closing_balance, currency FROM supplier_statements WHERE company_id = ${companyId} AND supplier_id = ${supplierId} ORDER BY id DESC LIMIT 1`.execute(db);
+      const result = await sql`SELECT id, company_id, supplier_id, statement_date, closing_balance, currency_code FROM supplier_statements WHERE company_id = ${companyId} AND supplier_id = ${supplierId} ORDER BY id DESC LIMIT 1`.execute(db);
       if (result.rows.length > 0) {
-        const row = result.rows[0] as { id: number; company_id: number; supplier_id: number; statement_date: Date; closing_balance: string; currency: string };
+        const row = result.rows[0] as { id: number; company_id: number; supplier_id: number; statement_date: Date; closing_balance: string; currency_code: string };
         return {
           id: Number(row.id),
           companyId: Number(row.company_id),
           supplierId: Number(row.supplier_id),
           statementDate: row.statement_date instanceof Date ? row.statement_date.toISOString().split("T")[0] : String(row.statement_date),
           closingBalance: String(row.closing_balance),
-          currency: String(row.currency),
+          currencyCode: String(row.currency_code),
         };
       }
     }
