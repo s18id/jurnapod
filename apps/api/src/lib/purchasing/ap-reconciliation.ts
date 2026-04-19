@@ -44,7 +44,7 @@ import { getDb } from "@/lib/db";
  * @param companyId - Company to resolve timezone for
  * @returns Resolved IANA timezone string
  */
-async function resolveCompanyTimezone(companyId: number): Promise<string> {
+export async function resolveCompanyTimezone(companyId: number): Promise<string> {
   const db = getDb() as KyselySchema;
 
   // Try outlet timezone first (default outlet for company)
@@ -132,9 +132,7 @@ export class APReconciliationTimezoneRequiredError extends APReconciliationError
 // Scaled Math Helpers (avoid parseFloat precision leakage)
 // =============================================================================
 
-const SCALE = 4n;
-
-function toScaled(value: string, scale: number): bigint {
+export function toScaled(value: string, scale: number): bigint {
   const trimmed = value.trim();
   // Accept optional leading minus for adjustment/variance paths.
   const re = new RegExp(`^-?\\d+(\\.\\d{1,${scale}})?$`);
@@ -150,7 +148,7 @@ function toScaled(value: string, scale: number): bigint {
   return sign * magnitude;
 }
 
-function fromScaled(value: bigint, scale: number): string {
+export function fromScaled(value: bigint, scale: number): string {
   const sign = value < 0n ? "-" : "";
   const abs = value < 0n ? -value : value;
   const intPart = abs / (10n ** BigInt(scale));
@@ -158,7 +156,7 @@ function fromScaled(value: bigint, scale: number): string {
   return `${sign}${intPart.toString()}.${fracPart}`;
 }
 
-function fromScaled4(value: bigint): string {
+export function fromScaled4(value: bigint): string {
   return fromScaled(value, 4);
 }
 
@@ -171,7 +169,7 @@ function fromScaled4(value: bigint): string {
  * This matches existing purchasing FX conversion behavior in PI/AP services
  * where base amounts are normalized to DECIMAL(19,4) before aggregation.
  */
-function computeBaseAmount(originalAmount: string, exchangeRate: string): bigint {
+export function computeBaseAmount(originalAmount: string, exchangeRate: string): bigint {
   const originalScaled = toScaled(originalAmount, 4);
   const rateScaled = toScaled(exchangeRate, 8);
   // original * rate: (scale4 * scale8) = scale12

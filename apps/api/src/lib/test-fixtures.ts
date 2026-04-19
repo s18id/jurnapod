@@ -1407,7 +1407,7 @@ export type APReconciliationSettingsFixture = {
 export async function createTestAPReconciliationSettings(
   companyId: number,
   accountIds: number[],
-  options?: Partial<{
+  _options?: Partial<{
     description: string;
   }>
 ): Promise<APReconciliationSettingsFixture> {

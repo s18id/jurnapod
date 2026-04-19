@@ -34,6 +34,7 @@ export * from "./constants/modules.js";
 export * from "./constants/resources.js";
 export * from "./constants/customers.js";
 export * from "./constants/purchasing.js";
+export * from "./constants/doc-types.js";
 export * from "./schemas/table-reservation.js";
 export * from "./schemas/customers.js";
 export * from "./schemas/purchasing.js";

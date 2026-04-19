@@ -9,6 +9,7 @@ import {
   AP_PAYMENT_STATUS_VALUES,
   PURCHASE_CREDIT_STATUS_VALUES
 } from "../constants/purchasing.js";
+import { PURCHASING_AP_TRANSACTION_TYPES } from "../constants/doc-types.js";
 
 /**
  * Currency code schema (ISO 4217)
@@ -710,8 +711,178 @@ export const APReconciliationSummaryResponseSchema = z.object({
   currency: z.string(),
 });
 
+// =============================================================================
+// AP Reconciliation Drilldown Schemas (Story 47.2 B2A)
+// =============================================================================
+
+/**
+ * Drilldown query schema - shared by drilldown, gl-detail, ap-detail, and export
+ */
+export const APReconciliationDrilldownQuerySchema = z.object({
+  as_of_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format"),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(500).default(100),
+});
+
+/**
+ * Drilldown attribution categories (deterministic precedence order)
+ * 1. currency_rounding_differences (<= tolerance)
+ * 2. posting_errors
+ * 3. timing_differences
+ * 4. missing_transactions
+ */
+export const DrilldownCategorySchema = z.enum([
+  "currency_rounding_differences",
+  "posting_errors",
+  "timing_differences",
+  "missing_transactions",
+]);
+export type DrilldownCategory = z.infer<typeof DrilldownCategorySchema>;
+
+/**
+ * Drilldown line item - individual transaction contributing to variance
+ */
+export const DrilldownLineItemSchema = z.object({
+  id: z.string(), // composite key for stability
+  category: DrilldownCategorySchema,
+  // AP side (optional - some items may be GL-only)
+  ap_transaction_id: z.number().int().positive().nullable(),
+  ap_transaction_type: z.enum(PURCHASING_AP_TRANSACTION_TYPES).nullable(),
+  ap_transaction_ref: z.string().nullable(), // invoice_no, payment_no, credit_no
+  ap_date: z.string().nullable(), // YYYY-MM-DD
+  ap_amount_original: z.string().nullable(),
+  ap_amount_base: z.string().nullable(),
+  ap_currency: z.string().nullable(),
+  // GL side (optional - some items may be AP-only)
+  gl_journal_line_id: z.number().int().positive().nullable(),
+  gl_journal_number: z.string().nullable(),
+  gl_effective_date: z.string().nullable(),
+  gl_description: z.string().nullable(),
+  gl_amount: z.string().nullable(), // debit or credit in base currency
+  gl_debit_credit: z.enum(["debit", "credit"]).nullable(),
+  // Match status
+  matched: z.boolean(),
+  match_id: z.string().nullable(), // composite key of matched pair
+  // Variance
+  difference: z.string(), // absolute difference in base currency
+  suggested_action: z.string().nullable(),
+});
+
+export type DrilldownLineItem = z.infer<typeof DrilldownLineItemSchema>;
+
+/**
+ * Drilldown variance category summary
+ */
+export const DrilldownCategorySummarySchema = z.object({
+  category: DrilldownCategorySchema,
+  total_difference: z.string(), // sum of differences in base currency
+  item_count: z.number().int().nonnegative(),
+  items: z.array(DrilldownLineItemSchema),
+});
+
+export type DrilldownCategorySummary = z.infer<typeof DrilldownCategorySummarySchema>;
+
+/**
+ * Drilldown response schema
+ */
+export const APReconciliationDrilldownResponseSchema = z.object({
+  as_of_date: z.string(),
+  configured_account_ids: z.array(z.number().int().positive()),
+  currency: z.string().default("BASE"),
+  // Totals from summary
+  ap_subledger_balance: z.string(),
+  gl_control_balance: z.string(),
+  variance: z.string(),
+  // Category summaries in deterministic precedence order
+  categories: z.array(DrilldownCategorySummarySchema),
+  // Pagination
+  next_cursor: z.string().nullable(),
+  has_more: z.boolean(),
+});
+
+/**
+ * GL detail line item
+ */
+export const GLDetailLineItemSchema = z.object({
+  journal_line_id: z.number().int().positive(),
+  journal_batch_id: z.number().int().positive(),
+  journal_number: z.string(),
+  effective_date: z.string(), // YYYY-MM-DD
+  description: z.string(),
+  account_id: z.number().int().positive(),
+  account_code: z.string(),
+  account_name: z.string(),
+  debit: z.string().nullable(), // null if credit
+  credit: z.string().nullable(), // null if debit
+  source_type: z.enum(PURCHASING_AP_TRANSACTION_TYPES).nullable(),
+  source_id: z.number().int().positive().nullable(),
+  posted_at: z.string(), // UTC datetime
+});
+
+export type GLDetailLineItem = z.infer<typeof GLDetailLineItemSchema>;
+
+/**
+ * GL detail response with pagination
+ */
+export const APReconciliationGLDetailResponseSchema = z.object({
+  as_of_date: z.string(),
+  configured_account_ids: z.array(z.number().int().positive()),
+  lines: z.array(GLDetailLineItemSchema),
+  next_cursor: z.string().nullable(),
+  has_more: z.boolean(),
+  total_count: z.number().int().nonnegative(),
+});
+
+/**
+ * AP detail line item
+ */
+export const APDetailLineItemSchema = z.object({
+  id: z.number().int().positive(),
+  type: z.enum(PURCHASING_AP_TRANSACTION_TYPES),
+  reference: z.string(), // invoice_no, credit_no, payment_no
+  date: z.string(), // YYYY-MM-DD
+  due_date: z.string().nullable(),
+  supplier_id: z.number().int().positive().nullable(),
+  supplier_name: z.string().nullable(),
+  currency_code: z.string(),
+  original_amount: z.string(), // in original currency
+  base_amount: z.string(), // converted to base currency
+  open_amount: z.string(), // remaining unpaid in base currency
+  status: z.string(),
+  // If matched to GL
+  matched: z.boolean(),
+  gl_journal_line_id: z.number().int().positive().nullable(),
+});
+
+export type APDetailLineItem = z.infer<typeof APDetailLineItemSchema>;
+
+/**
+ * AP detail response
+ */
+export const APReconciliationAPDetailResponseSchema = z.object({
+  as_of_date: z.string(),
+  lines: z.array(APDetailLineItemSchema),
+  next_cursor: z.string().nullable(),
+  has_more: z.boolean(),
+  total_count: z.number().int().nonnegative(),
+  total_open_base: z.string(),
+});
+
+/**
+ * CSV Export query schema
+ */
+export const APReconciliationExportQuerySchema = z.object({
+  as_of_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format"),
+  format: z.enum(["csv"]).default("csv"),
+});
+
 // Type exports for AP Reconciliation
 export type APReconciliationSettingsUpdate = z.infer<typeof APReconciliationSettingsUpdateSchema>;
 export type APReconciliationSettingsResponse = z.infer<typeof APReconciliationSettingsResponseSchema>;
 export type APReconciliationSummaryQuery = z.infer<typeof APReconciliationSummaryQuerySchema>;
 export type APReconciliationSummaryResponse = z.infer<typeof APReconciliationSummaryResponseSchema>;
+export type APReconciliationDrilldownQuery = z.infer<typeof APReconciliationDrilldownQuerySchema>;
+export type APReconciliationDrilldownResponse = z.infer<typeof APReconciliationDrilldownResponseSchema>;
+export type APReconciliationGLDetailResponse = z.infer<typeof APReconciliationGLDetailResponseSchema>;
+export type APReconciliationAPDetailResponse = z.infer<typeof APReconciliationAPDetailResponseSchema>;
+export type APReconciliationExportQuery = z.infer<typeof APReconciliationExportQuerySchema>;

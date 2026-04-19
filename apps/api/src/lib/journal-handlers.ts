@@ -26,7 +26,7 @@ import {
   InvalidJournalLineError
 } from "./journals";
 import type { AuthContext } from "./auth-guard";
-import type { ManualJournalEntryCreateRequest } from "@jurnapod/shared";
+import { normalizeJournalDocType, type ManualJournalEntryCreateRequest } from "@jurnapod/shared";
 
 // ============================================================================
 // Validation Schemas
@@ -81,7 +81,7 @@ export async function handleListJournals(
       outlet_id: query.outlet_id,
       start_date: query.start_date,
       end_date: query.end_date,
-      doc_type: query.doc_type,
+      doc_type: normalizeJournalDocType(query.doc_type),
       account_id: query.account_id,
       limit: query.limit ?? 100,
       offset: query.offset ?? 0,

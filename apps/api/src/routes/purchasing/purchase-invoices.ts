@@ -18,7 +18,6 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   PurchaseInvoiceCreateSchema,
-  PurchaseInvoiceStatusSchema,
   NumericIdSchema,
 } from "@jurnapod/shared";
 import { requireAccess, authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";

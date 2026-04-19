@@ -7,7 +7,7 @@ import type {
   JournalListQuery,
   JournalLineResponse
 } from "@jurnapod/shared";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { normalizeJournalDocType, toRfc3339Required } from "@jurnapod/shared";
 import { sql } from "kysely";
 import { withTransactionRetry, type KyselySchema } from "@jurnapod/db";
 
@@ -364,8 +364,9 @@ export class JournalsService {
       batchQuery = batchQuery.where('jb.outlet_id', '=', filters.outlet_id);
     }
 
-    if (filters.doc_type) {
-      batchQuery = batchQuery.where('jb.doc_type', '=', filters.doc_type);
+    const normalizedDocType = normalizeJournalDocType(filters.doc_type);
+    if (normalizedDocType) {
+      batchQuery = batchQuery.where('jb.doc_type', '=', normalizedDocType);
     }
 
     if (filters.start_date) {

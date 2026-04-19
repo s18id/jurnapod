@@ -1,6 +1,6 @@
 # Story 47.2: Reconciliation Drilldown & Variance Attribution
 
-Status: backlog
+Status: done
 
 ## Story
 
@@ -92,7 +92,20 @@ Story 47.1 provides a high‑level summary; Story 47.2 delivers the detailed dri
 
 ### Review Findings
 
-- [ ] *Review placeholder – findings will be populated during implementation review*
+- [x] [Review][Patch] Enforce tenant-scoped supplier joins in AP detail union queries [apps/api/src/lib/purchasing/ap-reconciliation-drilldown.ts:350]
+- [x] [Review][Patch] Prevent GL lines with unusable source type from being dropped by classifying them as timing differences [apps/api/src/lib/purchasing/ap-reconciliation-drilldown.ts:743]
+- [x] [Review][Defer] Make rounding tolerance configurable per company/report context [apps/api/src/lib/purchasing/ap-reconciliation-drilldown.ts:55] — deferred, pre-existing
+- [x] [Review][Defer] Evaluate CSV export scalability for very large datasets (streaming/background job) [apps/api/src/routes/purchasing/reports/ap-reconciliation.ts:531] — deferred, pre-existing
+- [x] [Review][Defer] Optimize large-data performance for UNION/count drilldown queries with index strategy and benchmarks [apps/api/src/lib/purchasing/ap-reconciliation-drilldown.ts:300] — deferred, pre-existing
+- [x] [Review][Defer] Consider stricter malformed cursor validation for explicit client feedback [apps/api/src/lib/purchasing/ap-reconciliation-drilldown.ts:598] — deferred, pre-existing
+
+### Review Findings (bmad-code-review rerun 2026-04-19)
+
+- [x] [Review][Decision] Define canonical classification for GL lines without a usable purchasing source key — resolved as `missing_transactions` to align AC1 wording (“GL entry with no AP source”) and keep deterministic attribution behavior [apps/api/src/lib/purchasing/ap-reconciliation-drilldown.ts:744]
+- [x] [Review][Patch] Add defensive tenant predicate to GL detail join on journal batches [apps/api/src/lib/purchasing/ap-reconciliation-drilldown.ts:211]
+- [x] [Review][Defer] Detect/flag wrong-account posting errors beyond configured AP control account set [apps/api/src/lib/purchasing/ap-reconciliation-drilldown.ts:211] — deferred, pre-existing
+- [x] [Review][Defer] Evaluate CSV export scalability for very large datasets (streaming/background job path) [apps/api/src/routes/purchasing/reports/ap-reconciliation.ts:531] — deferred, pre-existing
+- [x] [Review][Defer] Keep malformed-cursor validation enhancement (explicit 400 for invalid cursor format) in follow-up backlog [apps/api/src/lib/purchasing/ap-reconciliation-drilldown.ts:598] — deferred, pre-existing
 
 ---
 
@@ -139,7 +152,9 @@ curl "/api/purchasing/reports/ap-reconciliation/export?as_of_date=2025-04-19&for
 
 ## Dev Notes
 
-- Matching AP transactions to GL entries relies on the `source_id`/`source_type` recorded when the journal line was posted (e.g., `source_type='purchase_invoice'`, `source_id=invoice_id`). If those fields are missing, the item appears as “unmatched”.
+- Matching AP transactions to GL entries uses `journal_batches.doc_id` + `journal_batches.doc_type` (not `journal_lines.source_*` fields).
+- Canonical `doc_type` storage in journal batches is uppercase: `PURCHASE_INVOICE`, `AP_PAYMENT`, `PURCHASE_CREDIT`.
+- Drilldown matching must normalize both GL `doc_type` and AP transaction `type` through one canonical mapping (`DOC_TYPE_TO_AP_TYPE`) via a thin helper (`normalizeDocTypeToAPType`) before keying.
 - Timing differences are defined as AP transactions with `invoice_date` ≤ cutoff but no GL entry with `effective_date` ≤ cutoff (or vice‑versa). This may be normal during the posting lag; the drill‑down should flag them but not treat them as errors.
 - Posting errors are detected when a GL line references an AP transaction but the amount differs by more than a rounding tolerance (e.g., > 0.01).
 - Currency rounding differences should be grouped separately and shown as a single line with the total rounding variance.

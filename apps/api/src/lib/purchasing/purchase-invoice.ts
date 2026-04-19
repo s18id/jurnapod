@@ -13,8 +13,6 @@ import type { KyselySchema } from "@jurnapod/db";
 import { sql } from "kysely";
 import {
   PURCHASE_INVOICE_STATUS,
-  type PurchaseInvoiceCreate,
-  type PurchaseInvoiceResponse,
   type PurchaseInvoiceLineResponse,
 } from "@jurnapod/shared";
 import { getExchangeRate } from "./exchange-rate.js";
@@ -237,7 +235,7 @@ async function computeCreditUtilization(
   companyId: number,
   supplierId: number,
   invoiceGrandTotal: bigint,
-  currencyCode: string
+  _currencyCode: string
 ): Promise<CreditUtilization | null> {
   // Get supplier credit limit
   const supplier = await db

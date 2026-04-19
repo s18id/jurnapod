@@ -10,15 +10,15 @@ Implement Story 47.2 drilldown, GL-detail, AP-detail, and variance attribution a
 
 ## Scope Checklist
 
-- [ ] Drilldown endpoint implemented: `GET /api/purchasing/reports/ap-reconciliation/drilldown`
-- [ ] GL detail endpoint implemented: `GET /api/purchasing/reports/ap-reconciliation/gl-detail`
-- [ ] AP detail endpoint implemented: `GET /api/purchasing/reports/ap-reconciliation/ap-detail`
-- [ ] Variance categories implemented (timing, posting, missing, rounding)
-- [ ] Deterministic matching via `source_id`/`source_type`
-- [ ] Tenant scoping enforced on all joins/queries
-- [ ] ACL enforced: `purchasing.reports` + `ANALYZE`
-- [ ] Integration tests added/updated for attribution correctness
-- [ ] Build/typecheck/test evidence collected
+- [x] Drilldown endpoint implemented: `GET /api/purchasing/reports/ap-reconciliation/drilldown`
+- [x] GL detail endpoint implemented: `GET /api/purchasing/reports/ap-reconciliation/gl-detail`
+- [x] AP detail endpoint implemented: `GET /api/purchasing/reports/ap-reconciliation/ap-detail`
+- [x] Variance categories implemented (timing, posting, missing, rounding)
+- [x] Deterministic matching via `source_id`/`source_type`
+- [x] Tenant scoping enforced on all joins/queries
+- [x] ACL enforced: `purchasing.reports` + `ANALYZE`
+- [x] Integration tests added/updated for attribution correctness
+- [x] Build/typecheck/test evidence collected
 
 ## Guardrails
 
@@ -38,3 +38,4 @@ Implement Story 47.2 drilldown, GL-detail, AP-detail, and variance attribution a
 ## Gate
 
 - `@bmad-review` must return PASS with no unresolved P0/P1 before moving to B3/B4.
+- **Execution status (2026-04-19):** Implementation + validation complete; review gate pending.

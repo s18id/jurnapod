@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { sql } from "kysely";
-import { type KyselySchema } from "../db.js";
+import { getDb, type KyselySchema } from "../db.js";
 import { ensureUserHasOutletAccess as commonUtilsEnsureUserHasOutletAccess } from "./common-utils.js";
 // Re-export transaction helpers from @jurnapod/db
 // withTransactionRetry is preferred - it handles MySQL deadlocks automatically
@@ -81,4 +81,10 @@ export async function recordMasterDataAuditLog(
   `.execute(db);
 }
 
+/**
+ * Route-safe helper that avoids direct getDb() usage in route handlers.
+ */
+export async function recordMasterDataAuditLogDefaultDb(input: AuditLogInput): Promise<void> {
+  await recordMasterDataAuditLog(getDb(), input);
+}
 

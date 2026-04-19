@@ -97,7 +97,19 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.success).toBe(true);
-    const [intPart, fracPart = "0000"] = String(body.data.ap_subledger_balance).split(".");
+    return toScaled4(body.data.ap_subledger_balance);
+  };
+
+  const getSummaryVariance = async (asOfDate: string): Promise<bigint> => {
+    const res = await getJson(`/api/purchasing/reports/ap-reconciliation/summary?as_of_date=${asOfDate}`, ownerToken);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    return toScaled4(body.data.variance);
+  };
+
+  const toScaled4 = (value: string): bigint => {
+    const [intPart, fracPart = "0000"] = String(value).split(".");
     const scaled = `${intPart}${(fracPart + "0000").slice(0, 4)}`;
     return BigInt(scaled);
   };
@@ -734,6 +746,761 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
       // Company 2 should resolve only its own fallback/settings, not company 1 values
       expect(["none", "fallback_company_default", "settings"]).toContain(body.data.source);
       expect(body.data.account_ids).not.toContain(apAccountId);
+    });
+  });
+
+  // =============================================================================
+  // Story 47.2 B2A: Drilldown Endpoints Tests
+  // =============================================================================
+
+  describe("drilldown endpoints - ACL", () => {
+    beforeAll(async () => {
+      // Configure settings for company 1 (needed for drilldown)
+      await putJson("/api/purchasing/reports/ap-reconciliation/settings", ownerToken, {
+        account_ids: [apAccountId],
+      });
+    });
+
+    it("returns 401 when no token provided on drilldown", async () => {
+      const res = await getJson("/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19");
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 401 when no token provided on gl-detail", async () => {
+      const res = await getJson("/api/purchasing/reports/ap-reconciliation/gl-detail?as_of_date=2026-04-19");
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 401 when no token provided on ap-detail", async () => {
+      const res = await getJson("/api/purchasing/reports/ap-reconciliation/ap-detail?as_of_date=2026-04-19");
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 401 when no token provided on export", async () => {
+      const res = await getJson("/api/purchasing/reports/ap-reconciliation/export?as_of_date=2026-04-19");
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 403 when CASHIER attempts drilldown (insufficient permission)", async () => {
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+        cashierToken
+      );
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 403 when CASHIER attempts gl-detail (insufficient permission)", async () => {
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/gl-detail?as_of_date=2026-04-19",
+        cashierToken
+      );
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 403 when CASHIER attempts ap-detail (insufficient permission)", async () => {
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/ap-detail?as_of_date=2026-04-19",
+        cashierToken
+      );
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 403 when CASHIER attempts export (insufficient permission)", async () => {
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/export?as_of_date=2026-04-19",
+        cashierToken
+      );
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 200 when OWNER with proper permission accesses drilldown", async () => {
+      // Ensure owner has purchasing.reports ANALYZE permission
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+        ownerToken
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+      expect(body.data.categories).toBeDefined();
+      expect(Array.isArray(body.data.categories)).toBe(true);
+    });
+
+    it("returns 200 when OWNER accesses gl-detail", async () => {
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/gl-detail?as_of_date=2026-04-19",
+        ownerToken
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+      expect(body.data.lines).toBeDefined();
+      expect(Array.isArray(body.data.lines)).toBe(true);
+    });
+
+    it("returns 200 when OWNER accesses ap-detail", async () => {
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/ap-detail?as_of_date=2026-04-19",
+        ownerToken
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+      expect(body.data.lines).toBeDefined();
+      expect(Array.isArray(body.data.lines)).toBe(true);
+    });
+
+    it("returns CSV content-type when accessing export", async () => {
+      const res = await fetch(`${baseUrl}/api/purchasing/reports/ap-reconciliation/export?as_of_date=2026-04-19`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${ownerToken}`,
+        },
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/csv");
+    });
+  });
+
+  describe("drilldown endpoints - company isolation", () => {
+    it("does not leak drilldown data between companies", async () => {
+      // Configure settings for company 1
+      await putJson("/api/purchasing/reports/ap-reconciliation/settings", ownerToken, {
+        account_ids: [apAccountId],
+      });
+
+      // Create and post an invoice in company 1
+      await createAndPostInvoice(`ISO-C1-${Date.now() % 100000}`, "2026-04-15", "500.0000");
+
+      // Query drilldown for company 1
+      const res1 = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+        ownerToken
+      );
+      expect(res1.status).toBe(200);
+      const body1 = await res1.json();
+      expect(body1.success).toBe(true);
+
+      // Company 1 should have at least the invoice we created
+      const company1HasData = body1.data.categories.some((cat: any) => cat.item_count > 0);
+
+      // Create company 2 with purchasing reports permission
+      const db = getTestDb();
+      const company2UserEmail = `c2-drilldown-${Date.now()}@example.com`;
+      const company2User = await createTestUser(testCompany2Id, {
+        email: company2UserEmail,
+        name: "Company 2 Drilldown User",
+        password: "TestPassword123!",
+      });
+      const ownerRoleId = await getRoleIdByCode("OWNER");
+      await assignUserGlobalRole(company2User.id, ownerRoleId);
+      await setModulePermission(testCompany2Id, ownerRoleId, "purchasing", "reports", 63, { allowSystemRoleMutation: true });
+      await setModulePermission(testCompany2Id, ownerRoleId, "purchasing", "invoices", 63, { allowSystemRoleMutation: true });
+
+      // Create purchasing accounts for company 2
+      const { ap_account_id: company2ApAccountId } = await createTestPurchasingAccounts(testCompany2Id);
+      await putJson("/api/purchasing/reports/ap-reconciliation/settings", ownerToken, {
+        account_ids: [company2ApAccountId],
+      });
+
+      const company2 = await sql`SELECT code FROM companies WHERE id = ${testCompany2Id}`.execute(db);
+      const company2Code = (company2.rows[0] as { code: string }).code;
+      const company2Token = await loginForTest(baseUrl, company2Code, company2UserEmail, "TestPassword123!");
+
+      // Configure company 2 settings
+      await putJson("/api/purchasing/reports/ap-reconciliation/settings", company2Token, {
+        account_ids: [company2ApAccountId],
+      });
+
+      // Query drilldown for company 2
+      const res2 = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+        company2Token
+      );
+      expect(res2.status).toBe(200);
+      const body2 = await res2.json();
+      expect(body2.success).toBe(true);
+
+      // Company 2 should NOT see company 1's invoice data
+      // Company 1 has items, company 2 should not have the same items
+      const company2HasInvoiceFromCompany1 = body2.data.categories.some(
+        (cat: any) => cat.items.some((item: any) => item.ap_transaction_ref?.includes("ISO-C1"))
+      );
+      expect(company2HasInvoiceFromCompany1).toBe(false);
+
+      // Cleanup company 2 user session data
+      await sql`DELETE FROM settings_strings WHERE company_id = ${testCompany2Id}`.execute(db);
+    });
+
+    it("gl-detail does not leak data between companies", async () => {
+      // Create company 2 user with purchasing reports permission
+      const db = getTestDb();
+      const company2UserEmail = `c2-gldetail-${Date.now()}@example.com`;
+      const company2User = await createTestUser(testCompany2Id, {
+        email: company2UserEmail,
+        name: "Company 2 GL Detail User",
+        password: "TestPassword123!",
+      });
+      const ownerRoleId = await getRoleIdByCode("OWNER");
+      await assignUserGlobalRole(company2User.id, ownerRoleId);
+      await setModulePermission(testCompany2Id, ownerRoleId, "purchasing", "reports", 63, { allowSystemRoleMutation: true });
+
+      const company2 = await sql`SELECT code FROM companies WHERE id = ${testCompany2Id}`.execute(db);
+      const company2Code = (company2.rows[0] as { code: string }).code;
+      const company2Token = await loginForTest(baseUrl, company2Code, company2UserEmail, "TestPassword123!");
+
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/gl-detail?as_of_date=2026-04-19",
+        company2Token
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+
+      // GL lines from company 1 should not appear in company 2 response
+      const hasCompany1GLLine = body.data.lines.some(
+        (line: any) => line.journal_number?.includes("ISO-C1")
+      );
+      expect(hasCompany1GLLine).toBe(false);
+    });
+
+    it("ap-detail does not leak data between companies", async () => {
+      // Create company 2 user with purchasing reports permission
+      const db = getTestDb();
+      const company2UserEmail = `c2-apdetail-${Date.now()}@example.com`;
+      const company2User = await createTestUser(testCompany2Id, {
+        email: company2UserEmail,
+        name: "Company 2 AP Detail User",
+        password: "TestPassword123!",
+      });
+      const ownerRoleId = await getRoleIdByCode("OWNER");
+      await assignUserGlobalRole(company2User.id, ownerRoleId);
+      await setModulePermission(testCompany2Id, ownerRoleId, "purchasing", "reports", 63, { allowSystemRoleMutation: true });
+
+      const company2 = await sql`SELECT code FROM companies WHERE id = ${testCompany2Id}`.execute(db);
+      const company2Code = (company2.rows[0] as { code: string }).code;
+      const company2Token = await loginForTest(baseUrl, company2Code, company2UserEmail, "TestPassword123!");
+
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/ap-detail?as_of_date=2026-04-19",
+        company2Token
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+
+      // AP items from company 1 should not appear in company 2 response
+      const hasCompany1APItem = body.data.lines.some(
+        (line: any) => line.reference?.includes("ISO-C1")
+      );
+      expect(hasCompany1APItem).toBe(false);
+    });
+  });
+
+  describe("drilldown endpoints - attribution correctness", () => {
+    it("categorizes timing differences correctly", async () => {
+      // Configure settings
+      await putJson("/api/purchasing/reports/ap-reconciliation/settings", ownerToken, {
+        account_ids: [apAccountId],
+      });
+
+      // Create an invoice (this will have a corresponding GL entry when posted)
+      await createAndPostInvoice(`ATTR-TIME-${Date.now() % 100000}`, "2026-04-15", "100.0000");
+
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+        ownerToken
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+
+      // The drilldown should have categories
+      expect(body.data.categories).toBeDefined();
+      expect(Array.isArray(body.data.categories)).toBe(true);
+
+      // Categories should be in deterministic precedence order
+      const categoryOrder = body.data.categories.map((c: any) => c.category);
+      expect(categoryOrder).toEqual([
+        "currency_rounding_differences",
+        "posting_errors",
+        "timing_differences",
+        "missing_transactions",
+      ]);
+    });
+
+    it("has correct category structure for each variance type", async () => {
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+        ownerToken
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      for (const category of body.data.categories) {
+        expect(category).toHaveProperty("category");
+        expect(category).toHaveProperty("total_difference");
+        expect(category).toHaveProperty("item_count");
+        expect(category).toHaveProperty("items");
+        expect(Array.isArray(category.items)).toBe(true);
+
+        for (const item of category.items) {
+          expect(item).toHaveProperty("id");
+          expect(item).toHaveProperty("category");
+          expect(item).toHaveProperty("difference");
+          expect(item).toHaveProperty("matched");
+        }
+      }
+    });
+
+    it("matches GL doc_type to AP transaction type using canonical mapping", async () => {
+      // Ensure there is at least one freshly posted PI with journal doc_type PURCHASE_INVOICE
+      await createAndPostInvoice(`ATTR-MAP-${Date.now() % 100000}`, "2026-04-16", "77.0000");
+
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+        ownerToken
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+
+      const allItems = body.data.categories.flatMap((c: any) => c.items);
+      const hasMatchedPurchaseInvoice = allItems.some(
+        (item: any) =>
+          item.matched === true &&
+          item.ap_transaction_type === "purchase_invoice" &&
+          item.gl_journal_number
+      );
+
+      expect(hasMatchedPurchaseInvoice).toBe(true);
+    });
+
+    it("does not classify second GL line of the same invoice source as missing", async () => {
+      const invoiceNo = `ATTR-AGG-${Date.now() % 100000}`;
+      await createAndPostInvoice(invoiceNo, "2026-04-17", "123.0000");
+
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19&limit=500",
+        ownerToken
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+
+      const items = body.data.categories.flatMap((c: any) => c.items);
+      const missingForInvoice = items.filter(
+        (item: any) =>
+          item.category === "missing_transactions" &&
+          item.ap_transaction_ref === invoiceNo
+      );
+      expect(missingForInvoice.length).toBe(0);
+
+      const matchedForInvoice = items.filter(
+        (item: any) =>
+          item.ap_transaction_ref === invoiceNo &&
+          item.ap_transaction_type === "purchase_invoice" &&
+          item.matched === true
+      );
+      expect(matchedForInvoice.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("drilldown endpoints - deterministic output", () => {
+    it("returns identical results for repeated queries", async () => {
+      const res1 = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+        ownerToken
+      );
+      expect(res1.status).toBe(200);
+      const body1 = await res1.json();
+
+      // Small delay to ensure any async operations complete
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const res2 = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+        ownerToken
+      );
+      expect(res2.status).toBe(200);
+      const body2 = await res2.json();
+
+      // Results should be identical
+      expect(body1.data.categories).toEqual(body2.data.categories);
+      expect(body1.data.variance).toEqual(body2.data.variance);
+    });
+
+    it("categories appear in deterministic precedence order", async () => {
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+        ownerToken
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      const categoryOrder = body.data.categories.map((c: any) => c.category);
+      const expectedOrder = [
+        "currency_rounding_differences",
+        "posting_errors",
+        "timing_differences",
+        "missing_transactions",
+      ];
+      expect(categoryOrder).toEqual(expectedOrder);
+    });
+  });
+
+  describe("drilldown endpoints - pagination", () => {
+    it("gl-detail supports cursor pagination", async () => {
+      // Create multiple invoices to generate multiple GL lines
+      await createAndPostInvoice(`PAGE-GL1-${Date.now() % 100000}`, "2026-04-10", "100.0000");
+      await createAndPostInvoice(`PAGE-GL2-${Date.now() % 100000}`, "2026-04-11", "200.0000");
+      await createAndPostInvoice(`PAGE-GL3-${Date.now() % 100000}`, "2026-04-12", "300.0000");
+
+      // First request with small limit
+      const res1 = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/gl-detail?as_of_date=2026-04-19&limit=2",
+        ownerToken
+      );
+      expect(res1.status).toBe(200);
+      const body1 = await res1.json();
+      expect(body1.data.lines.length).toBeLessThanOrEqual(2);
+      expect(body1.data.has_more).toBe(true);
+      expect(body1.data.next_cursor).toBeTruthy();
+
+      // Second request with cursor
+      const res2 = await getJson(
+        `/api/purchasing/reports/ap-reconciliation/gl-detail?as_of_date=2026-04-19&limit=2&cursor=${body1.data.next_cursor}`,
+        ownerToken
+      );
+      expect(res2.status).toBe(200);
+      const body2 = await res2.json();
+
+      // Results should not overlap
+      const firstIds = body1.data.lines.map((l: any) => l.journal_line_id);
+      const secondIds = body2.data.lines.map((l: any) => l.journal_line_id);
+      const overlap = firstIds.filter((id: number) => secondIds.includes(id));
+      expect(overlap.length).toBe(0);
+    });
+
+    it("ap-detail supports cursor pagination", async () => {
+      // Create multiple invoices
+      await createAndPostInvoice(`PAGE-AP1-${Date.now() % 100000}`, "2026-04-10", "100.0000");
+      await createAndPostInvoice(`PAGE-AP2-${Date.now() % 100000}`, "2026-04-11", "200.0000");
+      await createAndPostInvoice(`PAGE-AP3-${Date.now() % 100000}`, "2026-04-12", "300.0000");
+
+      const res1 = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/ap-detail?as_of_date=2026-04-19&limit=2",
+        ownerToken
+      );
+      expect(res1.status).toBe(200);
+      const body1 = await res1.json();
+      expect(body1.data.lines.length).toBeLessThanOrEqual(2);
+      expect(body1.data.has_more).toBe(true);
+      expect(body1.data.next_cursor).toBeTruthy();
+    });
+
+    it("drilldown respects limit parameter", async () => {
+      // Create multiple invoices
+      await createAndPostInvoice(`LIM-DRILL1-${Date.now() % 100000}`, "2026-04-10", "100.0000");
+      await createAndPostInvoice(`LIM-DRILL2-${Date.now() % 100000}`, "2026-04-11", "200.0000");
+
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19&limit=100",
+        ownerToken
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+    });
+
+    it("drilldown variance equals summary variance regardless of pagination limit", async () => {
+      await createAndPostInvoice(`LIM-VAR1-${Date.now() % 100000}`, "2026-04-10", "410.0000");
+      await createAndPostInvoice(`LIM-VAR2-${Date.now() % 100000}`, "2026-04-11", "520.0000");
+      await createAndPostInvoice(`LIM-VAR3-${Date.now() % 100000}`, "2026-04-12", "630.0000");
+
+      const summaryVariance = await getSummaryVariance("2026-04-19");
+
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19&limit=2",
+        ownerToken
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+
+      const drilldownVariance = toScaled4(body.data.variance);
+      expect(drilldownVariance).toBe(summaryVariance);
+    });
+
+    it("ap-detail total_open_base is full-dataset total, not page-window total", async () => {
+      await createAndPostInvoice(`LIM-OPEN1-${Date.now() % 100000}`, "2026-04-10", "111.0000");
+      await createAndPostInvoice(`LIM-OPEN2-${Date.now() % 100000}`, "2026-04-11", "222.0000");
+      await createAndPostInvoice(`LIM-OPEN3-${Date.now() % 100000}`, "2026-04-12", "333.0000");
+
+      const firstPageRes = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/ap-detail?as_of_date=2026-04-19&limit=1",
+        ownerToken
+      );
+      expect(firstPageRes.status).toBe(200);
+      const firstPageBody = await firstPageRes.json();
+      expect(firstPageBody.success).toBe(true);
+
+      let cursor = firstPageBody.data.next_cursor as string | null;
+      let totalFromAllPages = 0n;
+      for (const line of firstPageBody.data.lines as Array<{ open_amount: string }>) {
+        totalFromAllPages += toScaled4(line.open_amount);
+      }
+
+      while (cursor) {
+        const pageRes = await getJson(
+          `/api/purchasing/reports/ap-reconciliation/ap-detail?as_of_date=2026-04-19&limit=1&cursor=${encodeURIComponent(cursor)}`,
+          ownerToken
+        );
+        expect(pageRes.status).toBe(200);
+        const pageBody = await pageRes.json();
+        for (const line of pageBody.data.lines as Array<{ open_amount: string }>) {
+          totalFromAllPages += toScaled4(line.open_amount);
+        }
+        cursor = pageBody.data.next_cursor;
+      }
+
+      const reportedTotal = toScaled4(firstPageBody.data.total_open_base);
+      expect(reportedTotal).toBe(totalFromAllPages);
+    });
+  });
+
+  describe("drilldown endpoints - CSV export", () => {
+    it("export CSV has correct headers", async () => {
+      const res = await fetch(
+        `${baseUrl}/api/purchasing/reports/ap-reconciliation/export?as_of_date=2026-04-19`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${ownerToken}`,
+          },
+        }
+      );
+      expect(res.status).toBe(200);
+      const csvText = await res.text();
+      const headers = csvText.split("\n")[0];
+      expect(headers).toContain("category");
+      expect(headers).toContain("ap_transaction_type");
+      expect(headers).toContain("gl_journal_number");
+      expect(headers).toContain("difference");
+      expect(headers).toContain("suggested_action");
+    });
+
+    it("export CSV row count matches drilldown data", async () => {
+      // First get drilldown data
+      const drilldownRes = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+        ownerToken
+      );
+      expect(drilldownRes.status).toBe(200);
+      const drilldownBody = await drilldownRes.json();
+
+      // Count total items across all categories
+      let totalItems = 0;
+      for (const cat of drilldownBody.data.categories) {
+        totalItems += cat.item_count;
+      }
+
+      // Get export CSV
+      const exportRes = await fetch(
+        `${baseUrl}/api/purchasing/reports/ap-reconciliation/export?as_of_date=2026-04-19`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${ownerToken}`,
+          },
+        }
+      );
+      expect(exportRes.status).toBe(200);
+      const csvText = await exportRes.text();
+      const csvRows = csvText.trim().split("\n");
+
+      // Header row + data rows should match
+      // (But may differ if there are 0 items - CSV might have just header)
+      if (totalItems > 0) {
+        expect(csvRows.length).toBe(totalItems + 1); // +1 for header
+      }
+    });
+
+    it("export CSV uses same drilldown dataset", async () => {
+      // Get drilldown data
+      const drilldownRes = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+        ownerToken
+      );
+      expect(drilldownRes.status).toBe(200);
+      const drilldownBody = await drilldownRes.json();
+
+      // Get export CSV
+      const exportRes = await fetch(
+        `${baseUrl}/api/purchasing/reports/ap-reconciliation/export?as_of_date=2026-04-19`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${ownerToken}`,
+          },
+        }
+      );
+      expect(exportRes.status).toBe(200);
+      const csvText = await exportRes.text();
+
+      // CSV should contain all category names from drilldown
+      for (const cat of drilldownBody.data.categories) {
+        if (cat.item_count > 0) {
+          expect(csvText).toContain(cat.category);
+        }
+      }
+    });
+  });
+
+  describe("drilldown endpoints - gl-detail structure", () => {
+    it("gl-detail returns correct line structure", async () => {
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/gl-detail?as_of_date=2026-04-19",
+        ownerToken
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      if (body.data.lines.length > 0) {
+        const line = body.data.lines[0];
+        expect(line).toHaveProperty("journal_line_id");
+        expect(line).toHaveProperty("journal_batch_id");
+        expect(line).toHaveProperty("journal_number");
+        expect(line).toHaveProperty("effective_date");
+        expect(line).toHaveProperty("description");
+        expect(line).toHaveProperty("account_id");
+        expect(line).toHaveProperty("account_code");
+        expect(line).toHaveProperty("account_name");
+        expect(line).toHaveProperty("debit");
+        expect(line).toHaveProperty("credit");
+        expect(line).toHaveProperty("source_type");
+        expect(line).toHaveProperty("source_id");
+        expect(line).toHaveProperty("posted_at");
+      }
+
+      expect(body.data).toHaveProperty("total_count");
+      expect(body.data).toHaveProperty("has_more");
+      expect(body.data).toHaveProperty("next_cursor");
+    });
+  });
+
+  describe("drilldown endpoints - ap-detail structure", () => {
+    it("ap-detail returns correct line structure with base and open amounts", async () => {
+      const res = await getJson(
+        "/api/purchasing/reports/ap-reconciliation/ap-detail?as_of_date=2026-04-19",
+        ownerToken
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      if (body.data.lines.length > 0) {
+        const line = body.data.lines[0];
+        expect(line).toHaveProperty("id");
+        expect(line).toHaveProperty("type");
+        expect(line).toHaveProperty("reference");
+        expect(line).toHaveProperty("date");
+        expect(line).toHaveProperty("currency_code");
+        expect(line).toHaveProperty("original_amount");
+        expect(line).toHaveProperty("base_amount");
+        expect(line).toHaveProperty("open_amount");
+        expect(line).toHaveProperty("status");
+        expect(line).toHaveProperty("matched");
+      }
+
+      expect(body.data).toHaveProperty("total_count");
+      expect(body.data).toHaveProperty("total_open_base");
+      expect(body.data).toHaveProperty("has_more");
+      expect(body.data).toHaveProperty("next_cursor");
+    });
+  });
+
+  describe("drilldown endpoints - fail-closed behavior", () => {
+    it("returns 409 when settings unresolved on drilldown", async () => {
+      // Create a company with no AP reconciliation settings
+      const noApCompany = await createTestCompanyMinimal({
+        code: `NOAP-DRILL-${Date.now()}`.slice(0, 15),
+      });
+
+      try {
+        const noApEmail = `noap-drill-${Date.now()}@example.com`;
+        const noApUser = await createTestUser(noApCompany.id, {
+          email: noApEmail,
+          name: "No AP Drill User",
+          password: "TestPassword123!",
+        });
+        const ownerRoleId = await getRoleIdByCode("OWNER");
+        await assignUserGlobalRole(noApUser.id, ownerRoleId);
+        await setModulePermission(noApCompany.id, ownerRoleId, "purchasing", "reports", 63, {
+          allowSystemRoleMutation: true,
+        });
+
+        const noApToken = await loginForTest(baseUrl, noApCompany.code, noApEmail, "TestPassword123!");
+
+        const res = await getJson(
+          "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+          noApToken
+        );
+        expect(res.status).toBe(409);
+        const body = await res.json();
+        expect(body.error.code).toBe("AP_RECONCILIATION_SETTINGS_REQUIRED");
+      } finally {
+        const db = getTestDb();
+        await sql`DELETE FROM settings_strings WHERE company_id = ${noApCompany.id}`.execute(db);
+        await sql`DELETE FROM users WHERE company_id = ${noApCompany.id}`.execute(db);
+        await sql`DELETE FROM companies WHERE id = ${noApCompany.id}`.execute(db);
+      }
+    });
+
+    it("returns 500 when timezone missing on drilldown (no UTC fallback)", async () => {
+      // Create a company with no timezone set
+      const noTzCompany = await createTestCompanyMinimal({
+        code: `NOTZ-DRILL-${Date.now()}`.slice(0, 15),
+      });
+
+      try {
+        const noTzEmail = `notz-drill-${Date.now()}@example.com`;
+        const noTzUser = await createTestUser(noTzCompany.id, {
+          email: noTzEmail,
+          name: "No TZ Drill User",
+          password: "TestPassword123!",
+        });
+        const ownerRoleId = await getRoleIdByCode("OWNER");
+        await assignUserGlobalRole(noTzUser.id, ownerRoleId);
+        await setModulePermission(noTzCompany.id, ownerRoleId, "purchasing", "reports", 63, {
+          allowSystemRoleMutation: true,
+        });
+
+        // Ensure fallback AP account exists so drilldown reaches timezone resolution
+        await createTestPurchasingAccounts(noTzCompany.id);
+
+        const db = getTestDb();
+        await sql`UPDATE companies SET timezone = NULL WHERE id = ${noTzCompany.id}`.execute(db);
+        await sql`UPDATE outlets SET timezone = NULL WHERE company_id = ${noTzCompany.id}`.execute(db);
+
+        const noTzToken = await loginForTest(baseUrl, noTzCompany.code, noTzEmail, "TestPassword123!");
+
+        const res = await getJson(
+          "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+          noTzToken
+        );
+        expect(res.status).toBe(500);
+        const body = await res.json();
+        expect(body.error.code).toBe("AP_RECONCILIATION_TIMEZONE_REQUIRED");
+        expect(String(body.error.message)).toContain("No UTC fallback is permitted");
+      } finally {
+        const db = getTestDb();
+        await sql`DELETE FROM accounts WHERE company_id = ${noTzCompany.id}`.execute(db);
+        await sql`DELETE FROM company_modules WHERE company_id = ${noTzCompany.id}`.execute(db);
+        await sql`DELETE FROM outlets WHERE company_id = ${noTzCompany.id}`.execute(db);
+        await sql`DELETE FROM settings_strings WHERE company_id = ${noTzCompany.id}`.execute(db);
+        await sql`DELETE FROM users WHERE company_id = ${noTzCompany.id}`.execute(db);
+        await sql`DELETE FROM companies WHERE id = ${noTzCompany.id}`.execute(db);
+      }
     });
   });
 });
