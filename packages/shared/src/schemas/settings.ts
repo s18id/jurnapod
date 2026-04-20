@@ -18,6 +18,8 @@ const BooleanInputSchema = z.preprocess((value) => {
 }, z.boolean());
 
 export const InventoryCostingMethodSchema = z.enum(["AVG", "FIFO", "LIFO"]);
+// FIX(47.5-WP-A1): Add AP period-close guardrail enum schema
+export const APPeriodCloseGuardrailSchema = z.enum(["strict", "override_allowed"]);
 
 const InventoryCostingMethodInputSchema = z.preprocess((value) => {
   if (typeof value === "string") {
@@ -25,6 +27,14 @@ const InventoryCostingMethodInputSchema = z.preprocess((value) => {
   }
   return value;
 }, InventoryCostingMethodSchema);
+
+// FIX(47.5-WP-A1): AP period-close guardrail input schema
+const APPeriodCloseGuardrailInputSchema = z.preprocess((value) => {
+  if (typeof value === "string") {
+    return value.trim().toLowerCase();
+  }
+  return value;
+}, APPeriodCloseGuardrailSchema);
 
 export const SettingValueTypeSchema = z.enum(["int", "boolean", "enum"]);
 
@@ -36,6 +46,8 @@ export const SETTINGS_KEYS = [
   "feature.inventory.allow_backorder",
   "feature.purchasing.require_approval",
   "accounting.allow_multiple_open_fiscal_years",
+  // FIX(47.5-WP-A1): AP period-close guardrail — strict blocks post/pay/apply in closed periods
+  "accounting.ap_period_close_guardrail",
   "inventory.low_stock_threshold",
   "inventory.reorder_point",
   "inventory.allow_negative_stock",
@@ -48,7 +60,9 @@ export const SettingKeySchema = z.enum(SETTINGS_KEYS);
 export type SettingKey = z.infer<typeof SettingKeySchema>;
 export type SettingValueType = z.infer<typeof SettingValueTypeSchema>;
 export type InventoryCostingMethod = z.infer<typeof InventoryCostingMethodSchema>;
-export type SettingValue = number | boolean | InventoryCostingMethod;
+// FIX(47.5-WP-A1): AP period-close guardrail type
+export type APPeriodCloseGuardrail = z.infer<typeof APPeriodCloseGuardrailSchema>;
+export type SettingValue = number | boolean | InventoryCostingMethod | APPeriodCloseGuardrail;
 
 export type SettingsRegistryEntry = {
   valueType: SettingValueType;
@@ -91,6 +105,12 @@ export const SETTINGS_REGISTRY: Record<SettingKey, SettingsRegistryEntry> = {
     valueType: "boolean",
     defaultValue: false,
     schema: BooleanInputSchema
+  },
+  // FIX(47.5-WP-A1): AP period-close guardrail — default strict blocks override unless explicitly allowed
+  "accounting.ap_period_close_guardrail": {
+    valueType: "enum",
+    defaultValue: "strict",
+    schema: APPeriodCloseGuardrailInputSchema
   },
   "inventory.low_stock_threshold": {
     valueType: "int",

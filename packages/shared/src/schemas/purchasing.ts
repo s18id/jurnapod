@@ -406,6 +406,7 @@ export const PurchaseInvoiceLineSchema = z.object({
 
 /**
  * Purchase invoice create request schema
+ * FIX(47.5-WP-C): Added optional override_reason for closed-period override
  */
 export const PurchaseInvoiceCreateSchema = z.object({
   supplier_id: NumericIdSchema,
@@ -416,7 +417,9 @@ export const PurchaseInvoiceCreateSchema = z.object({
   currency_code: CurrencyCodeSchema.optional().default("IDR"),
   exchange_rate: z.string().trim().regex(/^\d+(\.\d{1,8})?$/).default("1.00000000"),
   notes: z.string().trim().max(1000).nullable().optional(),
-  lines: z.array(PurchaseInvoiceLineSchema).min(1, "At least one line item is required")
+  lines: z.array(PurchaseInvoiceLineSchema).min(1, "At least one line item is required"),
+  // FIX(47.5-WP-C): Optional override reason for closed period override path
+  override_reason: z.string().trim().max(500).nullable().optional(),
 });
 
 /**
@@ -512,13 +515,16 @@ export const ApPaymentLineCreateSchema = z.object({
 
 /**
  * AP payment create request schema
+ * FIX(47.5-WP-C): Added optional override_reason for closed-period override
  */
 export const ApPaymentCreateSchema = z.object({
   payment_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format").transform((d) => new Date(d)),
   bank_account_id: NumericIdSchema,
   supplier_id: NumericIdSchema,
   description: z.string().trim().max(1000).nullable().optional(),
-  lines: z.array(ApPaymentLineCreateSchema).min(1, "At least one line item is required")
+  lines: z.array(ApPaymentLineCreateSchema).min(1, "At least one line item is required"),
+  // FIX(47.5-WP-C): Optional override reason for closed period override path
+  override_reason: z.string().trim().max(500).nullable().optional(),
 });
 
 /**
@@ -600,7 +606,9 @@ export const PurchaseCreditCreateSchema = z.object({
   credit_no: z.string().trim().min(1).max(64),
   credit_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format").transform((d) => new Date(d)),
   description: z.string().trim().max(1000).nullable().optional(),
-  lines: z.array(PurchaseCreditLineCreateSchema).min(1, "At least one line item is required")
+  lines: z.array(PurchaseCreditLineCreateSchema).min(1, "At least one line item is required"),
+  // FIX(47.5-WP-C): Optional override reason for closed period override path
+  override_reason: z.string().trim().max(500).nullable().optional(),
 });
 
 export const PurchaseCreditListQuerySchema = z.object({

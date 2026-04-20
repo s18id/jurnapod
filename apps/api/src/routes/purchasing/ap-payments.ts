@@ -42,6 +42,11 @@ import {
   APPaymentMissingAPAccountError,
   APPaymentInvalidAPAccountTypeError,
 } from "../../lib/purchasing/ap-payment.js";
+// FIX(47.5-WP-C): Import period-close guardrail errors for route error mapping
+import {
+  PeriodOverrideReasonInvalidError,
+  PeriodOverrideForbiddenError,
+} from "../../lib/accounting/ap-period-close-guardrail.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -164,6 +169,7 @@ paymentRoutes.get("/:id", async (c) => {
 });
 
 // POST /purchasing/payments - Create new AP payment (draft)
+// FIX(47.5-WP-C): Removed eager route-level ACL check — service layer handles override evaluation
 paymentRoutes.post("/", async (c) => {
   try {
     const auth = c.get("auth");
@@ -190,6 +196,7 @@ paymentRoutes.post("/", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
+    // FIX(47.5-WP-C): Pass override_reason directly to service — no eager ACL check here.
     const payment = await createDraftAPPayment(auth.companyId, auth.userId, {
       paymentDate: new Date(input.payment_date),
       bankAccountId: input.bank_account_id,
@@ -200,7 +207,8 @@ paymentRoutes.post("/", async (c) => {
         allocationAmount: line.allocation_amount,
         description: line.description ?? null,
       })),
-    });
+      overrideReason: input.override_reason ?? null,
+    }, auth);
 
     return successResponse(payment, 201);
   } catch (error) {
@@ -210,6 +218,12 @@ paymentRoutes.post("/", async (c) => {
     if (error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
+    if (error instanceof PeriodOverrideReasonInvalidError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+    if (error instanceof PeriodOverrideForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
     if (typeof error === "object" && error !== null && "code" in error) {
       const err = error as { code: string; message?: string };
       if (err.code === "SUPPLIER_NOT_FOUND") {
@@ -217,6 +231,10 @@ paymentRoutes.post("/", async (c) => {
       }
       if (err.code === "BANK_ACCOUNT_NOT_FOUND") {
         return errorResponse("BANK_ACCOUNT_NOT_FOUND", err.message ?? "Bank account not found", 400);
+      }
+      // FIX(47.5-WP-C): Handle period-close guardrail block response (strict mode → 409)
+      if (err.code === "PERIOD_CLOSED") {
+        return errorResponse("PERIOD_CLOSED", err.message ?? "Period is closed for AP transactions", 409);
       }
     }
     if (error instanceof APPaymentOverpaymentError) {
@@ -240,6 +258,7 @@ paymentRoutes.post("/", async (c) => {
 });
 
 // POST /purchasing/payments/:id/post - Post a draft payment (creates journal)
+// FIX(47.5-WP-C): Added period-close guardrail integration with override_reason support
 paymentRoutes.post("/:id/post", async (c) => {
   try {
     const auth = c.get("auth");
@@ -256,7 +275,18 @@ paymentRoutes.post("/:id/post", async (c) => {
 
     const paymentId = NumericIdSchema.parse(c.req.param("id"));
 
-    const result = await postAPPayment(auth.companyId, auth.userId, paymentId);
+    // FIX(47.5-WP-C): Pass override_reason directly to service — no eager ACL check.
+    let overrideReason: string | null = null;
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      if (body.override_reason !== undefined && body.override_reason !== null) {
+        overrideReason = String(body.override_reason).trim() || null;
+      }
+    } catch {
+      // Ignore parse errors — override is optional
+    }
+
+    const result = await postAPPayment(auth.companyId, auth.userId, paymentId, overrideReason, auth);
 
     return successResponse(result);
   } catch (error) {
@@ -268,6 +298,12 @@ paymentRoutes.post("/:id/post", async (c) => {
     }
     if (error instanceof APPaymentInvalidStatusTransitionError) {
       return errorResponse("INVALID_STATUS_TRANSITION", error.message, 400);
+    }
+    if (error instanceof PeriodOverrideReasonInvalidError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+    if (error instanceof PeriodOverrideForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
     }
     if (error instanceof APPaymentOverpaymentError) {
       return errorResponse("OVERPAYMENT", error.message, 400);
@@ -296,12 +332,20 @@ paymentRoutes.post("/:id/post", async (c) => {
     if (error instanceof APPaymentError && error.code === "JOURNAL_NOT_BALANCED") {
       return errorResponse("JOURNAL_NOT_BALANCED", error.message, 400);
     }
+    // FIX(47.5-WP-C): Handle period-close guardrail block response (strict mode → 409)
+    if (typeof error === "object" && error !== null && "code" in error) {
+      const err = error as { code: string; message?: string };
+      if (err.code === "PERIOD_CLOSED") {
+        return errorResponse("PERIOD_CLOSED", err.message ?? "Period is closed for AP transactions", 409);
+      }
+    }
     console.error("POST /purchasing/payments/:id/post failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to post AP payment", 500);
   }
 });
 
 // POST /purchasing/payments/:id/void - Void a posted payment (reverses journal)
+// FIX(47.5-WP-C): Added period-close guardrail integration with override_reason support
 paymentRoutes.post("/:id/void", async (c) => {
   try {
     const auth = c.get("auth");
@@ -318,7 +362,18 @@ paymentRoutes.post("/:id/void", async (c) => {
 
     const paymentId = NumericIdSchema.parse(c.req.param("id"));
 
-    const result = await voidAPPayment(auth.companyId, auth.userId, paymentId);
+    // FIX(47.5-WP-C): Pass override_reason directly to service — no eager ACL check.
+    let overrideReason: string | null = null;
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      if (body.override_reason !== undefined && body.override_reason !== null) {
+        overrideReason = String(body.override_reason).trim() || null;
+      }
+    } catch {
+      // Ignore parse errors — override is optional
+    }
+
+    const result = await voidAPPayment(auth.companyId, auth.userId, paymentId, overrideReason, auth);
 
     return successResponse(result);
   } catch (error) {
@@ -331,6 +386,12 @@ paymentRoutes.post("/:id/void", async (c) => {
     if (error instanceof APPaymentInvalidStatusTransitionError) {
       return errorResponse("INVALID_STATUS_TRANSITION", error.message, 400);
     }
+    if (error instanceof PeriodOverrideReasonInvalidError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+    if (error instanceof PeriodOverrideForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
     if (error instanceof APPaymentBankAccountNotFoundError) {
       return errorResponse("BANK_ACCOUNT_NOT_FOUND", error.message, 400);
     }
@@ -339,6 +400,13 @@ paymentRoutes.post("/:id/void", async (c) => {
     }
     if (error instanceof APPaymentError && error.code === "MISSING_JOURNAL_BATCH") {
       return errorResponse("MISSING_JOURNAL_BATCH", error.message, 400);
+    }
+    // FIX(47.5-WP-C): Handle period-close guardrail block response (strict mode → 409)
+    if (typeof error === "object" && error !== null && "code" in error) {
+      const err = error as { code: string; message?: string };
+      if (err.code === "PERIOD_CLOSED") {
+        return errorResponse("PERIOD_CLOSED", err.message ?? "Period is closed for AP transactions", 409);
+      }
     }
     console.error("POST /purchasing/payments/:id/void failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to void AP payment", 500);

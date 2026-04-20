@@ -93,6 +93,7 @@ export {
   createTestAPReconciliationSettings,
   createTestSupplierStatement,
   createTestAPException,
+  setTestCompanyStringSetting,
   type CompanyFixture,
   type OutletFixture,
   type UserFixture,

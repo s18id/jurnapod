@@ -1012,6 +1012,19 @@ export interface PaymentMethodMappings {
   updated_at: Generated<Date>;
 }
 
+export interface PeriodCloseOverrides {
+  // FIX(47.5-WP-A2): Period-close override audit trail
+  company_id: number;
+  created_at: Generated<Date>;
+  id: Generated<number>;
+  overridden_at: Generated<Date>;
+  period_id: number;
+  reason: string;
+  transaction_id: number;
+  transaction_type: string;
+  user_id: number;
+}
+
 export interface PlatformSettings {
   created_at: Generated<Date>;
   id: Generated<number>;
@@ -1981,6 +1994,7 @@ export interface DB {
   outlet_tables: OutletTables;
   outlets: Outlets;
   payment_method_mappings: PaymentMethodMappings;
+  period_close_overrides: PeriodCloseOverrides;
   platform_settings: PlatformSettings;
   pos_item_cancellations: PosItemCancellations;
   purchase_invoice_lines: PurchaseInvoiceLines;

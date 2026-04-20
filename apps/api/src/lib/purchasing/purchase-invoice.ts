@@ -17,6 +17,16 @@ import {
 } from "@jurnapod/shared";
 import { getExchangeRate } from "./exchange-rate.js";
 import { listCompanyModulesExtended } from "../settings-modules.js";
+// FIX(47.5-WP-C): Import guardrail service for period-close enforcement
+import {
+  checkPeriodCloseGuardrail,
+  validateOverrideReason,
+  insertPeriodCloseOverride,
+  PeriodOverrideReasonInvalidError,
+  PeriodOverrideForbiddenError,
+  evaluateOverrideAccess,
+} from "../accounting/ap-period-close-guardrail.js";
+import type { AuthContext } from "@/lib/auth-guard.js";
 
 // =============================================================================
 // Error Types
@@ -90,6 +100,8 @@ export class PITaxAccountMissingError extends PIError {
 // Types
 // =============================================================================
 
+// FIX(47.5-WP-C): Added optional override_reason for closed-period override path
+// auth parameter added for evaluateOverrideAccess in service layer
 export interface PICreateInput {
   supplierId: number;
   invoiceNo: string;
@@ -107,6 +119,7 @@ export interface PICreateInput {
     taxRateId?: number | null;
     lineType?: "ITEM" | "SERVICE" | "FREIGHT" | "TAX" | "DISCOUNT";
   }>;
+  overrideReason?: string | null;
 }
 
 export interface PIListParams {
@@ -287,9 +300,45 @@ async function computeCreditUtilization(
 export async function createDraftPI(
   companyId: number,
   userId: number,
-  input: PICreateInput
+  input: PICreateInput,
+  auth: AuthContext
 ): Promise<PIGetResult> {
   const db = getDb() as KyselySchema;
+
+  // FIX(47.5-WP-C): Period-close guardrail check for invoice creation
+  const invoiceDateStr = input.invoiceDate.toISOString().split("T")[0];
+  const decision = await checkPeriodCloseGuardrail(companyId, invoiceDateStr);
+
+  // FIX(47.5-WP-C): Evaluate override access using unified helper
+  // This single call handles: reason validation (400) + MANAGE permission check (403)
+  let isOverrideEligible = false;
+  let trackedOverrideReason: string | null = null;
+  if (!decision.allowed && decision.overrideRequired) {
+    // Closed period with override allowed — evaluate access (reason + MANAGE)
+    const access = await evaluateOverrideAccess(auth, input.overrideReason, decision);
+    if (!access.allowed) {
+      if (access.error === "reason") {
+        throw new PeriodOverrideReasonInvalidError(access.message);
+      }
+      // error === "forbidden" → 403
+      throw new PeriodOverrideForbiddenError(access.message);
+    }
+    // Reason is valid and MANAGE permission confirmed — check periodId for audit integrity
+    if (decision.periodId === null || decision.periodId <= 0) {
+      const err = new Error(decision.blockReason ?? "Period is closed for AP transactions") as Error & { code: string; blockCode: string };
+      err.code = "PERIOD_CLOSED";
+      err.blockCode = decision.blockCode ?? "PERIOD_CLOSED";
+      throw err;
+    }
+    isOverrideEligible = true;
+    trackedOverrideReason = access.overrideReason;
+  } else if (!decision.allowed) {
+    // Strict mode: direct block — 409
+    const err = new Error(decision.blockReason ?? "Period is closed for AP transactions") as Error & { code: string; blockCode: string };
+    err.code = "PERIOD_CLOSED";
+    err.blockCode = decision.blockCode ?? "PERIOD_CLOSED";
+    throw err;
+  }
 
   // Validate supplier ownership (tenant isolation)
   const supplier = await db
@@ -387,6 +436,20 @@ export async function createDraftPI(
       })
       .where("id", "=", piId)
       .executeTakeFirst();
+
+    // FIX(47.5-WP-C): Insert period_close_overrides audit row when override is eligible
+    // isOverrideEligible is only true when: valid reason + MANAGE + periodId > 0
+    if (isOverrideEligible && trackedOverrideReason !== null) {
+      await insertPeriodCloseOverride(trx, {
+        companyId,
+        userId,
+        transactionType: "PURCHASE_INVOICE",
+        transactionId: piId,
+        periodId: decision.periodId!, // Safe: isOverrideEligible ensures periodId > 0
+        reason: trackedOverrideReason,
+        overriddenAt: new Date(),
+      });
+    }
 
     return { piId };
   });
@@ -629,7 +692,9 @@ export async function getPIById(
 export async function postPI(
   companyId: number,
   userId: number,
-  piId: number
+  piId: number,
+  overrideReason: string | null | undefined,
+  auth: AuthContext
 ): Promise<PIPostResult> {
   const db = getDb() as KyselySchema;
 
@@ -651,6 +716,37 @@ export async function postPI(
   // Validate DRAFT -> POSTED transition
   if (pi.status !== PURCHASE_INVOICE_STATUS.DRAFT) {
     throw new PIInvalidStatusTransitionError(pi.status, PURCHASE_INVOICE_STATUS.POSTED);
+  }
+
+  // FIX(47.5-WP-C): Period-close guardrail check for invoice posting
+  const invoiceDate = new Date(pi.invoice_date);
+  const invoiceDateStr = invoiceDate.toISOString().split("T")[0];
+  const decision = await checkPeriodCloseGuardrail(companyId, invoiceDateStr);
+
+  // FIX(47.5-WP-C): Evaluate override access using unified helper
+  let isOverrideEligible = false;
+  let validOverrideReason: string | null = null;
+  if (!decision.allowed && decision.overrideRequired) {
+    const access = await evaluateOverrideAccess(auth, overrideReason, decision);
+    if (!access.allowed) {
+      if (access.error === "reason") {
+        throw new PeriodOverrideReasonInvalidError(access.message);
+      }
+      throw new PeriodOverrideForbiddenError(access.message);
+    }
+    if (decision.periodId === null || decision.periodId <= 0) {
+      const err = new Error(decision.blockReason ?? "Period is closed for AP transactions") as Error & { code: string; blockCode: string };
+      err.code = "PERIOD_CLOSED";
+      err.blockCode = decision.blockCode ?? "PERIOD_CLOSED";
+      throw err;
+    }
+    isOverrideEligible = true;
+    validOverrideReason = access.overrideReason;
+  } else if (!decision.allowed) {
+    const err = new Error(decision.blockReason ?? "Period is closed for AP transactions") as Error & { code: string; blockCode: string };
+    err.code = "PERIOD_CLOSED";
+    err.blockCode = decision.blockCode ?? "PERIOD_CLOSED";
+    throw err;
   }
 
   // Get company currency to determine if same-currency invoice
@@ -942,6 +1038,20 @@ export async function postPI(
       .where("id", "=", piId)
       .executeTakeFirst();
 
+    // FIX(47.5-WP-C): Insert period_close_overrides audit row when override is eligible
+    // isOverrideEligible is only true when: valid reason AND periodId > 0
+    if (isOverrideEligible && validOverrideReason !== null) {
+      await insertPeriodCloseOverride(trx, {
+        companyId,
+        userId,
+        transactionType: "PURCHASE_INVOICE",
+        transactionId: piId,
+        periodId: decision.periodId!, // Safe: isOverrideEligible ensures periodId > 0
+        reason: validOverrideReason,
+        overriddenAt: new Date(),
+      });
+    }
+
     return { batchId };
   });
 
@@ -959,7 +1069,9 @@ export async function postPI(
 export async function voidPI(
   companyId: number,
   userId: number,
-  piId: number
+  piId: number,
+  overrideReason: string | null | undefined,
+  auth: AuthContext
 ): Promise<{ id: number; reversal_batch_id: number }> {
   const db = getDb() as KyselySchema;
 
@@ -981,6 +1093,37 @@ export async function voidPI(
   // Validate POSTED -> VOID transition
   if (pi.status !== PURCHASE_INVOICE_STATUS.POSTED) {
     throw new PIInvalidStatusTransitionError(pi.status, PURCHASE_INVOICE_STATUS.VOID);
+  }
+
+  // FIX(47.5-WP-C): Period-close guardrail check for invoice voiding
+  const invoiceDate = new Date(pi.invoice_date);
+  const invoiceDateStr = invoiceDate.toISOString().split("T")[0];
+  const decision = await checkPeriodCloseGuardrail(companyId, invoiceDateStr);
+
+  // FIX(47.5-WP-C): Evaluate override access using unified helper
+  let isOverrideEligible = false;
+  let validOverrideReason: string | null = null;
+  if (!decision.allowed && decision.overrideRequired) {
+    const access = await evaluateOverrideAccess(auth, overrideReason, decision);
+    if (!access.allowed) {
+      if (access.error === "reason") {
+        throw new PeriodOverrideReasonInvalidError(access.message);
+      }
+      throw new PeriodOverrideForbiddenError(access.message);
+    }
+    if (decision.periodId === null || decision.periodId <= 0) {
+      const err = new Error(decision.blockReason ?? "Period is closed for AP transactions") as Error & { code: string; blockCode: string };
+      err.code = "PERIOD_CLOSED";
+      err.blockCode = decision.blockCode ?? "PERIOD_CLOSED";
+      throw err;
+    }
+    isOverrideEligible = true;
+    validOverrideReason = access.overrideReason;
+  } else if (!decision.allowed) {
+    const err = new Error(decision.blockReason ?? "Period is closed for AP transactions") as Error & { code: string; blockCode: string };
+    err.code = "PERIOD_CLOSED";
+    err.blockCode = decision.blockCode ?? "PERIOD_CLOSED";
+    throw err;
   }
 
   if (!pi.journal_batch_id) {
@@ -1033,6 +1176,20 @@ export async function voidPI(
       })
       .where("id", "=", piId)
       .executeTakeFirst();
+
+    // FIX(47.5-WP-C): Insert period_close_overrides audit row when override is eligible
+    // isOverrideEligible is only true when: valid reason AND periodId > 0
+    if (isOverrideEligible && validOverrideReason !== null) {
+      await insertPeriodCloseOverride(trx, {
+        companyId,
+        userId,
+        transactionType: "PURCHASE_INVOICE_VOID",
+        transactionId: piId,
+        periodId: decision.periodId!, // Safe: isOverrideEligible ensures periodId > 0
+        reason: validOverrideReason,
+        overriddenAt: new Date(),
+      });
+    }
 
     return { reversalBatchId };
   });

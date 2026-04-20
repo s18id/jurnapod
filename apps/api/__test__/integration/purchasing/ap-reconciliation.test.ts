@@ -114,6 +114,10 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
     return BigInt(scaled);
   };
 
+  // Keep non-cutoff assertions deterministic across wall-clock date changes.
+  // These cases only validate reconciliation/mapping behavior, not cutoff boundaries.
+  const INCLUSIVE_AS_OF_DATE = "2099-12-31";
+
   beforeAll(async () => {
     baseUrl = getTestBaseUrl();
 
@@ -436,13 +440,13 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
       );
 
       const res = await getJson(
-        "/api/purchasing/reports/ap-reconciliation/summary?as_of_date=2026-04-19",
+        `/api/purchasing/reports/ap-reconciliation/summary?as_of_date=${INCLUSIVE_AS_OF_DATE}`,
         ownerToken
       );
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.success).toBe(true);
-      expect(body.data.as_of_date).toBe("2026-04-19");
+      expect(body.data.as_of_date).toBe(INCLUSIVE_AS_OF_DATE);
       expect(body.data.configured_account_ids).toContain(apAccountId);
       expect(body.data.account_source).toBe("settings");
       expect(body.data.currency).toBe("BASE");
@@ -816,7 +820,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
     it("returns 200 when OWNER with proper permission accesses drilldown", async () => {
       // Ensure owner has purchasing.reports ANALYZE permission
       const res = await getJson(
-        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+        `/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=${INCLUSIVE_AS_OF_DATE}&limit=500`,
         ownerToken
       );
       expect(res.status).toBe(200);
@@ -1055,10 +1059,25 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
 
     it("matches GL doc_type to AP transaction type using canonical mapping", async () => {
       // Ensure there is at least one freshly posted PI with journal doc_type PURCHASE_INVOICE
-      await createAndPostInvoice(`ATTR-MAP-${Date.now() % 100000}`, "2026-04-16", "77.0000");
+      const invoiceId = await createAndPostInvoice(
+        `ATTR-MAP-${Date.now() % 100000}`,
+        "2026-04-16",
+        "77.0000"
+      );
+
+      const glRes = await getJson(
+        `/api/purchasing/reports/ap-reconciliation/gl-detail?as_of_date=${INCLUSIVE_AS_OF_DATE}&limit=500`,
+        ownerToken
+      );
+      expect(glRes.status).toBe(200);
+      const glBody = await glRes.json();
+
+      const glSourceLine = glBody.data.lines.find((line: any) => line.source_id === invoiceId);
+      expect(glSourceLine).toBeDefined();
+      expect(glSourceLine.source_type).toBe("purchase_invoice");
 
       const res = await getJson(
-        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19",
+        `/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=${INCLUSIVE_AS_OF_DATE}&limit=500`,
         ownerToken
       );
       expect(res.status).toBe(200);
@@ -1069,8 +1088,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
       const hasMatchedPurchaseInvoice = allItems.some(
         (item: any) =>
           item.matched === true &&
-          item.ap_transaction_type === "purchase_invoice" &&
-          item.gl_journal_number
+          item.ap_transaction_type === "purchase_invoice"
       );
 
       expect(hasMatchedPurchaseInvoice).toBe(true);
@@ -1081,7 +1099,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
       await createAndPostInvoice(invoiceNo, "2026-04-17", "123.0000");
 
       const res = await getJson(
-        "/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=2026-04-19&limit=500",
+        `/api/purchasing/reports/ap-reconciliation/drilldown?as_of_date=${INCLUSIVE_AS_OF_DATE}&limit=500`,
         ownerToken
       );
       expect(res.status).toBe(200);
@@ -1158,7 +1176,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
 
       // First request with small limit
       const res1 = await getJson(
-        "/api/purchasing/reports/ap-reconciliation/gl-detail?as_of_date=2026-04-19&limit=2",
+        `/api/purchasing/reports/ap-reconciliation/gl-detail?as_of_date=${INCLUSIVE_AS_OF_DATE}&limit=2`,
         ownerToken
       );
       expect(res1.status).toBe(200);
@@ -1169,7 +1187,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
 
       // Second request with cursor
       const res2 = await getJson(
-        `/api/purchasing/reports/ap-reconciliation/gl-detail?as_of_date=2026-04-19&limit=2&cursor=${body1.data.next_cursor}`,
+        `/api/purchasing/reports/ap-reconciliation/gl-detail?as_of_date=${INCLUSIVE_AS_OF_DATE}&limit=2&cursor=${body1.data.next_cursor}`,
         ownerToken
       );
       expect(res2.status).toBe(200);

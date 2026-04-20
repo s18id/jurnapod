@@ -32,6 +32,11 @@ import {
   PINotFoundError,
   PIInvalidStatusTransitionError,
 } from "../../lib/purchasing/purchase-invoice.js";
+// FIX(47.5-WP-C): Import period-close guardrail errors for route error mapping
+import {
+  PeriodOverrideReasonInvalidError,
+  PeriodOverrideForbiddenError,
+} from "../../lib/accounting/ap-period-close-guardrail.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -132,6 +137,7 @@ invoiceRoutes.get("/:id", async (c) => {
 });
 
 // POST /purchasing/invoices - Create new purchase invoice (draft)
+// FIX(47.5-WP-C): Removed eager route-level ACL check — service layer handles override evaluation
 invoiceRoutes.post("/", async (c) => {
   try {
     const auth = c.get("auth");
@@ -158,6 +164,9 @@ invoiceRoutes.post("/", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
+    // FIX(47.5-WP-C): Pass override_reason directly to service — no eager ACL check here.
+    // Service evaluates period status first; if open, no MANAGE permission needed.
+    // If closed+override_required, service validates reason length (→400) and MANAGE (→403).
     const pi = await createDraftPI(auth.companyId, auth.userId, {
       supplierId: input.supplier_id,
       invoiceNo: input.invoice_no,
@@ -175,7 +184,8 @@ invoiceRoutes.post("/", async (c) => {
         taxRateId: line.tax_rate_id ?? null,
         lineType: line.line_type ?? "ITEM",
       })),
-    });
+      overrideReason: input.override_reason ?? null,
+    }, auth);
 
     return successResponse(pi, 201);
   } catch (error) {
@@ -185,10 +195,20 @@ invoiceRoutes.post("/", async (c) => {
     if (error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
+    if (error instanceof PeriodOverrideReasonInvalidError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+    if (error instanceof PeriodOverrideForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
     if (typeof error === "object" && error !== null && "code" in error) {
       const err = error as { code: string; message?: string };
       if (err.code === "SUPPLIER_NOT_FOUND") {
         return errorResponse("NOT_FOUND", err.message ?? "Supplier not found", 404);
+      }
+      // FIX(47.5-WP-C): Handle period-close guardrail block response (strict mode → 409)
+      if (err.code === "PERIOD_CLOSED") {
+        return errorResponse("PERIOD_CLOSED", err.message ?? "Period is closed for AP transactions", 409);
       }
     }
     console.error("POST /purchasing/invoices failed", error);
@@ -197,6 +217,7 @@ invoiceRoutes.post("/", async (c) => {
 });
 
 // POST /purchasing/invoices/:id/post - Post a draft PI (creates journal)
+// FIX(47.5-WP-C): Added period-close guardrail integration with override_reason support
 invoiceRoutes.post("/:id/post", async (c) => {
   try {
     const auth = c.get("auth");
@@ -213,7 +234,18 @@ invoiceRoutes.post("/:id/post", async (c) => {
 
     const invoiceId = NumericIdSchema.parse(c.req.param("id"));
 
-    const result = await postPI(auth.companyId, auth.userId, invoiceId);
+    // FIX(47.5-WP-C): Pass override_reason directly to service — no eager ACL check.
+    let overrideReason: string | null = null;
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      if (body.override_reason !== undefined && body.override_reason !== null) {
+        overrideReason = String(body.override_reason).trim() || null;
+      }
+    } catch {
+      // Ignore parse errors — override is optional
+    }
+
+    const result = await postPI(auth.companyId, auth.userId, invoiceId, overrideReason, auth);
 
     return successResponse(result);
   } catch (error) {
@@ -226,10 +258,20 @@ invoiceRoutes.post("/:id/post", async (c) => {
     if (error instanceof PIInvalidStatusTransitionError) {
       return errorResponse("INVALID_STATUS_TRANSITION", error.message, 400);
     }
+    if (error instanceof PeriodOverrideReasonInvalidError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+    if (error instanceof PeriodOverrideForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
     if (typeof error === "object" && error !== null && "code" in error) {
       const err = error as { code: string; message?: string };
       if (err.code === "COMPANY_NOT_FOUND") {
         return errorResponse("NOT_FOUND", err.message ?? "Company not found", 404);
+      }
+      // FIX(47.5-WP-C): Handle period-close guardrail block response (strict mode → 409)
+      if (err.code === "PERIOD_CLOSED") {
+        return errorResponse("PERIOD_CLOSED", err.message ?? "Period is closed for AP transactions", 409);
       }
     }
     if (error instanceof PIError) {
@@ -256,6 +298,7 @@ invoiceRoutes.post("/:id/post", async (c) => {
 });
 
 // POST /purchasing/invoices/:id/void - Void a posted PI (reverses journal)
+// FIX(47.5-WP-C): Added period-close guardrail integration with override_reason support
 invoiceRoutes.post("/:id/void", async (c) => {
   try {
     const auth = c.get("auth");
@@ -272,7 +315,18 @@ invoiceRoutes.post("/:id/void", async (c) => {
 
     const invoiceId = NumericIdSchema.parse(c.req.param("id"));
 
-    const result = await voidPI(auth.companyId, auth.userId, invoiceId);
+    // FIX(47.5-WP-C): Pass override_reason directly to service — no eager ACL check.
+    let overrideReason: string | null = null;
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      if (body.override_reason !== undefined && body.override_reason !== null) {
+        overrideReason = String(body.override_reason).trim() || null;
+      }
+    } catch {
+      // Ignore parse errors — override is optional
+    }
+
+    const result = await voidPI(auth.companyId, auth.userId, invoiceId, overrideReason, auth);
 
     return successResponse(result);
   } catch (error) {
@@ -285,8 +339,21 @@ invoiceRoutes.post("/:id/void", async (c) => {
     if (error instanceof PIInvalidStatusTransitionError) {
       return errorResponse("INVALID_STATUS_TRANSITION", error.message, 400);
     }
+    if (error instanceof PeriodOverrideReasonInvalidError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+    if (error instanceof PeriodOverrideForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
     if (error instanceof PIError && error.code === "MISSING_JOURNAL_BATCH") {
       return errorResponse("MISSING_JOURNAL_BATCH", error.message, 400);
+    }
+    // FIX(47.5-WP-C): Handle period-close guardrail block response (strict mode → 409)
+    if (typeof error === "object" && error !== null && "code" in error) {
+      const err = error as { code: string; message?: string };
+      if (err.code === "PERIOD_CLOSED") {
+        return errorResponse("PERIOD_CLOSED", err.message ?? "Period is closed for AP transactions", 409);
+      }
     }
     console.error("POST /purchasing/invoices/:id/void failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to void purchase invoice", 500);

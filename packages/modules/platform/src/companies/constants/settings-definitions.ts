@@ -65,6 +65,24 @@ function parseCostingMethod(
   throw new Error(`${key} must be AVG, FIFO, or LIFO`);
 }
 
+// FIX(47.5-WP-A1): Parse AP period-close guardrail enum
+function parsePeriodCloseGuardrail(
+  value: string | undefined,
+  fallback: string,
+  key: string
+): string {
+  if (value == null || value.length === 0) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "strict" || normalized === "override_allowed") {
+    return normalized;
+  }
+
+  throw new Error(`${key} must be strict or override_allowed`);
+}
+
 export const SETTINGS_DEFINITIONS = [
   {
     key: "feature.pos.auto_sync_enabled",
@@ -120,6 +138,14 @@ export const SETTINGS_DEFINITIONS = [
     envKey: "JP_ACCOUNTING_ALLOW_MULTIPLE_OPEN_FISCAL_YEARS",
     parse: (value: string | undefined) =>
       parseBoolean(value, false, "JP_ACCOUNTING_ALLOW_MULTIPLE_OPEN_FISCAL_YEARS")
+  },
+  // FIX(47.5-WP-A1): AP period-close guardrail — strict blocks, override_allowed allows reason-based bypass
+  {
+    key: "accounting.ap_period_close_guardrail",
+    valueType: "enum",
+    envKey: "JP_ACCOUNTING_AP_PERIOD_CLOSE_GUARDRAIL",
+    parse: (value: string | undefined) =>
+      parsePeriodCloseGuardrail(value, "strict", "JP_ACCOUNTING_AP_PERIOD_CLOSE_GUARDRAIL")
   },
   {
     key: "inventory.allow_negative_stock",

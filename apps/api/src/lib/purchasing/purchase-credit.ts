@@ -19,6 +19,17 @@ import {
   type PurchaseCreditApplicationResponse,
   type PurchaseCreditLineResponse,
 } from "@jurnapod/shared";
+// FIX(47.5-WP-C): Import guardrail service for period-close enforcement
+import {
+  checkPeriodCloseGuardrail,
+  validateOverrideReason,
+  insertPeriodCloseOverride,
+  PeriodOverrideReasonInvalidError,
+  PeriodOverrideForbiddenError,
+  evaluateOverrideAccess,
+  type GuardrailDecision,
+} from "../accounting/ap-period-close-guardrail.js";
+import type { AuthContext } from "@/lib/auth-guard.js";
 
 // =============================================================================
 // Error Types
@@ -128,6 +139,7 @@ export class PurchaseCreditJournalNotBalancedError extends PurchaseCreditError {
 // Types
 // =============================================================================
 
+// FIX(47.5-WP-C): Added optional override_reason for closed-period override path
 export interface PurchaseCreditCreateInput {
   supplierId: number;
   creditNo: string;
@@ -142,6 +154,7 @@ export interface PurchaseCreditCreateInput {
     unitPrice: string;
     reason?: string | null;
   }>;
+  overrideReason?: string | null;
 }
 
 export interface PurchaseCreditListParams {
@@ -369,9 +382,40 @@ async function getPurchasingAccountsForUpdate(
 export async function createDraftPurchaseCredit(
   companyId: number,
   userId: number,
-  input: PurchaseCreditCreateInput
+  input: PurchaseCreditCreateInput,
+  auth: AuthContext
 ): Promise<PurchaseCreditGetResult> {
   const db = getDb() as KyselySchema;
+
+  // FIX(47.5-WP-C): Period-close guardrail check for credit creation
+  const creditDateStr = input.creditDate.toISOString().split("T")[0];
+  const decision = await checkPeriodCloseGuardrail(companyId, creditDateStr);
+
+  // FIX(47.5-WP-C): Evaluate override access using unified helper
+  let isOverrideEligible = false;
+  let validOverrideReason: string | null = null;
+  if (!decision.allowed && decision.overrideRequired) {
+    const access = await evaluateOverrideAccess(auth, input.overrideReason, decision);
+    if (!access.allowed) {
+      if (access.error === "reason") {
+        throw new PeriodOverrideReasonInvalidError(access.message);
+      }
+      throw new PeriodOverrideForbiddenError(access.message);
+    }
+    if (decision.periodId === null || decision.periodId <= 0) {
+      const err = new Error(decision.blockReason ?? "Period is closed for AP transactions") as Error & { code: string; blockCode: string };
+      err.code = "PERIOD_CLOSED";
+      err.blockCode = decision.blockCode ?? "PERIOD_CLOSED";
+      throw err;
+    }
+    isOverrideEligible = true;
+    validOverrideReason = access.overrideReason;
+  } else if (!decision.allowed) {
+    const err = new Error(decision.blockReason ?? "Period is closed for AP transactions") as Error & { code: string; blockCode: string };
+    err.code = "PERIOD_CLOSED";
+    err.blockCode = decision.blockCode ?? "PERIOD_CLOSED";
+    throw err;
+  }
 
   const supplier = await db
     .selectFrom("suppliers")
@@ -467,6 +511,20 @@ export async function createDraftPurchaseCredit(
       .set({ total_credit_amount: fromScaled4(totalCredit) })
       .where("id", "=", creditId)
       .executeTakeFirst();
+
+    // FIX(47.5-WP-C): Insert period_close_overrides audit row when override is eligible
+    // isOverrideEligible is only true when: valid reason AND periodId > 0
+    if (isOverrideEligible && validOverrideReason !== null) {
+      await insertPeriodCloseOverride(trx, {
+        companyId,
+        userId,
+        transactionType: "PURCHASE_CREDIT",
+        transactionId: creditId,
+        periodId: decision.periodId!, // Safe: isOverrideEligible ensures periodId > 0
+        reason: validOverrideReason,
+        overriddenAt: new Date(),
+      });
+    }
 
     return { creditId };
   });
@@ -716,9 +774,53 @@ export async function getPurchaseCreditById(
 export async function applyPurchaseCredit(
   companyId: number,
   userId: number,
-  creditId: number
+  creditId: number,
+  overrideReason: string | null | undefined,
+  auth: AuthContext
 ): Promise<PurchaseCreditApplyResult> {
   const db = getDb() as KyselySchema;
+
+  // FIX(47.5-WP-C): Period-close guardrail check for credit application
+  const creditForDate = await db
+    .selectFrom("purchase_credits")
+    .where("id", "=", creditId)
+    .where("company_id", "=", companyId)
+    .select(["id", "credit_date"])
+    .executeTakeFirst();
+
+  // FIX(47.5-WP-C): Evaluate override access using unified helper
+  let isOverrideEligible = false;
+  let validOverrideReason: string | null = null;
+  let cachedDecision: GuardrailDecision | null = null;
+
+  if (creditForDate) {
+    const creditDateStr = new Date(creditForDate.credit_date).toISOString().split("T")[0];
+    const decision = await checkPeriodCloseGuardrail(companyId, creditDateStr);
+    cachedDecision = decision;
+
+    if (!decision.allowed && decision.overrideRequired) {
+      const access = await evaluateOverrideAccess(auth, overrideReason, decision);
+      if (!access.allowed) {
+        if (access.error === "reason") {
+          throw new PeriodOverrideReasonInvalidError(access.message);
+        }
+        throw new PeriodOverrideForbiddenError(access.message);
+      }
+      if (decision.periodId === null || decision.periodId <= 0) {
+        const err = new Error(decision.blockReason ?? "Period is closed for AP transactions") as Error & { code: string; blockCode: string };
+        err.code = "PERIOD_CLOSED";
+        err.blockCode = decision.blockCode ?? "PERIOD_CLOSED";
+        throw err;
+      }
+      isOverrideEligible = true;
+      validOverrideReason = access.overrideReason;
+    } else if (!decision.allowed) {
+      const err = new Error(decision.blockReason ?? "Period is closed for AP transactions") as Error & { code: string; blockCode: string };
+      err.code = "PERIOD_CLOSED";
+      err.blockCode = decision.blockCode ?? "PERIOD_CLOSED";
+      throw err;
+    }
+  }
 
   const result = await db.transaction().execute(async (trx) => {
     const creditResult = await sql<{
@@ -948,6 +1050,20 @@ export async function applyPurchaseCredit(
       .where("id", "=", creditId)
       .executeTakeFirst();
 
+    // FIX(47.5-WP-C): Insert period_close_overrides audit row when override is eligible
+    // isOverrideEligible is only true when: valid reason AND periodId > 0
+    if (isOverrideEligible && validOverrideReason !== null && cachedDecision) {
+      await insertPeriodCloseOverride(trx, {
+        companyId,
+        userId,
+        transactionType: "PURCHASE_CREDIT",
+        transactionId: creditId,
+        periodId: cachedDecision.periodId!, // Safe: isOverrideEligible ensures periodId > 0
+        reason: validOverrideReason,
+        overriddenAt: new Date(),
+      });
+    }
+
     return {
       batchId,
       appliedAmount: fromScaled4(totalAppliedNow),
@@ -974,9 +1090,53 @@ export async function applyPurchaseCredit(
 export async function voidPurchaseCredit(
   companyId: number,
   userId: number,
-  creditId: number
+  creditId: number,
+  overrideReason: string | null | undefined,
+  auth: AuthContext
 ): Promise<PurchaseCreditVoidResult> {
   const db = getDb() as KyselySchema;
+
+  // FIX(47.5-WP-C): Period-close guardrail check for credit voiding
+  const creditForDate = await db
+    .selectFrom("purchase_credits")
+    .where("id", "=", creditId)
+    .where("company_id", "=", companyId)
+    .select(["id", "credit_date"])
+    .executeTakeFirst();
+
+  // FIX(47.5-WP-C): Evaluate override access using unified helper
+  let isOverrideEligible = false;
+  let validOverrideReason: string | null = null;
+  let cachedDecision: GuardrailDecision | null = null;
+
+  if (creditForDate) {
+    const creditDateStr = new Date(creditForDate.credit_date).toISOString().split("T")[0];
+    const decision = await checkPeriodCloseGuardrail(companyId, creditDateStr);
+    cachedDecision = decision;
+
+    if (!decision.allowed && decision.overrideRequired) {
+      const access = await evaluateOverrideAccess(auth, overrideReason, decision);
+      if (!access.allowed) {
+        if (access.error === "reason") {
+          throw new PeriodOverrideReasonInvalidError(access.message);
+        }
+        throw new PeriodOverrideForbiddenError(access.message);
+      }
+      if (decision.periodId === null || decision.periodId <= 0) {
+        const err = new Error(decision.blockReason ?? "Period is closed for AP transactions") as Error & { code: string; blockCode: string };
+        err.code = "PERIOD_CLOSED";
+        err.blockCode = decision.blockCode ?? "PERIOD_CLOSED";
+        throw err;
+      }
+      isOverrideEligible = true;
+      validOverrideReason = access.overrideReason;
+    } else if (!decision.allowed) {
+      const err = new Error(decision.blockReason ?? "Period is closed for AP transactions") as Error & { code: string; blockCode: string };
+      err.code = "PERIOD_CLOSED";
+      err.blockCode = decision.blockCode ?? "PERIOD_CLOSED";
+      throw err;
+    }
+  }
 
   const result = await db.transaction().execute(async (trx) => {
     const creditResult = await sql<{
@@ -1074,6 +1234,20 @@ export async function voidPurchaseCredit(
       })
       .where("id", "=", creditId)
       .executeTakeFirst();
+
+    // FIX(47.5-WP-C): Insert period_close_overrides audit row when override is eligible
+    // isOverrideEligible is only true when: valid reason AND periodId > 0
+    if (isOverrideEligible && validOverrideReason !== null && cachedDecision) {
+      await insertPeriodCloseOverride(trx, {
+        companyId,
+        userId,
+        transactionType: "PURCHASE_CREDIT_VOID",
+        transactionId: creditId,
+        periodId: cachedDecision.periodId!, // Safe: isOverrideEligible ensures periodId > 0
+        reason: validOverrideReason,
+        overriddenAt: new Date(),
+      });
+    }
 
     return { reversalBatchId };
   });

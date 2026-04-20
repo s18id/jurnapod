@@ -43,6 +43,11 @@ import {
   PurchaseCreditInvalidAPAccountTypeError,
   PurchaseCreditInvalidExpenseAccountTypeError,
 } from "../../lib/purchasing/purchase-credit.js";
+// FIX(47.5-WP-C): Import period-close guardrail errors for route error mapping
+import {
+  PeriodOverrideReasonInvalidError,
+  PeriodOverrideForbiddenError,
+} from "../../lib/accounting/ap-period-close-guardrail.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -173,6 +178,7 @@ creditRoutes.post("/", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
 
+    // FIX(47.5-WP-C): Pass override_reason directly to service — no eager ACL check here.
     const result = await createDraftPurchaseCredit(auth.companyId, auth.userId, {
       supplierId: input.supplier_id,
       creditNo: input.credit_no,
@@ -187,7 +193,8 @@ creditRoutes.post("/", async (c) => {
         unitPrice: line.unit_price,
         reason: line.reason ?? null,
       })),
-    });
+      overrideReason: input.override_reason ?? null,
+    }, auth);
 
     return successResponse(result, 201);
   } catch (error) {
@@ -197,10 +204,20 @@ creditRoutes.post("/", async (c) => {
     if (error instanceof SyntaxError) {
       return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
     }
+    if (error instanceof PeriodOverrideReasonInvalidError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+    if (error instanceof PeriodOverrideForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
     if (typeof error === "object" && error !== null && "code" in error) {
       const err = error as { code: string; message?: string };
       if (err.code === "SUPPLIER_NOT_FOUND") {
         return errorResponse("NOT_FOUND", err.message ?? "Supplier not found", 404);
+      }
+      // FIX(47.5-WP-C): Handle period-close guardrail block response (strict mode → 409)
+      if (err.code === "PERIOD_CLOSED") {
+        return errorResponse("PERIOD_CLOSED", err.message ?? "Period is closed for AP transactions", 409);
       }
     }
     if (error instanceof PurchaseCreditInvoiceNotFoundError) {
@@ -232,7 +249,19 @@ creditRoutes.post("/:id/apply", async (c) => {
     }
 
     const creditId = NumericIdSchema.parse(c.req.param("id"));
-    const result = await applyPurchaseCredit(auth.companyId, auth.userId, creditId);
+
+    // FIX(47.5-WP-C): Pass override_reason directly to service — no eager ACL check.
+    let overrideReason: string | null = null;
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      if (body.override_reason !== undefined && body.override_reason !== null) {
+        overrideReason = String(body.override_reason).trim() || null;
+      }
+    } catch {
+      // Ignore parse errors — override is optional
+    }
+
+    const result = await applyPurchaseCredit(auth.companyId, auth.userId, creditId, overrideReason, auth);
     return successResponse(result);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -243,6 +272,12 @@ creditRoutes.post("/:id/apply", async (c) => {
     }
     if (error instanceof PurchaseCreditInvalidStatusTransitionError) {
       return errorResponse("INVALID_STATUS_TRANSITION", error.message, 400);
+    }
+    if (error instanceof PeriodOverrideReasonInvalidError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+    if (error instanceof PeriodOverrideForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
     }
     if (error instanceof PurchaseCreditInvoiceNotFoundError) {
       return errorResponse("INVOICE_NOT_FOUND", error.message, 404);
@@ -274,6 +309,13 @@ creditRoutes.post("/:id/apply", async (c) => {
     if (error instanceof PurchaseCreditError && error.code === "JOURNAL_NOT_BALANCED") {
       return errorResponse("JOURNAL_NOT_BALANCED", error.message, 400);
     }
+    // FIX(47.5-WP-C): Handle period-close guardrail block response (strict mode → 409)
+    if (typeof error === "object" && error !== null && "code" in error) {
+      const err = error as { code: string; message?: string };
+      if (err.code === "PERIOD_CLOSED") {
+        return errorResponse("PERIOD_CLOSED", err.message ?? "Period is closed for AP transactions", 409);
+      }
+    }
     console.error("POST /purchasing/credits/:id/apply failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to apply purchase credit", 500);
   }
@@ -294,7 +336,19 @@ creditRoutes.post("/:id/void", async (c) => {
     }
 
     const creditId = NumericIdSchema.parse(c.req.param("id"));
-    const result = await voidPurchaseCredit(auth.companyId, auth.userId, creditId);
+
+    // FIX(47.5-WP-C): Pass override_reason directly to service — no eager ACL check.
+    let overrideReason: string | null = null;
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      if (body.override_reason !== undefined && body.override_reason !== null) {
+        overrideReason = String(body.override_reason).trim() || null;
+      }
+    } catch {
+      // Ignore parse errors — override is optional
+    }
+
+    const result = await voidPurchaseCredit(auth.companyId, auth.userId, creditId, overrideReason, auth);
     return successResponse(result);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -306,11 +360,24 @@ creditRoutes.post("/:id/void", async (c) => {
     if (error instanceof PurchaseCreditInvalidStatusTransitionError) {
       return errorResponse("INVALID_STATUS_TRANSITION", error.message, 400);
     }
+    if (error instanceof PeriodOverrideReasonInvalidError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+    if (error instanceof PeriodOverrideForbiddenError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
     if (error instanceof PurchaseCreditSupplierInactiveError) {
       return errorResponse("SUPPLIER_INACTIVE", error.message, 400);
     }
     if (error instanceof PurchaseCreditError && error.code === "MISSING_JOURNAL_BATCH") {
       return errorResponse("MISSING_JOURNAL_BATCH", error.message, 400);
+    }
+    // FIX(47.5-WP-C): Handle period-close guardrail block response (strict mode → 409)
+    if (typeof error === "object" && error !== null && "code" in error) {
+      const err = error as { code: string; message?: string };
+      if (err.code === "PERIOD_CLOSED") {
+        return errorResponse("PERIOD_CLOSED", err.message ?? "Period is closed for AP transactions", 409);
+      }
     }
     console.error("POST /purchasing/credits/:id/void failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to void purchase credit", 500);
