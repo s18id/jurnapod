@@ -234,12 +234,23 @@ grep -rn "afterAll" apps/api/__test__/integration/ --include="*.test.ts" | grep 
 
 ---
 
+## Companion Artifacts
+
+| Artifact | Path |
+|-----------|------|
+| SOLID/DRY/KISS kickoff scorecard | `_bmad-output/planning-artifacts/epic-49-solid-dry-kiss-scorecard.md` |
+| Risk register | `_bmad-output/planning-artifacts/epic-49-risk-register.md` |
+| Suite audit | `_bmad-output/planning-artifacts/epic-49-suite-audit.md` |
+| API-lib boundary migration queue | `_bmad-output/planning-artifacts/epic-49-api-lib-boundary-migration-queue.md` |
+| Story 49.1 execution checklist | `_bmad-output/planning-artifacts/epic-49-1-execution-checklist.md` |
+| Q49-001 execution pass 1 | `_bmad-output/planning-artifacts/epic-49-q49-001-test-fixtures-execution-pass-1.md` |
+| Story 49.1 spec | `_bmad-output/implementation-artifacts/stories/epic-49/story-49.1.md` |
+| File structure standard v1 | `_bmad-output/planning-artifacts/file-structure-standard-v1.md` |
+| Structure baseline | `_bmad-output/planning-artifacts/file-structure-baseline.json` |
+
 ## References
 
 - Program baseline: `_bmad-output/planning-artifacts/sprint-48-61-correctness-first-architecture-blueprint.md`
 - Epic 48 closure artifacts: `_bmad-output/planning-artifacts/epic-48-*.md`
 - Sprint tracking: `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - Root policy: `AGENTS.md` (Architecture Program Baseline section)
-- API-lib boundary migration queue: `_bmad-output/planning-artifacts/epic-49-api-lib-boundary-migration-queue.md`
-- Story 49.1 execution checklist: `_bmad-output/planning-artifacts/epic-49-1-execution-checklist.md`
-- Q49-001 execution pass: `_bmad-output/planning-artifacts/epic-49-q49-001-test-fixtures-execution-pass-1.md`

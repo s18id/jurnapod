@@ -555,13 +555,23 @@ development_status:
   epic-47-retrospective: done
 
   # Epic 48: Correctness-First Stability Lockdown (Wave A)
-  epic-48: in-progress
+  epic-48: done
   48-1-architecture-truth-map-risk-register-freeze: done
   48-2-financial-correctness-hardening-pack: done
   48-3-migration-reliability-gate-hardening: done
   48-4-integration-test-determinism-hardening: done
   48-5-ci-quality-gate-enforcement: done
-  48-6-type-lint-debt-containment-touched-hotspots: ready-for-dev
+  48-6-type-lint-debt-containment-touched-hotspots: done
   48-7-canonical-file-structure-rules-v1: done
   48-8-file-structure-baseline-gap-register: done
   48-9-ci-ratchet-gate-structure-conformance: done
+
+  # Epic 49: Test Determinism + CI Reliability
+  epic-49: in_progress
+  49-1-kickoff-gate-test-reliability-audit: done
+  49-2-accounting-suite-determinism-hardening: ready-for-dev
+  49-3-purchasing-suite-determinism-hardening: ready-for-dev
+  49-4-platform-acl-suite-determinism-hardening: ready-for-dev
+  49-5-sync-pos-inventory-suite-determinism-hardening: ready-for-dev
+  49-6-ci-pipeline-reliability-enforcement: ready-for-dev
+  49-7-pre-close-validation-final-solid-dry-kiss-gate: ready-for-dev

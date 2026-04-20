@@ -2,7 +2,7 @@
 
 > **Epic:** 49 — Test Determinism + CI Reliability  
 > **Prepared From:** Sprint 48 boundary mapping discussion  
-> **Status:** Approved queue (execution starts in Story 49.1)  
+> **Status:** Approved queue (intake completed in Story 49.1; execution starts in 49.2 touch chain)  
 > **Scope:** `apps/api/src/lib/**` ownership normalization into `packages/*` by sprint touch chain
 
 ---
@@ -36,17 +36,17 @@ Severity model for violations:
 
 ---
 
-## Queue A — Immediate Handoff (48-6 → 49.1)
+## Queue A — Immediate Handoff (48-6 → 49.1 intake, 49.2+ execution)
 
 These are preconditions to make later sprint extractions predictable.
 
 | Queue ID | Item | Current API lib area | Target location | Owner | Target Sprint | Severity |
 |---|---|---|---|---|---|---|
-| Q49-001 | Canonical fixture extraction | `apps/api/src/lib/test-fixtures.ts` | `packages/db/test-fixtures.ts` (+ API re-export adapter only if needed) | @bmad-dev | 49.1 | P1 |
-| Q49-002 | DB/audit infra extraction | `db.ts`, `audit.ts`, `audit-logs.ts`, `batch.ts` | `packages/db` | @bmad-dev | 49.1 | P1 |
-| Q49-003 | Shared utility boundary cleanup | `date-helpers.ts`, `pagination.ts`, `retry.ts`, `response.ts`, `request-meta.ts`, `correlation-id.ts`, `shared/*` | `packages/shared` | @bmad-dev | 49.1 | P1 |
-| Q49-004 | Purchasing module skeleton | `purchasing/*` (future extraction target) | create `packages/modules/purchasing` package scaffold | @bmad-architect + @bmad-dev | 49.1 | P1 |
-| Q49-005 | Auth/platform extraction prep | `auth*`, `users.ts`, `companies.ts`, `outlets.ts`, `settings*.ts` | `packages/auth`, `packages/modules/platform` | @bmad-architect | 49.1 | P1 |
+| Q49-001 | Canonical fixture extraction | `apps/api/src/lib/test-fixtures.ts` | `packages/db/test-fixtures.ts` (+ API re-export adapter only if needed) | @bmad-dev | 49.1 intake / 49.2 execution | P1 |
+| Q49-002 | DB/audit infra extraction | `db.ts`, `audit.ts`, `audit-logs.ts`, `batch.ts` | `packages/db` | @bmad-dev | 49.1 intake / 49.2 execution | P1 |
+| Q49-003 | Shared utility boundary cleanup | `date-helpers.ts`, `pagination.ts`, `retry.ts`, `response.ts`, `request-meta.ts`, `correlation-id.ts`, `shared/*` | `packages/shared` | @bmad-dev | 49.1 intake / 49.2 execution | P1 |
+| Q49-004 | Purchasing module skeleton | `purchasing/*` (future extraction target) | create `packages/modules/purchasing` package scaffold | @bmad-architect + @bmad-dev | 49.1 intake / 49.2 execution | P1 |
+| Q49-005 | Auth/platform extraction prep | `auth*`, `users.ts`, `companies.ts`, `outlets.ts`, `settings*.ts` | `packages/auth`, `packages/modules/platform` | @bmad-architect | 49.1 intake / 49.2 execution | P1 |
 
 ---
 
@@ -89,10 +89,10 @@ If any keep-allowlist file grows to include domain invariants, it must be reclas
 
 | Decision ID | Topic | Needed By |
 |---|---|---|
-| AD-49-001 | Ownership of `import/*` (shared package vs dedicated package) | Story 49.1 |
-| AD-49-002 | Ownership of `export/*` (reporting vs shared infra) | Story 49.1 |
-| AD-49-003 | `alerts/*` ownership (`telemetry` vs `notifications`) | Story 49.1 |
-| AD-49-004 | `packages/modules/purchasing` API contracts and boundaries | Story 49.1 |
+| AD-49-001 | Ownership of `import/*` (shared package vs dedicated package) | Story 49.2 kickoff |
+| AD-49-002 | Ownership of `export/*` (reporting vs shared infra) | Story 49.2 kickoff |
+| AD-49-003 | `alerts/*` ownership (`telemetry` vs `notifications`) | Story 49.2 kickoff |
+| AD-49-004 | `packages/modules/purchasing` API contracts and boundaries | Story 49.2 kickoff |
 
 ---
 

@@ -20,12 +20,12 @@ Before Epic 48 can be marked **done**, all items below must be verified.
 - [x] **48-3** — `migration-reliability-gate-hardening` — Status: **done** (2026-04-20)
 - [x] **48-4** — `integration-test-determinism-hardening` — Status: **done** (2026-04-20)
 - [x] **48-5** — `ci-quality-gate-enforcement` — Status: **done** (2026-04-21)
-- [ ] **48-6** — `type-lint-debt-containment-touched-hotspots` — Status: **ready-for-dev**
+- [x] **48-6** — `type-lint-debt-containment-touched-hotspots` — Status: **done** (2026-04-21) — 2 safe fixes applied (test-fixtures.ts:855,865); fiscal-years.ts:80 deferred (P2, risky adapter refactor, no runtime bug)
 - [x] **48-7** — `canonical-file-structure-rules-v1` — Status: **done** (2026-04-21) ← scope extension
 - [x] **48-8** — `file-structure-baseline-gap-register` — Status: **done** (2026-04-21) ← scope extension
 - [x] **48-9** — `ci-ratchet-gate-structure-conformance` — Status: **done** (2026-04-21) ← scope extension
 
-> **Note:** Story 48-5 is the gate-building story; it does not require 48-6 to be done for the quality gate itself to function. Story 48-6 is a parallel track targeting lint cleanup in touched files.
+> **Note:** Story 48-5 built the closure gate. Epic 48 closure now requires all 48.1–48.9 stories done, including 48-6 and scope-extension stories 48-7/48-8/48-9.
 
 ---
 

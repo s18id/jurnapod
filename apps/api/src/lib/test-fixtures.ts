@@ -852,7 +852,7 @@ export async function createTestPurchasingAccounts(
     INSERT INTO accounts (company_id, code, name, type_name, is_active, is_payable, created_at, updated_at)
     VALUES (${companyId}, ${apAccountCode}, ${apAccountName}, 'CREDITOR', 1, 1, NOW(), NOW())
   `.execute(db);
-  const apAccountId = Number((apResult as any).insertId);
+  const apAccountId = Number((apResult as { insertId?: number }).insertId ?? 0);
 
   // Create Expense account
   const expenseAccountCode = `TEST-EXP-${runId}`.slice(0, 20);
@@ -862,7 +862,7 @@ export async function createTestPurchasingAccounts(
     INSERT INTO accounts (company_id, code, name, type_name, is_active, is_payable, created_at, updated_at)
     VALUES (${companyId}, ${expenseAccountCode}, ${expenseAccountName}, 'EXPENSE', 1, 0, NOW(), NOW())
   `.execute(db);
-  const expenseAccountId = Number((expenseResult as any).insertId);
+  const expenseAccountId = Number((expenseResult as { insertId?: number }).insertId ?? 0);
 
   // Upsert company_modules entry for purchasing with the AP and expense accounts
   await sql`

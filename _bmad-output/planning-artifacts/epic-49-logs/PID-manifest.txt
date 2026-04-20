@@ -1,0 +1,21 @@
+# Epic 49.1 AC5 Baseline Run PID Manifest
+# Date: 2026-04-21
+
+01-fiscal-year-close.log: 284125
+02-period-close-guardrail.log: 284192
+03-ap-reconciliation.log: 284294
+04-ap-reconciliation-snapshots.log: 284400
+05-ap-exceptions.log: 284470
+06-sync-idempotency.log: 284602
+07-sync-push.log: 284700
+08-purchase-orders.log: 284797
+09-goods-receipts.log: 284880
+10-purchase-invoices.log: 285017
+11-ap-payments.log: 285086
+12-purchase-credits.log: 285172
+13-po-order-no-concurrency.log: 285299
+14-users-tenant-scope.log: 285370
+15-outlets-tenant-scope.log: 285493
+16-suppliers-tenant-isolation.log: 285617
+17-auth-resource-level-acl.log: 285834
+lint-api.log: 285896
