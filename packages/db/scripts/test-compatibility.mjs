@@ -26,7 +26,7 @@ const testConfigs = [
   {
     name: "MySQL 8.0",
     container: "mysql:8.0",
-    port: 3307,
+    port: 3311,
     env: {
       MYSQL_ROOT_PASSWORD: "test",
       MYSQL_DATABASE: "jurnapod"
@@ -35,7 +35,7 @@ const testConfigs = [
   {
     name: "MariaDB 11.8",
     container: "mariadb:11.8",
-    port: 3308,
+    port: 3312,
     env: {
       MARIADB_ROOT_PASSWORD: "test",
       MARIADB_DATABASE: "jurnapod"

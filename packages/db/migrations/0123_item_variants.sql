@@ -66,29 +66,21 @@ WHERE v.attributes IS NULL;
 -- ============================================================================
 -- Create trigger to auto-populate attributes on insert/update to combinations
 -- This ensures attributes column stays in sync with item_variant_combinations
+-- Note: CREATE TRIGGER cannot be PREPAREd in MySQL and cannot run inside a
+--       stored routine. Use DROP IF EXISTS + direct CREATE for idempotency.
 -- ============================================================================
-SET @trigger_exists = (
-  SELECT COUNT(*) = 0 FROM information_schema.TRIGGERS
-  WHERE TRIGGER_SCHEMA = DATABASE()
-    AND TRIGGER_NAME = 'trg_item_variants_sync_attributes'
-);
+DROP TRIGGER IF EXISTS trg_item_variants_sync_attributes;
 
-SET @sql = IF(@trigger_exists = 1,
-  'CREATE TRIGGER trg_item_variants_sync_attributes
-   AFTER INSERT ON item_variant_combinations
-   FOR EACH ROW
-   UPDATE item_variants SET attributes = (
-     SELECT JSON_OBJECTAGG(iva.attribute_name, ivav.value)
-     FROM item_variant_combinations vc
-     JOIN item_variant_attributes iva ON iva.id = vc.attribute_id
-     JOIN item_variant_attribute_values ivav ON ivav.id = vc.value_id
-     WHERE vc.variant_id = NEW.variant_id
-   ) WHERE id = NEW.variant_id',
-  'SELECT ''trigger already exists'' AS status'
-);
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+CREATE TRIGGER trg_item_variants_sync_attributes
+AFTER INSERT ON item_variant_combinations
+FOR EACH ROW
+UPDATE item_variants SET attributes = (
+  SELECT JSON_OBJECTAGG(iva.attribute_name, ivav.value)
+  FROM item_variant_combinations vc
+  JOIN item_variant_attributes iva ON iva.id = vc.attribute_id
+  JOIN item_variant_attribute_values ivav ON ivav.id = vc.value_id
+  WHERE vc.variant_id = NEW.variant_id
+) WHERE id = NEW.variant_id;
 
 SET FOREIGN_KEY_CHECKS=1;
 SET UNIQUE_CHECKS=1;

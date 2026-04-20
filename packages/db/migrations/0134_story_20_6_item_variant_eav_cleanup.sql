@@ -115,20 +115,10 @@ WHERE attributes IS NOT NULL
 
 -- ============================================================================
 -- Step 8: Drop the trigger that was syncing attributes (no longer needed with direct JSON storage)
+-- Note: DROP TRIGGER cannot be PREPAREd in MySQL; use direct execution.
+--       IF EXISTS makes it idempotent.
 -- ============================================================================
-SET @trigger_exists = (
-  SELECT COUNT(*) > 0 FROM information_schema.TRIGGERS
-  WHERE TRIGGER_SCHEMA = DATABASE()
-    AND TRIGGER_NAME = 'trg_item_variants_sync_attributes'
-);
-
-SET @sql = IF(@trigger_exists = 1,
-  'DROP TRIGGER IF EXISTS trg_item_variants_sync_attributes',
-  'SELECT ''trigger does not exist'' AS status'
-);
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+DROP TRIGGER IF EXISTS trg_item_variants_sync_attributes;
 
 SET FOREIGN_KEY_CHECKS=1;
 SET UNIQUE_CHECKS=1;

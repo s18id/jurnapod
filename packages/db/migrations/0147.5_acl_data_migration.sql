@@ -18,6 +18,23 @@ SET FOREIGN_KEY_CHECKS=0;
 SET UNIQUE_CHECKS=0;
 
 -- ==============================================================================
+-- Step 0: Ensure resource column exists (self-contained; 0147 also adds it)
+-- ==============================================================================
+SET @resource_col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'module_roles'
+    AND column_name = 'resource'
+);
+SET @sql = IF(@resource_col_exists = 0,
+  'ALTER TABLE module_roles ADD COLUMN resource VARCHAR(64) NULL AFTER module',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- ==============================================================================
 -- Step 1: Insert new platform module entries
 -- Maps: users -> platform.users, roles -> platform.roles, companies -> platform.companies,
 --       outlets -> platform.outlets, settings -> platform.settings

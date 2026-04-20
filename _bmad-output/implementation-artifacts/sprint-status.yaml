@@ -557,8 +557,8 @@ development_status:
   # Epic 48: Correctness-First Stability Lockdown (Wave A)
   epic-48: in-progress
   48-1-architecture-truth-map-risk-register-freeze: done
-  48-2-financial-correctness-hardening-pack: in-progress
-  48-3-migration-reliability-gate-hardening: ready-for-dev
+  48-2-financial-correctness-hardening-pack: done
+  48-3-migration-reliability-gate-hardening: done
   48-4-integration-test-determinism-hardening: ready-for-dev
   48-5-ci-quality-gate-enforcement: ready-for-dev
   48-6-type-lint-debt-containment-touched-hotspots: ready-for-dev

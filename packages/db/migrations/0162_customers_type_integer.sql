@@ -30,16 +30,24 @@ SET @col_type = (
 );
 
 -- Only modify if column exists and is still ENUM
-IF @col_exists > 0 AND @col_type = 'enum(''PERSON'',''BUSINESS'')' THEN
-  ALTER TABLE `customers` MODIFY COLUMN `type` TINYINT UNSIGNED NOT NULL DEFAULT 1;
-END IF;
+SET @alter_sql = IF(@col_exists > 0 AND @col_type = 'enum(''PERSON'',''BUSINESS'')',
+  'ALTER TABLE `customers` MODIFY COLUMN `type` TINYINT UNSIGNED NOT NULL DEFAULT 1',
+  'SELECT ''type column already converted or does not exist'' AS status'
+);
+
+PREPARE stmt FROM @alter_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- ==============================================================================
--- STEP 2: Update any existing ENUM string values to integers
+-- STEP 2: No UPDATE needed
+-- ALTER TABLE MODIFY COLUMN from ENUM to TINYINT automatically converts
+-- internal ENUM index values to integers:
+--   'PERSON'  (ENUM index 1) -> TINYINT 1
+--   'BUSINESS' (ENUM index 2) -> TINYINT 2
+-- Running UPDATEs after ALTER would compare string literals against TINYINT,
+-- causing "Truncated incorrect DOUBLE value" warnings. Removed for correctness.
 -- ==============================================================================
-
-UPDATE `customers` SET `type` = 1 WHERE `type` = 'PERSON';
-UPDATE `customers` SET `type` = 2 WHERE `type` = 'BUSINESS';
 
 SET FOREIGN_KEY_CHECKS=1;
 SET UNIQUE_CHECKS=1;
