@@ -15,6 +15,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "kysely";
+import { randomUUID } from "node:crypto";
 import { closeTestDb, getTestDb } from "../../helpers/db";
 import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
 import { getTestBaseUrl } from "../../helpers/env";
@@ -120,7 +121,7 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
       status: "OPEN",
     });
 
-    const closeRequestId = `init-test-${Date.now()}`;
+    const closeRequestId = `init-test-${randomUUID()}`;
     const res = await postJson(
       `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
       ownerToken,
@@ -158,7 +159,7 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
       status: "OPEN",
     });
 
-    const closeRequestId = `approve-test-${Date.now()}`;
+    const closeRequestId = `approve-test-${randomUUID()}`;
 
     // Step 1: Initiate
     const initiateRes = await postJson(
@@ -205,7 +206,7 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
       status: "OPEN",
     });
 
-    const closeRequestId = `idempotent-${Date.now()}`;
+    const closeRequestId = `idempotent-${randomUUID()}`;
 
     // Initiate
     const initiateRes = await postJson(
@@ -270,7 +271,7 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
     });
 
     // Try to approve without initiating first
-    const fakeCloseRequestId = `never-initiated-${Date.now()}`;
+    const fakeCloseRequestId = `never-initiated-${randomUUID()}`;
     const approveRes = await postJson(
       `/api/accounts/fiscal-years/${fiscalYear.id}/close/approve`,
       ownerToken,
@@ -300,7 +301,7 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
       status: "OPEN",
     });
 
-    const closeRequestId = `dup-init-${Date.now()}`;
+    const closeRequestId = `dup-init-${randomUUID()}`;
 
     // Initiate first time
     const init1Res = await postJson(
@@ -342,7 +343,7 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
       status: "OPEN",
     });
 
-    const closeRequestId = `concurrent-approve-${Date.now()}`;
+    const closeRequestId = `concurrent-approve-${randomUUID()}`;
 
     // Initiate first (creates PENDING close request)
     const initiateRes = await postJson(

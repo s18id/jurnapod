@@ -5,6 +5,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "kysely";
 import { getTestBaseUrl } from "../../helpers/env";
 import { closeTestDb, getTestDb } from "../../helpers/db";
+import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
 import {
   resetFixtureRegistry,
   createTestCompanyMinimal,
@@ -119,6 +120,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
   const INCLUSIVE_AS_OF_DATE = "2099-12-31";
 
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
 
     // Company 1 setup
@@ -219,6 +221,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
 
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   // =============================================================================
@@ -725,7 +728,6 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
 
       // Create company 2 user with same permissions
       const db = getTestDb();
-      const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
 
       const company2UserEmail = `c2-aprec-${Date.now()}@example.com`;
       const company2User = await createTestUser(testCompany2Id, {
