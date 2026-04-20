@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0",
+  "created": "2026-04-21",
+  "epic": "epic-48",
+  "description": "Baseline structure violations for active scope. CI ratchet (Story 48.9) will FAIL only on violations NOT in this list.",
+  "note": "This baseline is frozen. New violations will be flagged. Removed violations require intentional cleanup.",
+  "activeScope": [
+    "apps/api/src/**",
+    "packages/auth/src/**",
+    "packages/db/src/**",
+    "packages/shared/src/**",
+    "packages/sync-core/src/**",
+    "packages/pos-sync/src/**",
+    "packages/modules/accounting/src/**",
+    "packages/modules/platform/src/**",
+    "packages/modules/sales/src/**",
+    "packages/modules/inventory/src/**",
+    "packages/modules/inventory-costing/src/**",
+    "packages/modules/treasury/src/**",
+    "packages/modules/reservations/src/**",
+    "packages/modules/reporting/src/**",
+    "packages/notifications/src/**",
+    "packages/telemetry/src/**"
+  ],
+  "deferredScope": [
+    "apps/backoffice/**",
+    "apps/pos/**",
+    "packages/backoffice-sync/**",
+    "packages/offline-db/**"
+  ],
+  "violations": [
+    {
+      "id": "V-001",
+      "ruleId": "FS-FORBIDDEN-003",
+      "filePath": "apps/api/src/routes/companies.ts.bak2",
+      "description": "Backup file (.bak2) in source tree",
+      "severity": "P2",
+      "justification": "Stale backup file from development, not part of source"
+    },
+    {
+      "id": "V-002",
+      "ruleId": "FS-FORBIDDEN-002",
+      "filePath": "apps/api/src/middleware/telemetry.test.ts",
+      "description": "Test file placed alongside source instead of in __test__/ directory",
+      "severity": "P2",
+      "justification": "Historical test placement, should be moved to canonical __test__/unit/ location"
+    },
+    {
+      "id": "V-003",
+      "ruleId": "FS-FORBIDDEN-002",
+      "filePath": "apps/api/src/lib/cogs-posting.test.ts",
+      "description": "Test file placed alongside source instead of in __test__/ directory",
+      "severity": "P2",
+      "justification": "Historical test placement, should be moved to canonical __test__/ location"
+    },
+    {
+      "id": "V-004",
+      "ruleId": "FS-FORBIDDEN-002",
+      "filePath": "packages/modules/accounting/src/posting.test.ts",
+      "description": "Test file placed alongside source instead of in __test__/ directory",
+      "severity": "P2",
+      "justification": "Historical test placement in module src/ directory"
+    },
+    {
+      "id": "V-005",
+      "ruleId": "FS-FORBIDDEN-002",
+      "filePath": "packages/modules/treasury/src/helpers.test.ts",
+      "description": "Test file placed alongside source instead of in __test__/ directory",
+      "severity": "P2",
+      "justification": "Historical test placement in module src/ directory"
+    },
+    {
+      "id": "V-006",
+      "ruleId": "FS-FORBIDDEN-002",
+      "filePath": "packages/modules/treasury/src/cash-bank-service.test.ts",
+      "description": "Test file placed alongside source instead of in __test__/ directory",
+      "severity": "P2",
+      "justification": "Historical test placement in module src/ directory"
+    },
+    {
+      "id": "V-007",
+      "ruleId": "FS-FORBIDDEN-002",
+      "filePath": "packages/modules/treasury/src/journal-builder.test.ts",
+      "description": "Test file placed alongside source instead of in __test__/ directory",
+      "severity": "P2",
+      "justification": "Historical test placement in module src/ directory"
+    },
+    {
+      "id": "V-008",
+      "ruleId": "FS-FORBIDDEN-002",
+      "filePath": "packages/modules/reservations/src/time/timestamp.test.ts",
+      "description": "Test file placed alongside source instead of in __test__/ directory",
+      "severity": "P2",
+      "justification": "Historical test placement in module src/ directory"
+    },
+    {
+      "id": "V-009",
+      "ruleId": "FS-FORBIDDEN-002",
+      "filePath": "packages/modules/reservations/src/time/overlap.test.ts",
+      "description": "Test file placed alongside source instead of in __test__/ directory",
+      "severity": "P2",
+      "justification": "Historical test placement in module src/ directory"
+    }
+  ],
+  "deferredViolations": [
+    {
+      "id": "D-001",
+      "ruleId": "FS-FORBIDDEN-002",
+      "filePath": "apps/pos/**/__tests__/*.test.ts",
+      "description": "Test files alongside source in apps/pos (deferred scope)",
+      "severity": "P2",
+      "justification": "Deferred until scope freeze lifts"
+    },
+    {
+      "id": "D-002",
+      "ruleId": "FS-FORBIDDEN-002",
+      "filePath": "apps/backoffice/**/__tests__/*.test.ts",
+      "description": "Test files alongside source in apps/backoffice (deferred scope)",
+      "severity": "P2",
+      "justification": "Deferred until scope freeze lifts"
+    }
+  ],
+  "statistics": {
+    "totalActiveViolations": 9,
+    "totalDeferredViolations": 2,
+    "byRule": {
+      "FS-FORBIDDEN-002": 8,
+      "FS-FORBIDDEN-003": 1
+    },
+    "bySeverity": {
+      "P2": 9
+    }
+  }
+}

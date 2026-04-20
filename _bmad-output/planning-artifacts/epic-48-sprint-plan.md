@@ -35,6 +35,9 @@ This sprint is governed by:
 
 48.5 CI quality gate enforcement depends on: 48.2 + 48.3 + 48.4
 48.6 Type/lint debt containment depends on: 48.5 (policy) and 48.2/48.4 touched files
+48.7 Canonical file structure rules depends on: 48.6 (policy foundation)
+48.8 File structure baseline + gap register depends on: 48.7
+48.9 CI ratchet gate (structure conformance) depends on: 48.7 + 48.8
 ```
 
 ---
@@ -89,6 +92,33 @@ This sprint is governed by:
   - Prevent new warning debt in touched scope
   - Keep this bounded (no broad refactor)
 
+### Story 48.7 — Canonical File Structure Rules (v1)
+- **Priority:** P1 (process quality)
+- **Dependencies:** 48.6 (policy foundation)
+- **Focus:**
+  - Document canonical structure rules for `apps/api` and active packages
+  - Define naming conventions (kebab-case routes, camelCase libs)
+  - Establish rule ID taxonomy (FS-API-*, FS-PKG-*, FS-NC-*, FS-FORBIDDEN-*)
+  - Defer enforcement for `apps/backoffice` and `apps/pos` (scope freeze)
+
+### Story 48.8 — File Structure Baseline & Gap Register
+- **Priority:** P1 (enables ratchet)
+- **Dependencies:** 48.7
+- **Focus:**
+  - Scan active scope for structure violations
+  - Create machine-readable baseline JSON of known violations
+  - Separate active-scope violations from deferred-scope violations
+  - Mark baseline as frozen (will not auto-update)
+
+### Story 48.9 — CI Ratchet Gate (Structure Conformance)
+- **Priority:** P1 (enforcement)
+- **Dependencies:** 48.7 + 48.8
+- **Focus:**
+  - Implement `scripts/validate-structure-conformance.ts`
+  - FAIL only on new violations not in baseline
+  - Report baseline violations as tolerated debt (info, not failure)
+  - Wire CI job into `.github/workflows/ci.yml`
+
 ---
 
 ## Architecture Notes (Critical Decisions)
@@ -116,7 +146,7 @@ This sprint is governed by:
 
 Sprint 48 can be marked complete only if:
 
-- [ ] Stories 48.1–48.6 status updated with evidence
+- [ ] Stories 48.1–48.9 status updated with evidence
 - [ ] Kickoff, midpoint, and pre-close SOLID/DRY/KISS scoring completed
 - [ ] No unresolved P0/P1 findings in sprint scope
 - [ ] Adversarial review verdict is GO

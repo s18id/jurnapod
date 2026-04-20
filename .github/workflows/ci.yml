@@ -64,6 +64,58 @@ jobs:
       - name: Run lint across all workspaces
         run: npm run lint --workspaces --if-present
 
+  sprint-status:
+    name: Sprint Status Integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Run in parallel with build; never blocks PRs for active epics
+    # but catches file-overwrite regressions immediately
+    needs: []
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate sprint status integrity
+        run: npx tsx scripts/validate-sprint-status.ts
+        # Integrity check only (no --epic arg) — non-blocking signal job
+        # Failures here indicate file overwrite and require immediate recovery
+
+  structure-conformance:
+    name: Structure Conformance (Ratchet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Run in parallel with sprint-status; catches new structure violations
+    needs: []
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate structure conformance
+        run: npx tsx scripts/validate-structure-conformance.ts
+        # Ratchet mode: FAIL only on new violations not in baseline
+        # Baseline violations are reported as tolerated debt (info, not failure)
+        # Deferred scope (backoffice, pos) is ignored per scope freeze policy
+
   test:
     name: Test (${{ matrix.database }})
     runs-on: ubuntu-latest
