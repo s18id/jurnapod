@@ -886,6 +886,92 @@ export const APReconciliationExportQuerySchema = z.object({
   format: z.enum(["csv"]).default("csv"),
 });
 
+// =============================================================================
+// AP Reconciliation Snapshot Schemas (Story 47.6)
+// =============================================================================
+
+export const APReconciliationSnapshotCreateSchema = z.object({
+  as_of_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format"),
+  reason: z.string().trim().min(1).max(255).optional(),
+});
+
+export const APReconciliationSnapshotListQuerySchema = z
+  .object({
+    as_of_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    auto_generated: z
+      .enum(["true", "false"])
+      .optional()
+      .transform((value) => {
+        if (value === undefined) {
+          return undefined;
+        }
+        return value === "true";
+      }),
+    limit: z.coerce.number().int().positive().max(100).default(20),
+    offset: z.coerce.number().int().nonnegative().default(0),
+  })
+  .refine(
+    (val) => !val.start_date || !val.end_date || val.start_date <= val.end_date,
+    { message: "start_date must be less than or equal to end_date", path: ["start_date"] }
+  );
+
+export const APReconciliationSnapshotItemSchema = z.object({
+  id: NumericIdSchema,
+  company_id: NumericIdSchema,
+  as_of_date: z.string(),
+  timezone: z.string(),
+  snapshot_version: z.number().int().positive(),
+  ap_subledger_balance: z.string().trim(),
+  gl_control_balance: z.string().trim(),
+  variance: z.string().trim(),
+  configured_account_ids: z.array(z.number().int().positive()),
+  account_source: z.enum(["settings", "fallback_company_default", "none"]),
+  inputs_hash: z.string().length(64),
+  created_by: NumericIdSchema,
+  created_at: z.string().datetime(),
+  auto_generated: z.boolean(),
+  status: z.enum(["ACTIVE", "ARCHIVED"]),
+  retention_policy_years: z.number().int().positive().nullable(),
+  archived_at: z.string().datetime().nullable(),
+  archive_version: z.string().nullable(),
+});
+
+export const APReconciliationSnapshotCreateResponseSchema = z.object({
+  snapshot: APReconciliationSnapshotItemSchema,
+});
+
+export const APReconciliationSnapshotListResponseSchema = z.object({
+  items: z.array(APReconciliationSnapshotItemSchema),
+  total_count: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative(),
+});
+
+export const APReconciliationSnapshotGetResponseSchema = z.object({
+  snapshot: APReconciliationSnapshotItemSchema,
+});
+
+export const APReconciliationSnapshotCompareQuerySchema = z.object({
+  with: z.coerce.number().int().positive(),
+});
+
+export const APReconciliationSnapshotCompareResponseSchema = z.object({
+  base_snapshot: APReconciliationSnapshotItemSchema,
+  other_snapshot: APReconciliationSnapshotItemSchema,
+  delta: z.object({
+    ap_subledger_balance: z.string().trim(),
+    gl_control_balance: z.string().trim(),
+    variance: z.string().trim(),
+  }),
+  changed_fields: z.array(z.string()),
+});
+
+export const APReconciliationSnapshotExportQuerySchema = z.object({
+  format: z.enum(["csv"]).default("csv"),
+});
+
 // Type exports for AP Reconciliation
 export type APReconciliationSettingsUpdate = z.infer<typeof APReconciliationSettingsUpdateSchema>;
 export type APReconciliationSettingsResponse = z.infer<typeof APReconciliationSettingsResponseSchema>;
@@ -896,6 +982,15 @@ export type APReconciliationDrilldownResponse = z.infer<typeof APReconciliationD
 export type APReconciliationGLDetailResponse = z.infer<typeof APReconciliationGLDetailResponseSchema>;
 export type APReconciliationAPDetailResponse = z.infer<typeof APReconciliationAPDetailResponseSchema>;
 export type APReconciliationExportQuery = z.infer<typeof APReconciliationExportQuerySchema>;
+export type APReconciliationSnapshotCreate = z.infer<typeof APReconciliationSnapshotCreateSchema>;
+export type APReconciliationSnapshotListQuery = z.infer<typeof APReconciliationSnapshotListQuerySchema>;
+export type APReconciliationSnapshotItem = z.infer<typeof APReconciliationSnapshotItemSchema>;
+export type APReconciliationSnapshotCreateResponse = z.infer<typeof APReconciliationSnapshotCreateResponseSchema>;
+export type APReconciliationSnapshotListResponse = z.infer<typeof APReconciliationSnapshotListResponseSchema>;
+export type APReconciliationSnapshotGetResponse = z.infer<typeof APReconciliationSnapshotGetResponseSchema>;
+export type APReconciliationSnapshotCompareQuery = z.infer<typeof APReconciliationSnapshotCompareQuerySchema>;
+export type APReconciliationSnapshotCompareResponse = z.infer<typeof APReconciliationSnapshotCompareResponseSchema>;
+export type APReconciliationSnapshotExportQuery = z.infer<typeof APReconciliationSnapshotExportQuerySchema>;
 
 // =============================================================================
 // Supplier Statement Schemas (Story 47.3)

@@ -132,6 +132,41 @@ export interface ApPayments {
   voided_by_user_id: Generated<number | null>;
 }
 
+export interface ApReconciliationAuditTrail {
+  action_type: string;
+  change_reason: Generated<string | null>;
+  change_summary: string;
+  changed_at: Generated<Date>;
+  changed_by: number;
+  company_id: number;
+  id: Generated<number>;
+  metadata: Generated<string | null>;
+  previous_snapshot_id: Generated<number | null>;
+  snapshot_id: number;
+}
+
+export interface ApReconciliationSnapshots {
+  account_source: string;
+  ap_subledger_balance: Decimal;
+  archive_version: Generated<string | null>;
+  archived_at: Generated<Date | null>;
+  as_of_date: Date;
+  auto_generated: Generated<number>;
+  company_id: number;
+  configured_account_ids_json: string;
+  created_at: Generated<Date>;
+  created_by: number;
+  gl_control_balance: Decimal;
+  id: Generated<number>;
+  inputs_hash: string;
+  retention_policy_years: Generated<number | null>;
+  snapshot_version: number;
+  status: Generated<string>;
+  superseded_by_snapshot_id: Generated<number | null>;
+  timezone: string;
+  variance: Decimal;
+}
+
 export interface ArchiveSyncDataVersions {
   archived_at: Generated<Date | null>;
   company_id: number;
@@ -1932,6 +1967,8 @@ export interface DB {
   ap_exceptions: ApExceptions;
   ap_payment_lines: ApPaymentLines;
   ap_payments: ApPayments;
+  ap_reconciliation_audit_trail: ApReconciliationAuditTrail;
+  ap_reconciliation_snapshots: ApReconciliationSnapshots;
   archive_sync_data_versions: ArchiveSyncDataVersions;
   archive_sync_operations: ArchiveSyncOperations;
   archive_sync_tier_versions: ArchiveSyncTierVersions;

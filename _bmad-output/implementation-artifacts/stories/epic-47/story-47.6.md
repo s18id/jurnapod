@@ -1,6 +1,6 @@
 # Story 47.6: Reconciliation Snapshot & Audit Trail
 
-Status: backlog
+Status: done
 
 ## Story
 
@@ -62,7 +62,9 @@ Reconciliation results are point‑in‑time calculations that can change as new
 **AC6: Snapshot Export**
 **Given** a snapshot exists,
 **When** the user requests export,
-**Then** they can download a PDF or CSV containing the snapshot details and supporting drill‑down (if available).
+**Then** they can download a CSV containing the snapshot details and supporting drill‑down metadata.
+
+**Scope-freeze note:** PDF export is explicitly deferred follow-up for post-47.6.
 
 **AC7: API Endpoints**
 **Given** appropriate permissions,
@@ -71,7 +73,7 @@ Reconciliation results are point‑in‑time calculations that can change as new
 - `GET /api/purchasing/reports/ap-reconciliation/snapshots` (list with filters)
 - `GET /api/purchasing/reports/ap-reconciliation/snapshots/{id}` (retrieve one)
 - `GET /api/purchasing/reports/ap-reconciliation/snapshots/{id}/compare?with={other_id}` (compare two)
-- `GET /api/purchasing/reports/ap-reconciliation/snapshots/{id}/export?format=pdf` (export)
+- `GET /api/purchasing/reports/ap-reconciliation/snapshots/{id}/export?format=csv` (export)
 **Then** each endpoint returns the expected data.
 
 **Canonical ACL mapping for this story:**
@@ -89,23 +91,32 @@ Reconciliation results are point‑in‑time calculations that can change as new
 
 ## Tasks / Subtasks
 
-- [ ] Design `ap_reconciliation_snapshots` table (company_id, version, as_of_date, ap_balance, gl_balance, variance, account_set JSON, calculation_ts, created_by, auto_generated BOOLEAN)
-- [ ] Design `ap_reconciliation_audit_trail` table (company_id, snapshot_id, previous_snapshot_id, change_description, changed_at, changed_by)
-- [ ] Create migrations for snapshot and audit tables
-- [ ] Implement snapshot service that copies current reconciliation summary
-- [ ] Integrate automatic snapshot on period‑close (hook into Epic 32)
-- [ ] Build snapshot CRUD endpoints (create, list, retrieve)
-- [ ] Implement comparison endpoint (diff two snapshots)
-- [ ] Add export endpoint (reuse existing export infrastructure)
-- [ ] Write integration tests for snapshot immutability and audit trail
-- [ ] Write integration tests for period‑end auto‑snapshot
-- [ ] Update OpenAPI spec
+- [x] Design `ap_reconciliation_snapshots` table (company_id, version, as_of_date, ap_balance, gl_balance, variance, account_set JSON, calculation_ts, created_by, auto_generated BOOLEAN)
+- [x] Design `ap_reconciliation_audit_trail` table (company_id, snapshot_id, previous_snapshot_id, change_description, changed_at, changed_by)
+- [x] Create migrations for snapshot and audit tables
+- [x] Implement snapshot service that copies current reconciliation summary
+- [x] Integrate automatic snapshot on period‑close (hook into fiscal-year close API flow)
+- [x] Build snapshot CRUD endpoints (create, list, retrieve)
+- [x] Implement comparison endpoint (diff two snapshots)
+- [x] Add export endpoint (CSV in 47.6 scope)
+- [x] Write integration tests for snapshot immutability and audit trail
+- [x] Write integration tests for period‑end auto‑snapshot
+- [x] Update API contracts in shared schemas
 
 ---
 
 ### Review Findings
 
-- [ ] *Review placeholder – findings will be populated during implementation review*
+- [x] `@bmad-review` adversarial gate re-review: **GO** (no unresolved P0/P1)
+- [x] Actioned blockers from initial review:
+  - race-safe snapshot creation retry on duplicate version key contention
+  - supersession chain linkage persisted via `superseded_by_snapshot_id`
+  - `created_by` FK safety guard in snapshot POST + auto-close snapshot actor fallback
+- [ ] Non-blocking follow-ups (P2/P3 backlog):
+  - `toIsoDateTime` DATETIME timezone normalization hardening
+  - expose supersession chain field in API response contract
+  - PDF export (deferred by 47.6 scope freeze)
+  - richer audit trail attribution (transaction-level change causes)
 
 ---
 
@@ -148,9 +159,9 @@ curl "/api/purchasing/reports/ap-reconciliation/snapshots?start_date=2025-04-01&
 curl "/api/purchasing/reports/ap-reconciliation/snapshots/1001/compare?with=1002" \
   -H "Authorization: Bearer $TOKEN"
 
-# Export snapshot as PDF
-curl "/api/purchasing/reports/ap-reconciliation/snapshots/1001/export?format=pdf" \
-  -H "Authorization: Bearer $TOKEN" -o snapshot.pdf
+# Export snapshot as CSV
+curl "/api/purchasing/reports/ap-reconciliation/snapshots/1001/export?format=csv" \
+  -H "Authorization: Bearer $TOKEN" -o snapshot.csv
 ```
 
 ---
