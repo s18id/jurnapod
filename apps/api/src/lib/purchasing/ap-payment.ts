@@ -20,7 +20,6 @@ import {
 // FIX(47.5-WP-C): Import guardrail service for period-close enforcement
 import {
   checkPeriodCloseGuardrail,
-  validateOverrideReason,
   insertPeriodCloseOverride,
   PeriodOverrideReasonInvalidError,
   PeriodOverrideForbiddenError,

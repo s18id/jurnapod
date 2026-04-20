@@ -10,6 +10,7 @@
 
 | When you need... | Use this agent |
 |------------------|----------------|
+| **File exploration / mapping** | `bmad-explorer` |
 | Story implementation (from spec) | `bmad-dev` |
 | Quick code change / bug fix | `bmad-master` |
 | Solo dev on a small task | `bmad-master` |
@@ -22,6 +23,8 @@
 | QA / test generation | `bmad-qa` |
 | UX design | `bmad-ux-designer` |
 | Technical writing / documentation | `bmad-tech-writer` |
+
+> **Exploration Rule (MANDATORY):** All file exploration tasks — including `grep`, `map`, `find`, `ls`, `tree`, `count`, content search, line counting, and any file/directory navigation — MUST be delegated to `bmad-explorer`. Do NOT perform file system operations directly.
 
 ---
 
@@ -57,6 +60,52 @@
 5. **Finalized records are immutable** — Use `VOID` and `REFUND`, not silent mutation
 6. **Shared contracts** — Stay aligned across apps and packages
 7. **Build packages before apps** — When modifying `packages/` code, always `npm run build -w @jurnapod/<package>` before building or testing dependent `apps/`
+
+---
+
+## Architecture Program Baseline (MANDATORY — S48 to S61)
+
+All agents and contributors must follow the approved correctness-first architecture baseline:
+
+- **Baseline document:** `_bmad-output/planning-artifacts/sprint-48-61-correctness-first-architecture-blueprint.md`
+- **Priority rule:** `Correctness > Safety > Speed`
+- **Scope rule:** No net-new feature scope in this program unless explicitly approved as emergency/regulatory exception.
+
+### Mandatory Per-Sprint Loop
+
+For every sprint in S48–S61:
+
+1. **Kickoff Gate** — score SOLID/DRY/KISS (`Unknown/Pass/Fail`)
+2. **Mid-Sprint Checkpoint** — re-score and escalate unresolved P1 risks
+3. **Pre-Close Quality Gate** — attach evidence and run adversarial review gate
+4. **Retro Carry-Over** — max 2 action items, each with owner + deadline + success criterion
+
+### SOLID/DRY/KISS Enforcement
+
+The sprint checklist in the baseline document is mandatory and must be applied in kickoff, midpoint, and pre-close for every sprint (S48–S61). Any failed checklist item must be tracked as explicit sprint work with severity.
+
+### Sprint Closure Gate
+
+- Sprint cannot be closed with unresolved **P0/P1** items in sprint scope.
+- Program changes require explicit re-baseline approval (scope/risk/schedule impact).
+
+---
+
+## Temporary Scope Freeze (Architecture-First)
+
+> **Effective immediately — supersedes all other scope guidance during freeze.**
+
+**In-scope:**
+- `apps/api` — API correctness, routing, validation, auth, tenant scoping
+- Shared/core packages required for API correctness (`packages/db`, `packages/shared`, `packages/auth`, `packages/modules/*`)
+
+**Out-of-scope (temporary freeze):**
+- `apps/backoffice` — frozen except emergency / regulatory / security fixes explicitly approved
+- `apps/pos` — frozen except emergency / regulatory / security fixes explicitly approved
+
+**Priority order (unchanged):** `Correctness > Safety > Speed`
+
+**Rule:** No net-new features in frozen apps unless approved via explicit exception (emergency/regulatory/security). All other work proceeds normally against `apps/api` and required packages.
 
 ---
 

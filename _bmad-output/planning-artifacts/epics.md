@@ -9,6 +9,19 @@ inputDocuments: []
 
 This document provides the epic and story breakdown for jurnapod, focused on tooling standards and process improvements carried forward from Epics 33 and 34.
 
+## Program Baseline Reference (S48–S61)
+
+Architecture and sprint execution for S48–S61 are governed by:
+
+- `_bmad-output/planning-artifacts/sprint-48-61-correctness-first-architecture-blueprint.md`
+
+Mandatory interpretation:
+
+- Priority order: `Correctness > Safety > Speed`
+- SOLID/DRY/KISS checklist applied at kickoff, midpoint, and pre-close each sprint
+- No sprint closure with unresolved P0/P1 in sprint scope
+- No net-new feature scope unless explicitly approved exception
+
 ## Requirements Inventory
 
 ### Functional Requirements

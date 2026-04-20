@@ -36,7 +36,6 @@ import {
   reconcileSupplierStatement,
   markSupplierStatementReconciled,
   SUPPLIER_STATEMENT_STATUS,
-  SUPPLIER_STATEMENT_STATUS_VALUES,
   SupplierStatementError,
 } from "../../lib/purchasing/supplier-statements.js";
 

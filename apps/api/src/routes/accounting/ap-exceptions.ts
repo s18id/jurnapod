@@ -26,7 +26,6 @@ import {
   detectThenList,
   assignException,
   resolveException,
-  getException,
   APExceptionNotFoundError,
   APExceptionInvalidTransitionError,
 } from "@/lib/accounting/ap-exceptions.js";

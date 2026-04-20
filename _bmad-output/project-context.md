@@ -345,6 +345,14 @@ await pool.execute(`INSERT INTO user_role_assignments...`);
 9. **Reservation timezone**: No UTC fallback; resolve in order: outlet → company
 10. **Resource-level ACL**: Permissions use `module.resource` format per Epic 39
 
+### Temporary Scope Override (Architecture-First Freeze)
+
+> **Active freeze — all agents must respect or obtain explicit approval.**
+
+- **In-scope:** `apps/api` + shared/core packages (`packages/db`, `packages/shared`, `packages/auth`, `packages/modules/*`)
+- **Frozen:** `apps/backoffice`, `apps/pos` — no new work except explicit emergency / regulatory / security exception
+- **Priority:** `Correctness > Safety > Speed` (unchanged)
+
 ### Critical Anti-Patterns
 - **Never** `FLOAT`/`DOUBLE` for money
 - **Never** native `Date` for business logic
