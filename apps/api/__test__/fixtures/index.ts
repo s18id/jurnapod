@@ -86,6 +86,7 @@ export {
   createTestCustomerForCompany,
   createTestSupplier,
   createTestPurchasingAccounts,
+  createTestFiscalCloseBalanceFixture,
   createTestPurchasingSettings,
   createTestBankAccount,
   createTestFiscalYear,

@@ -4,11 +4,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "kysely";
 import { closeTestDb, getTestDb } from "../../helpers/db";
+import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
 import { getTestBaseUrl } from "../../helpers/env";
 import {
   assignUserGlobalRole,
   createTestAPReconciliationSettings,
   createTestCompanyMinimal,
+  createTestFiscalCloseBalanceFixture,
   createTestFiscalYear,
   createTestPurchasingAccounts,
   createTestRole,
@@ -49,6 +51,7 @@ describe("purchasing.ap-reconciliation-snapshots", { timeout: 90000 }, () => {
   };
 
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     const seedToken = await getTestAccessToken(baseUrl);
 
@@ -108,6 +111,7 @@ describe("purchasing.ap-reconciliation-snapshots", { timeout: 90000 }, () => {
     // This suite uses unique-per-run fixture identities and non-destructive teardown.
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   it("creates snapshot manually and returns version 1", async () => {
@@ -242,6 +246,11 @@ describe("purchasing.ap-reconciliation-snapshots", { timeout: 90000 }, () => {
   });
 
   it("auto-creates snapshot on fiscal-year close approve", async () => {
+    await createTestFiscalCloseBalanceFixture(companyId, {
+      asOfDate: "2031-12-31",
+      plBalance: "250.0000",
+    });
+
     const fiscalYear = await createTestFiscalYear(companyId, {
       year: 2031,
       startDate: "2031-01-01",
@@ -250,6 +259,8 @@ describe("purchasing.ap-reconciliation-snapshots", { timeout: 90000 }, () => {
     });
 
     const closeRequestId = `close-47-6-${Date.now()}`;
+
+    // Step 1: Initiate - should NOT close the fiscal year
     const initiateRes = await postJson(
       `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
       ownerToken,
@@ -257,17 +268,42 @@ describe("purchasing.ap-reconciliation-snapshots", { timeout: 90000 }, () => {
     );
 
     expect(initiateRes.status).toBe(200);
+    const initiateBody = await initiateRes.json();
+    expect(initiateBody.success).toBe(true);
+    // Initiate should NOT have closed the fiscal year yet
+    // The fiscal year status should still be OPEN at this point
 
+    // Verify fiscal year is still OPEN after initiate
+    const fyStatusRes = await getJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/status`,
+      ownerToken
+    );
+    expect(fyStatusRes.status).toBe(200);
+    const fyStatus = await fyStatusRes.json();
+    expect(fyStatus.data.status).toBe("OPEN");
+
+    // Step 2: Approve - should close the fiscal year and create auto snapshot
     const approveRes = await postJson(
       `/api/accounts/fiscal-years/${fiscalYear.id}/close/approve`,
       ownerToken,
       { close_request_id: closeRequestId }
     );
 
-    // Current fiscal-year flow can close in initiate step; approve may return 409
-    // when the fiscal year is already closed.
-    expect([200, 409]).toContain(approveRes.status);
+    // Approve should succeed with 200 (not 409, since initiate no longer closes)
+    expect(approveRes.status).toBe(200);
+    const approveBody = await approveRes.json();
+    expect(approveBody.success).toBe(true);
 
+    // Verify fiscal year is now CLOSED after approve
+    const fyStatusAfterRes = await getJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/status`,
+      ownerToken
+    );
+    expect(fyStatusAfterRes.status).toBe(200);
+    const fyStatusAfter = await fyStatusAfterRes.json();
+    expect(fyStatusAfter.data.status).toBe("CLOSED");
+
+    // Verify auto snapshot was created
     const snapshotsRes = await getJson(
       "/api/purchasing/reports/ap-reconciliation/snapshots?as_of_date=2031-12-31&auto_generated=true&limit=10",
       ownerToken
@@ -278,5 +314,26 @@ describe("purchasing.ap-reconciliation-snapshots", { timeout: 90000 }, () => {
     expect(snapshotsBody.success).toBe(true);
     expect(snapshotsBody.data.items.length).toBeGreaterThanOrEqual(1);
     expect(snapshotsBody.data.items.some((item: { auto_generated: boolean }) => item.auto_generated)).toBe(true);
+
+    const initialAutoSnapshotCount = Number(snapshotsBody.data.items.length);
+
+    // Replay approve with same close_request_id must be idempotent and side-effect free.
+    const replayApproveRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close/approve`,
+      ownerToken,
+      { close_request_id: closeRequestId }
+    );
+    expect(replayApproveRes.status).toBe(200);
+    const replayApproveBody = await replayApproveRes.json();
+    expect(replayApproveBody.success).toBe(true);
+
+    const snapshotsAfterReplayRes = await getJson(
+      "/api/purchasing/reports/ap-reconciliation/snapshots?as_of_date=2031-12-31&auto_generated=true&limit=10",
+      ownerToken
+    );
+    expect(snapshotsAfterReplayRes.status).toBe(200);
+    const snapshotsAfterReplayBody = await snapshotsAfterReplayRes.json();
+    expect(snapshotsAfterReplayBody.success).toBe(true);
+    expect(Number(snapshotsAfterReplayBody.data.items.length)).toBe(initialAutoSnapshotCount);
   });
 });

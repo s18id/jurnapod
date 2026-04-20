@@ -555,9 +555,9 @@ development_status:
   epic-47-retrospective: done
 
   # Epic 48: Correctness-First Stability Lockdown (Wave A)
-  epic-48: ready-for-dev
-  48-1-architecture-truth-map-risk-register-freeze: ready-for-dev
-  48-2-financial-correctness-hardening-pack: ready-for-dev
+  epic-48: in-progress
+  48-1-architecture-truth-map-risk-register-freeze: done
+  48-2-financial-correctness-hardening-pack: in-progress
   48-3-migration-reliability-gate-hardening: ready-for-dev
   48-4-integration-test-determinism-hardening: ready-for-dev
   48-5-ci-quality-gate-enforcement: ready-for-dev

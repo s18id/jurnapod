@@ -878,6 +878,211 @@ export async function createTestPurchasingAccounts(
 }
 
 /**
+ * Create canonical fiscal-close fixture data for integration tests:
+ * - Retained earnings-like account (name contains "Retained")
+ * - P&L account with non-zero current balance (ensures closing entries are generated)
+ *
+ * This helper prevents ad-hoc SQL setup from being duplicated across test suites.
+ */
+export async function createTestFiscalCloseBalanceFixture(
+  companyId: number,
+  options?: Partial<{
+    retainedEarningsName: string;
+    plAccountName: string;
+    plBalance: string;
+    plNormalBalance: "D" | "K";
+    asOfDate: string;
+  }>
+): Promise<{ retained_earnings_account_id: number; pl_account_id: number }> {
+  const db = getDb();
+  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+
+  const retainedEarningsName = options?.retainedEarningsName ?? `Retained Earnings ${runId}`;
+  const retainedCode = `TEST-RE-${runId}`.slice(0, 20).toUpperCase();
+  const retainedInsert = await sql`
+    INSERT INTO accounts (
+      company_id,
+      code,
+      name,
+      type_name,
+      is_active,
+      is_payable,
+      report_group,
+      normal_balance,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ${companyId},
+      ${retainedCode},
+      ${retainedEarningsName},
+      'EQUITY',
+      1,
+      0,
+      'EQ',
+      'K',
+      NOW(),
+      NOW()
+    )
+  `.execute(db);
+
+  const retainedEarningsAccountId = Number((retainedInsert as { insertId?: number }).insertId ?? 0);
+  if (!retainedEarningsAccountId) {
+    throw new Error("Failed to create retained earnings account for fiscal close fixture");
+  }
+
+  const plCode = `TEST-PL-${runId}`.slice(0, 20).toUpperCase();
+  const plAccountName = options?.plAccountName ?? `Test Revenue ${runId}`;
+  const plNormalBalance = options?.plNormalBalance ?? "K";
+  const plBalance = options?.plBalance ?? "100.0000";
+  const asOfDate = options?.asOfDate ?? "2099-12-31";
+  const fixtureDocId = Number((Date.now() % 2_000_000_000) + Math.floor(Math.random() * 1000));
+
+  // Offset account for balanced fixture journal entry.
+  const offsetCode = `TEST-OFF-${runId}`.slice(0, 20).toUpperCase();
+  const offsetInsert = await sql`
+    INSERT INTO accounts (
+      company_id,
+      code,
+      name,
+      type_name,
+      is_active,
+      is_payable,
+      report_group,
+      normal_balance,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ${companyId},
+      ${offsetCode},
+      ${`Test Offset ${runId}`},
+      'ASSET',
+      1,
+      0,
+      'BS',
+      'D',
+      NOW(),
+      NOW()
+    )
+  `.execute(db);
+
+  const offsetAccountId = Number((offsetInsert as { insertId?: number }).insertId ?? 0);
+  if (!offsetAccountId) {
+    throw new Error("Failed to create offset account for fiscal close fixture");
+  }
+
+  const plAccountInsert = await sql`
+    INSERT INTO accounts (
+      company_id,
+      code,
+      name,
+      type_name,
+      is_active,
+      is_payable,
+      report_group,
+      normal_balance,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ${companyId},
+      ${plCode},
+      ${plAccountName},
+      'REVENUE',
+      1,
+      0,
+      'PL',
+      ${plNormalBalance},
+      NOW(),
+      NOW()
+    )
+  `.execute(db);
+
+  const plAccountId = Number((plAccountInsert as { insertId?: number }).insertId ?? 0);
+  if (!plAccountId) {
+    throw new Error("Failed to create test P&L account for fiscal close fixture");
+  }
+
+  // Seed a balanced manual journal entry in the fiscal-year window.
+  // This ensures close preview derives non-zero PL balances from journal_lines.
+  const journalBatchInsert = await sql`
+    INSERT INTO journal_batches (
+      company_id,
+      outlet_id,
+      doc_type,
+      doc_id,
+      posted_at,
+      client_ref,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ${companyId},
+      NULL,
+      'MANUAL',
+      ${fixtureDocId},
+      ${asOfDate},
+      ${`FIXTURE-FY-CLOSE-${runId}`},
+      NOW(),
+      NOW()
+    )
+  `.execute(db);
+
+  const journalBatchId = Number((journalBatchInsert as { insertId?: number }).insertId ?? 0);
+  if (!journalBatchId) {
+    throw new Error("Failed to create fixture journal batch for fiscal close fixture");
+  }
+
+  const debitAccountId = plNormalBalance === "D" ? plAccountId : offsetAccountId;
+  const creditAccountId = plNormalBalance === "D" ? offsetAccountId : plAccountId;
+
+  await sql`
+    INSERT INTO journal_lines (
+      company_id,
+      outlet_id,
+      journal_batch_id,
+      account_id,
+      line_date,
+      debit,
+      credit,
+      description,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ${companyId},
+      NULL,
+      ${journalBatchId},
+      ${debitAccountId},
+      ${asOfDate},
+      ${plBalance},
+      '0.0000',
+      'Fiscal close fixture debit line',
+      NOW(),
+      NOW()
+    ),
+    (
+      ${companyId},
+      NULL,
+      ${journalBatchId},
+      ${creditAccountId},
+      ${asOfDate},
+      '0.0000',
+      ${plBalance},
+      'Fiscal close fixture credit line',
+      NOW(),
+      NOW()
+    )
+  `.execute(db);
+
+  return {
+    retained_earnings_account_id: retainedEarningsAccountId,
+    pl_account_id: plAccountId,
+  };
+}
+
+/**
  * Configure purchasing module settings for a company.
  *
  * Sets `purchasing_default_ap_account_id` and `purchasing_default_expense_account_id`
@@ -1195,6 +1400,7 @@ export async function setTestItemLowStockThreshold(
 export type FiscalYearFixture = {
   id: number;
   company_id: number;
+  code: string;
   year: number;
   startDate: string;
   endDate: string;
@@ -1246,6 +1452,7 @@ export async function createTestFiscalYear(
     const fixture: FiscalYearFixture = {
       id: Number(row.id),
       company_id: companyId,
+      code: row.code,
       year,
       startDate: row.start_date instanceof Date ? row.start_date.toISOString().split("T")[0] : String(row.start_date),
       endDate: row.end_date instanceof Date ? row.end_date.toISOString().split("T")[0] : String(row.end_date),
@@ -1261,6 +1468,7 @@ export async function createTestFiscalYear(
         return {
           id: Number(row.id),
           company_id: companyId,
+          code: row.code,
           year,
           startDate: row.start_date instanceof Date ? row.start_date.toISOString().split("T")[0] : String(row.start_date),
           endDate: row.end_date instanceof Date ? row.end_date.toISOString().split("T")[0] : String(row.end_date),

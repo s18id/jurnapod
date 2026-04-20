@@ -486,7 +486,11 @@ export class FiscalYearService {
 
     // Get PL account balances for the fiscal year
     const { incomeAccounts, expenseAccounts, totalIncome, totalExpenses } =
-      await this.getPlAccountBalances(companyId);
+      await this.getPlAccountBalances(
+        companyId,
+        formatDateOnlyFromUnknown(fiscalYear.start_date),
+        formatDateOnlyFromUnknown(fiscalYear.end_date)
+      );
 
     // For closing entries, net income is income minus expenses (signs preserved)
     const netIncome = totalIncome - totalExpenses;
@@ -586,6 +590,88 @@ export class FiscalYearService {
       canClose,
       cannotCloseReason
     };
+  }
+
+  /**
+   * Claim idempotency key for fiscal year close without performing the actual close.
+   * 
+   * This implements the two-step close contract:
+   * - Step 1 (initiate): Claim idempotency key, transition to PENDING
+   * - Step 2 (approve): Post journals and close fiscal year atomically
+   * 
+   * This method ONLY claims the idempotency key. It does NOT:
+   * - Transition fiscal year status to IN_PROGRESS
+   * - Transition fiscal year status to CLOSED
+   * - Post any journal entries
+   * 
+   * All of those side effects are reserved for the approveFiscalYearClose path.
+   */
+  async claimIdempotencyKeyOnly(
+    fiscalYearId: number,
+    closeRequestId: string,
+    context: CloseFiscalYearContext
+  ): Promise<CloseFiscalYearResult> {
+    const { companyId, requestedByUserId, requestedAtEpochMs } = context;
+
+    return await withTransactionRetry(this.db, async (trx) => {
+      // Check if fiscal year exists and is not already closed
+      const fiscalYear = await trx
+        .selectFrom("fiscal_years")
+        .where("id", "=", fiscalYearId)
+        .where("company_id", "=", companyId)
+        .select(["id", "company_id", "status"])
+        .executeTakeFirst();
+
+      if (!fiscalYear) {
+        throw new FiscalYearNotFoundError(`Fiscal year ${fiscalYearId} not found`);
+      }
+
+      if (fiscalYear.status === "CLOSED") {
+        throw new FiscalYearAlreadyClosedError(`Fiscal year ${fiscalYearId} is already closed`);
+      }
+
+      // Atomically claim idempotency key via INSERT...ON DUPLICATE KEY
+      const { closeRequestDbId, existingRequest } = await this.claimCloseRequestIdempotency(
+        trx,
+        companyId,
+        fiscalYearId,
+        closeRequestId,
+        context
+      );
+
+      // If duplicate found, return existing result immediately
+      if (existingRequest) {
+        return {
+          success: existingRequest.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED,
+          fiscalYearId,
+          closeRequestId,
+          status: existingRequest.status as FiscalYearCloseStatus,
+          previousStatus: existingRequest.fiscal_year_status_before,
+          newStatus: existingRequest.fiscal_year_status_after,
+          resultJson: existingRequest.result_json
+            ? JSON.parse(existingRequest.result_json)
+            : undefined,
+          failureCode: existingRequest.failure_code ?? undefined,
+          failureMessage: existingRequest.failure_message ?? undefined,
+        };
+      }
+
+      // Return the PENDING status - initiate is just claiming the key
+      // The fiscal year remains OPEN at this point
+      return {
+        success: true,
+        fiscalYearId,
+        closeRequestId,
+        status: FISCAL_YEAR_CLOSE_STATUS.PENDING,
+        previousStatus: fiscalYear.status,
+        newStatus: fiscalYear.status, // No change - remains OPEN
+        resultJson: {
+          claimed: true,
+          closeRequestDbId,
+          message: "Fiscal year close initiated. Proceed to approve to post closing entries."
+        }
+      };
+    });
   }
 
   // =============================================================================
@@ -924,19 +1010,28 @@ export class FiscalYearService {
           .executeTakeFirst();
 
         if (existingRequest) {
-          return {
-            success: existingRequest.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED,
-            fiscalYearId,
-            closeRequestId,
-            status: existingRequest.status as FiscalYearCloseStatus,
-            previousStatus: existingRequest.fiscal_year_status_before,
-            newStatus: existingRequest.fiscal_year_status_after,
-            resultJson: existingRequest.result_json
-              ? JSON.parse(existingRequest.result_json)
-              : undefined,
-            failureCode: existingRequest.failure_code ?? undefined,
-            failureMessage: existingRequest.failure_message ?? undefined
-          };
+          // If already succeeded, return existing result
+          if (existingRequest.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED) {
+            return {
+              success: true,
+              fiscalYearId,
+              closeRequestId,
+              status: FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED as FiscalYearCloseStatus,
+              previousStatus: existingRequest.fiscal_year_status_before,
+              newStatus: existingRequest.fiscal_year_status_after,
+              resultJson: existingRequest.result_json
+                ? JSON.parse(existingRequest.result_json)
+                : undefined,
+              failureCode: existingRequest.failure_code ?? undefined,
+              failureMessage: existingRequest.failure_message ?? undefined
+            };
+          }
+
+          // If PENDING or IN_PROGRESS (partial completion), throw conflict
+          // The approve step must not re-process an in-progress close attempt
+          throw new FiscalYearCloseConflictError(
+            `Fiscal year close request is already ${existingRequest.status}`
+          );
         }
       }
 
@@ -1027,19 +1122,26 @@ export class FiscalYearService {
   private async findRetainedEarningsAccountId(
     companyId: number
   ): Promise<{ id: number; code: string; name: string }> {
-    // First try to find a dedicated retained earnings account
+    // First try to find a dedicated retained earnings account,
+    // but constrain candidates to equity-classified accounts.
     const retainedAccount = await this.db
-      .selectFrom("accounts")
-      .where("company_id", "=", companyId)
-      .where("is_active", "=", 1)
+      .selectFrom("accounts as a")
+      .leftJoin("account_types as at", "at.id", "a.account_type_id")
+      .where("a.company_id", "=", companyId)
+      .where("a.is_active", "=", 1)
       .where((eb) => eb.or([
-        eb("name", "like", "%Retained%"),
-        eb("name", "like", "%Undivided%"),
-        eb("name", "like", "%Undistributed%"),
-        eb("name", "like", "%Laba%"), // Indonesian
-        eb("name", "like", "%Labad%"), // Indonesian variant
+        eb("a.report_group", "=", "EQ"),
+        eb("at.name", "like", "%Equity%"),
+        eb("at.name", "like", "%Modal%"), // Indonesian
       ]))
-      .select(["id", "code", "name"])
+      .where((eb) => eb.or([
+        eb("a.name", "like", "%Retained%"),
+        eb("a.name", "like", "%Undivided%"),
+        eb("a.name", "like", "%Undistributed%"),
+        eb("a.name", "like", "%Laba%"), // Indonesian
+        eb("a.name", "like", "%Labad%"), // Indonesian variant
+      ]))
+      .select(["a.id", "a.code", "a.name"])
       .limit(1)
       .executeTakeFirst();
 
@@ -1081,18 +1183,30 @@ export class FiscalYearService {
    * Get account balances for P&L accounts within a fiscal year
    */
   private async getPlAccountBalances(
-    companyId: number
+    companyId: number,
+    fiscalYearStartDate: string,
+    fiscalYearEndDate: string
   ): Promise<{
     incomeAccounts: Array<{ id: number; code: string; name: string; balance: number; normalBalance: string }>;
     expenseAccounts: Array<{ id: number; code: string; name: string; balance: number; normalBalance: string }>;
     totalIncome: number;
     totalExpenses: number;
   }> {
-    // Get all P&L accounts with their current balances
+    // Scope P&L balances to the fiscal-year window to avoid closing entries
+    // being polluted by transactions outside the target year.
+    const startDate = parseDateOnly(fiscalYearStartDate);
+    const endDate = parseDateOnly(fiscalYearEndDate);
+
     const plAccounts = await this.db
       .selectFrom("accounts as a")
-      .leftJoin("account_balances_current as ab", "ab.account_id", "a.id")
       .leftJoin("account_types as at", "at.id", "a.account_type_id")
+      .leftJoin("journal_lines as jl", (join) =>
+        join
+          .onRef("jl.account_id", "=", "a.id")
+          .onRef("jl.company_id", "=", "a.company_id")
+          .on("jl.line_date", ">=", startDate)
+          .on("jl.line_date", "<=", endDate)
+      )
       .where("a.company_id", "=", companyId)
       .where("a.is_active", "=", 1)
       .where("a.report_group", "=", "PL")
@@ -1100,9 +1214,12 @@ export class FiscalYearService {
         "a.id",
         "a.code",
         "a.name",
-        "at.normal_balance",
-        sql<number>`COALESCE(ab.balance, 0)`.as("balance")
+        "at.normal_balance as account_type_normal_balance",
+        "a.normal_balance as account_normal_balance",
+        sql<number>`COALESCE(SUM(jl.debit), 0)`.as("debit_sum"),
+        sql<number>`COALESCE(SUM(jl.credit), 0)`.as("credit_sum")
       ])
+      .groupBy(["a.id", "a.code", "a.name", "at.normal_balance", "a.normal_balance"])
       .execute();
 
     const incomeAccounts: Array<{ id: number; code: string; name: string; balance: number; normalBalance: string }> = [];
@@ -1112,26 +1229,33 @@ export class FiscalYearService {
     let totalExpenses = 0;
 
     for (const account of plAccounts) {
-      const normalBalance = account.normal_balance || "D";
+      const normalBalance = account.account_type_normal_balance
+        || account.account_normal_balance
+        || "D";
+      const debitSum = Number(account.debit_sum ?? 0);
+      const creditSum = Number(account.credit_sum ?? 0);
+      const computedBalance = normalBalance === "K"
+        ? creditSum - debitSum
+        : debitSum - creditSum;
 
       if (normalBalance === "K") {
         incomeAccounts.push({
           id: Number(account.id),
           code: String(account.code),
           name: String(account.name),
-          balance: Number(account.balance),
+          balance: computedBalance,
           normalBalance
         });
-        totalIncome += Number(account.balance);
+        totalIncome += computedBalance;
       } else {
         expenseAccounts.push({
           id: Number(account.id),
           code: String(account.code),
           name: String(account.name),
-          balance: Number(account.balance),
+          balance: computedBalance,
           normalBalance
         });
-        totalExpenses += Number(account.balance);
+        totalExpenses += computedBalance;
       }
     }
 

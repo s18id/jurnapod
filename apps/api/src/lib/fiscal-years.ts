@@ -30,6 +30,8 @@ import {
   type CloseFiscalYearResult,
   type ClosePreviewResult,
   type FiscalYearStatusResult,
+  type FiscalYearCloseStatus,
+  FISCAL_YEAR_CLOSE_STATUS,
 } from "@jurnapod/modules-accounting/fiscal-year";
 import {
   JournalsService,
@@ -146,6 +148,41 @@ async function triggerAutoSnapshotForFiscalYearClose(input: {
   }
 }
 
+async function hasAutoSnapshotForFiscalYearEnd(input: {
+  db: KyselySchema;
+  companyId: number;
+  fiscalYearId: number;
+}): Promise<boolean> {
+  const fiscalYear = await input.db
+    .selectFrom("fiscal_years")
+    .where("company_id", "=", input.companyId)
+    .where("id", "=", input.fiscalYearId)
+    .select(["end_date"])
+    .executeTakeFirst();
+
+  if (!fiscalYear?.end_date) {
+    return false;
+  }
+
+  const asOfDate = fiscalYear.end_date instanceof Date
+    ? fiscalYear.end_date.toISOString().slice(0, 10)
+    : String(fiscalYear.end_date).slice(0, 10);
+  const asOfDateValue = fiscalYear.end_date instanceof Date
+    ? fiscalYear.end_date
+    : new Date(`${asOfDate}T00:00:00.000Z`);
+
+  const existingAutoSnapshot = await input.db
+    .selectFrom("ap_reconciliation_snapshots")
+    .where("company_id", "=", input.companyId)
+    .where("as_of_date", "=", asOfDateValue)
+    .where("auto_generated", "=", 1)
+    .select(["id"])
+    .limit(1)
+    .executeTakeFirst();
+
+  return Boolean(existingAutoSnapshot);
+}
+
 // Wrapper functions that provide backward-compatible API
 
 export async function listFiscalYears(query: FiscalYearListQuery): Promise<FiscalYear[]> {
@@ -230,6 +267,10 @@ export async function closeFiscalYear(
  * 
  * This creates the idempotency record for the close request.
  * The actual close (status update to CLOSED) happens in approveFiscalYearClose.
+ * 
+ * IMPORTANT: This function only CLAIMS the idempotency key (PENDING status).
+ * It does NOT transition the fiscal year to CLOSED. The approve step is the
+ * only path that posts closing journals AND closes the fiscal year atomically.
  */
 export async function initiateFiscalYearClose(
   fiscalYearId: number,
@@ -238,20 +279,17 @@ export async function initiateFiscalYearClose(
 ): Promise<CloseFiscalYearResult> {
   const db = getDb();
   const service = new FiscalYearService(db as FiscalYearDbClient, createSettingsPort(db));
-  const closeResult = await service.closeFiscalYear(fiscalYearId, closeRequestId, context);
 
-  if (closeResult.success && closeResult.newStatus === "CLOSED") {
-    await triggerAutoSnapshotForFiscalYearClose({
-      db: db as KyselySchema,
-      companyId: context.companyId,
-      fiscalYearId,
-      requestedByUserId: context.requestedByUserId,
-      closeRequestId,
-      reasonPrefix: "fiscal_year_close_initiated",
-    });
-  }
+  // Claim idempotency key only - do NOT call closeFiscalYear() here
+  // because that would transition the fiscal year to CLOSED prematurely.
+  // The approve step is the only path that closes the fiscal year.
+  const result = await service.claimIdempotencyKeyOnly(
+    fiscalYearId,
+    closeRequestId,
+    context
+  );
 
-  return closeResult;
+  return result;
 }
 
 export async function getFiscalYearClosePreview(
@@ -290,10 +328,20 @@ export interface ApproveFiscalYearCloseResult {
   totalIncome: number;
   totalExpenses: number;
   hasImbalance: boolean;
+  replayed?: boolean;
   imbalanceDetails?: {
     batchId: number;
     imbalance: number;
   };
+}
+
+type ApproveFlowErrorCode = "FISCAL_YEAR_CLOSE_CONFLICT" | "NOT_INITIATED";
+type ApproveFlowError = Error & { code?: ApproveFlowErrorCode };
+
+function makeApproveFlowError(code: ApproveFlowErrorCode, message: string): ApproveFlowError {
+  const error = new Error(message) as ApproveFlowError;
+  error.code = code;
+  return error;
 }
 
 /**
@@ -318,7 +366,98 @@ export async function approveFiscalYearClose(
   const closeResult = await db.transaction().execute(async (tx) => {
     const journalsService = new JournalsService(tx as JournalsDbClient);
 
-    // 1. Get preview within transaction for consistent reads
+    // 0) Lock idempotency row and resolve status before side effects.
+    const lockedRequest = await tx
+      .selectFrom("fiscal_year_close_requests")
+      .where("fiscal_year_id", "=", fiscalYearId)
+      .where("close_request_id", "=", closeRequestId)
+      .where("company_id", "=", companyId)
+      .forUpdate()
+      .select(["id", "status", "fiscal_year_status_before", "fiscal_year_status_after", "result_json", "failure_code", "failure_message"])
+      .executeTakeFirst();
+
+    if (!lockedRequest) {
+      throw makeApproveFlowError("NOT_INITIATED", "Fiscal year close was not initiated. Call initiate first.");
+    }
+
+    // If already succeeded, return existing result (idempotent retry)
+    if (lockedRequest.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED) {
+      const parsed = lockedRequest.result_json ? JSON.parse(lockedRequest.result_json) : {};
+      const postedBatchIdsRaw = parsed.postedBatchIds;
+      const postedBatchIds = Array.isArray(postedBatchIdsRaw)
+        ? postedBatchIdsRaw.filter((v): v is number => typeof v === "number")
+        : [];
+
+      return {
+        success: true,
+        fiscalYearId,
+        closeRequestId,
+        status: lockedRequest.status,
+        previousStatus: lockedRequest.fiscal_year_status_before,
+        newStatus: lockedRequest.fiscal_year_status_after,
+        postedBatchIds,
+        netIncome: typeof parsed.netIncome === "number" ? parsed.netIncome : 0,
+        totalIncome: typeof parsed.totalIncome === "number" ? parsed.totalIncome : 0,
+        totalExpenses: typeof parsed.totalExpenses === "number" ? parsed.totalExpenses : 0,
+        hasImbalance: typeof parsed.hasImbalance === "boolean" ? parsed.hasImbalance : false,
+        replayed: true,
+      };
+    }
+
+    // Only PENDING can proceed to execution ownership claim.
+    if (lockedRequest.status !== FISCAL_YEAR_CLOSE_STATUS.PENDING) {
+      throw makeApproveFlowError(
+        "FISCAL_YEAR_CLOSE_CONFLICT",
+        `Fiscal year close request is already ${lockedRequest.status}`
+      );
+    }
+
+    // 1) Lock fiscal year row to serialize close execution across all close_request_id values.
+    const lockedFiscalYear = await tx
+      .selectFrom("fiscal_years")
+      .where("id", "=", fiscalYearId)
+      .where("company_id", "=", companyId)
+      .forUpdate()
+      .select(["id", "status"])
+      .executeTakeFirst();
+
+    if (!lockedFiscalYear) {
+      throw makeApproveFlowError(
+        "FISCAL_YEAR_CLOSE_CONFLICT",
+        `Fiscal year ${fiscalYearId} not found for company ${companyId}`
+      );
+    }
+
+    if (lockedFiscalYear.status === "CLOSED") {
+      throw makeApproveFlowError(
+        "FISCAL_YEAR_CLOSE_CONFLICT",
+        `Fiscal year ${fiscalYearId} is already closed`
+      );
+    }
+
+    // 2) Atomically claim execution ownership via guarded PENDING -> IN_PROGRESS transition.
+    const startedAt = Date.now();
+    const claimResult = await tx
+      .updateTable("fiscal_year_close_requests")
+      .set({
+        status: FISCAL_YEAR_CLOSE_STATUS.IN_PROGRESS,
+        fiscal_year_status_before: String(lockedFiscalYear.status),
+        started_at_ts: startedAt,
+        updated_at_ts: startedAt,
+      })
+      .where("id", "=", Number(lockedRequest.id))
+      .where("status", "=", FISCAL_YEAR_CLOSE_STATUS.PENDING)
+      .executeTakeFirst();
+
+    const claimedRows = Number(claimResult.numUpdatedRows ?? 0n);
+    if (claimedRows !== 1) {
+      throw makeApproveFlowError(
+        "FISCAL_YEAR_CLOSE_CONFLICT",
+        "Fiscal year close request already claimed by another request"
+      );
+    }
+
+    // 3) Get preview (still inside transaction) and execute side effects once.
     const preview = await getFiscalYearClosePreview(companyId, fiscalYearId, tx as KyselySchema);
 
     const postedBatchIds: number[] = [];
@@ -349,7 +488,7 @@ export async function approveFiscalYearClose(
         );
       }
 
-      // 2. Post journal entries within transaction
+      // 4) Post journal entries within transaction.
       const journalResult = await journalsService.createManualEntry(
         {
           company_id: companyId,
@@ -362,7 +501,7 @@ export async function approveFiscalYearClose(
       );
       postedBatchIds.push(journalResult.id);
 
-      // Check for GL imbalance within transaction - happens AFTER posting but BEFORE commit.
+      // Check for GL imbalance before commit.
       const imbalanceResult = await checkGlImbalanceByBatchId(tx as KyselySchema, journalResult.id, companyId);
       if (imbalanceResult) {
         hasImbalance = true;
@@ -376,37 +515,92 @@ export async function approveFiscalYearClose(
       }
     }
 
-    // 3. Update fiscal year status within same transaction
-    const closeResult = await closeFiscalYear(
-      tx as KyselySchema,
-      fiscalYearId,
-      closeRequestId,
-      {
-        companyId: context.companyId,
-        requestedByUserId: context.requestedByUserId,
-        requestedAtEpochMs: context.requestedAtEpochMs,
-        reason: `Fiscal year close approved. Posted ${postedBatchIds.length} closing entry batch(es).`
-      },
-      tx as KyselySchema
-    );
+    // 5) Persist SUCCEEDED request result (guarded by IN_PROGRESS).
+    const completedAt = Date.now();
+    const completeResult = await tx
+      .updateTable("fiscal_year_close_requests")
+      .set({
+        status: FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED,
+        fiscal_year_status_before: "OPEN",
+        fiscal_year_status_after: "CLOSED",
+        result_json: JSON.stringify({
+          closedAt: completedAt,
+          closedByUserId: context.requestedByUserId,
+          postedBatchIds,
+          netIncome: preview.netIncome,
+          totalIncome: preview.totalIncome,
+          totalExpenses: preview.totalExpenses,
+          hasImbalance,
+          reason: `Fiscal year close approved. Posted ${postedBatchIds.length} closing entry batch(es).`
+        }),
+        completed_at_ts: completedAt,
+        updated_at_ts: completedAt
+      })
+      .where("id", "=", Number(lockedRequest.id))
+      .where("status", "=", FISCAL_YEAR_CLOSE_STATUS.IN_PROGRESS)
+      .executeTakeFirst();
+
+    const completedRows = Number(completeResult.numUpdatedRows ?? 0n);
+    if (completedRows !== 1) {
+      throw makeApproveFlowError(
+        "FISCAL_YEAR_CLOSE_CONFLICT",
+        "Failed to finalize fiscal year close request"
+      );
+    }
+
+    // 6) Close fiscal year with tenant + state guard.
+    const fiscalYearUpdate = await tx
+      .updateTable("fiscal_years")
+      .set({
+        status: "CLOSED",
+        updated_by_user_id: context.requestedByUserId
+      })
+      .where("id", "=", fiscalYearId)
+      .where("company_id", "=", companyId)
+      .where("status", "=", "OPEN")
+      .executeTakeFirst();
+
+    const fiscalYearRows = Number(fiscalYearUpdate.numUpdatedRows ?? 0n);
+    if (fiscalYearRows !== 1) {
+      throw makeApproveFlowError(
+        "FISCAL_YEAR_CLOSE_CONFLICT",
+        "Fiscal year state changed while closing"
+      );
+    }
 
     return {
-      success: closeResult.success,
-      fiscalYearId: closeResult.fiscalYearId,
-      closeRequestId: closeResult.closeRequestId,
-      status: closeResult.status,
-      previousStatus: closeResult.previousStatus,
-      newStatus: closeResult.newStatus,
+      success: true,
+      fiscalYearId,
+      closeRequestId,
+      status: FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED as FiscalYearCloseStatus,
+      previousStatus: "OPEN",
+      newStatus: "CLOSED",
       postedBatchIds,
       netIncome: preview.netIncome,
       totalIncome: preview.totalIncome,
       totalExpenses: preview.totalExpenses,
       hasImbalance,
+      replayed: false,
       imbalanceDetails: imbalanceDetails ?? undefined
     };
   });
 
-  if (closeResult.success && closeResult.newStatus === "CLOSED") {
+  // Replay-safe + recoverable side-effect rule:
+  // - First successful approve always attempts snapshot.
+  // - Replays attempt snapshot only if the expected auto-snapshot is missing
+  //   (recovery path for transient failure after close commit).
+  const shouldAttemptAutoSnapshot = closeResult.success
+    && closeResult.newStatus === "CLOSED"
+    && (
+      !closeResult.replayed
+      || !(await hasAutoSnapshotForFiscalYearEnd({
+        db: db as KyselySchema,
+        companyId,
+        fiscalYearId,
+      }))
+    );
+
+  if (shouldAttemptAutoSnapshot) {
     await triggerAutoSnapshotForFiscalYearClose({
       db: db as KyselySchema,
       companyId,

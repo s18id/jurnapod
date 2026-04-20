@@ -87,7 +87,7 @@ declare module "hono" {
 // =============================================================================
 
 // Note: We use module permissions (bitmask) for access control
-// Permission bitmask: create=1, read=2, update=4, delete=8
+// Canonical permission bits: READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32
 
 const accountListQuerySchema = z.object({
   company_id: NumericIdSchema,
@@ -1287,6 +1287,10 @@ accountRoutes.post("/fiscal-years/:id/close/approve", async (c) => {
     const err = error as { code?: string; message?: string };
     if (err.code === "FISCAL_YEAR_CLOSE_CONFLICT") {
       return errorResponse("CLOSE_CONFLICT", err.message || "Close operation conflict", 409);
+    }
+
+    if (err.code === "NOT_INITIATED") {
+      return errorResponse("CLOSE_CONFLICT", err.message || "Fiscal year close was not initiated", 400);
     }
 
     if (err.code === "FISCAL_YEAR_CLOSED") {
