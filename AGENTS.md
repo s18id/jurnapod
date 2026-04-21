@@ -61,6 +61,29 @@
 6. **Shared contracts** — Stay aligned across apps and packages
 7. **Build packages before apps** — When modifying `packages/` code, always `npm run build -w @jurnapod/<package>` before building or testing dependent `apps/`
 
+### Architecture Cleanup Policy (MANDATORY)
+
+**A) Cleanup mandatory when touching sprint scope.**
+Any code change that falls within active sprint scope MUST include a cleanup pass for:
+- Resolved TODO/FIXME comments in the modified area
+- Outdated comments or dead code paths made unreachable by the change
+- Misplaced files (e.g., library logic in `routes/`, source files outside `src/`) discovered during the change
+Cleanup is not optional. Unchecked cleanup debt is a sprint-trackable P1/P2 item.
+
+**B) Fixture flow mode policy.**
+- **Full Fixture Mode (default):** Fixture setup MUST use canonical production package flow so production invariants and test invariants remain identical.
+- **Partial Fixture Mode (global exception):** Fixture setup MAY use decomposed domain parts only when those parts are provided by the same production package that owns the domain invariant. Partial mode MUST be explicitly declared with scope, rationale, and owner.
+- Fixture setup MUST NOT introduce a parallel business-write path.
+
+**C) No new business DB triggers.**
+Agents and contributors MUST NOT introduce new database triggers that enforce business logic. All business invariants MUST be enforced in application code where they are testable, reviewable, and version-controllable. Existing triggers MUST NOT be extended with new business logic.
+
+**D) Reserved.**
+Section D is reserved for future global policy additions.
+
+**E) Agent-safe documentation language.**
+All documentation, policy statements, and specifications MUST use RFC-style keywords: `MUST`, `MUST NOT`, `SHOULD`, `MAY`. Terms such as "should", "might", "could", "consider", "recommend", or "prefer" are forbidden in policy statements — they create ambiguity for agents executing against these documents. Where nuance is required, it MUST be expressed as an explicit conditional with a concrete example.
+
 ---
 
 ## Architecture Program Baseline (MANDATORY — S48 to S61)
@@ -349,6 +372,12 @@ When canonical data patterns are established (timestamps, status IDs, enum value
 3. **Update any tests** that deviate from the canonical pattern
 4. **Document the fixture** with clear examples of correct usage
 
+### Fixture Flow Policy (MANDATORY — S48 to S61)
+
+- **Full Fixture Mode (default):** Fixture setup **MUST** use the canonical production package flow so production invariants and test invariants remain identical.
+- **Partial Fixture Mode (global exception):** Partial fixture setup **MAY** be used only via decomposed domain parts provided by the same production package that owns the domain invariant. It **MUST** be explicitly declared in story notes with scope, rationale, and owner.
+- Fixture setup **MUST NOT** introduce a parallel business-write path.
+
 ### Example: Timestamp Handling
 
 ```typescript
@@ -448,6 +477,14 @@ Before marking ANY story as DONE:
 ### Implementation
 - [ ] All Acceptance Criteria implemented with evidence
 - [ ] No breaking changes without cross-package alignment
+
+### Story Done Authority (MANDATORY)
+
+The implementing developer MUST NOT mark their own story done. Done requires:
+- Reviewer GO (code review approval with no blockers)
+- Story owner explicit sign-off
+
+No story may be marked DONE based solely on self-attestation of the implementing developer.
 
 ### ACL Implementation (Epic 39)
 - [ ] Resource-level permissions use `module.resource` format

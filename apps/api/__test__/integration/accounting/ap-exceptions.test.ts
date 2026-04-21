@@ -31,6 +31,7 @@ import {
   getOrCreateTestCashierForPermission,
   createTestAPException,
 } from '../../fixtures';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 
 // ---------------------------------------------------------------------------
 // AP Exception int-enum constants (mirrors migration 0188 and test-fixtures.ts)
@@ -88,6 +89,7 @@ let otherOwnerUserId: number;
 
 describe('accounting.ap-exceptions (Story 47.4)', { timeout: 60000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     // FIX(47.4-WP-E-GUARDRAIL): Use seed token for role management APIs.
     // Avoid mutating canonical OWNER permissions just to create custom roles.
@@ -99,7 +101,7 @@ describe('accounting.ap-exceptions (Story 47.4)', { timeout: 60000 }, () => {
     testCompanyCode = company.code;
 
     // Owner user: OWNER role → CRUDAM on accounting.journals (covers ANALYZE + UPDATE).
-    const ownerEmail = `ap-exc-owner-${Date.now()}@example.com`;
+    const ownerEmail = `ap-exc-owner-${crypto.randomUUID().slice(0, 8)}@example.com`;
     const ownerUser = await createTestUser(testCompanyId, {
       email: ownerEmail,
       name: 'AP Exc Owner',
@@ -128,7 +130,7 @@ describe('accounting.ap-exceptions (Story 47.4)', { timeout: 60000 }, () => {
     // ---- purchasing.suppliers ANALYZE user (OR path) ----
     // FIX(47.4-WP-E): Create a custom non-system role with ONLY purchasing.suppliers ANALYZE.
     // This validates the OR ACL branch independently.
-    const suppliersEmail = `ap-exc-sup-${Date.now()}@example.com`;
+    const suppliersEmail = `ap-exc-sup-${crypto.randomUUID().slice(0, 8)}@example.com`;
     const suppliersUser = await createTestUser(testCompanyId, {
       email: suppliersEmail,
       name: 'AP Exc Suppliers Analyst',
@@ -160,7 +162,7 @@ describe('accounting.ap-exceptions (Story 47.4)', { timeout: 60000 }, () => {
     const otherCompany = await createTestCompanyMinimal();
     otherCompanyId = otherCompany.id;
 
-    const otherOwnerEmail = `ap-exc-other-${Date.now()}@example.com`;
+    const otherOwnerEmail = `ap-exc-other-${crypto.randomUUID().slice(0, 8)}@example.com`;
     const otherOwnerUser = await createTestUser(otherCompanyId, {
       email: otherOwnerEmail,
       name: 'Other Company Owner',
@@ -187,6 +189,7 @@ describe('accounting.ap-exceptions (Story 47.4)', { timeout: 60000 }, () => {
   afterAll(async () => {
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   // ==========================================================================
@@ -244,7 +247,7 @@ describe('accounting.ap-exceptions (Story 47.4)', { timeout: 60000 }, () => {
       // FIX(47.4-WP-E): Create a canonical OPEN exception via createTestAPException.
       // No ad-hoc SQL; all setup via fixture library.
       const exc = await createTestAPException(testCompanyId, {
-        exceptionKey: `WF-EXC-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        exceptionKey: `WF-EXC-${crypto.randomUUID().slice(0, 12)}`,
         type: AP_EXC_TYPE.VARIANCE,
         sourceType: 'INVOICE',
         sourceId: 1001,
@@ -300,7 +303,7 @@ describe('accounting.ap-exceptions (Story 47.4)', { timeout: 60000 }, () => {
       // FIX(47.4-WP-E): resolveException requires ASSIGNED status.
       // An OPEN exception that has never been assigned must yield 409 INVALID_TRANSITION.
       const freshExc = await createTestAPException(testCompanyId, {
-        exceptionKey: `WF-409-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        exceptionKey: `WF-409-${crypto.randomUUID().slice(0, 12)}`,
         type: AP_EXC_TYPE.MISMATCH,
         sourceType: 'INVOICE',
         sourceId: 1002,
@@ -338,7 +341,7 @@ describe('accounting.ap-exceptions (Story 47.4)', { timeout: 60000 }, () => {
       // FIX(47.4-WP-E): Create an AP exception belonging to the OTHER company.
       // Primary company owner must NOT be able to operate on it.
       const exc = await createTestAPException(otherCompanyId, {
-        exceptionKey: `TENANT-ISO-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        exceptionKey: `TENANT-ISO-${crypto.randomUUID().slice(0, 12)}`,
         type: AP_EXC_TYPE.VARIANCE,
         sourceType: 'INVOICE',
         sourceId: 9001,
@@ -395,7 +398,7 @@ describe('accounting.ap-exceptions (Story 47.4)', { timeout: 60000 }, () => {
     it('worklist only returns exceptions scoped to the authenticated company', async () => {
       // FIX(47.4-WP-E): Create a known OPEN exception in primary company so the list is non-empty.
       await createTestAPException(testCompanyId, {
-        exceptionKey: `LIST-SCOPE-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        exceptionKey: `LIST-SCOPE-${crypto.randomUUID().slice(0, 12)}`,
         type: AP_EXC_TYPE.DISPUTE,
         sourceType: 'INVOICE',
         sourceId: 3001,

@@ -7,12 +7,14 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
 import { resetFixtureRegistry, getTestAccessToken } from '../../fixtures';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 
 let baseUrl: string;
 let accessToken: string;
 
 describe('sales.orders', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
   });
@@ -20,6 +22,7 @@ describe('sales.orders', { timeout: 30000 }, () => {
   afterAll(async () => {
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   it('requires auth', async () => {

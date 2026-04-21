@@ -282,7 +282,7 @@
 ## Section 5: Forbidden Patterns
 
 ### FORBIDDEN-001: Source Files Outside `src/` (FS-FORBIDDEN-001)
-**Rule:** `forbidden`  
+**Rule:** `forbidden`
 **Description:** TypeScript source files (`*.ts`, `*.tsx`) must not exist outside a `src/` directory within packages or apps.
 
 **Examples:**
@@ -292,7 +292,7 @@
 ```
 
 ### FORBIDDEN-002: Tests Alongside Source (FS-FORBIDDEN-002)
-**Rule:** `forbidden`  
+**Rule:** `forbidden`
 **Description:** Test files must not be placed alongside source files. They must use the canonical `__test__/` directory structure.
 
 **Examples:**
@@ -302,7 +302,7 @@
 ```
 
 ### FORBIDDEN-003: `.bak` and Temporary Files in Source Tree (FS-FORBIDDEN-003)
-**Rule:** `forbidden`  
+**Rule:** `forbidden`
 **Description:** Backup files (`.bak`, `.tmp`, `.orig`) must not exist in source directories.
 
 **Examples:**
@@ -312,7 +312,7 @@
 ```
 
 ### FORBIDDEN-004: Deep Nested Lib in Routes (FS-FORBIDDEN-004)
-**Rule:** `forbidden`  
+**Rule:** `forbidden`
 **Description:** Library business logic must not be placed inside `routes/`. Route handlers should delegate to `lib/` or service packages.
 
 **Examples:**
@@ -320,6 +320,41 @@
 ❌ apps/api/src/routes/lib/posting.ts
 ❌ apps/api/src/routes/helpers/accounting.ts
 ```
+
+---
+
+## Section 5a: Mandatory Policy Requirements
+
+All agents and contributors MUST follow these policies as authoritative project rules.
+
+### Architecture Cleanup Policy (MANDATORY)
+**A) Cleanup mandatory when touching sprint scope.**
+Any code change that falls within active sprint scope MUST include a cleanup pass for:
+- Resolved TODO/FIXME comments in the modified area
+- Outdated comments or dead code paths made unreachable by the change
+- Misplaced files discovered during the change
+Cleanup is not optional. Unchecked cleanup debt is a sprint-trackable P1/P2 item.
+
+**B) Fixture modes:**
+- **Full Fixture Mode (default):** Canonical production package flow. Test setup MUST use canonical package creators/helpers so production invariants and test invariants remain identical.
+- **Partial Fixture Mode (global exception):** Permitted only via decomposed domain parts provided by the same production package that owns the domain invariant, with explicit scope, rationale, and owner. Any test bypassing Full Fixture Mode MUST document decomposition scope, rationale, and owner.
+- Fixture setup MUST NOT introduce a parallel business-write path.
+
+**C) No new business DB triggers.**
+All business invariants MUST be enforced in application code where they are testable, reviewable, and version-controllable. Existing triggers MUST NOT be extended with new business logic.
+
+**D) Reserved.**
+Section D is reserved for future global policy additions.
+
+**E) Agent-safe documentation language.**
+All documentation, policy statements, and specifications MUST use RFC-style keywords: `MUST`, `MUST NOT`, `SHOULD`, `MAY`. Terms such as "should", "might", "could", "consider", "recommend", or "prefer" are forbidden in policy statements — they create ambiguity for agents executing against these documents. Where nuance is required, it MUST be expressed as an explicit conditional with a concrete example.
+
+### Story Done Authority (MANDATORY)
+The implementing developer MUST NOT mark their own story done. Done requires:
+- Reviewer GO (code review approval with no blockers)
+- Story owner explicit sign-off
+
+No story may be marked DONE based solely on self-attestation of the implementing developer.
 
 ---
 

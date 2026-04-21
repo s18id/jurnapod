@@ -569,7 +569,7 @@ development_status:
   # Epic 49: Test Determinism + CI Reliability
   epic-49: in_progress
   49-1-kickoff-gate-test-reliability-audit: done
-  49-2-accounting-suite-determinism-hardening: ready-for-dev
+  49-2-accounting-suite-determinism-hardening: done
   49-3-purchasing-suite-determinism-hardening: ready-for-dev
   49-4-platform-acl-suite-determinism-hardening: ready-for-dev
   49-5-sync-pos-inventory-suite-determinism-hardening: ready-for-dev

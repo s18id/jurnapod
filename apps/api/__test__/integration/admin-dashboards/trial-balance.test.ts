@@ -8,6 +8,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
 import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext as loadSeedSyncContext } from '../../fixtures';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 
 let baseUrl: string;
 let accessToken: string;
@@ -16,6 +17,7 @@ const getSeedSyncContext = async () => seedCtx;
 
 describe('admin-dashboards.trial-balance', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     seedCtx = await loadSeedSyncContext();
@@ -24,6 +26,7 @@ describe('admin-dashboards.trial-balance', { timeout: 30000 }, () => {
   afterAll(async () => {
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   it('rejects request without auth', async () => {
@@ -69,7 +72,7 @@ describe('admin-dashboards.trial-balance', { timeout: 30000 }, () => {
   });
 
   it('supports date range filtering via as_of_epoch_ms', async () => {
-    const asOfEpochMs = Date.now();
+    const asOfEpochMs = 1767225600000; // 2026-01-02T00:00:00Z fixed epoch
     
     const res = await fetch(`${baseUrl}/admin/dashboard/trial-balance?fiscal_year_id=1&as_of_epoch_ms=${asOfEpochMs}`, {
       headers: {
@@ -161,8 +164,8 @@ describe('admin-dashboards.trial-balance', { timeout: 30000 }, () => {
   });
 
   it('validates as_of_epoch_ms is not in the future', async () => {
-    // Date.now() + 86_400_000 (1 day in ms) + 1ms should exceed the max
-    const futureDate = Date.now() + 86400001;
+    // Use a fixed future epoch far enough to always exceed current server time
+    const futureDate = 2777184000000; // 2058-01-01T00:00:00Z — unambiguous future
     
     const res = await fetch(`${baseUrl}/admin/dashboard/trial-balance?fiscal_year_id=1&as_of_epoch_ms=${futureDate}`, {
       headers: {

@@ -42,10 +42,10 @@ All `Date.now()`, `new Date()`, and `Math.random()` usages within in-scope suite
 Every in-scope suite must have a verified `afterAll` that closes the DB pool and releases any RWLock. Verify with `--detect-open-handles`.
 
 **AC3: Fixture Isolation**
-Each `describe` block uses a unique `company_id` and `outlet_id`. No test may depend on state created by another `it()` block within the same suite. Use canonical seed helpers from `packages/db/test-fixtures.ts` or `apps/api/src/lib/test-fixtures.ts`.
+Each `describe` block uses a unique `company_id` and `outlet_id`. No test may depend on state created by another `it()` block within the same suite. Use canonical seed helpers from `packages/db/test-fixtures.ts`; `apps/api/src/lib/test-fixtures.ts` is deprecated for new fixture code and MAY be used only for migration-compatibility paths.
 
 **AC4: RWLock Pattern**
-Any in-scope suite that uses the test server (HTTP requests) must use `acquireReadLock`/`releaseReadLock`. If missing, add it.
+Any in-scope suite that uses the test server (HTTP requests) MUST use `acquireReadLock`/`releaseReadLock`. If missing, it MUST be added.
 
 **AC5: Concurrency Suite Determinism**
 `po-order-no.concurrency.test.ts` exercises parallel order creation. Its determinism depends on:
@@ -63,6 +63,37 @@ Each in-scope suite passes 3 times consecutively. Log evidence at:
 ---
 
 ## Dev Notes
+
+### Policy Requirements (MANDATORY)
+**A) Cleanup mandatory when touching sprint scope.**
+Any code change that falls within active sprint scope MUST include a cleanup pass for:
+- Resolved TODO/FIXME comments in the modified area
+- Outdated comments or dead code paths made unreachable by the change
+- Misplaced files discovered during the change
+Cleanup is not optional. Unchecked cleanup debt is a sprint-trackable P1/P2 item.
+
+**B) Fixture modes:**
+- **Full Fixture Mode (default):** Canonical production package flow. Test setup MUST use canonical package creators/helpers so production invariants and test invariants remain identical.
+- **Partial Fixture Mode (global exception):** Fixture setup MAY use decomposed domain parts only when those parts are provided by the same production package that owns the domain invariant. Partial mode MUST be explicitly declared with scope, rationale, and owner.
+- Fixture setup MUST NOT introduce a parallel business-write path.
+
+**C) No new business DB triggers.**
+All business invariants MUST be enforced in application code where they are testable, reviewable, and version-controllable. Existing triggers MUST NOT be extended with new business logic.
+
+**D) Reserved.**
+Section D is reserved for future global policy additions.
+
+**E) Agent-safe documentation language.**
+All documentation, policy statements, and specifications MUST use RFC-style keywords: `MUST`, `MUST NOT`, `SHOULD`, `MAY`. Terms such as "should", "might", "could", "consider", "recommend", or "prefer" are forbidden in policy statements — they create ambiguity for agents executing against these documents. Where nuance is required, it MUST be expressed as an explicit conditional with a concrete example.
+
+**Story Done Authority (MANDATORY):**
+The implementing developer MUST NOT mark their own story done. Done requires:
+- Reviewer GO (code review approval with no blockers)
+- Story owner explicit sign-off
+
+No story may be marked DONE based solely on self-attestation of the implementing developer.
+
+### Implementation Notes
 
 - **RWLock pattern**: Same as Story 49.2 — import from `../../helpers/setup`
 - **Canonical fixtures**: If `purchase-orders.test.ts` or `purchase-invoices.test.ts` use ad-hoc SQL for fixture setup, refactor to use canonical helpers before adding determinism fixes

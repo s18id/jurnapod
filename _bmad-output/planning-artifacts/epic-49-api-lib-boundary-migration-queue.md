@@ -27,10 +27,15 @@ When a file in `apps/api/src/lib/**` is touched:
 2. **If touched before target sprint:** allow only minimal correctness fix + open explicit exception (owner + deadline + success criterion).
 3. **No new domain invariant logic may be introduced in API lib.**
 4. **No package may import from `apps/*`.**
+5. **Cleanup is mandatory:** touched scope MUST remove obsolete adapters, dead paths, and deprecated helpers introduced or exposed by the change.
+6. **Fixture mode policy applies:** default fixture flow MUST use canonical production package flow so production invariants and test invariants remain identical; partial fixture mode MAY be used only via decomposed domain parts provided by the same production package that owns the domain invariant, with explicit scope, rationale, and owner.
+7. **No new business DB triggers:** business invariants MUST be enforced in app/package code, not new trigger logic.
 
 Severity model for violations:
 
+- **P0:** Story marked `done` without reviewer GO and delegator approval
 - **P1:** domain logic kept/added in API lib during target sprint
+- **P1:** fixture setup introduces a parallel business-write path
 - **P2:** pre-existing legacy still in API lib but untouched
 - **P3:** naming/layout hygiene issues without ownership impact
 
@@ -106,6 +111,16 @@ Queue item can be marked complete only when:
 4. Related integration tests pass
 5. No new boundary violations introduced in `apps/api/src/lib/**`
 6. Evidence linked in story completion notes
+
+### Story Done Authority (MANDATORY)
+The implementing developer MUST NOT mark their own story done. Done requires:
+- Reviewer GO (code review approval with no blockers)
+- Story owner explicit sign-off
+
+No story may be marked DONE based solely on self-attestation of the implementing developer.
+
+### Agent-Safe Documentation Language (MANDATORY)
+All documentation, policy statements, and specifications MUST use RFC-style keywords: `MUST`, `MUST NOT`, `SHOULD`, `MAY`. Terms such as "should", "might", "could", "consider", "recommend", or "prefer" are forbidden in policy statements — they create ambiguity for agents executing against these documents. Where nuance is required, it MUST be expressed as an explicit conditional with a concrete example.
 
 ---
 

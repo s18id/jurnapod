@@ -19,6 +19,9 @@ Execute Story 49.1 with concrete, auditable steps and include the API-lib bounda
 - [x] `scripts/validate-sprint-status.ts --epic 48` output attached
 - [x] `scripts/validate-structure-conformance.ts` baseline output attached
 - [x] This checklist linked in Story 49.1 working notes
+- [x] Cleanup mandatory rule acknowledged: touched sprint scope requires cleanup before close
+- [x] Fixture mode policy acknowledged: Full Fixture Mode default (production invariants and test invariants remain identical); Partial Fixture Mode only via decomposed domain parts provided by the same production package that owns the domain invariant, with explicit scope, rationale, and owner
+- [x] No-new-business-trigger rule acknowledged
 
 ---
 
@@ -156,6 +159,18 @@ grep -rn "acquireReadLock\|releaseReadLock" apps/api/__test__/integration/ --inc
 | Date | Blocker | Severity | Owner | Resolution Plan |
 |---|---|---|---|---|
 | — | — | — | — | — |
+
+---
+
+## Story Done Authority (MANDATORY)
+The implementing developer MUST NOT mark their own story done. Done requires:
+- Reviewer GO (code review approval with no blockers)
+- Story owner explicit sign-off
+
+No story may be marked DONE based solely on self-attestation of the implementing developer.
+
+### Agent-Safe Documentation Language (MANDATORY)
+All documentation, policy statements, and specifications MUST use RFC-style keywords: `MUST`, `MUST NOT`, `SHOULD`, `MAY`. Terms such as "should", "might", "could", "consider", "recommend", or "prefer" are forbidden in policy statements — they create ambiguity for agents executing against these documents. Where nuance is required, it MUST be expressed as an explicit conditional with a concrete example.
 
 ---
 

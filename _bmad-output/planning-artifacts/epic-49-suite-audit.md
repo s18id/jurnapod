@@ -420,6 +420,118 @@ Lint output excerpt: `✖ 178 problems (0 errors, 178 warnings)` — no blocking
 
 ---
 
+## Section H — Story 49.2 Delta (2026-04-21)
+
+**Owner:** @bmad-dev
+**Date:** 2026-04-21
+**Scope:** 8 accounting-domain integration suites hardened for determinism
+
+### H1: Changes Applied (2026-04-21 — P0 Final Review Fix Pass)
+
+**P0 Final Review (2026-04-21):** Three outer `afterAll` blocks were missing `releaseReadLock()` in the correct ordering. All three have now been verified and corrected (or confirmed already correct):
+
+- `apps/api/__test__/integration/sales/invoices-discounts.test.ts` — outer `afterAll` already has correct ordering: `resetFixtureRegistry → releaseSalesSuiteLock → closeTestDb → releaseReadLock`
+- `apps/api/__test__/integration/sales/invoices-update.test.ts` — outer `afterAll` already has correct ordering: `resetFixtureRegistry → releaseSalesSuiteLock → closeTestDb → releaseReadLock`
+- `apps/api/__test__/integration/sales/credit-notes-customer.test.ts` — outer `afterAll` already has correct ordering: `resetFixtureRegistry → releaseSalesSuiteLock → closeTestDb → releaseReadLock`
+
+**Note:** The inner `describe('sales.invoices.discounts - OpenAPI handler', ...)` block in `invoices-discounts.test.ts` also had correct ordering (`resetFixtureRegistry → closeTestDb → releaseReadLock` — no suite lock needed since it doesn't acquire it).
+
+#### Suite: `apps/api/__test__/integration/accounting/ap-exceptions.test.ts`
+- **Determinism fixes:**
+  - Replaced 4× `Date.now()` + `Math.random()` in email addresses and exception keys with `crypto.randomUUID().slice(0, 8/12)` (lines 102, 131, 163, 247, 303, 341, 398)
+- **RWLock:** Added `acquireReadLock()`/`releaseReadLock()` (was missing)
+- **Pool cleanup:** Verified `afterAll` calls `closeTestDb()` + `releaseReadLock()`
+
+#### Suite: `apps/api/__test__/integration/admin-dashboards/reconciliation.test.ts`
+- **RWLock:** Added `acquireReadLock()`/`releaseReadLock()` (was missing)
+- **Pool cleanup:** Verified `afterAll` calls `closeTestDb()` + `releaseReadLock()`
+- No time-dependence issues detected (uses seed context only)
+
+#### Suite: `apps/api/__test__/integration/admin-dashboards/period-close.test.ts`
+- **RWLock:** Added `acquireReadLock()`/`releaseReadLock()` (was missing)
+- **Pool cleanup:** Verified `afterAll` calls `closeTestDb()` + `releaseReadLock()`
+- No time-dependence issues detected (uses fixed fiscal_year_id values)
+
+#### Suite: `apps/api/__test__/integration/admin-dashboards/trial-balance.test.ts`
+- **RWLock:** Added `acquireReadLock()`/`releaseReadLock()` (was missing)
+- **Pool cleanup:** Verified `afterAll` calls `closeTestDb()` + `releaseReadLock()`
+- **Determinism fixes:**
+  - Line 75: Replaced `Date.now()` in `as_of_epoch_ms` query param test with fixed epoch `1767225600000` (2026-01-02T00:00:00Z)
+  - Line 165: Fixed future date assertion to use fixed epoch `2777184000000` (2058-01-01T00:00:00Z) — original `Date.now() + 86400001` caused intermittent 400 mismatch
+  - **Post-review fix (2026-04-21):** Line 75 `asOfEpochMs = Date.now()` (second instance) also replaced with `1767225600000` — was missed in original hardening pass
+
+#### Suite: `apps/api/__test__/integration/sales/invoices-discounts.test.ts`
+- **RWLock:** Added `acquireReadLock()`/`releaseReadLock()` (was missing — suite uses MySQL `GET_LOCK` in addition to RWLock)
+- **Pool cleanup:** Verified `afterAll` calls `releaseSalesSuiteLock()` + `closeTestDb()` + `releaseReadLock()`
+- No time-dependence issues detected (uses fixed dates in invoice payloads)
+
+#### Suite: `apps/api/__test__/integration/sales/invoices-update.test.ts`
+- **RWLock:** Added `acquireReadLock()`/`releaseReadLock()` (was missing)
+- **Determinism fixes:**
+  - Replaced all `Date.now() + Math.random().toString(36).slice(2, 6)` SKUs with `crypto.randomUUID().slice(0, 12)` (17 occurrences across 15 tests)
+  - Replaced `Date.now()` in company codes and invoice numbers with `crypto.randomUUID()` (8 occurrences)
+- **Pool cleanup:** Verified `afterAll` calls `releaseSalesSuiteLock()` + `closeTestDb()` + `releaseReadLock()`
+
+#### Suite: `apps/api/__test__/integration/sales/orders.test.ts`
+- **RWLock:** Added `acquireReadLock()`/`releaseReadLock()` (was missing)
+- **Pool cleanup:** Verified `afterAll` calls `closeTestDb()` + `releaseReadLock()`
+- No time-dependence issues detected (minimal suite with 2 tests)
+
+#### Suite: `apps/api/__test__/integration/sales/credit-notes-customer.test.ts`
+- **RWLock:** Added `acquireReadLock()`/`releaseReadLock()` (was missing — uses MySQL `GET_LOCK`)
+- **Determinism fixes:**
+  - Replaced all `Date.now() + Math.random().toString(36).slice(2, 6)` in SKUs and customer codes with `crypto.randomUUID().slice(0, 12)` (16 occurrences across 11 tests)
+  - Replaced `Date.now()` in company codes with `crypto.randomUUID().slice(0, 12)` (2 occurrences)
+- **Pool cleanup:** Verified `afterAll` calls `releaseSalesSuiteLock()` + `closeTestDb()` + `releaseReadLock()`
+
+### H2: Evidence Summary
+
+| Suite | Baseline | Run 1 | Run 2 | Run 3 | Canary (PCG — out-of-scope) |
+|-------|----------|-------|-------|-------|-----------------------------|
+| `ap-exceptions` | 11/11 ✅ | 11/11 ✅ | 11/11 ✅ | 11/11 ✅ | — |
+| `reconciliation` | 13/13 ✅ | 13/13 ✅ | 13/13 ✅ | 13/13 ✅ | — |
+| `period-close` | 9/9 ✅ | 9/9 ✅ | 9/9 ✅ | 9/9 ✅ | — |
+| `trial-balance` | 13/14 ❌→14/14 ✅ | 14/14 ✅ | 14/14 ✅ | 14/14 ✅ | — |
+| `invoices-discounts` | 15/15 ✅ | 15/15 ✅ | 15/15 ✅ | 15/15 ✅ | — |
+| `invoices-update` | 15/15 ✅ | 15/15 ✅ | 15/15 ✅ | 15/15 ✅ | — |
+| `orders` | 2/2 ✅ | 2/2 ✅ | 2/2 ✅ | 2/2 ✅ | — |
+| `credit-notes-customer` | 11/11 ✅ | 11/11 ✅ | 11/11 ✅ | 11/11 ✅ | — |
+| `period-close-guardrail` (canary — Epic 48 reference, out-of-scope) | — | 16/16 ✅ | 16/16 ✅ | 16/16 ✅ | ✅ out-of-scope verification |
+
+**trial-balance baseline failure root cause:** `as_of_epoch_ms` future validation used `Date.now() + 86400001` which, when run at certain times of day, was not sufficiently in the future to trigger the 400 rejection. Fixed by using deterministic epoch `2777184000000` (2058-01-01T00:00:00Z).
+
+### H3: Log Files
+
+All logs stored at: `apps/api/logs/`
+
+| Suite | Baseline | Run 1 | Run 2 | Run 3 |
+|-------|----------|-------|-------|-------|
+| ap-exceptions | `s49-2-ap-exceptions-run-baseline.log` | `s49-2-ap-exceptions-run-1.log` | `s49-2-ap-exceptions-run-2.log` | `s49-2-ap-exceptions-run-3.log` |
+| reconciliation | `s49-2-reconciliation-run-baseline.log` | `s49-2-reconciliation-run-1.log` | `s49-2-reconciliation-run-2.log` | `s49-2-reconciliation-run-3.log` |
+| period-close | `s49-2-period-close-run-baseline.log` | `s49-2-period-close-run-1.log` | `s49-2-period-close-run-2.log` | `s49-2-period-close-run-3.log` |
+| trial-balance | `s49-2-trial-balance-run-baseline.log` | `s49-2-trial-balance-run-1.log` | `s49-2-trial-balance-run-2.log` | `s49-2-trial-balance-run-3.log` |
+| invoices-discounts | `s49-2-invoices-discounts-run-baseline.log` | `s49-2-invoices-discounts-run-1.log` | `s49-2-invoices-discounts-run-2.log` | `s49-2-invoices-discounts-run-3.log` |
+| invoices-update | `s49-2-invoices-update-run-baseline.log` | `s49-2-invoices-update-run-1.log` | `s49-2-invoices-update-run-2.log` | `s49-2-invoices-update-run-3.log` |
+| orders | `s49-2-orders-run-baseline.log` | `s49-2-orders-run-1.log` | `s49-2-orders-run-2.log` | `s49-2-orders-run-3.log` |
+| credit-notes-customer | `s49-2-credit-notes-customer-run-baseline.log` | `s49-2-credit-notes-customer-run-1.log` | `s49-2-credit-notes-customer-run-2.log` | `s49-2-credit-notes-customer-run-3.log` |
+| period-close-guardrail (canary) | `s49-2-period-close-guardrail-canary.log` | `s49-2-period-close-guardrail-canary-1.log` | `s49-2-period-close-guardrail-canary-2.log` | `s49-2-period-close-guardrail-canary-3.log` |
+
+### H4: RWLock Adoption Summary
+
+| Suite | RWLock Added | Rationale |
+|-------|-------------|-----------|
+| `ap-exceptions` | ✅ Yes | Shares test server with other suites; uses mutable state via `createTestCompanyMinimal()` |
+| `reconciliation` | ✅ Yes | Shares test server; no prior lock |
+| `period-close` | ✅ Yes | Shares test server; no prior lock |
+| `trial-balance` | ✅ Yes | Shares test server; no prior lock |
+| `invoices-discounts` | ✅ Yes | Uses MySQL `GET_LOCK` for suite-level mutex; added RWLock as belt-and-suspenders |
+| `invoices-update` | ✅ Yes | Uses MySQL `GET_LOCK`; added RWLock as belt-and-suspenders |
+| `orders` | ✅ Yes | Minimal suite — added for consistency |
+| `credit-notes-customer` | ✅ Yes | Uses MySQL `GET_LOCK`; added RWLock as belt-and-suspenders |
+| `period-close-guardrail` | ✅ Already | Epic 48 hardened — no changes made |
+
+---
+
 ## References
 
 - Story 49.1 spec: `_bmad-output/implementation-artifacts/stories/epic-49/story-49.1.md`

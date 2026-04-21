@@ -14,6 +14,7 @@ import {
   getTestAccessToken,
   getSeedSyncContext
 } from '../../fixtures';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 
 let baseUrl: string;
 let ownerToken: string;
@@ -32,6 +33,7 @@ async function releaseSalesSuiteLock() {
 
 describe('sales.invoices.discounts', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     await acquireSalesSuiteLock();
     baseUrl = getTestBaseUrl();
     ownerToken = await getTestAccessToken(baseUrl);
@@ -44,6 +46,7 @@ describe('sales.invoices.discounts', { timeout: 30000 }, () => {
     resetFixtureRegistry();
     await releaseSalesSuiteLock();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   // -------------------------------------------------------------------------
@@ -378,6 +381,7 @@ describe('sales.invoices.discounts', { timeout: 30000 }, () => {
 // =============================================================================
 describe('sales.invoices.discounts - OpenAPI handler', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     ownerToken = await getTestAccessToken(baseUrl);
 
@@ -388,6 +392,7 @@ describe('sales.invoices.discounts - OpenAPI handler', { timeout: 30000 }, () =>
   afterAll(async () => {
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   it('OpenAPI: rejects discount exceeding subtotal with 400', async () => {
