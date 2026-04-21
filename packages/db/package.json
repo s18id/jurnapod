@@ -13,6 +13,10 @@
     "./kysely": {
       "import": "./dist/kysely/index.js",
       "types": "./dist/kysely/index.d.ts"
+    },
+    "./test-fixtures": {
+      "import": "./dist/test-fixtures/index.js",
+      "types": "./dist/test-fixtures/index.d.ts"
     }
   },
   "scripts": {

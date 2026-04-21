@@ -68,7 +68,7 @@ import { sql } from "kysely";
 import { withTransactionRetry } from "@jurnapod/db";
 import { getAppEnv } from "./env";
 import { hashPassword } from "./password-hash";
-import { createCompanyBasic, CompanyCodeExistsError } from "./companies";
+import { createCompanyBasic, createCompany, CompanyCodeExistsError } from "./companies";
 import { createOutletBasic, OutletCodeExistsError } from "./outlets";
 import { createUserBasic, UserEmailExistsError } from "./users";
 import { createItem } from "./items/index.js";
@@ -256,9 +256,22 @@ export function registerFixtureCleanup(
 // ============================================================================
 
 /**
- * Create a minimal company (just the row, no bootstrap).
- * Use this when you need a company for FK references but don't need full setup.
- * 
+ * Create a test company using PARTIAL (row-only) creation path.
+ *
+ * PARTIAL FIXTURE MODE — EXCEPTION: This is a partial fixture path that only creates
+ * the company row without full bootstrap. Use only when:
+ * 1. Tests need a company FK reference without ACL/module_roles
+ * 2. The test will manually add required setup
+ * 3. A full bootstrap is too heavy for the test scenario
+ *
+ * RATIONALE FOR EXCEPTION: Company bootstrap (ensureRoles/ensureModules/ensureSettings/
+ * ensureCompanyModuleRoles) is owned by @jurnapod/modules-platform. However, since
+ * createTestCompany() now uses the full production path via createCompany(), tests
+ * that need the full fixture should use createTestCompany() instead.
+ *
+ * This partial path is retained for backward compatibility and for tests that specifically
+ * need a lightweight company without any bootstrap side effects.
+ *
  * @param options - Partial company options
  * @returns Company fixture with id, code, name
  */
@@ -284,150 +297,6 @@ export async function createTestCompanyMinimal(
       currency_code: options?.currency_code ?? "IDR"
     });
 
-    // Seed purchasing.suppliers and purchasing.exchange_rates ACL for new company
-    // so integration tests with resource-level ACL don't fail with 403.
-    // Only seed for system roles (SUPER_ADMIN, OWNER, COMPANY_ADMIN get CRUDAM=63,
-    // ADMIN/ACCOUNTANT get CRUDA=31, CASHIER gets 0).
-    // This mirrors migrations 0169 and 0171 but for companies created during tests.
-    await sql`
-      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
-      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing',
-        CASE
-          WHEN ${true} THEN 'suppliers'
-          ELSE 'suppliers'
-        END as resource,
-        CASE r.code
-          WHEN 'SUPER_ADMIN' THEN 63
-          WHEN 'OWNER' THEN 63
-          WHEN 'COMPANY_ADMIN' THEN 63
-          WHEN 'ADMIN' THEN 31
-          WHEN 'ACCOUNTANT' THEN 31
-          WHEN 'CASHIER' THEN 0
-          ELSE 0
-        END as permission_mask
-      FROM roles r
-      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
-    `.execute(db);
-
-    // Also seed purchasing.exchange_rates ACL
-    await sql`
-      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
-      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing', 'exchange_rates',
-        CASE r.code
-          WHEN 'SUPER_ADMIN' THEN 63
-          WHEN 'OWNER' THEN 63
-          WHEN 'COMPANY_ADMIN' THEN 63
-          WHEN 'ADMIN' THEN 31
-          WHEN 'ACCOUNTANT' THEN 31
-          WHEN 'CASHIER' THEN 0
-          ELSE 0
-        END as permission_mask
-      FROM roles r
-      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
-    `.execute(db);
-
-    // Also seed purchasing.orders ACL
-    await sql`
-      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
-      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing', 'orders',
-        CASE r.code
-          WHEN 'SUPER_ADMIN' THEN 63
-          WHEN 'OWNER' THEN 63
-          WHEN 'COMPANY_ADMIN' THEN 63
-          WHEN 'ADMIN' THEN 31
-          WHEN 'ACCOUNTANT' THEN 31
-          WHEN 'CASHIER' THEN 0
-          ELSE 0
-        END as permission_mask
-      FROM roles r
-      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
-    `.execute(db);
-
-    // Also seed purchasing.receipts ACL
-    await sql`
-      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
-      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing', 'receipts',
-        CASE r.code
-          WHEN 'SUPER_ADMIN' THEN 63
-          WHEN 'OWNER' THEN 63
-          WHEN 'COMPANY_ADMIN' THEN 63
-          WHEN 'ADMIN' THEN 31
-          WHEN 'ACCOUNTANT' THEN 31
-          WHEN 'CASHIER' THEN 0
-          ELSE 0
-        END as permission_mask
-      FROM roles r
-      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
-    `.execute(db);
-
-    // Also seed purchasing.invoices ACL
-    await sql`
-      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
-      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing', 'invoices',
-        CASE r.code
-          WHEN 'SUPER_ADMIN' THEN 63
-          WHEN 'OWNER' THEN 63
-          WHEN 'COMPANY_ADMIN' THEN 63
-          WHEN 'ADMIN' THEN 31
-          WHEN 'ACCOUNTANT' THEN 31
-          WHEN 'CASHIER' THEN 0
-          ELSE 0
-        END as permission_mask
-      FROM roles r
-      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
-    `.execute(db);
-
-    // Also seed purchasing.payments ACL
-    await sql`
-      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
-      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing', 'payments',
-        CASE r.code
-          WHEN 'SUPER_ADMIN' THEN 63
-          WHEN 'OWNER' THEN 63
-          WHEN 'COMPANY_ADMIN' THEN 63
-          WHEN 'ADMIN' THEN 31
-          WHEN 'ACCOUNTANT' THEN 31
-          WHEN 'CASHIER' THEN 0
-          ELSE 0
-        END as permission_mask
-      FROM roles r
-      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
-    `.execute(db);
-
-    // Also seed purchasing.credits ACL
-    await sql`
-      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
-      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing', 'credits',
-        CASE r.code
-          WHEN 'SUPER_ADMIN' THEN 63
-          WHEN 'OWNER' THEN 63
-          WHEN 'COMPANY_ADMIN' THEN 63
-          WHEN 'ADMIN' THEN 31
-          WHEN 'ACCOUNTANT' THEN 31
-          WHEN 'CASHIER' THEN 0
-          ELSE 0
-        END as permission_mask
-      FROM roles r
-      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
-    `.execute(db);
-
-    // Also seed purchasing.reports ACL
-    await sql`
-      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
-      SELECT ${company.id} as company_id, r.id as role_id, 'purchasing', 'reports',
-        CASE r.code
-          WHEN 'SUPER_ADMIN' THEN 63
-          WHEN 'OWNER' THEN 63
-          WHEN 'COMPANY_ADMIN' THEN 63
-          WHEN 'ADMIN' THEN 31
-          WHEN 'ACCOUNTANT' THEN 31
-          WHEN 'CASHIER' THEN 0
-          ELSE 0
-        END as permission_mask
-      FROM roles r
-      WHERE r.code IN ('SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER')
-    `.execute(db);
-
     createdFixtures.companies.push(company);
     return company;
   } catch (error: unknown) {
@@ -449,9 +318,21 @@ export async function createTestCompanyMinimal(
 }
 
 /**
- * Create a test company with full bootstrap (roles, modules, settings, fiscal year).
- * For most tests, use createTestCompanyMinimal() instead to avoid unnecessary setup.
- * 
+ * Create a test company using FULL production company creation path.
+ *
+ * This function delegates to `createCompany()` from "./companies" which performs
+ * full bootstrap including:
+ * - Default MAIN outlet creation
+ * - System role seeding (via ensureRoles)
+ * - Module seeding (via ensureModules)
+ * - Default settings (via ensureSettings)
+ * - Default tax rate (via ensureDefaultTaxRate)
+ * - Company module configs (via ensureCompanyModules)
+ * - Module role permissions (via ensureCompanyModuleRoles) — ACL seed for all modules
+ * - System accounts (via ensureSystemAccounts)
+ *
+ * Use this when tests need a fully bootstrapped company with proper ACL/module_roles.
+ *
  * @param options - Partial company options
  * @returns Company fixture with id, code, name
  */
@@ -463,12 +344,44 @@ export async function createTestCompany(
     currency_code: string;
   }>
 ): Promise<CompanyFixture> {
-  // For now, createTestCompany and createTestCompanyMinimal are the same
-  // because createCompany with full bootstrap requires an actor user.
-  // Tests should use createTestCompanyMinimal and manually add what they need.
-  // 
-  // TODO: Once we have a way to create a bootstrap actor, implement full bootstrap here.
-  return createTestCompanyMinimal(options);
+  const db = getDb();
+  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+
+  const code = options?.code ?? `TEST-CO-${runId}`.slice(0, 20).toUpperCase();
+  const name = options?.name ?? `Test Company ${runId}`;
+
+  try {
+    // Use production createCompany() path for full bootstrap.
+    // Test actor: use a system placeholder userId (1) since audit is not required for test fixtures.
+    // This actor satisfies the CompanyActor type requirement without needing a real user.
+    const TEST_ACTOR = { userId: 1, outletId: null, ipAddress: null };
+
+    const company = await createCompany({
+      code,
+      name,
+      timezone: options?.timezone ?? "Asia/Jakarta",
+      currency_code: options?.currency_code ?? "IDR",
+      actor: TEST_ACTOR,
+    });
+
+    createdFixtures.companies.push(company);
+    return company;
+  } catch (error: unknown) {
+    if (error instanceof CompanyCodeExistsError) {
+      // Company with this code already exists - fetch it instead
+      const result = await sql`SELECT id, code, name FROM companies WHERE code = ${code} LIMIT 1`.execute(db);
+      if (result.rows.length > 0) {
+        const row = result.rows[0] as { id: number; code: string; name: string };
+        const existing = {
+          id: Number(row.id),
+          code: row.code,
+          name: row.name
+        };
+        return existing;
+      }
+    }
+    throw error;
+  }
 }
 
 // ============================================================================
@@ -476,8 +389,14 @@ export async function createTestCompany(
 // ============================================================================
 
 /**
- * Create a minimal outlet (just the row, no audit).
- * 
+ * Create a test outlet with PARTIAL (row-only) creation path.
+ *
+ * PARTIAL FIXTURE MODE — EXCEPTION: No package-level service exists for full outlet
+ * creation with audit logging. This partial path creates only the row.
+ *
+ * TODO (Q49-001-Gate-B): When @jurnapod/modules-platform exports a createOutlet service,
+ * update createTestOutlet to delegate to it for full bootstrap (audit, default settings).
+ *
  * @param companyId - Parent company ID
  * @param options - Partial outlet options
  * @returns Outlet fixture with id, company_id, code, name
@@ -492,10 +411,10 @@ export async function createTestOutletMinimal(
 ): Promise<OutletFixture> {
   const db = getDb();
   const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-  
+
   const code = options?.code ?? `TEST-OL-${runId}`.slice(0, 20).toUpperCase();
   const name = options?.name ?? `Test Outlet ${runId}`;
-  
+
   try {
     const outlet = await createOutletBasic({
       company_id: companyId,
@@ -503,7 +422,7 @@ export async function createTestOutletMinimal(
       name,
       timezone: options?.timezone ?? "Asia/Jakarta"
     });
-    
+
     createdFixtures.outlets.push(outlet);
     return outlet;
   } catch (error: unknown) {
@@ -528,7 +447,10 @@ export async function createTestOutletMinimal(
 /**
  * Create a test outlet with full audit logging.
  * For most tests, use createTestOutletMinimal() instead.
- * 
+ *
+ * TODO (Q49-001-Gate-B): When @jurnapod/modules-platform exports a createOutlet service,
+ * update this function to delegate to it for full bootstrap.
+ *
  * @param companyId - Parent company ID
  * @param options - Partial outlet options
  * @returns Outlet fixture with id, company_id, code, name
@@ -541,9 +463,8 @@ export async function createTestOutlet(
     timezone: string;
   }>
 ): Promise<OutletFixture> {
-  // For now, createTestOutlet and createTestOutletMinimal are the same
-  // because createOutlet with audit requires an actor user.
-  // Tests should use createTestOutletMinimal and manually add what they need.
+  // TODO (Q49-001-Gate-B): Delegate to package-level createOutlet service
+  // when available, instead of using createTestOutletMinimal.
   return createTestOutletMinimal(companyId, options);
 }
 

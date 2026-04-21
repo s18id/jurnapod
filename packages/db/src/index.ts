@@ -47,3 +47,11 @@ export { batchInsert, batchInsertWithChunking, BATCH_MAX_SIZE } from './batch.js
 
 // Config type for passing to createKysely
 export type { DbPoolConfig } from './pool.js';
+
+// Test fixtures (deterministic primitives only)
+export {
+  CANONICAL_TIMESTAMPS,
+  generateDeterministicRunId,
+  generateDeterministicCode,
+  type DeterministicRunIdOptions,
+} from './test-fixtures/index.js';
