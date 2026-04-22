@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { closeTestDb, getTestDb } from '../../helpers/db';
 import { sql } from 'kysely';
 import {
@@ -21,14 +22,23 @@ import {
   createTestPurchasingAccounts,
 } from '../../fixtures';
 
+// Deterministic code generator for constrained fields
+// suiteTag + workerTag + counter, workerTag from VITEST_POOL_ID
+function makeTag(prefix: string, counter: number): string {
+  const worker = process.env.VITEST_POOL_ID ?? '0';
+  return `${prefix}${worker}${String(counter).padStart(4, '0')}`.slice(0, 32);
+}
+
 let baseUrl: string;
 let ownerToken: string;
 let testCompanyId: number;
 let cashierToken: string;
 let testSupplierId: number;
+let piTagCounter = 0;
 
 describe('purchasing.invoices', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
 
     // We need an OWNER token that has purchasing.invoices permissions
@@ -41,7 +51,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
     testCompanyId = testCompany.id;
 
     // Create an OWNER user with known password
-    const testEmail = `pi-owner-${Date.now()}@example.com`;
+    const testEmail = `pi-owner-${++piTagCounter}@example.com`;
     const testUser = await createTestUser(testCompany.id, {
       email: testEmail,
       name: 'PI Test Owner',
@@ -60,7 +70,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
 
     // Create a supplier for this test company
     const supplier = await createTestSupplier(testCompany.id, {
-      code: `PI-SUP-${Date.now()}`,
+      code: makeTag('PISUP', ++piTagCounter),
       name: 'PI Test Supplier',
       currency: 'IDR',
     });
@@ -101,6 +111,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
     }
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   // -------------------------------------------------------------------------
@@ -190,7 +201,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `PI-DRAFT-${Date.now() % 100000}`,
+        invoice_no: `PIDR${String(++piTagCounter).padStart(4, '0')}`,
         invoice_date: '2026-04-15',
         currency_code: 'IDR',
         notes: 'Test PI',
@@ -219,7 +230,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `PI-EMPTY-${Date.now() % 100000}`,
+        invoice_no: `PIEM${String(++piTagCounter).padStart(4, '0')}`,
         invoice_date: '2026-04-15',
         lines: []
       })
@@ -240,7 +251,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `PI-GET-${Date.now() % 100000}`,
+        invoice_no: `PIGT${String(++piTagCounter).padStart(4, '0')}`,
         invoice_date: '2026-04-16',
         lines: [
           { description: 'Item for get test', qty: '5', unit_price: '10000.00', line_type: 'SERVICE' }
@@ -283,7 +294,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('posts a draft PI and returns journal_batch_id', async () => {
     // Create a PI first
-    const invoiceNo = `PI-POST-${Date.now() % 100000}`;
+    const invoiceNo = makeTag('PIPT', ++piTagCounter);
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: {
@@ -346,7 +357,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `PI-NO-FX-${Date.now() % 100000}`,
+        invoice_no: `PINOFX${String(++piTagCounter).padStart(4, '0')}`,
         invoice_date: '2026-04-10',
         currency_code: 'XYZ',  // Currency unlikely to have an exchange rate
         lines: [
@@ -381,7 +392,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
     const db = getTestDb();
 
     // 1. Create exchange rate via API for test company: 1 USD = 15000 IDR
-    const fxDate = `2026-04-${(10 + (Date.now() % 15)).toString().padStart(2, '0')}`;
+    const fxDate = '2026-04-10';
     const createRateRes = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
       method: 'POST',
       headers: {
@@ -398,7 +409,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
     expect(createRateRes.status).toBe(201);
 
     // 2. Create a PI in USD: qty=2, unit_price=100 USD -> line_total = 200 USD
-    const invoiceNo = `PI-FX-${Date.now() % 100000}`;
+    const invoiceNo = makeTag('PIFX', ++piTagCounter);
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: {
@@ -499,7 +510,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `PI-NO-AP-${Date.now() % 100000}`,
+        invoice_no: `PINOAP${String(++piTagCounter).padStart(4, '0')}`,
         invoice_date: '2026-04-10',
         currency_code: 'IDR',
         lines: [
@@ -533,7 +544,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('voids a posted PI and rejects a second void', async () => {
     // Create and post a PI
-    const invoiceNo = `PI-VOID-${Date.now() % 100000}`;
+    const invoiceNo = makeTag('PIVD', ++piTagCounter);
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: {
@@ -617,7 +628,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('returns 400 when posting an already posted PI', async () => {
     // Create and post a PI
-    const invoiceNo = `PI-DOUBLE-POST-${Date.now() % 100000}`;
+    const invoiceNo = makeTag('PIDP', ++piTagCounter);
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: {
@@ -670,7 +681,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('returns 400 when trying to void a draft PI', async () => {
     // Create a PI (stays in draft)
-    const invoiceNo = `PI-VOID-DRAFT-${Date.now() % 100000}`;
+    const invoiceNo = makeTag('PIVDFT', ++piTagCounter);
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: {

@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { closeTestDb, getTestDb } from '../../helpers/db';
 import { sql } from 'kysely';
 import {
@@ -19,9 +20,14 @@ let baseUrl: string;
 let ownerToken: string;
 let cashierToken: string;
 let cashierCompanyId: number;
+// Deterministic day counter for exchange rate date fixtures (avoids Math.random())
+let exchangeRateDayCounter = 10;
+// Deterministic test counter for unique values per test
+let exchangeRateTestCounter = 0;
 
 describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     ownerToken = await getTestAccessToken(baseUrl);
     const context = await getSeedSyncContext();
@@ -46,6 +52,7 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
     }
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   // -------------------------------------------------------------------------
@@ -71,7 +78,7 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
   });
 
   it('returns 403 when CASHIER tries to create an exchange rate', async () => {
-    const date = `2026-04-${(20 + Math.floor(Math.random() * 10)).toString().padStart(2, '0')}`;
+    const date = `2026-04-${(20 + (Math.floor(exchangeRateDayCounter++) % 10)).toString().padStart(2, '0')}`;
     const res = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
       method: 'POST',
       headers: {
@@ -144,8 +151,7 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
   // AC: Create exchange rate (OWNER)
   // -------------------------------------------------------------------------
   it('creates an exchange rate with valid data', async () => {
-    const unique = Date.now() % 10000;
-    const day = 10 + (unique % 5);  // Days 10-14
+    const day = 10 + (exchangeRateTestCounter++ % 5);  // Days 10-14
     const date = `2026-04-${day.toString().padStart(2, '0')}`;
     const res = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
       method: 'POST',
@@ -171,8 +177,7 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
   });
 
   it('creates an exchange rate with minimum required fields', async () => {
-    const unique = Date.now() % 10000;
-    const day = 20 + (unique % 5);  // Days 20-24
+    const day = 20 + (exchangeRateTestCounter++ % 5);  // Days 20-24
     const date = `2026-04-${day.toString().padStart(2, '0')}`;
     const res = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
       method: 'POST',
@@ -195,8 +200,7 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
   });
 
   it('returns 409 for duplicate currency_code + effective_date', async () => {
-    const unique = Date.now() % 10000;
-    const day = 30 + (unique % 2);  // Days 30-31
+    const day = 30 + (exchangeRateTestCounter++ % 2);  // Days 30-31
     const date = `2026-05-${day.toString().padStart(2, '0')}`;
     // Create first rate with unique currency
     const res1 = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
@@ -232,7 +236,6 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
   });
 
   it('returns 400 for invalid request body', async () => {
-    const unique = Date.now() % 10000;
     const res = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
       method: 'POST',
       headers: {
@@ -250,7 +253,6 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
   });
 
   it('returns 403 when creating exchange rate for another company', async () => {
-    const unique = Date.now() % 10000;
     const res = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
       method: 'POST',
       headers: {
@@ -271,8 +273,7 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
   // AC: Get exchange rate by ID (OWNER)
   // -------------------------------------------------------------------------
   it('gets exchange rate by ID', async () => {
-    const unique = Date.now() % 10000;
-    const day = 10 + (unique % 5);  // Days 10-14
+    const day = 10 + (exchangeRateTestCounter++ % 5);  // Days 10-14
     const date = `2026-04-${day.toString().padStart(2, '0')}`;
     const createRes = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
       method: 'POST',
@@ -332,8 +333,7 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
   // AC: Update exchange rate (OWNER)
   // -------------------------------------------------------------------------
   it('updates exchange rate rate', async () => {
-    const unique = Date.now() % 10000;
-    const day = 25 + (unique % 5);  // Days 25-29
+    const day = 25 + (exchangeRateTestCounter++ % 5);  // Days 25-29
     const date = `2026-04-${day.toString().padStart(2, '0')}`;
     const createRes = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
       method: 'POST',
@@ -368,8 +368,7 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
   });
 
   it('updates exchange rate notes', async () => {
-    const unique = Date.now() % 10000;
-    const day = 15 + (unique % 5);  // Days 15-19
+    const day = 15 + (exchangeRateTestCounter++ % 5);  // Days 15-19
     const date = `2026-04-${day.toString().padStart(2, '0')}`;
     const createRes = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
       method: 'POST',
@@ -404,8 +403,8 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
   });
 
   it('updates exchange rate is_active', async () => {
-    const unique = Date.now() % 10000;
-    const date = `2026-04-${(10 + (unique % 10)).toString().padStart(2, '0')}`;
+    const day = 10 + (exchangeRateTestCounter++ % 10);
+    const date = `2026-04-${day.toString().padStart(2, '0')}`;
     const createRes = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
       method: 'POST',
       headers: {
@@ -453,8 +452,8 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
   });
 
   it('returns 400 when PATCH has empty body', async () => {
-    const unique = Date.now() % 10000;
-    const date = `2026-04-${(20 + (unique % 5)).toString().padStart(2, '0')}`;
+    const day = 20 + (exchangeRateTestCounter++ % 5);
+    const date = `2026-04-${day.toString().padStart(2, '0')}`;
     const createRes = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
       method: 'POST',
       headers: {
@@ -487,9 +486,8 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
   // AC: Rate Lookup by Date
   // -------------------------------------------------------------------------
   it('returns most recent rate on or before given date', async () => {
-    const unique = Date.now() % 10000;
     // Use different currency codes with same date to avoid uniqueness constraint
-    const date = `2026-04-${(10 + (unique % 10)).toString().padStart(2, '0')}`;
+    const date = `2026-04-${(10 + (exchangeRateTestCounter++ % 10)).toString().padStart(2, '0')}`;
 
     // Create multiple rates for different currencies at different effective dates
     const res1 = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
@@ -559,8 +557,8 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
   // AC: Soft-deleted rates not returned (is_active filter)
   // -------------------------------------------------------------------------
   it('does not return inactive rates in lookup', async () => {
-    const unique = Date.now() % 10000;
-    const date = `2026-05-${(10 + (unique % 10)).toString().padStart(2, '0')}`;
+    const day = 10 + (exchangeRateTestCounter++ % 10);
+    const date = `2026-05-${day.toString().padStart(2, '0')}`;
 
     const createRes = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
       method: 'POST',
@@ -580,7 +578,8 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
     });
 
     // Lookup should not find it - use a date after the rate's effective_date
-    const lookupDate = `2026-05-${(20 + (unique % 5)).toString().padStart(2, '0')}`;
+    const lookupDay = 20 + ((exchangeRateTestCounter - 1) % 5);
+    const lookupDate = `2026-05-${lookupDay.toString().padStart(2, '0')}`;
     const res = await fetch(`${baseUrl}/api/purchasing/exchange-rates/lookup?currency_code=DKK&date=${lookupDate}`, {
       method: 'GET',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' }
@@ -592,8 +591,8 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
   // AC: Decimal precision handling
   // -------------------------------------------------------------------------
   it('preserves 8 decimal places in rate', async () => {
-    const unique = Date.now() % 10000;
-    const date = `2026-05-${(15 + (unique % 10)).toString().padStart(2, '0')}`;
+    const day = 15 + (exchangeRateTestCounter++ % 10);
+    const date = `2026-05-${day.toString().padStart(2, '0')}`;
     const res = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },

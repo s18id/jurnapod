@@ -1,10 +1,18 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
+export type WarningPayload = {
+  code: string;
+  reason: string;
+  message: string;
+  blocking: false;
+};
+
 export type SuccessPayload<T> = {
   success: true;
   data: T;
   error?: never;
+  warnings?: WarningPayload[];
 };
 
 export type ErrorPayload = {
@@ -16,8 +24,19 @@ export type ErrorPayload = {
   };
 };
 
-export function successResponse<T>(data: T, status = 200): Response {
-  return Response.json({ success: true, data }, { status });
+export function successResponse<T>(
+  data: T,
+  status = 200,
+  warnings?: WarningPayload[]
+): Response {
+  const body: { success: true; data: T; warnings?: WarningPayload[] } = {
+    success: true,
+    data,
+  };
+  if (warnings && warnings.length > 0) {
+    body.warnings = warnings;
+  }
+  return Response.json(body, { status });
 }
 
 export function errorResponse(

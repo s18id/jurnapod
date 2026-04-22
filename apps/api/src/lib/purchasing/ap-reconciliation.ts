@@ -83,11 +83,18 @@ export async function resolveCompanyTimezone(companyId: number): Promise<string>
 // =============================================================================
 
 export class APReconciliationError extends Error {
+  public readonly code: string;
   constructor(
-    public readonly code: string,
+    code: string,
     message: string
   ) {
     super(message);
+    // Explicit assignment required — TypeScript parameter properties
+    // (public readonly code: string) in a base class constructor do NOT
+    // reliably propagate through subclass super() calls. Using explicit
+    // field declaration + manual assignment ensures .code is always set
+    // on APReconciliationError instances regardless of inheritance depth.
+    this.code = code;
     this.name = "APReconciliationError";
   }
 }

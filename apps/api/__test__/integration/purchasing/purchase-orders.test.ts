@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { closeTestDb, getTestDb } from '../../helpers/db';
 import { sql } from 'kysely';
 import {
@@ -13,15 +14,32 @@ import {
   getTestAccessToken,
   getSeedSyncContext,
   getOrCreateTestCashierForPermission,
+  createTestSupplier,
 } from '../../fixtures';
 
+// Deterministic counter for test data
 let baseUrl: string;
 let ownerToken: string;
 let cashierToken: string;
 let cashierCompanyId: number;
+let testSupplierId: number;
+let poTagCounter = 0;
+const PURCHASE_ORDERS_SUITE_LOCK = 'jp_purchase_orders_suite_lock';
+
+async function acquirePurchaseOrdersSuiteLock() {
+  const db = getTestDb();
+  await sql`SELECT GET_LOCK(${PURCHASE_ORDERS_SUITE_LOCK}, 120)`.execute(db);
+}
+
+async function releasePurchaseOrdersSuiteLock() {
+  const db = getTestDb();
+  await sql`SELECT RELEASE_LOCK(${PURCHASE_ORDERS_SUITE_LOCK})`.execute(db);
+}
 
 describe('purchasing.orders', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
+    await acquirePurchaseOrdersSuiteLock();
     baseUrl = getTestBaseUrl();
     ownerToken = await getTestAccessToken(baseUrl);
     const context = await getSeedSyncContext();
@@ -33,6 +51,13 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
       baseUrl
     );
     cashierToken = cashier.accessToken;
+
+    const supplier = await createTestSupplier(cashierCompanyId, {
+      code: `PO-SUP-${++poTagCounter}`,
+      name: 'PO Test Supplier',
+      currency: 'IDR',
+    });
+    testSupplierId = supplier.id;
   });
 
   afterAll(async () => {
@@ -46,7 +71,9 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
       // ignore cleanup errors
     }
     resetFixtureRegistry();
+    await releasePurchaseOrdersSuiteLock();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   // -------------------------------------------------------------------------
@@ -79,7 +106,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-01',
         lines: [{ qty: '10', unit_price: '100.00', tax_rate: '0.10' }]
       })
@@ -126,7 +153,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
   // AC: Create purchase order (OWNER)
   // -------------------------------------------------------------------------
   it('creates a purchase order with valid data', async () => {
-    const supplierId = 1; // Need an existing supplier
+    const supplierId = testSupplierId;
     const res = await fetch(`${baseUrl}/api/purchasing/orders`, {
       method: 'POST',
       headers: {
@@ -156,7 +183,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
   });
 
   it('creates a purchase order with minimum required fields', async () => {
-    const supplierId = 1;
+    const supplierId = testSupplierId;
     const res = await fetch(`${baseUrl}/api/purchasing/orders`, {
       method: 'POST',
       headers: {
@@ -186,7 +213,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-17',
         lines: []
       })
@@ -218,7 +245,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-05-01',
         lines: [{ item_id: 99999999, qty: '1', unit_price: '1000.00' }]
       })
@@ -228,7 +255,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
 
   it('rolls back PO header when create fails due to invalid item_id', async () => {
     const db = getTestDb();
-    const markerNotes = `rollback-check-${Date.now()}`;
+    const markerNotes = `rollback-check-${++poTagCounter}`;
 
     const beforeCount = await sql<{ c: string }>`
       SELECT COUNT(*) as c
@@ -246,7 +273,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-05-02',
         notes: markerNotes,
         lines: [
@@ -280,7 +307,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-19',
         lines: [{ qty: '2', unit_price: '3000.00' }]
       })
@@ -327,7 +354,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-20',
         lines: [{ qty: '3', unit_price: '1500.00' }]
       })
@@ -360,7 +387,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-21',
         lines: [{ qty: '4', unit_price: '2000.00' }]
       })
@@ -388,7 +415,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-21',
         lines: [
           { qty: '2', unit_price: '1000.00', tax_rate: '0.00' }
@@ -429,7 +456,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-21',
         lines: [{ qty: '1', unit_price: '1000.00' }]
       })
@@ -458,7 +485,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-21',
         lines: [{ qty: '1', unit_price: '1000.00' }]
       })
@@ -492,7 +519,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-22',
         lines: [{ qty: '5', unit_price: '5000.00' }]
       })
@@ -523,7 +550,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-23',
         lines: [{ qty: '6', unit_price: '6000.00' }]
       })
@@ -555,7 +582,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-24',
         lines: [{ qty: '10', unit_price: '1000.00' }]
       })
@@ -597,7 +624,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-25',
         lines: [{ qty: '8', unit_price: '800.00' }]
       })
@@ -639,7 +666,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-26',
         lines: [{ qty: '7', unit_price: '900.00' }]
       })
@@ -688,7 +715,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-27',
         lines: [{ qty: '3', unit_price: '1200.00' }]
       })
@@ -722,7 +749,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-28',
         lines: [
           { qty: '100', unit_price: '10.00', tax_rate: '0.10' } // 100 * 10 * 1.1 = 1100
@@ -743,7 +770,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-29',
         lines: [
           { qty: '10', unit_price: '100.00', tax_rate: '0.00' },  // 1000
@@ -768,7 +795,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        supplier_id: 1,
+        supplier_id: testSupplierId,
         order_date: '2026-04-30',
         lines: [{ qty: '1', unit_price: '50000.00' }]
       })

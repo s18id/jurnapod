@@ -1255,6 +1255,12 @@ accountRoutes.post("/fiscal-years/:id/close/approve", async (c) => {
       }
     );
 
+    // Attach snapshot warning as top-level warnings in the success envelope if present.
+    // The close/posting itself always succeeds (200) even if the auto-snapshot side effect
+    // failed; the warning is non-blocking side information only.
+    if (result.snapshotWarning) {
+      return successResponse(result, 200, [result.snapshotWarning]);
+    }
     return successResponse(result);
   } catch (error) {
     // Check for our custom "ENTRIES_NOT_BALANCED" error format

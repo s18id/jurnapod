@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { getTestDb, closeTestDb } from '../../helpers/db';
 import { sql } from 'kysely';
 import {
@@ -14,12 +15,20 @@ import {
   getSeedSyncContext,
 } from '../../fixtures';
 
+// Deterministic code generator for constrained fields (max 20 chars)
+function makeTag(prefix: string, counter: number): string {
+  const worker = process.env.VITEST_POOL_ID ?? '0';
+  return `${prefix}${worker}${String(counter).padStart(4, '0')}`.slice(0, 20);
+}
+
 let baseUrl: string;
 let accessToken: string;
 let companyId: number;
+let softDelTagCounter = 0;
 
 describe('supplier - Regression: Soft Delete Referential Integrity', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     const context = await getSeedSyncContext();
@@ -29,6 +38,7 @@ describe('supplier - Regression: Soft Delete Referential Integrity', { timeout: 
   afterAll(async () => {
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   // =============================================================================
@@ -46,7 +56,7 @@ describe('supplier - Regression: Soft Delete Referential Integrity', { timeout: 
         },
         body: JSON.stringify({
           company_id: companyId,
-          code: `SUP-DEL-${Date.now()}`,
+          code: makeTag('SUPDEL', ++softDelTagCounter),
           name: 'Delete Test Supplier',
           currency: 'IDR'
         })
@@ -97,7 +107,7 @@ describe('supplier - Regression: Soft Delete Referential Integrity', { timeout: 
         },
         body: JSON.stringify({
           company_id: companyId,
-          code: `SUP-DEL-OK-${Date.now()}`,
+          code: makeTag('SUPDELOK', ++softDelTagCounter),
           name: 'Safe Delete Supplier',
           currency: 'IDR'
         })
@@ -133,7 +143,7 @@ describe('supplier - Regression: Soft Delete Referential Integrity', { timeout: 
         },
         body: JSON.stringify({
           company_id: companyId,
-          code: `SUP-PATCH-DEL-${Date.now()}`,
+          code: makeTag('SUPPATCHDEL', ++softDelTagCounter),
           name: 'Patch Deactivate Guard Supplier',
           currency: 'IDR'
         })

@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
 import { sql } from "kysely";
 import { getTestBaseUrl } from "../../helpers/env";
 import { closeTestDb, getTestDb } from "../../helpers/db";
@@ -23,6 +24,12 @@ import {
   getTestAccessToken,
 } from "../../fixtures";
 
+// Deterministic code generator for constrained fields
+function makeTag(prefix: string, counter: number): string {
+  const worker = process.env.VITEST_POOL_ID ?? '0';
+  return `${prefix}${worker}${String(counter).padStart(4, '0')}`.slice(0, 20);
+}
+
 let baseUrl: string;
 let testCompanyId: number;
 let testCompany2Id: number;
@@ -34,6 +41,7 @@ let supplier2Id: number;
 let bankAccountId: number;
 let apAccountId: number;
 let ownerUserId: number;
+let ssTagCounter = 0;
 
 describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
   const postJson = async (path: string, token: string, body?: unknown) => {
@@ -128,6 +136,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
   };
 
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
 
     // Get seed token for role creation (custom test role created via API)
@@ -141,7 +150,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
     const company = await createTestCompanyMinimal();
     testCompanyId = company.id;
 
-    const ownerEmail = `ss-owner-${Date.now()}@example.com`;
+    const ownerEmail = `ss-owner-${++ssTagCounter}@example.com`;
     const ownerUser = await createTestUser(testCompanyId, {
       email: ownerEmail,
       name: "Supplier Statement Owner",
@@ -167,7 +176,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
     bankAccountId = await createTestBankAccount(testCompanyId, { typeName: "BANK", isActive: true });
 
     const supplier = await createTestSupplier(testCompanyId, {
-      code: `SS-SUP-${Date.now()}`.slice(0, 20),
+      code: makeTag('SSSUP', ++ssTagCounter),
       name: "Supplier Statement Supplier",
       currency: "IDR",
       paymentTermsDays: 30,
@@ -175,7 +184,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
     supplierId = supplier.id;
 
     const supplier2 = await createTestSupplier(testCompanyId, {
-      code: `SS-SUP2-${Date.now()}`.slice(0, 20),
+      code: makeTag('SSSUP2', ++ssTagCounter),
       name: "Supplier 2 for Statements",
       currency: "IDR",
       paymentTermsDays: 30,
@@ -191,7 +200,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
     // Create ANALYZE-only role user (mask=16 = ANALYZE, no CREATE)
     const analyzeOnlyRole = await createTestRole(baseUrl, seedToken, "SS Analyze Only");
     const analyzeOnlyRoleId = analyzeOnlyRole.id;
-    const analyzeOnlyEmail = `ss-analyze-${Date.now()}@example.com`;
+    const analyzeOnlyEmail = `ss-analyze-${++ssTagCounter}@example.com`;
     const analyzeOnlyUser = await createTestUser(testCompanyId, {
       email: analyzeOnlyEmail,
       name: "Supplier Statement Analyze Only",
@@ -206,7 +215,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
 
     // Company 2 setup (for cross-tenant tests)
     const company2 = await createTestCompanyMinimal({
-      code: `SS-C2-${Date.now()}`.slice(0, 15),
+      code: makeTag('SSC2', ++ssTagCounter).slice(0, 15),
     });
     testCompany2Id = company2.id;
   });
@@ -261,6 +270,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
 
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   // =============================================================================
@@ -345,9 +355,9 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
 
     it("rejects statement for supplier not owned by company", async () => {
       // Create supplier in company 2
-      const company2 = await createTestCompanyMinimal({ code: `SS-C2-DUP-${Date.now()}` });
+      const company2 = await createTestCompanyMinimal({ code: makeTag('SSC2DUP', ++ssTagCounter).slice(0, 15) });
       const supplier2Company = await createTestSupplier(company2.id, {
-        code: `SS-C2-SUP-${Date.now()}`,
+        code: makeTag('SSC2SUP', ++ssTagCounter),
         name: "Company 2 Supplier",
         currency: "IDR",
       });
@@ -474,9 +484,9 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
 
     it("enforces tenant isolation - cannot see company 2 statements", async () => {
       // Create statement in company 2
-      const company2 = await createTestCompanyMinimal({ code: `SS-C2-LIST-${Date.now()}` });
+      const company2 = await createTestCompanyMinimal({ code: makeTag('SSC2LIST', ++ssTagCounter).slice(0, 15) });
       const c2Supplier = await createTestSupplier(company2.id, {
-        code: `SS-C2-SUP-L-${Date.now()}`,
+        code: makeTag('SSC2SUPL', ++ssTagCounter),
         name: "Company 2 Supplier for List",
         currency: "IDR",
       });
@@ -534,7 +544,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
 
       // Create and post an invoice
       await createAndPostInvoice(
-        `SS-INV-${Date.now()}`.slice(0, 20),
+        makeTag('SSINV', ++ssTagCounter),
         statementDate,
         amount,
         supplierId
@@ -571,9 +581,9 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
 
     it("returns 403 when statement belongs to another company", async () => {
       // Create statement in company 2
-      const company2 = await createTestCompanyMinimal({ code: `SS-C2-REC-${Date.now()}` });
+      const company2 = await createTestCompanyMinimal({ code: makeTag('SSC2REC', ++ssTagCounter).slice(0, 15) });
       const c2Supplier = await createTestSupplier(company2.id, {
-        code: `SS-C2-SUP-R-${Date.now()}`,
+        code: makeTag('SSC2SUPR', ++ssTagCounter),
         name: "Company 2 Supplier for Reconcile",
         currency: "IDR",
       });
@@ -596,7 +606,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
 
       // Create and post an invoice with specific amount
       await createAndPostInvoice(
-        `SS-INV-TOL-${Date.now()}`.slice(0, 20),
+        makeTag('SSINVTOL', ++ssTagCounter),
         statementDate,
         "100.0000",
         supplierId
@@ -626,7 +636,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
       const statementDate = "2026-04-26";
 
       const fxSupplier = await createTestSupplier(testCompanyId, {
-        code: `SUP-FX-${Date.now()}`.slice(0, 20),
+        code: makeTag('SUPFX', ++ssTagCounter),
         name: "FX Supplier",
         currency: "USD",
         paymentTermsDays: 30,
@@ -637,7 +647,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
 
       // Invoice in USD 100, PI posting uses rate 2 => base 200
       await createAndPostInvoice(
-        `SS-INV-FX-${Date.now()}`.slice(0, 20),
+        makeTag('SSINVF', ++ssTagCounter),
         statementDate,
         "100.0000",
         fxSupplier.id,
@@ -767,9 +777,9 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
 
     it("returns 403 when statement belongs to another company", async () => {
       // Create statement in company 2
-      const company2 = await createTestCompanyMinimal({ code: `SS-C2-PUT-${Date.now()}` });
+      const company2 = await createTestCompanyMinimal({ code: makeTag('SSC2PUT', ++ssTagCounter).slice(0, 15) });
       const c2Supplier = await createTestSupplier(company2.id, {
-        code: `SS-C2-SUP-P-${Date.now()}`,
+        code: makeTag('SSC2SMPP', ++ssTagCounter),
         name: "Company 2 Supplier for Put",
         currency: "IDR",
       });
@@ -796,7 +806,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
       const statementDate = "2026-04-23";
 
       const toleranceSupplier = await createTestSupplier(testCompanyId, {
-        code: `SUP-TOL-${Date.now()}`.slice(0, 20),
+        code: makeTag('SUPTOL', ++ssTagCounter),
         name: "Tolerance Supplier A",
         currency: "IDR",
         paymentTermsDays: 30,
@@ -804,7 +814,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
 
       // Create an invoice
       await createAndPostInvoice(
-        `SS-INV-ACC-${Date.now()}`.slice(0, 20),
+        makeTag('SSINvacc', ++ssTagCounter),
         statementDate,
         "1000.0000",
         toleranceSupplier.id
@@ -833,7 +843,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
       const statementDate = "2026-04-24";
 
       const toleranceSupplier = await createTestSupplier(testCompanyId, {
-        code: `SUP-TOL-${Date.now()}`.slice(0, 20),
+        code: makeTag('SUPTOL', ++ssTagCounter),
         name: "Tolerance Supplier B",
         currency: "IDR",
         paymentTermsDays: 30,
@@ -841,7 +851,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
 
       // Create an invoice
       await createAndPostInvoice(
-        `SS-INV-UNACC-${Date.now()}`.slice(0, 20),
+        makeTag('SSINVUNACC', ++ssTagCounter),
         statementDate,
         "1000.0000",
         toleranceSupplier.id

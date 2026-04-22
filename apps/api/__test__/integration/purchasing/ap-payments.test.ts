@@ -6,10 +6,11 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { closeTestDb, getTestDb } from '../../helpers/db';
 import { sql } from 'kysely';
 import {
-  resetFixtureRegistry,
+  cleanupTestFixtures,
   createTestCompanyMinimal,
   createTestUser,
   getRoleIdByCode,
@@ -20,7 +21,17 @@ import {
   createTestPurchasingAccounts,
   getOrCreateTestCashierForPermission,
   createTestBankAccount,
+  setTestSupplierActive,
+  setTestBankAccountActive,
+  setTestPurchasingDefaultApAccount,
 } from '../../fixtures';
+
+// Deterministic code generator for constrained fields
+function makeTag(prefix: string, counter: number): string {
+  const worker = process.env.VITEST_POOL_ID ?? '0';
+  const pidTag = String(process.pid % 10000).padStart(4, '0');
+  return `${prefix}${worker}${pidTag}${String(counter).padStart(4, '0')}`;
+}
 
 let baseUrl: string;
 let ownerToken: string;
@@ -33,17 +44,22 @@ let expenseAccountId: number;
 let postedPi1Id: number;  // PI for partial payment tests
 let postedPi2Id: number;  // PI for full payment tests
 let postedPi3Id: number;  // PI for multi-line payment tests
+let apTagCounter = 0;
 
 describe('purchasing.ap-payments', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
 
     // Create test company with ACL seeded for purchasing.payments
-    const testCompany = await createTestCompanyMinimal();
+    const testCompany = await createTestCompanyMinimal({
+      code: makeTag('APCO', ++apTagCounter).toUpperCase(),
+      name: `AP Payments Company ${process.pid}`,
+    });
     testCompanyId = testCompany.id;
 
     // Create an OWNER user with known password
-    const testEmail = `ap-pay-owner-${Date.now()}@example.com`;
+    const testEmail = `ap-pay-owner-${++apTagCounter}@example.com`;
     const testUser = await createTestUser(testCompanyId, {
       email: testEmail,
       name: 'AP Payment Test Owner',
@@ -54,12 +70,20 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
     const ownerRoleId = await getRoleIdByCode('OWNER');
     await assignUserGlobalRole(testUser.id, ownerRoleId);
 
-    // Set purchasing.payments CRUDAM (63) for OWNER role
-    await setModulePermission(testCompanyId, ownerRoleId, 'purchasing', 'payments', 63, { allowSystemRoleMutation: true });
+    // Set purchasing.payments CRUDAM (63) and purchasing.invoices CRUDAM (63) for OWNER role
+    // Also set purchasing.suppliers CRUDAM since tests create suppliers
+    for (const [module, resource] of [
+      ['purchasing', 'payments'],
+      ['purchasing', 'invoices'],
+      ['purchasing', 'suppliers'],
+      ['purchasing', 'exchange_rates'],
+    ] as [string, string][]) {
+      await setModulePermission(testCompanyId, ownerRoleId, module, resource, 63, { allowSystemRoleMutation: true });
+    }
 
     // Create a supplier for this test company
     const supplier = await createTestSupplier(testCompanyId, {
-      code: `APP-SUP-${Date.now()}`.slice(0, 20),
+      code: makeTag('APPSUP', ++apTagCounter),
       name: 'AP Payment Test Supplier',
       currency: 'IDR',
     });
@@ -94,7 +118,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `API-PI1-${Date.now() % 100000}`,
+        invoice_no: makeTag('APIPI1', ++apTagCounter),
         invoice_date: '2026-04-01',
         currency_code: 'IDR',
         notes: 'PI for partial payment test',
@@ -125,7 +149,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `API-PI2-${Date.now() % 100000}`,
+        invoice_no: makeTag('APIPI2', ++apTagCounter),
         invoice_date: '2026-04-02',
         currency_code: 'IDR',
         notes: 'PI for full payment test',
@@ -156,7 +180,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `API-PI3-${Date.now() % 100000}`,
+        invoice_no: makeTag('APIPI3', ++apTagCounter),
         invoice_date: '2026-04-03',
         currency_code: 'IDR',
         notes: 'PI for multi-line payment test',
@@ -196,13 +220,17 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       // Clean up purchase invoices
       await sql`DELETE FROM purchase_invoice_lines WHERE company_id = ${testCompanyId}`.execute(db);
       await sql`DELETE FROM purchase_invoices WHERE company_id = ${testCompanyId}`.execute(db);
+      // Clean up supplier and FX rows created by tests
+      await sql`DELETE FROM exchange_rates WHERE company_id = ${testCompanyId}`.execute(db);
+      await sql`DELETE FROM suppliers WHERE company_id = ${testCompanyId}`.execute(db);
       // Clean up bank account
       await sql`DELETE FROM accounts WHERE company_id = ${testCompanyId}`.execute(db);
     } catch (e) {
       // ignore cleanup errors
     }
-    resetFixtureRegistry();
+    await cleanupTestFixtures();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   // -------------------------------------------------------------------------
@@ -284,7 +312,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `API-CONCUR-${Date.now() % 100000}`,
+        invoice_no: makeTag('APICONCUR', ++apTagCounter),
         invoice_date: '2026-04-05',
         currency_code: 'IDR',
         lines: [
@@ -508,7 +536,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `API-PARTIAL-${Date.now() % 100000}`,
+        invoice_no: makeTag('APIPARTIAL', ++apTagCounter),
         invoice_date: '2026-04-10',
         currency_code: 'IDR',
         lines: [
@@ -663,7 +691,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `API-ML1-${Date.now() % 100000}`,
+        invoice_no: makeTag('APIML1', ++apTagCounter),
         invoice_date: '2026-04-11',
         currency_code: 'IDR',
         lines: [
@@ -692,7 +720,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `API-ML2-${Date.now() % 100000}`,
+        invoice_no: makeTag('APIML2', ++apTagCounter),
         invoice_date: '2026-04-12',
         currency_code: 'IDR',
         lines: [
@@ -881,7 +909,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `API-OVER-${Date.now() % 100000}`,
+        invoice_no: makeTag('APIOVER', ++apTagCounter),
         invoice_date: '2026-04-13',
         currency_code: 'IDR',
         lines: [
@@ -949,7 +977,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `API-FX-${Date.now() % 100000}`,
+        invoice_no: makeTag('APIFX', ++apTagCounter),
         invoice_date: '2026-04-26',
         currency_code: 'USD',
         exchange_rate: '15000.00000000',
@@ -1030,7 +1058,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `API-DUPLINE-${Date.now() % 100000}`,
+        invoice_no: makeTag('APIDUPLINE', ++apTagCounter),
         invoice_date: '2026-04-13',
         currency_code: 'IDR',
         lines: [
@@ -1075,7 +1103,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
 
   it('rejects payment when invoice supplier does not match payment supplier', async () => {
     const otherSupplier = await createTestSupplier(testCompanyId, {
-      code: `APP-OTH-${Date.now()}`.slice(0, 20),
+      code: makeTag('APPOTH', ++apTagCounter),
       name: 'AP Payment Other Supplier',
       currency: 'IDR',
     });
@@ -1088,7 +1116,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: otherSupplier.id,
-        invoice_no: `API-SUPMM-${Date.now() % 100000}`,
+        invoice_no: makeTag('APISUPMM', ++apTagCounter),
         invoice_date: '2026-04-13',
         currency_code: 'IDR',
         lines: [
@@ -1132,7 +1160,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
 
   it('returns 400 when creating payment with inactive supplier', async () => {
     const inactiveSupplier = await createTestSupplier(testCompanyId, {
-      code: `APP-INACT-${Date.now()}`.slice(0, 20),
+      code: makeTag('APPINACT', ++apTagCounter),
       name: 'Inactive Supplier',
       currency: 'IDR',
       isActive: false,
@@ -1161,7 +1189,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
 
   it('returns 400 on post when supplier is deactivated after draft creation', async () => {
     const supplier = await createTestSupplier(testCompanyId, {
-      code: `APP-DEACT-${Date.now()}`.slice(0, 20),
+      code: makeTag('APPDEACT', ++apTagCounter),
       name: 'Supplier Deactivated Before Post',
       currency: 'IDR',
       isActive: true,
@@ -1175,7 +1203,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: supplier.id,
-        invoice_no: `API-SUPDEACT-${Date.now() % 100000}`,
+        invoice_no: makeTag('APISUPDEACT', ++apTagCounter),
         invoice_date: '2026-04-22',
         currency_code: 'IDR',
         lines: [
@@ -1215,11 +1243,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
     const payment = await createRes.json();
     const paymentId = payment.data.id;
 
-    await sql`
-      UPDATE suppliers
-      SET is_active = 0, updated_at = NOW()
-      WHERE id = ${supplier.id} AND company_id = ${testCompanyId}
-    `.execute(getTestDb());
+    await setTestSupplierActive(testCompanyId, supplier.id, false);
 
     const postRes = await fetch(`${baseUrl}/api/purchasing/payments/${paymentId}/post`, {
       method: 'POST',
@@ -1256,11 +1280,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
     const payment = await createRes.json();
     const paymentId = payment.data.id;
 
-    await sql`
-      UPDATE accounts
-      SET is_active = 0, updated_at = NOW()
-      WHERE id = ${draftBankId} AND company_id = ${testCompanyId}
-    `.execute(getTestDb());
+    await setTestBankAccountActive(testCompanyId, draftBankId, false);
 
     const postRes = await fetch(`${baseUrl}/api/purchasing/payments/${paymentId}/post`, {
       method: 'POST',
@@ -1295,13 +1315,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
     const payment = await createRes.json();
     const paymentId = payment.data.id;
 
-    await sql`
-      UPDATE company_modules cm
-      INNER JOIN modules m ON m.id = cm.module_id
-      SET cm.purchasing_default_ap_account_id = ${expenseAccountId}, cm.updated_at = NOW()
-      WHERE cm.company_id = ${testCompanyId}
-        AND m.code = 'purchasing'
-    `.execute(getTestDb());
+    await setTestPurchasingDefaultApAccount(testCompanyId, expenseAccountId);
 
     try {
       const postRes = await fetch(`${baseUrl}/api/purchasing/payments/${paymentId}/post`, {
@@ -1316,13 +1330,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       expect(body.success).toBe(false);
       expect(body.error.code).toBe('AP_ACCOUNT_INVALID_TYPE');
     } finally {
-      await sql`
-        UPDATE company_modules cm
-        INNER JOIN modules m ON m.id = cm.module_id
-        SET cm.purchasing_default_ap_account_id = ${apAccountId}, cm.updated_at = NOW()
-        WHERE cm.company_id = ${testCompanyId}
-          AND m.code = 'purchasing'
-      `.execute(getTestDb());
+      await setTestPurchasingDefaultApAccount(testCompanyId, apAccountId);
     }
   });
 
@@ -1339,7 +1347,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `API-VOID-${Date.now() % 100000}`,
+        invoice_no: makeTag('APIVOID', ++apTagCounter),
         invoice_date: '2026-04-14',
         currency_code: 'IDR',
         lines: [
@@ -1445,7 +1453,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: `API-2VOID-${Date.now() % 100000}`,
+        invoice_no: makeTag('API2VOID', ++apTagCounter),
         invoice_date: '2026-04-15',
         currency_code: 'IDR',
         lines: [

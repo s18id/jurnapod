@@ -7,6 +7,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { getTestDb, closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
@@ -18,6 +19,7 @@ let accessToken: string;
 
 describe('purchase-orders - Concurrency: Order Number Generation', { timeout: 60000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
   });
@@ -25,6 +27,7 @@ describe('purchase-orders - Concurrency: Order Number Generation', { timeout: 60
   afterAll(async () => {
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   // =============================================================================
@@ -37,7 +40,7 @@ describe('purchase-orders - Concurrency: Order Number Generation', { timeout: 60
       const concurrency = 10;
       const operations: Promise<any>[] = [];
 
-      // Act: Create multiple POs concurrently
+      // Act: Create multiple POs concurrently, each with unique idempotency key
       for (let i = 0; i < concurrency; i++) {
         operations.push(
           fetch(`${baseUrl}/api/purchasing/orders`, {
@@ -49,7 +52,8 @@ describe('purchase-orders - Concurrency: Order Number Generation', { timeout: 60
             body: JSON.stringify({
               supplier_id: 1,
               order_date: '2026-04-20',
-              lines: [{ qty: '1', unit_price: '1000.00' }]
+              lines: [{ qty: '1', unit_price: '1000.00' }],
+              client_tx_id: `PO-CONC-${crypto.randomUUID()}`
             })
           }).then(r => r.json())
         );
@@ -61,7 +65,6 @@ describe('purchase-orders - Concurrency: Order Number Generation', { timeout: 60
       const conflictResults = results.filter(
         r => r.status === 'fulfilled' && r.value.error?.code === 'CONFLICT'
       );
-      // TODO: Before fix, collisions may cause CONFLICT. After fix, zero conflicts.
       expect(conflictResults).toHaveLength(0);
 
       // Assert: All successful POs have unique order_no values
@@ -71,15 +74,6 @@ describe('purchase-orders - Concurrency: Order Number Generation', { timeout: 60
       const orderNos = successful.map(r => (r as any).value.data.order_no);
       const uniqueOrderNos = new Set(orderNos);
       expect(uniqueOrderNos.size).toBe(orderNos.length);
-    });
-
-    it('should NOT allow duplicate order_no from race condition (P1)', async () => {
-      // This test specifically targets the Math.random() collision
-      // Before fix: Two concurrent requests can generate the same order_no
-      // After fix: Each request gets a unique order_no via atomic counter or UUID
-
-      // TODO: Implement deterministic collision simulation if possible
-      // (e.g., by mocking Date.now() or Math.random() in test setup)
     });
   });
 });

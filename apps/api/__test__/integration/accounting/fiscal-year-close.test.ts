@@ -26,6 +26,7 @@ import {
   createTestFiscalYear,
   createTestRole,
   createTestUser,
+  clearTestAPReconciliationSettings,
   getTestAccessToken,
   loginForTest,
   resetFixtureRegistry,
@@ -78,16 +79,17 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
     await acquireReadLock();
     baseUrl = getTestBaseUrl();
     const seedToken = await getTestAccessToken(baseUrl);
+    const runId = randomUUID().slice(0, 8);
 
     const company = await createTestCompanyMinimal({
-      code: `FYCLOSE-${Date.now()}`.slice(0, 15),
+      code: `FYCLOSE-${runId}`,
       timezone: "Asia/Jakarta",
     });
     companyId = company.id;
 
     const ownerRole = await createTestRole(baseUrl, seedToken, "FY Close Owner");
     const ownerUser = await createTestUser(companyId, {
-      email: `fy-close-${Date.now()}@example.com`,
+      email: `fy-close-${runId}@example.com`,
       name: "FY Close Owner",
       password: "TestPassword123!",
     });
@@ -438,5 +440,66 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
         AND id IN (${sql.join(persistedBatchIds)})
     `.execute(db);
     expect(persistedBatchRows.rows).toHaveLength(1);
+  });
+
+  /**
+   * AC-7: Auto-snapshot failure is non-blocking warning - approve still returns 200 with warning.
+   * When AP reconciliation settings are missing, the snapshot call fails, but the close/posting
+   * itself succeeds and the response is 200 with a top-level warnings array.
+   */
+  it("approve returns 200 with non-blocking warning when AP reconciliation settings are missing", async () => {
+    const fiscalYear = await createTestFiscalYear(companyId, {
+      year: 2050,
+      startDate: "2050-01-01",
+      endDate: "2050-12-31",
+      status: "OPEN",
+    });
+
+    const closeRequestId = `warn-test-${randomUUID()}`;
+
+    // Ensure settings are explicitly missing for deterministic warning-path assertion.
+    await clearTestAPReconciliationSettings(companyId);
+
+    // Step 1: Initiate
+    const initiateRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
+      ownerToken,
+      { close_request_id: closeRequestId, reason: "AC-7 test: warning side information" }
+    );
+    expect(initiateRes.status).toBe(200);
+
+    // Re-assert missing settings right before approve in case any setup path populated defaults.
+    await clearTestAPReconciliationSettings(companyId);
+
+    // Step 2: Approve - expect 200 with warning (AP settings not configured)
+    const approveRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close/approve`,
+      ownerToken,
+      { close_request_id: closeRequestId }
+    );
+
+    expect(approveRes.status).toBe(200);
+    const approveBody = await approveRes.json();
+    expect(approveBody.success).toBe(true);
+    expect(approveBody.error).toBeUndefined();
+
+    // Verify top-level warnings are present
+    expect(Array.isArray(approveBody.warnings)).toBe(true);
+    expect(approveBody.warnings.length).toBeGreaterThan(0);
+
+    // The warning must be non-blocking
+    const warning = approveBody.warnings[0];
+    expect(warning.blocking).toBe(false);
+    expect(warning.code).toBeTruthy();
+    expect(warning.reason).toBeTruthy();
+    expect(warning.message).toBeTruthy();
+
+    // Fiscal year should still be CLOSED despite the snapshot warning
+    const fyStatusRes = await getJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/status`,
+      ownerToken
+    );
+    const fyStatusBody = await fyStatusRes.json();
+    expect(fyStatusBody.data.status).toBe("CLOSED");
   });
 });

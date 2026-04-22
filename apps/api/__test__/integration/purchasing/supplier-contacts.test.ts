@@ -6,7 +6,9 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
-import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
+import { closeTestDb, getTestDb } from '../../helpers/db';
+import { sql } from 'kysely';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -14,16 +16,24 @@ import {
   getOrCreateTestCashierForPermission,
 } from '../../fixtures';
 
+// Deterministic code generator for constrained fields (max 20 chars)
+function makeTag(prefix: string, counter: number): string {
+  const worker = process.env.VITEST_POOL_ID ?? '0';
+  return `${prefix}${worker}${String(counter).padStart(4, '0')}`.slice(0, 20);
+}
+
 let baseUrl: string;
 let ownerToken: string;
 let cashierToken: string;
 let cashierCompanyId: number;
+let scTagCounter = 0;
 
 describe('purchasing.supplier-contacts', { timeout: 30000 }, () => {
   let testSupplierId: number;
   let testSupplierCode: string;
 
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     ownerToken = await getTestAccessToken(baseUrl);
     const context = await getSeedSyncContext();
@@ -38,7 +48,7 @@ describe('purchasing.supplier-contacts', { timeout: 30000 }, () => {
     cashierToken = cashier.accessToken;
 
     // Create a supplier for contact tests
-    testSupplierCode = `SUP-CT-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    testSupplierCode = makeTag('SUPCT', ++scTagCounter);
     const createRes = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -55,8 +65,17 @@ describe('purchasing.supplier-contacts', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
+    // Clean up contacts and supplier created by this test
+    try {
+      const db = getTestDb();
+      await sql`DELETE FROM supplier_contacts WHERE supplier_id = ${testSupplierId}`.execute(db);
+      await sql`DELETE FROM suppliers WHERE company_id = ${cashierCompanyId}`.execute(db);
+    } catch (e) {
+      // ignore cleanup errors
+    }
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   // -------------------------------------------------------------------------

@@ -1067,6 +1067,55 @@ export async function createTestBankAccount(
   return accountId;
 }
 
+/**
+ * Update supplier active status for tests that validate posting safeguards.
+ */
+export async function setTestSupplierActive(
+  companyId: number,
+  supplierId: number,
+  isActive: boolean
+): Promise<void> {
+  const db = getDb();
+  await sql`
+    UPDATE suppliers
+    SET is_active = ${isActive ? 1 : 0}, updated_at = NOW()
+    WHERE id = ${supplierId} AND company_id = ${companyId}
+  `.execute(db);
+}
+
+/**
+ * Update bank/cash account active status for payment posting tests.
+ */
+export async function setTestBankAccountActive(
+  companyId: number,
+  accountId: number,
+  isActive: boolean
+): Promise<void> {
+  const db = getDb();
+  await sql`
+    UPDATE accounts
+    SET is_active = ${isActive ? 1 : 0}, updated_at = NOW()
+    WHERE id = ${accountId} AND company_id = ${companyId}
+  `.execute(db);
+}
+
+/**
+ * Override purchasing default AP account id for AP posting validation tests.
+ */
+export async function setTestPurchasingDefaultApAccount(
+  companyId: number,
+  accountId: number
+): Promise<void> {
+  const db = getDb();
+  await sql`
+    UPDATE company_modules cm
+    INNER JOIN modules m ON m.id = cm.module_id
+    SET cm.purchasing_default_ap_account_id = ${accountId}, cm.updated_at = NOW()
+    WHERE cm.company_id = ${companyId}
+      AND m.code = 'purchasing'
+  `.execute(db);
+}
+
 // ============================================================================
 // Item Fixtures
 // ============================================================================
@@ -1572,6 +1621,32 @@ export async function createTestAPReconciliationSettings(
     companyId,
     accountIds,
   };
+}
+
+/**
+ * Clear AP reconciliation settings and fallback AP account defaults for a company.
+ *
+ * This helper enforces the explicit "settings missing" state used by fail-closed
+ * and warning-path tests.
+ */
+export async function clearTestAPReconciliationSettings(companyId: number): Promise<void> {
+  const db = getDb();
+  const settingKey = "ap_reconciliation_account_ids";
+
+  await sql`
+    DELETE FROM settings_strings
+    WHERE company_id = ${companyId}
+      AND outlet_id IS NULL
+      AND setting_key = ${settingKey}
+  `.execute(db);
+
+  await sql`
+    UPDATE company_modules cm
+    INNER JOIN modules m ON m.id = cm.module_id
+    SET cm.purchasing_default_ap_account_id = NULL
+    WHERE cm.company_id = ${companyId}
+      AND m.code = 'purchasing'
+  `.execute(db);
 }
 
 // FIX(47.5-WP-D): Canonical helper for company-level string settings.
