@@ -1,6 +1,6 @@
 # Action Items Tracker
 
-**Last Updated:** 2026-04-14T00:00:00Z
+**Last Updated:** 2026-04-22T00:00:00Z
 **Review Cadence:** Monthly at sprint retrospective
 
 ---
@@ -10,10 +10,10 @@
 | Priority | Open | Done | Won't Fix | Total |
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
-| P1 | 0 | 11 | 0 | 11 |
+| P1 | 0 | 13 | 0 | 13 |
 | P2 | 3 | 17 | 0 | 20 |
 | P3 | 1 | 2 | 3 | 6 |
-| **Total** | **4** | **34** | **3** | **41** |
+| **Total** | **4** | **36** | **3** | **43** |
 
 ---
 
@@ -76,6 +76,8 @@
 | **E46-A1** | Add sprint-status utility + validation as mandatory pre-step in story template | Epic 46 | Epic 46 | Pending — E46 backlog |
 | **E46-A2** | Limit retrospectives to MAX 2 action items with explicit owners/deadlines | Epic 46 | Epic 46 | Pending — E46 backlog |
 | **E46-A4** | Verify sprint-status.yaml integrity before marking any epic done (human gate) | Epic 46 | Epic 46 | Pending — E46 backlog |
+| **E48-A2** | Q49-001 execution planning (critical path) | Epic 48 | Epic 49 | Decomposition passes documented; backward-compatibility constraints verified; Pass 1 marked `ready-to-execute` in `_bmad-output/planning-artifacts/epic-49-q49-001-test-fixtures-execution-pass-1.md` |
+| **E48-A1** | Kickoff debt signal improvement | Epic 48 | Epic 49 | Kickoff scorecard now distinguishes sprint-introduced lint errors from pre-existing debt with explicit evidence paths in `_bmad-output/planning-artifacts/epic-49-solid-dry-kiss-scorecard.md` |
 
 ### P2
 
@@ -172,4 +174,4 @@ Examples:
 - `E8-A1` = Epic 8, Action 1
 - `E15-A2` = Epic 15, Action 2
 
-_Last Updated: 2026-04-19T00:00:00Z_
+_Last Updated: 2026-04-22T00:00:00Z_

@@ -112,6 +112,15 @@ This scorecard establishes the kickoff baseline for Epic 49 using the SOLID/DRY/
 
 ## Fails-to-Track Summary (from Kickoff Baseline)
 
+### Kickoff Lint Debt Classification (E48-A1)
+
+| Classification | Result | Evidence Path |
+|----------------|--------|---------------|
+| Sprint-introduced lint errors | None detected (`0` errors, lint exit `0`) | `_bmad-output/planning-artifacts/epic-49-logs/lint-api.log` |
+| Pre-existing lint debt | `@typescript-eslint/no-explicit-any` warning baseline tracked as technical debt (TD-038) | `docs/adr/TECHNICAL-DEBT.md` (TD-038), `_bmad-output/planning-artifacts/epic-49-risk-register.md` (R49-003) |
+
+**Kickoff classification note:** Epic 49 kickoff explicitly separates sprint-introduced lint errors from pre-existing debt per E48-A1. Lint baseline evidence is archived in `epic-49-logs/lint-api.log`; pre-existing debt remains tracked via TD-038.
+
 | Finding | Category | Severity | Story Assignment |
 |---------|----------|----------|------------------|
 | 504 `Date.now()` usages in api integration tests | Time-dependent | P1 | 49.2, 49.3, 49.4, 49.5 |

@@ -1,0 +1,8 @@
+---
+stepsCompleted: [1]
+user_name: Ahmad
+date: '2026-04-22'
+agents_loaded: true
+party_active: true
+exit_triggers: ['*exit', 'goodbye', 'end party', 'quit']
+---
