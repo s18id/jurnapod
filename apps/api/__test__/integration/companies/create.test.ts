@@ -7,6 +7,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
+import { makeTag } from '../../helpers/tags';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -21,6 +23,7 @@ let superAdminToken: string | null = null;
 
 describe('companies.create', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
 
@@ -39,6 +42,7 @@ describe('companies.create', { timeout: 30000 }, () => {
   afterAll(async () => {
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   it('rejects request without auth', async () => {
@@ -56,7 +60,7 @@ describe('companies.create', { timeout: 30000 }, () => {
   it('requires SUPER_ADMIN role to create company', async () => {
     // accessToken is OWNER - should be rejected because only SUPER_ADMIN can create companies
     // This is a platform-level operation
-    const uniqueCode = `CO-CREATE-${Date.now()}`;
+    const uniqueCode = `CO-CREATE-${makeTag('CCR')}`;
     const res = await fetch(`${baseUrl}/api/companies`, {
       method: 'POST',
       headers: {
@@ -81,7 +85,7 @@ describe('companies.create', { timeout: 30000 }, () => {
     }
     const adminToken = superAdminToken;
 
-    const uniqueCode = `CO-NEW-${Date.now()}`;
+    const uniqueCode = `CO-NEW-${makeTag('CNW')}`;
     const res = await fetch(`${baseUrl}/api/companies`, {
       method: 'POST',
       headers: {
@@ -148,7 +152,7 @@ describe('companies.create', { timeout: 30000 }, () => {
     }
     const adminToken = superAdminToken;
 
-    const uniqueCode = `CO-EMAIL-${Date.now()}`;
+    const uniqueCode = `CO-EMAIL-${makeTag('CEM')}`;
     const res = await fetch(`${baseUrl}/api/companies`, {
       method: 'POST',
       headers: {

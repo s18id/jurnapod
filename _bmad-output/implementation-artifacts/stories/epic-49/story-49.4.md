@@ -1,6 +1,6 @@
 # Story 49.4: Platform + ACL Suite Determinism Hardening
 
-**Status:** backlog
+**Status:** done
 
 ## Story
 
@@ -105,26 +105,74 @@ Each in-scope suite passes 3 times consecutively with zero failures. Log evidenc
 
 ## Validation Evidence
 
+### Implementation Progress (2026-04-22)
+
+Completed in this story thread:
+- Deterministic tag hardening migrated to shared helper: `apps/api/__test__/helpers/tags.ts`
+- Invalid UUID slicing pattern removed from touched platform/sales/accounting suites in Epic 49 scope
+- RWLock pattern enforced across platform/company/user suites in scope
+- `afterAll` teardown hardened with exception-safe `try/finally` lock release
+- Negative-permission tests aligned to low-privilege `CASHIER` tokens (no OWNER/SUPER_ADMIN for expected 403)
+- Auth token time assertions hardened with fake timers in:
+  - `packages/auth/__test__/integration/tokens.integration.test.ts`
+  - `packages/auth/__test__/integration/refresh-tokens.integration.test.ts`
+
+Outstanding before story close:
+- None. AC1–AC5 completed with evidence.
+
+### AC5 Evidence Summary (Completed)
+
+All in-scope suites passed 3 consecutive reruns with zero failures.
+
+API logs: `apps/api/logs/s49-4-*-run-{1,2,3}.log`  
+Auth logs: `packages/auth/logs/s49-4-*-run-{1,2,3}.log`
+
+Verification grep:
+- No `Test Files ... failed`
+- No `Failed Tests`
+- No `No test files found`
+- No `npm error`
+
+### AC5 Execution Commands (3 Consecutive Runs)
+
 ```bash
 # API platform suites
-for suite in customers tenant-scope create \
-  companies/create companies/update companies/get-by-id companies/list \
-  users/create users/update users/list users/get-by-id users/roles \
-  users/tenant-scope users/activate users/password users/outlets users/me; do
+for suite in \
+  "__test__/integration/platform/customers.test.ts" \
+  "__test__/integration/outlets/tenant-scope.test.ts" \
+  "__test__/integration/outlets/create.test.ts" \
+  "__test__/integration/companies/create.test.ts" \
+  "__test__/integration/companies/update.test.ts" \
+  "__test__/integration/companies/get-by-id.test.ts" \
+  "__test__/integration/companies/list.test.ts" \
+  "__test__/integration/users/create.test.ts" \
+  "__test__/integration/users/update.test.ts" \
+  "__test__/integration/users/list.test.ts" \
+  "__test__/integration/users/get-by-id.test.ts" \
+  "__test__/integration/users/roles.test.ts" \
+  "__test__/integration/users/tenant-scope.test.ts" \
+  "__test__/integration/users/activate.test.ts" \
+  "__test__/integration/users/password.test.ts" \
+  "__test__/integration/users/outlets.test.ts" \
+  "__test__/integration/users/me.test.ts"; do
   for run in 1 2 3; do
-    nohup npm run test:single -- \
-      "apps/api/__test__/integration/platform/${suite}.test.ts" \
-      > "apps/api/logs/s49-4-${suite}-run-${run}.log" 2>&1 &
+    suite_name=$(basename "${suite}" .test.ts)
+    nohup npm run test:single -w @jurnapod/api -- "${suite}" \
+      > "apps/api/logs/s49-4-${suite_name}-run-${run}.log" 2>&1 &
   done
 done
 
 # Auth packages suites
-for suite in resource-level-acl.integration access-check.integration \
-  tokens.integration refresh-tokens.integration login-throttle.integration; do
+for suite in \
+  "__test__/integration/resource-level-acl.integration.test.ts" \
+  "__test__/integration/access-check.integration.test.ts" \
+  "__test__/integration/tokens.integration.test.ts" \
+  "__test__/integration/refresh-tokens.integration.test.ts" \
+  "__test__/integration/login-throttle.integration.test.ts"; do
   for run in 1 2 3; do
-    nohup npm run test:single -- \
-      "packages/auth/__test__/integration/${suite}.test.ts" \
-      > "packages/auth/logs/s49-4-${suite}-run-${run}.log" 2>&1 &
+    suite_name=$(basename "${suite}" .test.ts)
+    nohup npm run test:single -w @jurnapod/auth -- "${suite}" \
+      > "packages/auth/logs/s49-4-${suite_name}-run-${run}.log" 2>&1 &
   done
 done
 wait

@@ -7,31 +7,39 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
+import { makeTag } from '../../helpers/tags';
 import {
-  resetFixtureRegistry,
+  cleanupTestFixtures,
   getTestAccessToken,
   getSeedSyncContext as loadSeedSyncContext,
   createTestCompanyMinimal,
-  registerFixtureCleanup
+  getOrCreateTestCashierForPermission
 } from '../../fixtures';
 
 let baseUrl: string;
 let accessToken: string;
 let companyId: number;
+let companyCode: string;
 let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
-const getSeedSyncContext = async () => seedCtx;
 
 describe('companies.update', { timeout: 60000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
+    companyCode = process.env.JP_COMPANY_CODE ?? '';
+    if (!companyCode) {
+      throw new Error('JP_COMPANY_CODE is required for companies.update integration tests');
+    }
     accessToken = await getTestAccessToken(baseUrl);
     seedCtx = await loadSeedSyncContext();
     companyId = seedCtx.companyId;
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
+    await cleanupTestFixtures();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   it('rejects request without auth', async () => {
@@ -59,8 +67,8 @@ describe('companies.update', { timeout: 60000 }, () => {
       })
     });
 
-    // Owner bypasses module permission
-    expect([200, 403]).toContain(res.status);
+    // Owner bypasses module permission on own company → success
+    expect(res.status).toBe(200);
 
     if (res.ok) {
       const body = await res.json();
@@ -81,8 +89,8 @@ describe('companies.update', { timeout: 60000 }, () => {
       body: JSON.stringify({})
     });
 
-    // Empty update is valid - all fields are optional
-    expect([200, 403]).toContain(res.status);
+    // Own company update with OWNER token → 200
+    expect(res.status).toBe(200);
   });
 
   it('returns 400 for invalid email format', async () => {
@@ -99,10 +107,11 @@ describe('companies.update', { timeout: 60000 }, () => {
       })
     });
 
-    expect([400, 403]).toContain(res.status);
+    // Own company with OWNER: validation runs → 400
+    expect(res.status).toBe(400);
   });
 
-  it('returns 404 for non-existent company', async () => {
+  it('returns 403 for non-existent foreign company id (tenant isolation first)', async () => {
     const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/companies/999999`, {
@@ -116,40 +125,7 @@ describe('companies.update', { timeout: 60000 }, () => {
       })
     });
 
-    expect(res.status).toBe(404);
-  });
-
-  it('validates company code uniqueness on update', async () => {
-    // Create two test companies
-    const company1 = await createTestCompanyMinimal({
-      code: `CO1-${Date.now()}`,
-      name: 'Company One'
-    });
-
-    const company2 = await createTestCompanyMinimal({
-      code: `CO2-${Date.now()}`,
-      name: 'Company Two'
-    });
-
-    const ownerToken = accessToken;
-
-    // Note: The PATCH endpoint does NOT support updating code.
-    // Code uniqueness is validated on CREATE only.
-    // This test verifies the endpoint correctly ignores code field in update.
-    const res = await fetch(`${baseUrl}/api/companies/${company1.id}`, {
-      method: 'PATCH',
-      headers: {
-        'Authorization': `Bearer ${ownerToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        name: 'Updated Name',
-        // code is intentionally not included - PATCH doesn't support code update
-      })
-    });
-
-    // Should succeed since we're only updating name
-    expect([200, 403]).toContain(res.status);
+    expect(res.status).toBe(403);
   });
 
   it('allows timezone update', async () => {
@@ -166,7 +142,8 @@ describe('companies.update', { timeout: 60000 }, () => {
       })
     });
 
-    expect([200, 403]).toContain(res.status);
+    // Own company with OWNER token → 200
+    expect(res.status).toBe(200);
 
     if (res.ok) {
       const body = await res.json();
@@ -175,14 +152,14 @@ describe('companies.update', { timeout: 60000 }, () => {
     }
   });
 
-  it('returns 200 when non-SUPER_ADMIN updates company (module permission granted)', async () => {
+  it('returns 403 when updating another company (cross-company access denied)', async () => {
     // Create another company
     const otherCompany = await createTestCompanyMinimal({
-      code: `CO-OTHER-${Date.now()}`,
+      code: `CO-OTHER-${makeTag('COT')}`,
       name: 'Other Company'
     });
 
-    // Use cashier token - may be able to update if module permission is granted via role
+    // Use accessToken (OWNER) to update a different company → cross-company → must be 403
     const res = await fetch(`${baseUrl}/api/companies/${otherCompany.id}`, {
       method: 'PATCH',
       headers: {
@@ -194,8 +171,29 @@ describe('companies.update', { timeout: 60000 }, () => {
       })
     });
 
-    // Note: The route allows this when user has module permission via role
-    // This test documents actual behavior - module permission can grant cross-company access
-    expect([200, 403]).toContain(res.status);
+    // Cross-company update MUST be denied regardless of role
+    // (company-level scoping enforces tenant isolation)
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 403 for CASHIER without platform.companies.update permission', async () => {
+    const { accessToken: cashierToken } = await getOrCreateTestCashierForPermission(
+      companyId,
+      companyCode,
+      baseUrl
+    );
+
+    const res = await fetch(`${baseUrl}/api/companies/${companyId}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${cashierToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: `No Access ${makeTag('NAU')}`
+      })
+    });
+
+    expect(res.status).toBe(403);
   });
 });

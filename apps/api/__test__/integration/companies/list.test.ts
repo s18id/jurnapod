@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
@@ -17,10 +18,10 @@ let baseUrl: string;
 let accessToken: string;
 let companyId: number;
 let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
-const getSeedSyncContext = async () => seedCtx;
 
 describe('companies.list', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     seedCtx = await loadSeedSyncContext();
@@ -28,8 +29,12 @@ describe('companies.list', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+      await closeTestDb();
+    } finally {
+      await releaseReadLock();
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -37,7 +42,7 @@ describe('companies.list', { timeout: 30000 }, () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns 200 with valid token for SUPER_ADMIN listing all companies', async () => {
+  it('returns 200 with valid OWNER token for company listing', async () => {
     const ownerToken = accessToken;
 
     const res = await fetch(`${baseUrl}/api/companies`, {
@@ -48,8 +53,8 @@ describe('companies.list', { timeout: 30000 }, () => {
       }
     });
 
-    // Owner may bypass module permission
-    expect([200, 403]).toContain(res.status);
+    // OWNER can list companies - deterministic 200
+    expect(res.status).toBe(200);
 
     if (res.ok) {
       const body = await res.json();
@@ -58,8 +63,8 @@ describe('companies.list', { timeout: 30000 }, () => {
     }
   });
 
-  it('returns only own company for non-SUPER_ADMIN', async () => {
-    // Use the cashier token which is not SUPER_ADMIN
+  it('returns only own company for OWNER (non-SUPER_ADMIN)', async () => {
+    // Use OWNER token (non-SUPER_ADMIN path)
     const res = await fetch(`${baseUrl}/api/companies`, {
       method: 'GET',
       headers: {
@@ -68,17 +73,15 @@ describe('companies.list', { timeout: 30000 }, () => {
       }
     });
 
-    // Without companies:read permission, expect 403
-    expect([200, 403]).toContain(res.status);
+    // OWNER listing companies - deterministic 200
+    expect(res.status).toBe(200);
 
     if (res.ok) {
       const body = await res.json();
       expect(body.success).toBe(true);
       expect(Array.isArray(body.data)).toBe(true);
       // Non-SUPER_ADMIN should only see their own company
-      if (body.data.length > 0) {
-        expect(body.data.some((c: { id: number }) => c.id === companyId)).toBe(true);
-      }
+      expect(body.data.every((c: { id: number }) => c.id === companyId)).toBe(true);
     }
   });
 
@@ -93,7 +96,8 @@ describe('companies.list', { timeout: 30000 }, () => {
       }
     });
 
-    expect([200, 403]).toContain(res.status);
+    // Owner listing with filter - deterministic 200
+    expect(res.status).toBe(200);
 
     if (res.ok) {
       const body = await res.json();

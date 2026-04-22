@@ -7,8 +7,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
-import { closeTestDb } from '../../helpers/db';
-import { getTestDb } from '../../helpers/db';
+import { closeTestDb, getTestDb } from '../../helpers/db';
 import { sql } from 'kysely';
 import {
   resetFixtureRegistry,
@@ -21,9 +20,12 @@ import {
   getRoleIdByCode,
   loginForTest,
   createTestCompanyMinimal,
-  getOrCreateTestCashierForPermission
+  getOrCreateTestCashierForPermission,
+  createTestCustomerForCompany,
+  createTestCustomer
 } from '../../fixtures';
 import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
+import { makeTag } from '../../helpers/tags';
 
 let baseUrl: string;
 let ownerToken: string;
@@ -80,7 +82,7 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
 
     // Create an ADMIN user with outlet-scoped access to outletId only.
     // This user can PATCH invoices on the source outlet but cannot reassign to other outlets.
-    const scopedAdminEmail = `inv-test-admin+${crypto.randomUUID().slice(0, 8)}@example.com`;
+    const scopedAdminEmail = `inv-test-admin+${makeTag('ADM', 32)}@example.com`;
     const scopedAdminPassword = 'TestAdmin123!';
 
     const scopedAdmin = await createTestUser(companyId, {
@@ -115,7 +117,7 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
   it('updates invoice_no via PATCH', async () => {
     // Create a test item for the invoice
     const item = await createTestItem(companyId, {
-      sku: `INV-UPD-${crypto.randomUUID().slice(0, 12)}`,
+      sku: `INV-UPD-${makeTag('UPD', 20)}`,
       name: 'Invoice Update Test Item',
       type: 'PRODUCT'
     });
@@ -151,7 +153,7 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
     await ensureInvoiceVisible(baseUrl, ownerToken, invoiceId);
 
     // PATCH with new invoice_no
-    const patchPayload = { invoice_no: `INV-NEW-${crypto.randomUUID().slice(0, 12)}` };
+    const patchPayload = { invoice_no: `INV-NEW-${makeTag('NEW', 20)}` };
     const patchRes = await fetch(`${baseUrl}/api/sales/invoices/${invoiceId}`, {
       method: 'PATCH',
       headers: {
@@ -169,7 +171,7 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
 
   it('updates invoice_date and due_date via PATCH', async () => {
     const item = await createTestItem(companyId, {
-      sku: `INV-DATE-${crypto.randomUUID().slice(0, 12)}`,
+      sku: `INV-DATE-${makeTag('DAT', 20)}`,
       name: 'Date Update Item',
       type: 'SERVICE'
     });
@@ -224,7 +226,7 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
 
   it('updates due_term via PATCH', async () => {
     const item = await createTestItem(companyId, {
-      sku: `INV-TERM-${crypto.randomUUID().slice(0, 12)}`,
+      sku: `INV-TERM-${makeTag('TRM', 20)}`,
       name: 'Term Update Item',
       type: 'SERVICE'
     });
@@ -275,7 +277,7 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
 
   it('updates tax_amount via PATCH', async () => {
     const item = await createTestItem(companyId, {
-      sku: `INV-TAX-${crypto.randomUUID().slice(0, 12)}`,
+      sku: `INV-TAX-${makeTag('TAX', 20)}`,
       name: 'Tax Update Item',
       type: 'PRODUCT'
     });
@@ -329,7 +331,7 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
   it('rejects PATCH with empty body', async () => {
     // First create an invoice
     const item = await createTestItem(companyId, {
-      sku: `INV-EMPTY-${crypto.randomUUID().slice(0, 12)}`,
+      sku: `INV-EMPTY-${makeTag('EMP', 20)}`,
       name: 'Empty Patch Item',
       type: 'SERVICE'
     });
@@ -373,12 +375,12 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
   it('returns 403 when reassigning invoice to inaccessible outlet', async () => {
     // Create a second outlet that the scoped ADMIN user does NOT have access to
     const inaccessibleOutlet = await createTestOutlet(companyId, {
-      code: `INV-INACC-${crypto.randomUUID().slice(0, 12)}`.slice(0, 20),
+      code: `INV-INACC-${makeTag('INA', 20)}`,
       name: 'Inaccessible Outlet'
     });
 
     const item = await createTestItem(companyId, {
-      sku: `INV-REASSIGN-${crypto.randomUUID().slice(0, 12)}`,
+      sku: `INV-REASSIGN-${makeTag('RAS', 20)}`,
       name: 'Reassign Item',
       type: 'PRODUCT'
     });
@@ -423,39 +425,6 @@ describe('sales.invoices.update', { timeout: 30000 }, () => {
 });
 
 // =============================================================================
-// Helper to create a customer via API
-// =============================================================================
-async function createTestCustomer(
-  token: string,
-  custCompanyId: number,
-  code: string,
-  displayName: string
-): Promise<number> {
-  const normalizedCode = code.slice(0, 32);
-
-  const res = await fetch(`${baseUrl}/api/platform/customers`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      company_id: custCompanyId,
-      code: normalizedCode,
-      type: 'PERSON',
-      display_name: displayName
-    })
-  });
-
-  if (!res.ok) {
-    throw new Error(`Failed to create customer: ${res.status} ${await res.text()}`);
-  }
-
-  const result = await res.json();
-  return result.data.id;
-}
-
-// =============================================================================
 // Tests for customer_id feature (Story 44.2)
 // =============================================================================
 describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
@@ -490,8 +459,9 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('POST with customer_id creates invoice with customer link', async () => {
     // Create a test customer
-    const customerCode = `CUST-POST-${crypto.randomUUID().slice(0, 12)}`;
+    const customerCode = `CUST-POST-${makeTag('CPO', 20)}`;
     const customerId = await createTestCustomer(
+      baseUrl,
       ownerToken,
       companyId,
       customerCode,
@@ -500,7 +470,7 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(companyId, {
-      sku: `INV-CUST-POST-${crypto.randomUUID().slice(0, 12)}`,
+      sku: `INV-CUST-POST-${makeTag('ICP', 20)}`,
       name: 'Customer POST Test Item',
       type: 'PRODUCT'
     });
@@ -541,8 +511,9 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('POST with customer_id requires platform.customers.READ permission', async () => {
     // Create a customer (owner can do this)
-    const customerCode = `CUST-POST-PERM-${crypto.randomUUID().slice(0, 12)}`;
+    const customerCode = `CUST-POST-PERM-${makeTag('CPP', 20)}`;
     const customerId = await createTestCustomer(
+      baseUrl,
       ownerToken,
       companyId,
       customerCode,
@@ -551,7 +522,7 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(companyId, {
-      sku: `INV-POST-PERM-${crypto.randomUUID().slice(0, 12)}`,
+      sku: `INV-POST-PERM-${makeTag('IPP', 20)}`,
       name: 'POST Permission Test Item',
       type: 'PRODUCT'
     });
@@ -592,7 +563,7 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('POST with invalid customer_id returns 404', async () => {
     const item = await createTestItem(companyId, {
-      sku: `INV-INVALID-${crypto.randomUUID().slice(0, 12)}`,
+      sku: `INV-INVALID-${makeTag('INV', 20)}`,
       name: 'Invalid Customer Test Item',
       type: 'PRODUCT'
     });
@@ -635,41 +606,23 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
   it('POST with customer_id from different company returns 404', async () => {
     // Create another company
     const otherCompany = await createTestCompanyMinimal({
-      code: `OTHER-CO-${crypto.randomUUID().slice(0, 12)}`.slice(0, 20).toUpperCase(),
+      code: `OTHER-CO-${makeTag('OCO', 20).toUpperCase()}`,
       name: 'Other Company for Customer Test'
     });
 
-    // Create a customer in the other company using direct DB insert
-    // This is necessary because we don't have API access to create customers in another company
-    const db = getTestDb();
-    const otherCustomerCode = `CROSS-CO-CUST-${crypto.randomUUID().slice(0, 12)}`;
-    const insertResult = await db
-      .insertInto('customers')
-      .values({
-        company_id: otherCompany.id,
-        code: otherCustomerCode,
-        type: 1, // PERSON
-        display_name: 'Cross Company Customer',
-        is_active: 1,
-        created_by_user_id: null,
-        updated_by_user_id: null
-      })
-      .executeTakeFirst();
-
-    // Get the inserted customer ID - we need to query since insertResult doesn't give us the id easily
-    const customerRow = await db
-      .selectFrom('customers')
-      .where('company_id', '=', otherCompany.id)
-      .where('code', '=', otherCustomerCode)
-      .select(['id'])
-      .executeTakeFirst();
-
-    expect(customerRow).toBeDefined();
-    const otherCompanyCustomerId = customerRow!.id;
+    // Create a customer in the other company via canonical fixture helper
+    const otherCustomerCode = `CROSS-CO-CUST-${makeTag('CCC', 20)}`;
+    const otherCompanyCustomerId = await createTestCustomerForCompany(
+      baseUrl,
+      ownerToken,
+      otherCompany.id,
+      otherCustomerCode,
+      'Cross Company Customer'
+    );
 
     // Create a test item
     const item = await createTestItem(companyId, {
-      sku: `INV-CROSS-CO-${crypto.randomUUID().slice(0, 12)}`,
+      sku: `INV-CROSS-CO-${makeTag('ICC', 20)}`,
       name: 'Cross Company Test Item',
       type: 'PRODUCT'
     });
@@ -710,7 +663,7 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('POST without customer_id creates invoice with null customer', async () => {
     const item = await createTestItem(companyId, {
-      sku: `INV-NO-CUST-${crypto.randomUUID().slice(0, 12)}`,
+      sku: `INV-NO-CUST-${makeTag('INC', 20)}`,
       name: 'No Customer Test Item',
       type: 'PRODUCT'
     });
@@ -751,8 +704,9 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('PATCH customer_id to valid customer updates invoice', async () => {
     // Create a customer
-    const customerCode = `CUST-PATCH-${crypto.randomUUID().slice(0, 12)}`;
+    const customerCode = `CUST-PATCH-${makeTag('CP', 20)}`;
     const customerId = await createTestCustomer(
+      baseUrl,
       ownerToken,
       companyId,
       customerCode,
@@ -761,7 +715,7 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
 
     // Create an invoice without customer first
     const item = await createTestItem(companyId, {
-      sku: `INV-PATCH-UPD-${crypto.randomUUID().slice(0, 12)}`,
+      sku: `INV-PATCH-UPD-${makeTag('IPU', 20)}`,
       name: 'Patch Update Test Item',
       type: 'PRODUCT'
     });
@@ -817,8 +771,9 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('PATCH customer_id to null clears customer link', async () => {
     // Create a customer
-    const customerCode = `CUST-NULL-${crypto.randomUUID().slice(0, 12)}`;
+    const customerCode = `CUST-NULL-${makeTag('CNU', 20)}`;
     const customerId = await createTestCustomer(
+      baseUrl,
       ownerToken,
       companyId,
       customerCode,
@@ -827,7 +782,7 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
 
     // Create an invoice WITH customer
     const item = await createTestItem(companyId, {
-      sku: `INV-NULL-TEST-${crypto.randomUUID().slice(0, 12)}`,
+      sku: `INV-NULL-TEST-${makeTag('INT', 20)}`,
       name: 'Null Customer Test Item',
       type: 'PRODUCT'
     });
@@ -886,7 +841,7 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
   it('PATCH with invalid customer_id returns 404', async () => {
     // Create an invoice first
     const item = await createTestItem(companyId, {
-      sku: `INV-PATCH-INVALID-${crypto.randomUUID().slice(0, 12)}`,
+      sku: `INV-PATCH-INVALID-${makeTag('IPI', 20)}`,
       name: 'Patch Invalid Customer Item',
       type: 'PRODUCT'
     });
@@ -941,8 +896,9 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('PATCH with customer_id requires platform.customers.READ permission', async () => {
     // Create a customer
-    const customerCode = `CUST-PERM-${crypto.randomUUID().slice(0, 12)}`;
+    const customerCode = `CUST-PERM-${makeTag('CPR', 20)}`;
     const customerId = await createTestCustomer(
+      baseUrl,
       ownerToken,
       companyId,
       customerCode,
@@ -951,7 +907,7 @@ describe('sales.invoices.update - customer_id', { timeout: 30000 }, () => {
 
     // Create an invoice
     const item = await createTestItem(companyId, {
-      sku: `INV-PERM-TEST-${crypto.randomUUID().slice(0, 12)}`,
+      sku: `INV-PERM-TEST-${makeTag('IPT', 20)}`,
       name: 'Permission Test Item',
       type: 'PRODUCT'
     });

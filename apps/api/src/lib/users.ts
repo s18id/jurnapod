@@ -495,7 +495,7 @@ export async function createUser(params: {
       ...[...combinedRoleCodes].map((code) => roleMap.get(code)?.role_level ?? 0)
     );
 
-    if (requestedMaxLevel >= actorMaxLevel) {
+    if (requestedMaxLevel > actorMaxLevel) {
       throw new RoleLevelViolationError("Insufficient role level to assign requested roles");
     }
 

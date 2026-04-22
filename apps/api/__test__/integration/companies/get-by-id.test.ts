@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { closeTestDb } from '../../helpers/db';
 import {
   resetFixtureRegistry,
@@ -17,10 +18,10 @@ let baseUrl: string;
 let accessToken: string;
 let companyId: number;
 let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
-const getSeedSyncContext = async () => seedCtx;
 
 describe('companies.get-by-id', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     seedCtx = await loadSeedSyncContext();
@@ -28,8 +29,12 @@ describe('companies.get-by-id', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+      await closeTestDb();
+    } finally {
+      await releaseReadLock();
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -38,7 +43,7 @@ describe('companies.get-by-id', { timeout: 30000 }, () => {
   });
 
   it('returns company details for own company', async () => {
-    // Use cashier token - should be able to access own company
+    // Use OWNER token - should be able to access own company
     const res = await fetch(`${baseUrl}/api/companies/${companyId}`, {
       method: 'GET',
       headers: {
@@ -47,8 +52,8 @@ describe('companies.get-by-id', { timeout: 30000 }, () => {
       }
     });
 
-    // User can access their own company without special permissions
-    expect([200, 403]).toContain(res.status);
+    // User can access their own company - deterministic 200
+    expect(res.status).toBe(200);
 
     if (res.ok) {
       const body = await res.json();
@@ -86,8 +91,8 @@ describe('companies.get-by-id', { timeout: 30000 }, () => {
     expect(res.status).toBe(400);
   });
 
-  it('returns 403 when non-SUPER_ADMIN accesses another company', async () => {
-    // Use cashier token - should NOT be able to access another company
+  it('returns 404 for inaccessible/non-existent foreign company id', async () => {
+    // Use OWNER token against unrelated/non-existent company id
     const res = await fetch(`${baseUrl}/api/companies/99999`, {
       method: 'GET',
       headers: {
@@ -96,7 +101,7 @@ describe('companies.get-by-id', { timeout: 30000 }, () => {
       }
     });
 
-    // Non-SUPER_ADMIN accessing another company without permission should get 403
-    expect([403, 404]).toContain(res.status);
+    // Route returns NOT_FOUND for inaccessible or non-existent foreign id in this path.
+    expect(res.status).toBe(404);
   });
 });

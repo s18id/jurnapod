@@ -570,7 +570,7 @@ development_status:
   49-1-kickoff-gate-test-reliability-audit: done
   49-2-accounting-suite-determinism-hardening: done
   49-3-purchasing-suite-determinism-hardening: done
-  49-4-platform-acl-suite-determinism-hardening: ready-for-dev
+  49-4-platform-acl-suite-determinism-hardening: done
   49-5-sync-pos-inventory-suite-determinism-hardening: ready-for-dev
   49-6-ci-pipeline-reliability-enforcement: ready-for-dev
   49-7-pre-close-validation-final-solid-dry-kiss-gate: ready-for-dev

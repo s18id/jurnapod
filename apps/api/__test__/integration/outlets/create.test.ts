@@ -7,6 +7,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
+import { makeTag } from '../../helpers/tags';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -22,6 +24,7 @@ const getSeedSyncContext = async () => seedCtx;
 
 describe('outlets.create', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     seedCtx = await loadSeedSyncContext();
@@ -31,6 +34,7 @@ describe('outlets.create', { timeout: 30000 }, () => {
   afterAll(async () => {
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   it('rejects request without auth', async () => {
@@ -48,7 +52,7 @@ describe('outlets.create', { timeout: 30000 }, () => {
   it('creates outlet with valid data', async () => {
     const ownerToken = accessToken;
 
-    const uniqueCode = `OUTLET-CREATE-${Date.now()}`;
+    const uniqueCode = `OC-${makeTag('OC', 20)}`;
     const res = await fetch(`${baseUrl}/api/outlets`, {
       method: 'POST',
       headers: {
@@ -83,7 +87,7 @@ describe('outlets.create', { timeout: 30000 }, () => {
   it('creates outlet with valid timezone', async () => {
     const ownerToken = accessToken;
 
-    const uniqueCode = `OUTLET-TZ-${Date.now()}`;
+    const uniqueCode = `OT-${makeTag('OT', 20)}`;
     const res = await fetch(`${baseUrl}/api/outlets`, {
       method: 'POST',
       headers: {
@@ -118,7 +122,7 @@ describe('outlets.create', { timeout: 30000 }, () => {
   it('returns 400 for invalid email format', async () => {
     const ownerToken = accessToken;
 
-    const uniqueCode = `OUTLET-EMAIL-${Date.now()}`;
+    const uniqueCode = `OE-${makeTag('OE', 20)}`;
     const res = await fetch(`${baseUrl}/api/outlets`, {
       method: 'POST',
       headers: {
@@ -136,7 +140,7 @@ describe('outlets.create', { timeout: 30000 }, () => {
   });
 
   it('returns 403 when non-SUPER_ADMIN tries to create in another company', async () => {
-    const uniqueCode = `OUTLET-CROSS-${Date.now()}`;
+    const uniqueCode = `OUTLET-CROSS-${makeTag('OC', 20)}`;
     const res = await fetch(`${baseUrl}/api/outlets`, {
       method: 'POST',
       headers: {

@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { closeTestDb } from '../../helpers/db';
 import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext, getOrCreateTestCashierForPermission } from '../../fixtures';
 
@@ -17,6 +18,7 @@ let companyCode: string;
 
 describe('users.list', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     ownerToken = await getTestAccessToken(baseUrl);
     const context = await getSeedSyncContext();
@@ -34,8 +36,12 @@ describe('users.list', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+      await closeTestDb();
+    } finally {
+      await releaseReadLock();
+    }
   });
 
   it('rejects request without auth', async () => {

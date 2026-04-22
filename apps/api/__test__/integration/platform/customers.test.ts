@@ -7,14 +7,13 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
+import { makeTag } from '../../helpers/tags';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
   getSeedSyncContext,
-  getOrCreateTestCashierForPermission,
-  createTestUser,
-  assignUserGlobalRole,
-  getRoleIdByCode
+  getOrCreateTestCashierForPermission
 } from '../../fixtures';
 
 let baseUrl: string;
@@ -25,6 +24,7 @@ let companyCode: string;
 
 describe('platform.customers', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     ownerToken = await getTestAccessToken(baseUrl);
     const context = await getSeedSyncContext();
@@ -44,6 +44,7 @@ describe('platform.customers', { timeout: 30000 }, () => {
   afterAll(async () => {
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   // -------------------------------------------------------------------------
@@ -77,7 +78,7 @@ describe('platform.customers', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         company_id: cashierCompanyId,
-        code: `TEMP-${Date.now()}`,
+        code: `TEMP-${makeTag('TMP', 16)}`,
         type: 'PERSON',
         display_name: 'Should not create'
       })
@@ -89,7 +90,7 @@ describe('platform.customers', { timeout: 30000 }, () => {
   // AC: POST creates customer with unique code
   // -------------------------------------------------------------------------
   it('creates a PERSON customer with minimal fields', async () => {
-    const code = `CUST-P-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const code = `CUST-P-${makeTag('CP', 20)}`;
     const payload = {
       company_id: cashierCompanyId,
       code,
@@ -118,7 +119,7 @@ describe('platform.customers', { timeout: 30000 }, () => {
   });
 
   it('creates a BUSINESS customer with company_name', async () => {
-    const code = `CUST-B-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const code = `CUST-B-${makeTag('CB', 20)}`;
     const payload = {
       company_id: cashierCompanyId,
       code,
@@ -153,7 +154,7 @@ describe('platform.customers', { timeout: 30000 }, () => {
   // AC: Code uniqueness — active codes cannot be duplicated
   // -------------------------------------------------------------------------
   it('rejects duplicate code within the same company', async () => {
-    const uniqueCode = `CUST-DUP-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const uniqueCode = `CUST-DUP-${makeTag('DUP', 20)}`;
     const payload = {
       company_id: cashierCompanyId,
       code: uniqueCode,
@@ -193,7 +194,7 @@ describe('platform.customers', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         company_id: cashierCompanyId,
-        code: `CUST-NOBN-${Date.now()}`,
+        code: `CUST-NOBN-${makeTag('NOBN', 16)}`,
         type: 'BUSINESS',
         display_name: 'No Company Name'
         // company_name intentionally omitted
@@ -225,7 +226,7 @@ describe('platform.customers', { timeout: 30000 }, () => {
 
   it('filters by is_active', async () => {
     // Create an inactive customer
-    const code = `CUST-ACT-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const code = `CUST-ACT-${makeTag('ACT', 20)}`;
     const create = await fetch(`${baseUrl}/api/platform/customers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -284,7 +285,7 @@ describe('platform.customers', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('updates customer fields via PATCH', async () => {
     // Create a customer to update
-    const code = `CUST-UPD-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const code = `CUST-UPD-${makeTag('UPD', 20)}`;
     const createRes = await fetch(`${baseUrl}/api/platform/customers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -337,7 +338,7 @@ describe('platform.customers', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('soft-deletes customer via DELETE', async () => {
     // Create a customer to delete
-    const code = `CUST-DEL-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const code = `CUST-DEL-${makeTag('DEL', 20)}`;
     const createRes = await fetch(`${baseUrl}/api/platform/customers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -384,7 +385,7 @@ describe('platform.customers', { timeout: 30000 }, () => {
   // AC: Soft-deleted code cannot be reused
   // -------------------------------------------------------------------------
   it('cannot reuse code of a soft-deleted customer', async () => {
-    const code = `CUST-SD-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const code = `CUST-SD-${makeTag('SD', 20)}`;
 
     // Create
     const createRes = await fetch(`${baseUrl}/api/platform/customers`, {
@@ -435,7 +436,7 @@ describe('platform.customers', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         company_id: 99998,  // different company
-        code: `CUST-CROSS-${Date.now()}`,
+        code: `CUST-CROSS-${makeTag('CRS', 20)}`,
         type: 'PERSON',
         display_name: 'Cross Company'
       })
@@ -449,7 +450,7 @@ describe('platform.customers', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('returns 403 when CASHIER tries to update a customer', async () => {
     // Create a customer first (as owner)
-    const code = `CUST-CASH-UPD-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const code = `CUST-CASH-UPD-${makeTag('CUPD', 20)}`;
     const createRes = await fetch(`${baseUrl}/api/platform/customers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -480,7 +481,7 @@ describe('platform.customers', { timeout: 30000 }, () => {
   });
 
   it('returns 403 when CASHIER tries to delete a customer', async () => {
-    const code = `CUST-CASH-DEL-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const code = `CUST-CASH-DEL-${makeTag('CDEL', 20)}`;
     const createRes = await fetch(`${baseUrl}/api/platform/customers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -523,7 +524,7 @@ describe('platform.customers', { timeout: 30000 }, () => {
   // Full lifecycle — create, read, update, delete
   // -------------------------------------------------------------------------
   it('full lifecycle: create → get → update → delete', async () => {
-    const code = `CUST-LIFE-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const code = `CUST-LIFE-${makeTag('LIFE', 20)}`;
 
     // 1. Create
     const createRes = await fetch(`${baseUrl}/api/platform/customers`, {

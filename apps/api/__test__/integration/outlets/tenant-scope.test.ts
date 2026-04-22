@@ -7,6 +7,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
+import { makeTag } from '../../helpers/tags';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -24,6 +26,7 @@ const getSeedSyncContext = async () => seedCtx;
 
 describe('outlets.tenant-scope', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     seedCtx = await loadSeedSyncContext();
@@ -34,6 +37,7 @@ describe('outlets.tenant-scope', { timeout: 30000 }, () => {
   afterAll(async () => {
     resetFixtureRegistry();
     await closeTestDb();
+    await releaseReadLock();
   });
 
   it('non-SUPER_ADMIN cannot list outlets from another company', async () => {
@@ -57,7 +61,7 @@ describe('outlets.tenant-scope', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        code: `CROSS-CO-${Date.now()}`,
+        code: `CROSS-CO-${makeTag('CC', 20)}`,
         name: 'Cross Company Outlet',
         company_id: 99999
       })
@@ -104,11 +108,11 @@ describe('outlets.tenant-scope', { timeout: 30000 }, () => {
 
     // Create another company to test cross-company outlet creation
     const otherCompany = await createTestCompanyMinimal({
-      code: `OTHER-CO-${Date.now()}`.slice(0, 20).toUpperCase(),
+      code: `OTHER-CO-${makeTag('OC', 20).toUpperCase()}`,
       name: 'Other Company'
     });
 
-    const uniqueCode = `SUPER-ADMIN-${Date.now()}`;
+    const uniqueCode = `SUPER-ADMIN-${makeTag('SA', 20)}`;
     const res = await fetch(`${baseUrl}/api/outlets`, {
       method: 'POST',
       headers: {

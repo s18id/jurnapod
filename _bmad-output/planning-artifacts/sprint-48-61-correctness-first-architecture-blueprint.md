@@ -35,6 +35,16 @@ Non-goals:
 3. Sprint closes only when no unresolved **P0/P1** in sprint scope
 4. Any deviation from this baseline requires explicit re-baseline approval
 
+### Fixture Extraction Governance (Q49-001)
+
+Q49-001 (Canonical fixture extraction) MUST be treated as an integral part of Sprint 49 execution. The `apps/api/src/lib/test-fixtures.ts` hub MUST be decomposed so portable DB-level fixtures live in `@jurnapod/db/test-fixtures`, and API-runtime fixtures remain in the API wrapper only.
+
+Rules:
+1. Q49-001 extraction MUST proceed in documented passes; each pass MUST preserve backward compatibility for existing consumers.
+2. No new domain-invariant logic MUST be introduced into `apps/api/src/lib/test-fixtures.ts` during the extraction window.
+3. Package fixture build (`npm run build -w @jurnapod/db`) MUST pass before consumer flip.
+4. Fixture extraction scope MUST be tracked in `_bmad-output/planning-artifacts/epic-49-api-lib-boundary-migration-queue.md` (Queue A, Q49-001) and MUST be executed per `_bmad-output/planning-artifacts/epic-49-q49-001-test-fixtures-execution-pass-1.md`.
+
 ### Architecture Cleanup Policy (MANDATORY)
 **A) Cleanup mandatory when touching sprint scope.**
 Any code change that falls within active sprint scope MUST include a cleanup pass for:
@@ -47,6 +57,8 @@ Cleanup is not optional. Unchecked cleanup debt is a sprint-trackable P1/P2 item
 - **Full Fixture Mode (default):** Fixture setup MUST use canonical production package flow so production invariants and test invariants remain identical.
 - **Partial Fixture Mode (global exception):** Fixture setup MAY use decomposed domain parts only when those parts are provided by the same production package that owns the domain invariant. Partial mode MUST be explicitly declared with scope, rationale, and owner.
 - Fixture setup MUST NOT introduce a parallel business-write path.
+
+> **Q49-001 Alignment:** Canonical fixture extraction (Sprint 49, Epic 49 queue item Q49-001) MUST be the primary mechanism for satisfying Section B during this program. All fixture setup MUST comply with the split defined in `epic-49-q49-001-test-fixtures-execution-pass-1.md`: portable DB fixtures in `@jurnapod/db/test-fixtures`, API-runtime helpers in `apps/api/src/lib/test-fixtures.ts` wrapper only.
 
 **C) No new business DB triggers.**
 All business invariants MUST be enforced in application code where they are testable, reviewable, and version-controllable. Existing triggers MUST NOT be extended with new business logic.
@@ -170,6 +182,7 @@ No story may be marked DONE based solely on self-attestation of the implementing
 - [ ] No duplicated SQL — repeated query patterns become repository helpers in packages/db
 - [ ] No duplicated ACL logic — requireAccess() patterns centralized, not copy-pasted across route handlers
 - [ ] No duplicated test fixtures — canonical fixtures in packages/db/test-fixtures.ts or packages/shared/test/fixtures.ts
+- [ ] Q49-001 progress — portable fixtures extracted to @jurnapod/db/test-fixtures, API wrapper preserves backward compatibility, and no duplicate fixture creation path is introduced
 
 ### KISS Principles Checklist Per Sprint
 - [ ] No over-engineering — simple feature flags over elaborate abstraction layers for speculative future needs

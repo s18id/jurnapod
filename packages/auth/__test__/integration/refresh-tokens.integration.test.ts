@@ -11,7 +11,7 @@ import { createRealDbAdapter, getTestDb, closeTestPool } from '../../src/test-ut
 import { useRealDb, testConfig } from '../../src/test-utils/test-adapter.js';
 import { createCompany, cleanupCompanies } from '../../src/test-utils/fixtures/companies.js';
 import { createUser, cleanupUsers } from '../../src/test-utils/fixtures/users.js';
-import type { AuthDbAdapter, RefreshTokenRotateResult } from '../../src/types.js';
+import type { AuthDbAdapter } from '../../src/types.js';
 
 // ---------------------------------------------------------------------------
 // Helper Types
@@ -28,6 +28,21 @@ interface RefreshTokenRow {
   ip_address: string | null;
   user_agent: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// Deterministic time control
+// ---------------------------------------------------------------------------
+
+const FROZEN_TIME_MS = 1704067200000; // 2024-01-01 00:00:00 UTC
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(FROZEN_TIME_MS);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 // ---------------------------------------------------------------------------
 // Test Suite
@@ -94,7 +109,7 @@ test('RefreshTokenManager: issue() creates token in database', { skip: !useRealD
     } else {
       expiresAtMs = row.expires_at as number;
     }
-    assert.ok(expiresAtMs > Date.now(), 'Token should expire in the future');
+    assert.ok(expiresAtMs > FROZEN_TIME_MS, 'Token should expire in the future');
   } finally {
     // Cleanup
     await cleanupUsers(adapter, userIds);
@@ -354,7 +369,8 @@ test('RefreshTokenManager: Transaction rollback on failure', { skip: !useRealDb 
             company_id: company.id,
             user_id: user.id,
             token_hash: 'test-hash',
-            expires_at: new Date(Date.now() + 60000),
+            // Use FROZEN_TIME_MS to avoid Date.now() call while fake timers are active
+            expires_at: new Date(FROZEN_TIME_MS + 60000),
             ip_address: '127.0.0.1',
             user_agent: 'Test'
           })

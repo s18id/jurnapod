@@ -16,9 +16,11 @@ import {
   createTestCompanyMinimal,
   getOrCreateTestCashierForPermission,
   createTestCustomer,
-  createTestCustomerForCompany
+  createTestCustomerForCompany,
+  registerFixtureCleanup,
 } from '../../fixtures';
 import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
+import { makeTag } from '../../helpers/tags';
 
 let baseUrl: string;
 let ownerToken: string;
@@ -43,7 +45,7 @@ async function releaseSalesSuiteLock() {
 // =============================================================================
 async function createPostedInvoice(withCustomerId: number | null): Promise<number> {
   const item = await createTestItem(companyId, {
-    sku: `CN-INV-${crypto.randomUUID().slice(0, 12)}`,
+    sku: `CN-INV-${makeTag('CNI', 20)}`,
     name: 'Credit Note Test Item',
     type: 'PRODUCT'
   });
@@ -78,6 +80,8 @@ async function createPostedInvoice(withCustomerId: number | null): Promise<numbe
   expect(createRes.status).toBe(201);
   const created = await createRes.json();
   const invoiceId = created.data.id;
+
+  // Posted invoice cleanup handled by resetFixtureRegistry
 
   // Post the invoice
   let postRes: Response | null = null;
@@ -168,7 +172,7 @@ describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }
   // -------------------------------------------------------------------------
   it('credit note created from invoice inherits customer_id', async () => {
     // Create a customer
-    const customerCode = `CN-INH-${crypto.randomUUID().slice(0, 12)}`;
+    const customerCode = `CN-INH-${makeTag('INH', 20)}`;
     const customerId = await createTestCustomer(
       baseUrl,
       ownerToken,
@@ -204,7 +208,7 @@ describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }
   // -------------------------------------------------------------------------
   it('credit note created manually with customer_id succeeds', async () => {
     // Create a customer
-    const customerCode = `CN-MAN-${crypto.randomUUID().slice(0, 12)}`;
+    const customerCode = `CN-MAN-${makeTag('MAN', 20)}`;
     const customerId = await createTestCustomer(
       baseUrl,
       ownerToken,
@@ -264,12 +268,12 @@ describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }
   it('credit note created with customer_id from different company returns 404', async () => {
     // Create another company with its own owner user
     const otherCompany = await createTestCompanyMinimal({
-      code: `OTHER-CN-${crypto.randomUUID().slice(0, 12)}`.slice(0, 20).toUpperCase(),
+      code: `OTHER-CN-${makeTag('OCN', 20).toUpperCase()}`,
       name: 'Other Company for CN Customer Test'
     });
 
     // Create a customer in the other company via canonical fixture helper
-    const otherCustomerCode = `CROSS-CO-CN-${crypto.randomUUID().slice(0, 12)}`;
+    const otherCustomerCode = `CROSS-CO-CN-${makeTag('CCN', 20)}`;
     const otherCompanyCustomerId = await createTestCustomerForCompany(
       baseUrl,
       ownerToken,
@@ -304,7 +308,7 @@ describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }
   // -------------------------------------------------------------------------
   it('PATCH credit note customer_id to valid customer updates credit note', async () => {
     // Create a customer
-    const customerCode = `CN-PATCH-${crypto.randomUUID().slice(0, 12)}`;
+    const customerCode = `CN-PATCH-${makeTag('PAT', 20)}`;
     const customerId = await createTestCustomer(
       baseUrl,
       ownerToken,
@@ -356,7 +360,7 @@ describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }
   // -------------------------------------------------------------------------
   it('PATCH credit note customer_id to null clears customer link', async () => {
     // Create a customer
-    const customerCode = `CN-NULL-${crypto.randomUUID().slice(0, 12)}`;
+    const customerCode = `CN-NULL-${makeTag('NUL', 20)}`;
     const customerId = await createTestCustomer(
       baseUrl,
       ownerToken,
@@ -407,7 +411,7 @@ describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }
   // -------------------------------------------------------------------------
   it('PATCH with customer_id requires platform.customers.READ permission', async () => {
     // Create a customer
-    const customerCode = `CN-PERM-${crypto.randomUUID().slice(0, 12)}`;
+    const customerCode = `CN-PERM-${makeTag('PRM', 20)}`;
     const customerId = await createTestCustomer(
       baseUrl,
       ownerToken,
@@ -458,7 +462,7 @@ describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }
   // -------------------------------------------------------------------------
   it('PATCH customer_id to null requires platform.customers.READ permission', async () => {
     // Create a customer
-    const customerCode = `CN-CLEAR-${crypto.randomUUID().slice(0, 12)}`;
+    const customerCode = `CN-CLEAR-${makeTag('CLR', 20)}`;
     const customerId = await createTestCustomer(
       baseUrl,
       ownerToken,
@@ -508,7 +512,7 @@ describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }
   // -------------------------------------------------------------------------
   it('POST with customer_id requires platform.customers.READ permission', async () => {
     // Create a customer
-    const customerCode = `CN-PERM-POST-${crypto.randomUUID().slice(0, 12)}`;
+    const customerCode = `CN-PERM-POST-${makeTag('CPP', 20)}`;
     const customerId = await createTestCustomer(
       baseUrl,
       ownerToken,
@@ -543,7 +547,7 @@ describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }
   // -------------------------------------------------------------------------
   it('source invoice customer_id is inherited and request customer_id is ignored', async () => {
     // Create two customers
-    const invoiceCustomerCode = `CN-INV-CUST-${crypto.randomUUID().slice(0, 12)}`;
+    const invoiceCustomerCode = `CN-INV-CUST-${makeTag('INVC', 20)}`;
     const invoiceCustomerId = await createTestCustomer(
       baseUrl,
       ownerToken,
@@ -552,7 +556,7 @@ describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }
       'Invoice Customer'
     );
 
-    const overrideCustomerCode = `CN-OVR-${crypto.randomUUID().slice(0, 12)}`;
+    const overrideCustomerCode = `CN-OVR-${makeTag('OVR', 20)}`;
     const overrideCustomerId = await createTestCustomer(
       baseUrl,
       ownerToken,
@@ -589,7 +593,7 @@ describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }
   // -------------------------------------------------------------------------
   it('credit note list response includes customer_id field', async () => {
     // Create a customer
-    const customerCode = `CN-LIST-${crypto.randomUUID().slice(0, 12)}`;
+    const customerCode = `CN-LIST-${makeTag('LST', 20)}`;
     const customerId = await createTestCustomer(
       baseUrl,
       ownerToken,
@@ -614,6 +618,8 @@ describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }
     });
 
     expect(createRes.status).toBe(201);
+    const created = await createRes.json();
+    const creditNoteId = created.data.id;
 
     // List credit notes
     const listRes = await fetch(`${baseUrl}/api/sales/credit-notes?outlet_id=${outletId}`, {
@@ -630,13 +636,14 @@ describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }
     expect(listData.data.credit_notes).toBeDefined();
     expect(Array.isArray(listData.data.credit_notes)).toBe(true);
 
-    // Find our credit note in the list
+    // Find our specific credit note in the list by id
     const ourCreditNote = listData.data.credit_notes.find(
-      (cn: { id: number }) => cn.id !== undefined
+      (cn: { id: number }) => cn.id === creditNoteId
     );
     expect(ourCreditNote).toBeDefined();
-    // The list should include customer_id field
+    // The credit note should include customer_id field and match our customer
     expect('customer_id' in ourCreditNote).toBe(true);
+    expect(ourCreditNote.customer_id).toBe(customerId);
   });
 
 });

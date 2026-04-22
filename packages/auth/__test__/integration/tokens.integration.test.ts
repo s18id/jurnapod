@@ -4,7 +4,7 @@
  * These tests use a real database and are skipped unless AUTH_TEST_USE_DB=1 is set.
  */
 
-import { test, describe, beforeEach, afterAll } from 'vitest';
+import { test, describe, afterAll } from 'vitest';
 import assert from 'node:assert';
 import { createHash, randomBytes } from "node:crypto";
 import { EmailTokenManager } from '../../src/email/tokens.js';
@@ -13,7 +13,6 @@ import { createRealDbAdapter, getTestDb, closeTestPool } from '../../src/test-ut
 import { useRealDb, testConfig } from '../../src/test-utils/test-adapter.js';
 import { createCompany, cleanupCompanies } from '../../src/test-utils/fixtures/companies.js';
 import { createUser, cleanupUsers } from '../../src/test-utils/fixtures/users.js';
-import type { AuthDbAdapter } from '../../src/types.js';
 
 // ---------------------------------------------------------------------------
 // Helper functions
@@ -22,6 +21,22 @@ import type { AuthDbAdapter } from '../../src/types.js';
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
+
+// ---------------------------------------------------------------------------
+// Deterministic time control
+// ---------------------------------------------------------------------------
+
+const FROZEN_TIME_MS = 1704067200000; // 2024-01-01 00:00:00 UTC
+
+beforeAll(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(FROZEN_TIME_MS);
+});
+
+afterAll(async () => {
+  vi.useRealTimers();
+  await closeTestPool();
+});
 
 // ---------------------------------------------------------------------------
 // create() tests
@@ -88,7 +103,6 @@ test("EmailTokenManager.create() - calculates correct expiry for PASSWORD_RESET"
 
     const manager = new EmailTokenManager(adapter, testConfig);
 
-    const beforeCreate = Date.now();
     const result = await manager.create({
       companyId: company.id,
       userId: user.id,
@@ -96,17 +110,15 @@ test("EmailTokenManager.create() - calculates correct expiry for PASSWORD_RESET"
       type: "PASSWORD_RESET",
       createdBy: user.id
     });
-    const afterCreate = Date.now();
 
     // passwordResetTtlMinutes from testConfig (10 minutes from .env.test)
     const ttlMs = testConfig.emailTokens!.passwordResetTtlMinutes * 60 * 1000;
-    const expectedMinExpiry = beforeCreate + ttlMs;
-    const expectedMaxExpiry = afterCreate + ttlMs;
+    const expectedExpiry = FROZEN_TIME_MS + ttlMs;
 
-    assert.ok(
-      result.expiresAt.getTime() >= expectedMinExpiry &&
-      result.expiresAt.getTime() <= expectedMaxExpiry,
-      "Expiry should be within expected range for PASSWORD_RESET"
+    assert.strictEqual(
+      result.expiresAt.getTime(),
+      expectedExpiry,
+      "Expiry should be exactly FROZEN_TIME_MS + TTL for PASSWORD_RESET"
     );
   } finally {
     await cleanupUsers(adapter, userIds);
@@ -128,7 +140,6 @@ test("EmailTokenManager.create() - uses inviteTtlMinutes for INVITE type", { ski
 
     const manager = new EmailTokenManager(adapter, testConfig);
 
-    const beforeCreate = Date.now();
     const result = await manager.create({
       companyId: company.id,
       userId: user.id,
@@ -136,17 +147,15 @@ test("EmailTokenManager.create() - uses inviteTtlMinutes for INVITE type", { ski
       type: "INVITE",
       createdBy: user.id
     });
-    const afterCreate = Date.now();
 
     // inviteTtlMinutes from testConfig (30 minutes from .env.test)
     const ttlMs = testConfig.emailTokens!.inviteTtlMinutes * 60 * 1000;
-    const expectedMinExpiry = beforeCreate + ttlMs;
-    const expectedMaxExpiry = afterCreate + ttlMs;
+    const expectedExpiry = FROZEN_TIME_MS + ttlMs;
 
-    assert.ok(
-      result.expiresAt.getTime() >= expectedMinExpiry &&
-      result.expiresAt.getTime() <= expectedMaxExpiry,
-      "Expiry should be within expected range for INVITE"
+    assert.strictEqual(
+      result.expiresAt.getTime(),
+      expectedExpiry,
+      "Expiry should be exactly FROZEN_TIME_MS + TTL for INVITE"
     );
   } finally {
     await cleanupUsers(adapter, userIds);
@@ -168,7 +177,6 @@ test("EmailTokenManager.create() - uses verifyEmailTtlMinutes for VERIFY_EMAIL t
 
     const manager = new EmailTokenManager(adapter, testConfig);
 
-    const beforeCreate = Date.now();
     const result = await manager.create({
       companyId: company.id,
       userId: user.id,
@@ -176,17 +184,15 @@ test("EmailTokenManager.create() - uses verifyEmailTtlMinutes for VERIFY_EMAIL t
       type: "VERIFY_EMAIL",
       createdBy: user.id
     });
-    const afterCreate = Date.now();
 
     // verifyEmailTtlMinutes from testConfig (10 minutes from .env.test)
     const ttlMs = testConfig.emailTokens!.verifyEmailTtlMinutes * 60 * 1000;
-    const expectedMinExpiry = beforeCreate + ttlMs;
-    const expectedMaxExpiry = afterCreate + ttlMs;
+    const expectedExpiry = FROZEN_TIME_MS + ttlMs;
 
-    assert.ok(
-      result.expiresAt.getTime() >= expectedMinExpiry &&
-      result.expiresAt.getTime() <= expectedMaxExpiry,
-      "Expiry should be within expected range for VERIFY_EMAIL"
+    assert.strictEqual(
+      result.expiresAt.getTime(),
+      expectedExpiry,
+      "Expiry should be exactly FROZEN_TIME_MS + TTL for VERIFY_EMAIL"
     );
   } finally {
     await cleanupUsers(adapter, userIds);
@@ -624,7 +630,3 @@ test("EmailTokenManager.getInfo() - returns null for unknown token", { skip: !us
 // ---------------------------------------------------------------------------
 // Cleanup
 // ---------------------------------------------------------------------------
-
-afterAll(async () => {
-  await closeTestPool();
-});

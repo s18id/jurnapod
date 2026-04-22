@@ -231,7 +231,12 @@ companyRoutes.patch("/:id", async (c) => {
   try {
     const auth = c.get("auth");
     const companyId = NumericIdSchema.parse(c.req.param("id"));
-    
+
+    // TENANT ISOLATION: non-super-admin contexts cannot update other companies
+    if (companyId !== auth.companyId) {
+      return errorResponse("FORBIDDEN", "Cannot update another company", 403);
+    }
+
     // Check access permission using bitmask system
     const accessResult = await requireAccess({
       module: "platform",
@@ -535,6 +540,12 @@ export function registerCompanyRoutes(app: OpenAPIHono): void {
     async (c): Promise<any> => {
       const auth = c.get("auth");
       const companyId = NumericIdSchema.parse(c.req.param("id"));
+
+      // TENANT ISOLATION: non-super-admin contexts cannot update other companies
+      if (companyId !== auth.companyId) {
+        return errorResponse("FORBIDDEN", "Cannot update another company", 403);
+      }
+
       const accessResult = await requireAccess({ module: "platform", resource: "companies", permission: "update" })(c.req.raw, auth);
       if (accessResult !== null) return accessResult;
 
