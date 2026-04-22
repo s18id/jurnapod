@@ -438,12 +438,20 @@ When performing extraction or package migration stories (moving code from `apps/
 
 **Preferred Method (E46-A1):**
 - Use `npx tsx scripts/update-sprint-status.ts --epic N --story N-X --status done` (the canonical utility)
+- Story input **MUST** use dash notation: `N-X` or `N-X-a`; title segment **MUST** be passed separately via `--title` (e.g., `--story 6-1-a --title platform-acl`; dot/short forms are invalid)
+- Bucket after `N-X-` **MUST** be exactly one letter (`a-z`); malformed keys in format `N-X[alpha]` **MUST** be normalized to `N-X-[alpha]` (e.g., `--story 6-1a --title platform-acl` -> `6-1-a-platform-acl`)
+- If `--story` matches multiple existing keys, command **MUST** fail unless `--multi` is passed intentionally
+- If update fails due malformed historical keys, you **MUST** run cleaner first: `npx tsx scripts/clean-sprint-status.ts --epic N --fix`
 - This prevents overwrite by design
 
 **Mandatory Validation (E46-A4):**
 - Before closing any epic: run `npx tsx scripts/validate-sprint-status.ts`
 - The retrospective workflow (Step 0) enforces this check before the retro begins
 - If validation fails, restore with: `git checkout HEAD -- _bmad-output/implementation-artifacts/sprint-status.yaml`
+
+**Malformed Historical Keys:**
+- Use `npx tsx scripts/clean-sprint-status.ts --epic N` (dry run) to scan for malformed story keys
+- Use `npx tsx scripts/clean-sprint-status.ts --epic N --fix` (apply) to rename or remove them
 
 **Impact of violation:** Replacing the file destroys completion tracking for ALL prior epics. This is a P1 process failure.
 

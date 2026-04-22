@@ -16,8 +16,10 @@ const SPRINT_STATUS_PATH = resolve(
 interface CliArgs {
   epic?: string;
   story?: string;
+  title?: string;
   status?: string;
   epicStatus?: string;
+  multi?: boolean;
   dryRun?: boolean;
   help?: boolean;
 }
@@ -30,8 +32,10 @@ function parseArgs(): CliArgs {
     const arg = argv[i];
     if (arg === "--epic") args.epic = argv[++i];
     else if (arg === "--story") args.story = argv[++i];
+    else if (arg === "--title") args.title = argv[++i];
     else if (arg === "--status") args.status = argv[++i];
     else if (arg === "--epic-status") args.epicStatus = argv[++i];
+    else if (arg === "--multi") args.multi = true;
     else if (arg === "--dry-run") args.dryRun = true;
     else if (arg === "--help" || arg === "-h") args.help = true;
   }
@@ -48,6 +52,12 @@ function validateArgs(args: CliArgs): void {
   }
   if (args.story && !args.status) {
     errors.push("--status is required when updating a story");
+  }
+  if (args.title && !args.story) {
+    errors.push("--title requires --story");
+  }
+  if (args.title && args.multi) {
+    errors.push("--title cannot be used with --multi");
   }
   if (
     args.status &&
@@ -114,35 +124,113 @@ function normalizeStoryInput(epic: string, story: string): string {
     process.exit(1);
   }
 
-  if (value === epic) {
-    console.error(`Error: --story '${value}' is invalid for epic ${epic}.`);
-    console.error("Use --epic-status for epic-level updates, or pass a story key like '46-4' or '46-4-goods-receipt'.");
+  // Enforce strict dash notation only:
+  // - N-X
+  // - N-X-a
+  // where bucket after N-X is exactly ONE letter [a-z]
+  let normalized = value;
+
+  // Normalize bracketed single-letter bucket: N-X-[a]-title -> N-X-a-title
+  normalized = normalized.replace(/-\[([a-z])\](?=-|$)/gi, "-$1");
+
+  // Reject placeholder class literal; require concrete letter (e.g. 6-1-a-title)
+  if (/\[a-z\]/i.test(normalized)) {
+    console.error(`Error: --story '${value}' is invalid.`);
+    console.error("Use a concrete alpha bucket, e.g. '6-1-a-title' (not '[a-z]').");
     process.exit(1);
   }
 
-  if (value.startsWith(`${epic}-`)) return value;
-  return `${epic}-${value}`;
+  // Normalize compact one-letter bucket form: N-Xa-title -> N-X-a-title
+  const compactBucketMatch = normalized.match(/^(\d+-\d+)([a-z])$/i);
+  if (compactBucketMatch) {
+    const [, prefix, bucket] = compactBucketMatch;
+    normalized = `${prefix}-${bucket}`;
+  }
+
+  normalized = normalized.toLowerCase();
+
+  const isNumericStory = /^\d+-\d+$/.test(normalized);
+  const isBucketStory = /^\d+-\d+-[a-z]$/i.test(normalized);
+
+  if (!isNumericStory && !isBucketStory) {
+    console.error(`Error: --story '${value}' is invalid.`);
+    console.error("Story input MUST be: 'N-X' OR 'N-X-a'.");
+    console.error("Use --title for title part, e.g. --story 6-1-a --title platform-acl.");
+    console.error("Bucket MUST be exactly one letter [a-z] (e.g., 6-1-a). Inputs like '6-1-aa' are invalid.");
+    console.error("Do NOT use dot notation (49.3) or short form (3).");
+    console.error(`If existing keys are malformed, run: npx tsx scripts/clean-sprint-status.ts --epic ${epic}`);
+    process.exit(1);
+  }
+
+  const storyEpic = normalized.split("-")[0];
+  if (storyEpic !== epic) {
+    console.error(`Error: --story '${normalized}' targets epic ${storyEpic}, but --epic is ${epic}.`);
+    process.exit(1);
+  }
+
+  return normalized;
 }
 
-function resolveStoryKey(epic: string, story: string, existingKeys: string[]): string {
+function normalizeTitleInput(title: string): string {
+  const value = title.trim();
+  if (value.length === 0) {
+    console.error("Error: --title cannot be empty");
+    process.exit(1);
+  }
+  if (!/^[a-z0-9-]+$/i.test(value)) {
+    console.error(`Error: --title '${title}' is invalid.`);
+    console.error("Title MUST use dash notation only: lowercase letters, numbers, and '-' (e.g., my-title-name).");
+    process.exit(1);
+  }
+  return value.toLowerCase();
+}
+
+function toLegacyCompactKey(key: string): string | null {
+  const match = key.match(/^(\d+-\d+)-([a-z])(?:-(.+))?$/i);
+  if (!match) return null;
+  const [, prefix, bucket, tail] = match;
+  return tail ? `${prefix}${bucket}-${tail}` : `${prefix}${bucket}`;
+}
+
+function resolveStoryKeys(epic: string, story: string, existingKeys: string[], allowMulti: boolean): string[] {
   const normalized = normalizeStoryInput(epic, story);
 
-  // 1) exact key match
-  if (existingKeys.includes(normalized)) return normalized;
+  const exactMatches = new Set<string>();
+  const prefixMatches = new Set<string>();
 
-  // 2) prefix match (e.g., 46-4 -> 46-4-goods-receipt)
-  const prefixMatches = existingKeys.filter((k) => k.startsWith(`${normalized}-`));
-  if (prefixMatches.length === 1) return prefixMatches[0];
+  // 1) exact and canonical prefix matches
+  for (const key of existingKeys) {
+    const lowerKey = key.toLowerCase();
+    if (lowerKey === normalized) exactMatches.add(key);
+    if (lowerKey.startsWith(`${normalized}-`)) prefixMatches.add(key);
+  }
 
-  if (prefixMatches.length > 1) {
-    console.error(`\n❌ Error: Multiple existing keys match '${story}':`);
-    prefixMatches.forEach((m) => console.error(`  - ${m}`));
-    console.error("\nUse the full key via --story to disambiguate.");
-    process.exit(1);
+  // 2) Legacy compact bucket match support:
+  //    N-Xa-title should be considered a match for N-X queries.
+  if (/^\d+-\d+$/.test(normalized)) {
+    const compactBucketPattern = new RegExp(`^${normalized}[a-z](?:-|$)`, "i");
+    for (const key of existingKeys) {
+      if (compactBucketPattern.test(key)) prefixMatches.add(key);
+    }
+  }
+
+  const allMatches = existingKeys.filter((key) => exactMatches.has(key) || prefixMatches.has(key));
+  if (allMatches.length === 1) return [allMatches[0]];
+
+  if (allMatches.length > 1) {
+    if (!allowMulti) {
+      console.error(`\n❌ Error: Multiple existing keys match '${story}':`);
+      allMatches.forEach((m) => console.error(`  - ${m}`));
+      console.error("\nUse --multi to update all matches, or pass a more specific --story key.");
+      console.error(`If these matches look malformed, run: npx tsx scripts/clean-sprint-status.ts --epic ${epic}`);
+      process.exit(1);
+    }
+
+    return allMatches;
   }
 
   // 3) no match -> create normalized key
-  return normalized;
+  return [normalized];
 }
 
 function updateSprintStatus(content: string, args: CliArgs): string {
@@ -178,40 +266,56 @@ function updateSprintStatus(content: string, args: CliArgs): string {
 
   if (args.status && args.story) {
     const storyKeys = getStoryKeysForEpic(lines, sectionStart, sectionEnd);
-    const targetKey = resolveStoryKey(epic, args.story, storyKeys);
+    let targetKeys: string[];
 
-    const escapedKey = targetKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const storyPattern = new RegExp(`^\\s*${escapedKey}:`);
-    const storyIdx = lines.findIndex((l) => storyPattern.test(l));
-
-    if (storyIdx === -1) {
-      // append within section, after last story key if any, else after epic status line
-      let insertIdx = epicStatusIdx + 1;
-      for (let i = epicStatusIdx + 1; i < sectionEnd; i++) {
-        if (/^\s*\d+-[^:]+:/.test(lines[i])) {
-          insertIdx = i + 1;
-        }
-      }
-
-      const newLine = buildStoryLine(targetKey, args.status);
-      if (args.dryRun) {
-        console.log(`[DRY RUN] Would add story: ${newLine}`);
-      } else {
-        lines.splice(insertIdx, 0, newLine);
-        console.log(`✅ Added story: ${newLine}`);
-      }
+    if (args.title) {
+      const normalizedTitle = normalizeTitleInput(args.title);
+      targetKeys = [`${normalizeStoryInput(epic, args.story)}-${normalizedTitle}`];
     } else {
-      const oldLine = lines[storyIdx];
-      const newLine = oldLine.replace(/:.+$/, `: ${args.status}`);
-      if (oldLine !== newLine) {
+      targetKeys = resolveStoryKeys(epic, args.story, storyKeys, Boolean(args.multi));
+    }
+
+    for (const targetKey of targetKeys) {
+      const escapedKey = targetKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const storyPattern = new RegExp(`^\\s*${escapedKey}:`);
+      const storyIdx = lines.findIndex((l) => storyPattern.test(l));
+
+      if (storyIdx === -1) {
+        const legacyCompact = toLegacyCompactKey(targetKey);
+        if (legacyCompact && storyKeys.includes(legacyCompact)) {
+          console.error(`\n❌ Error: Found legacy malformed key '${legacyCompact}' for '${targetKey}'.`);
+          console.error(`Run cleaner first: npx tsx scripts/clean-sprint-status.ts --epic ${epic} --fix`);
+          process.exit(1);
+        }
+
+        // append within section, after last story key if any, else after epic status line
+        let insertIdx = epicStatusIdx + 1;
+        for (let i = epicStatusIdx + 1; i < sectionEnd; i++) {
+          if (/^\s*\d+-[^:]+:/.test(lines[i])) {
+            insertIdx = i + 1;
+          }
+        }
+
+        const newLine = buildStoryLine(targetKey, args.status);
         if (args.dryRun) {
-          console.log(`[DRY RUN] Would change:\n  ${oldLine.trim()}\n  → ${newLine.trim()}`);
+          console.log(`[DRY RUN] Would add story: ${newLine}`);
         } else {
-          lines[storyIdx] = newLine;
-          console.log(`✅ Updated story: ${newLine.trim()}`);
+          lines.splice(insertIdx, 0, newLine);
+          console.log(`✅ Added story: ${newLine}`);
         }
       } else {
-        console.log(`ℹ️  Story already has status '${args.status}' — no change needed.`);
+        const oldLine = lines[storyIdx];
+        const newLine = oldLine.replace(/:.+$/, `: ${args.status}`);
+        if (oldLine !== newLine) {
+          if (args.dryRun) {
+            console.log(`[DRY RUN] Would change:\n  ${oldLine.trim()}\n  → ${newLine.trim()}`);
+          } else {
+            lines[storyIdx] = newLine;
+            console.log(`✅ Updated story: ${newLine.trim()}`);
+          }
+        } else {
+          console.log(`ℹ️  Story already has status '${args.status}' — no change needed.`);
+        }
       }
     }
   }
@@ -243,8 +347,8 @@ Sprint Status Update Utility
 
 Usage:
   npx tsx scripts/update-sprint-status.ts --epic 46 --story 46-4 --status done
-  npx tsx scripts/update-sprint-status.ts --epic 46 --story 4 --status done
-  npx tsx scripts/update-sprint-status.ts --epic 46 --story 46-4-goods-receipt --status done
+  npx tsx scripts/update-sprint-status.ts --epic 6 --story 6-1-a --title platform-acl --status done
+  npx tsx scripts/update-sprint-status.ts --epic 6 --story 6-1 --status done --multi
   npx tsx scripts/update-sprint-status.ts --epic 46 --epic-status done
 `);
     process.exit(0);

@@ -67,22 +67,22 @@ development_status:
 
   # Epic 6: Technical Debt Consolidation & Modernization
   epic-6: done
-  6-1a-invoice-types-extraction: done
-  6-1b-payment-types-extraction: done
-  6-1c-order-types-extraction: done
-  6-1d-credit-note-extraction: done
-  6-1e-shared-utilities-consolidation: done
-  6-2a-service-sessions-types: done
-  6-2b-service-sessions-lifecycle: done
-  6-2c-service-sessions-lines: done
-  6-2d-service-sessions-checkpoint: done
+  6-1-a-invoice-types-extraction: done
+  6-1-b-payment-types-extraction: done
+  6-1-c-order-types-extraction: done
+  6-1-d-credit-note-extraction: done
+  6-1-e-shared-utilities-consolidation: done
+  6-2-a-service-sessions-types: done
+  6-2-b-service-sessions-lifecycle: done
+  6-2-c-service-sessions-lines: done
+  6-2-d-service-sessions-checkpoint: done
   6-3-type-safety-audit: done
   6-4-deprecation-cleanup: done
-  6-5a-reservations-types: done
-  6-5b-reservations-crud: done
-  6-5c-reservations-utils-availability: done
-  6-5d-reservations-status: done
-  6-5e-reservations-consolidation: done
+  6-5-a-reservations-types: done
+  6-5-b-reservations-crud: done
+  6-5-c-reservations-utils-availability: done
+  6-5-d-reservations-status: done
+  6-5-e-reservations-consolidation: done
   6-6-adr-documentation: done
   6-7-epic-5-follow-up: done
   epic-6-retrospective: done
@@ -127,7 +127,7 @@ development_status:
 
   # Epic 10: Fix Critical Hardcoded ID Tests
   epic-10: done
-  10-1-add-createOutletBasic: done
+  10-1-add-createoutletbasic: done
   10-2-refactor-variant-stock-tests: done
   10-3-refactor-services-stock-tests: done
   10-4-refactor-routes-stock-tests: done
@@ -139,7 +139,7 @@ development_status:
   11-2-refactor-cogs-posting-tests: done
   11-3-refactor-users-auth-tests: done
   11-4-refactor-remaining-tests: done
-  11-5-replace-insert-items-with-createItem: done
+  11-5-replace-insert-items-with-createitem: done
   epic-11-retrospective: done
 
   # Epic 12: Standardize Library Usage for All Routes
@@ -205,8 +205,8 @@ development_status:
   epic-18: done
   18-1-verify-db-exports: done
   18-2-verify-auth-kysely-pattern: done
-  18-3a-migrate-sync-core-data-queries-part1: done
-  18-3b-migrate-sync-core-data-queries-part2: done
+  18-3-a-migrate-sync-core-data-queries-part1: done
+  18-3-b-migrate-sync-core-data-queries-part2: done
   18-4-migrate-pos-sync: done
   18-5-migrate-backoffice-sync: done
   18-6-migrate-modules-accounting: done
@@ -320,8 +320,8 @@ development_status:
   # Epic 26: Extend modules-inventory with Cost-Dependent Stock Operations
   epic-26: done
   26-1-extend-stock-service-interface: done
-  26-2-implement-deductStockWithCost: done
-  26-3-implement-restoreStock-adjustStock: done
+  26-2-implement-deductstockwithcost: done
+  26-3-implement-restorestock-adjuststock: done
   26-4-update-api-stock-delegation-remove-cost-tracking: done
   26-5-full-validation-gate: done
   epic-26-retrospective: done
@@ -375,12 +375,11 @@ development_status:
   31-4-thin-routes-users-companies: done
   31-5-import-export-platform: backlog  # Moved to Epic 36 (scope too large for story)
   31-6-notifications-consolidation: done
-  31-7a-inventory-route-thinning: done
-  31-7b-reports-route-thinning: done
-  31-7c-accounts-route-thinning: done  # no refactoring needed, ADR-0016 created
-  31-8a-adapter-migration-prep: done  # Boundaries verified, lint fixes applied
-  31-8b-deletion-verification: done  # Deleted: cash-bank.ts, reconciliation-service.ts, reservation-groups.ts, reservations.ts. Remaining REVIEW candidates kept (pagination.ts used by telemetry, retry.ts unused but harmless).
-  31-post-epic-test-fixes: done  # Date handling, Temporal timezone, status_id fixtures
+  31-7-a-inventory-route-thinning: done
+  31-7-b-reports-route-thinning: done
+  31-7-c-accounts-route-thinning: done  # no refactoring needed, ADR-0016 created
+  31-8-a-adapter-migration-prep: done  # Boundaries verified, lint fixes applied
+  31-8-b-deletion-verification: done  # Deleted: cash-bank.ts, reconciliation-service.ts, reservation-groups.ts, reservations.ts. Remaining REVIEW candidates kept (pagination.ts used by telemetry, retry.ts unused but harmless).
   epic-31-retrospective: done
 
   # Epic 32: Financial Period Close & Reconciliation Workspace
@@ -570,9 +569,8 @@ development_status:
   epic-49: in_progress
   49-1-kickoff-gate-test-reliability-audit: done
   49-2-accounting-suite-determinism-hardening: done
-  49-3-purchasing-suite-determinism-hardening: ready-for-dev
+  49-3-purchasing-suite-determinism-hardening: done
   49-4-platform-acl-suite-determinism-hardening: ready-for-dev
   49-5-sync-pos-inventory-suite-determinism-hardening: ready-for-dev
   49-6-ci-pipeline-reliability-enforcement: ready-for-dev
   49-7-pre-close-validation-final-solid-dry-kiss-gate: ready-for-dev
-  49-49.3: done
