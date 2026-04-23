@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../../helpers/env';
 import { closeTestDb } from '../../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -13,19 +14,28 @@ import {
   createTestItem,
   registerFixtureCleanup
 } from '../../../fixtures';
+import { makeTag } from '../../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
 
 describe('inventory.items.list', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -69,7 +79,7 @@ describe('inventory.items.list', { timeout: 30000 }, () => {
     
     // Create an item under the seeded company
     const item = await createTestItem(ctx.companyId, {
-      sku: `LIST-PERM-${Date.now()}`,
+      sku: makeTag('LP'),
       name: 'Permission Test Item',
       type: 'PRODUCT'
     });

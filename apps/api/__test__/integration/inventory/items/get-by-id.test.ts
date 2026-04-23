@@ -6,27 +6,37 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../../helpers/env';
 import { closeTestDb } from '../../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
   getSeedSyncContext,
   createTestItem,
-  createTestCompany,
+  createTestCompanyMinimal,
   registerFixtureCleanup
 } from '../../../fixtures';
+import { makeTag } from '../../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
 
 describe('inventory.items.get-by-id', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -53,7 +63,7 @@ describe('inventory.items.get-by-id', { timeout: 30000 }, () => {
     
     // Create item under seeded company
     const item = await createTestItem(ctx.companyId, {
-      sku: `GETBYID-SKU-${Date.now()}`,
+      sku: makeTag('GI'),
       name: 'Test Item for GetById',
       type: 'PRODUCT'
     });
@@ -71,12 +81,12 @@ describe('inventory.items.get-by-id', { timeout: 30000 }, () => {
 
   it('enforces company scoping - cannot access other company items', async () => {
     // Create a second company and item under it
-    const otherCompany = await createTestCompany({ 
-      code: `OTHER-CO-${Date.now()}`,
+    const otherCompany = await createTestCompanyMinimal({ 
+      code: makeTag('OC'),
       name: 'Other Company'
     });
     const otherCompanyItem = await createTestItem(otherCompany.id, {
-      sku: `OTHER-CO-SKU-${Date.now()}`,
+      sku: makeTag('OI'),
       name: 'Other Company Item',
       type: 'PRODUCT'
     });

@@ -66,6 +66,8 @@ export {
   createTestVariant,
   createTestPrice,
   createTestStock,
+  createTestInventoryStock,
+  createTestInventoryTransaction,
   setTestItemLowStockThreshold,
   createTestFixtureSet,
   createFullTestFixtureSet,

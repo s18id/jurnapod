@@ -6,27 +6,38 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
-import { getTestDb, closeTestDb } from '../../helpers/db';
-import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext, createTestItem, registerFixtureCleanup } from '../../fixtures';
-import { sql } from 'kysely';
+import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
+import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext, createTestItem, createTestStock, createTestPrice, createTestInventoryTransaction } from '../../fixtures';
 
 let baseUrl: string;
 let accessToken: string;
 let outletId: number;
 let companyId: number;
 
+// Cache the seed context for zero-overhead access in it() blocks
+let seedCtx: Awaited<ReturnType<typeof getSeedSyncContext>>;
+
 describe('stock.transactions', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
-    const syncContext = await getSeedSyncContext();
-    outletId = syncContext.outletId;
-    companyId = syncContext.companyId;
+    seedCtx = await getSeedSyncContext();
+    outletId = seedCtx.outletId;
+    companyId = seedCtx.companyId;
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth token', async () => {
@@ -68,28 +79,22 @@ describe('stock.transactions', { timeout: 30000 }, () => {
   it('supports filtering by product_id', async () => {
     // Create a test item with stock transaction
     const item = await createTestItem(companyId, {
-      sku: `STOCK-TXN-TEST-${Date.now()}`,
+      sku: `STOCK-TXN-TEST-001`,
       name: 'Stock Transaction Test Item',
       type: 'PRODUCT',
       trackStock: true
     });
 
-    // Insert inventory_stock record
-    const db = getTestDb();
-    await sql`
-      INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity, created_at, updated_at)
-      VALUES (${companyId}, ${outletId}, ${item.id}, 100, 0, 100, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `.execute(db);
+    // Use canonical createTestStock for inventory_stock (Q49-001 fixture policy)
+    // This helper creates stock record AND inventory_transaction atomically
+    // First create price so adjustStock can derive unit cost for cost layer
+    await createTestPrice(companyId, item.id, seedCtx.cashierUserId, { price: 15000 });
+    await createTestStock(companyId, item.id, outletId, 100, seedCtx.cashierUserId);
 
-    // Create a transaction record
-    await sql`
-      INSERT INTO inventory_transactions (company_id, outlet_id, transaction_type, reference_type, reference_id, product_id, quantity_delta, created_at)
-      VALUES (${companyId}, ${outletId}, 5, 'ADJUSTMENT', 'TEST-REF-001', ${item.id}, 50, CURRENT_TIMESTAMP)
-    `.execute(db);
-
-    registerFixtureCleanup(`stock_txn_${item.id}`, async () => {
-      await sql`DELETE FROM inventory_transactions WHERE product_id = ${item.id} AND reference_id = 'TEST-REF-001'`.execute(db);
-      await sql`DELETE FROM inventory_stock WHERE product_id = ${item.id} AND outlet_id = ${outletId}`.execute(db);
+    // Create an additional ADJUSTMENT transaction for filtering verification
+    // Uses canonical createTestInventoryTransaction (Q49-001 fixture policy)
+    await createTestInventoryTransaction(companyId, item.id, outletId, seedCtx.cashierUserId, 50, {
+      referenceId: `STOCKTXN-${item.id}-ADJ-001`
     });
 
     // Query with product_id filter

@@ -6,24 +6,34 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../../helpers/env';
 import { closeTestDb } from '../../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
   registerFixtureCleanup
 } from '../../../fixtures';
+import { makeTag } from '../../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
 
 describe('inventory.item-groups.delete', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -34,8 +44,6 @@ describe('inventory.item-groups.delete', { timeout: 30000 }, () => {
   });
 
   it('deletes existing item group', async () => {
-    const timestamp = Date.now();
-
     // Create a group to delete
     const createRes = await fetch(`${baseUrl}/api/inventory/item-groups`, {
       method: 'POST',
@@ -43,7 +51,7 @@ describe('inventory.item-groups.delete', { timeout: 30000 }, () => {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ name: `Group To Delete ${timestamp}` })
+      body: JSON.stringify({ name: makeTag('GD') })
     });
     expect(createRes.status).toBe(201);
     const created = await createRes.json();

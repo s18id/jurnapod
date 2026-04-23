@@ -22,6 +22,33 @@ import { sql } from 'kysely';
 import { DataRetentionJob, DEFAULT_RETENTION_POLICIES, RetentionPolicy } from '../../src/jobs/data-retention.job.js';
 
 // ============================================================================
+// Deterministic Time Base
+// ============================================================================
+
+/**
+ * Anchor for deterministic date construction in tests.
+ * Anchored to the actual wall-clock date of the test run to stay in sync
+ * with the job's own `new Date()` cutoff computation.
+ * Updated once per test run to remove date-of-run nondeterminism while
+ * keeping relative offsets consistent with the job's real cutoff logic.
+ */
+const TEST_NOW_MS = Date.now();
+const TEST_NOW = new Date(TEST_NOW_MS);
+
+/**
+ * Days in milliseconds (24h * 60m * 60s * 1000ms)
+ */
+const DAYS_MS = 86_400_000;
+
+/**
+ * Returns a Date offset by `days` days from TEST_NOW_MS.
+ * Replaces: new Date(); oldDate.setDate(oldDate.getDate() - N)
+ */
+function daysAgo(days: number): Date {
+  return new Date(TEST_NOW_MS - days * DAYS_MS);
+}
+
+// ============================================================================
 // Test Configuration
 // ============================================================================
 
@@ -145,14 +172,14 @@ async function getOldRecordsCount(
   dateColumn: string,
   days: number
 ): Promise<number> {
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - days);
-  
+  // Use TEST_NOW_MS to compute deterministic cutoff (in sync with job's own Date.now())
+  const cutoffDate = new Date(TEST_NOW_MS - days * DAYS_MS);
+
   // Use raw SQL for dynamic table/column names since they're not in the schema
   const result = await sql<{ cnt: number }>`
     SELECT COUNT(*) as cnt FROM ${sql.raw(table)} WHERE ${sql.raw(dateColumn)} < ${cutoffDate}
   `.execute(db);
-  
+
   return result.rows[0]?.cnt ?? 0;
 }
 
@@ -203,12 +230,11 @@ describe('DataRetentionJob Integration', () => {
       const companyId = fixtures.testCompanyId;
       
       // Insert old records with SUCCESS status (should be deleted)
-      const oldDate = new Date();
-      oldDate.setDate(oldDate.getDate() - 10);
-      
+      const oldDate = daysAgo(10);
+
       await insertBackofficeSyncQueue(fixtures.db, companyId, oldDate, 'SUCCESS');
       await insertBackofficeSyncQueue(fixtures.db, companyId, oldDate, 'SUCCESS');
-      
+
       // Insert old records with PENDING status (should NOT be deleted due to additionalWhere)
       await fixtures.db
         .insertInto('backoffice_sync_queue')
@@ -250,14 +276,12 @@ describe('DataRetentionJob Integration', () => {
       const companyId = fixtures.testCompanyId;
       
       // Insert old events (100 days old)
-      const oldDate = new Date();
-      oldDate.setDate(oldDate.getDate() - 100);
-      
+      const oldDate = daysAgo(100);
+
       const oldEventId = await insertSyncAuditEvent(fixtures.db, companyId, oldDate);
-      
+
       // Insert recent event (5 days old) - should NOT be archived
-      const recentDate = new Date();
-      recentDate.setDate(recentDate.getDate() - 5);
+      const recentDate = daysAgo(5);
       
       await insertSyncAuditEvent(fixtures.db, companyId, recentDate);
       
@@ -289,9 +313,8 @@ describe('DataRetentionJob Integration', () => {
       
       const job = new DataRetentionJob(fixtures.db);
       
-      // Insert only recent events (should not be archived)
-      const recentDate = new Date();
-      recentDate.setDate(recentDate.getDate() - 5);
+      // Insert only recent events (should not be archived) - 5 days ago
+      const recentDate = daysAgo(5);
       
       await insertSyncAuditEvent(fixtures.db, fixtures.testCompanyId, recentDate);
       
@@ -305,10 +328,9 @@ describe('DataRetentionJob Integration', () => {
     test('should execute all default retention policies', async () => {
       const companyId = fixtures.testCompanyId;
       
-      // Insert old data for each table
-      const oldDate = new Date();
-      oldDate.setDate(oldDate.getDate() - 40);
-      
+      // Insert old data for each table - 40 days ago
+      const oldDate = daysAgo(40);
+
       // Old backoffice_sync_queue (SUCCESS status)
       await insertBackofficeSyncQueue(fixtures.db, companyId, oldDate, 'SUCCESS');
       
@@ -355,9 +377,8 @@ describe('DataRetentionJob Integration', () => {
     test('should include date ranges in results', async () => {
       const companyId = fixtures.testCompanyId;
       
-      // Insert old backoffice_sync_queue
-      const oldDate = new Date();
-      oldDate.setDate(oldDate.getDate() - 40);
+      // Insert old backoffice_sync_queue - 40 days ago
+      const oldDate = daysAgo(40);
       await insertBackofficeSyncQueue(fixtures.db, companyId, oldDate, 'SUCCESS');
       
       const job = new DataRetentionJob(fixtures.db);

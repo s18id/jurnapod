@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -16,6 +17,7 @@ import {
   createTestPrice,
   registerFixtureCleanup
 } from '../../fixtures';
+import { makeTag } from '../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
@@ -25,14 +27,22 @@ describe('pos.item-variants', { timeout: 30000 }, () => {
   const getSeedSyncContext = async () => seedCtx;
 
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     seedCtx = await loadSeedSyncContext();
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth token', async () => {
@@ -69,7 +79,7 @@ describe('pos.item-variants', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `POS-VAR-TEST-${Date.now()}`,
+      sku: makeTag('PV'),
       name: 'POS Variant Test Item',
       type: 'PRODUCT'
     });
@@ -118,7 +128,7 @@ describe('pos.item-variants', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `POS-VAR-OUTLET-${Date.now()}`,
+      sku: makeTag('PVO'),
       name: 'POS Variant Outlet Test Item',
       type: 'PRODUCT'
     });
@@ -174,7 +184,7 @@ describe('pos.item-variants', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `POS-VAR-ACTIVE-${Date.now()}`,
+      sku: makeTag('PVA'),
       name: 'POS Active Variants Test',
       type: 'PRODUCT'
     });
@@ -241,7 +251,7 @@ describe('pos.item-variants', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `POS-VAR-STRUCT-${Date.now()}`,
+      sku: makeTag('PVS'),
       name: 'POS Variant Structure Test',
       type: 'PRODUCT'
     });

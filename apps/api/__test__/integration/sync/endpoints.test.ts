@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { resetFixtureRegistry, getTestAccessToken } from '../../fixtures';
 
 let baseUrl: string;
@@ -18,13 +19,21 @@ let accessToken: string;
 
 describe('sync.endpoints', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('healthcheck returns ok', async () => {

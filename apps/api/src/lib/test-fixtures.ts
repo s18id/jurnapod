@@ -77,6 +77,7 @@ import { DatabaseConflictError } from "./master-data-errors.js";
 import { createVariantAttribute } from "./item-variants";
 import { adjustStock } from "./stock.js";
 import { MODULE_PERMISSION_BITS, buildPermissionMask, type ModulePermission } from "@jurnapod/auth";
+import { InventoryConflictError } from "@jurnapod/modules-inventory";
 
 // ============================================================================
 // Types
@@ -1139,8 +1140,13 @@ export async function createTestItem(
 ): Promise<ItemFixture> {
   const db = getDb();
   const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-  
-  const sku = options?.sku ?? `TEST-SKU-${runId}`.slice(0, 30);
+
+  // Always append a unique suffix to SKU to prevent cross-test pollution.
+  // Even when caller provides an explicit SKU, append a run-unique suffix
+  // so that each test gets its own item with isolated stock.
+  const sku = options?.sku
+    ? `${options.sku}-${runId}`.slice(0, 30)
+    : `TEST-SKU-${runId}`.slice(0, 30);
   const name = options?.name ?? `Test Item ${runId}`;
   const type = options?.type ?? "PRODUCT";
   
@@ -1244,6 +1250,8 @@ export async function createTestVariant(
 
 /**
  * Create a test price using the canonical itemPriceService.
+ * Idempotent: if an active price already exists for the same item+outlet+variant
+ * combination, returns the existing price instead of creating a duplicate.
  * Requires a real userId for audit logging.
  */
 export async function createTestPrice(
@@ -1257,14 +1265,46 @@ export async function createTestPrice(
     isActive: boolean;
   }>
 ): Promise<PriceFixture> {
+  const db = getDb();
+  const outletId = options?.outletId ?? null;
+  const variantId = options?.variantId ?? null;
+  const priceValue = options?.price ?? 10000;
+  const isActive = options?.isActive ?? true;
+
+  // Idempotent check: find existing price for same item+outlet+variant
+  const existing = await sql`
+    SELECT id, item_id, outlet_id, variant_id, price, is_active
+    FROM item_prices
+    WHERE item_id = ${itemId}
+      AND outlet_id ${outletId === null ? sql`IS NULL` : sql`= ${outletId}`}
+      AND variant_id ${variantId === null ? sql`IS NULL` : sql`= ${variantId}`}
+    LIMIT 1
+  `.execute(db);
+
+  if (existing.rows.length > 0) {
+    const row = existing.rows[0] as { id: number; item_id: number; outlet_id: number | null; variant_id: number | null; price: string; is_active: number };
+    const fixture: PriceFixture = {
+      id: Number(row.id),
+      item_id: Number(row.item_id),
+      outlet_id: row.outlet_id !== null ? Number(row.outlet_id) : null,
+      variant_id: row.variant_id !== null ? Number(row.variant_id) : null,
+      price: Number(row.price),
+      is_active: Boolean(row.is_active),
+    };
+    // Track existing price to prevent orphaned cleanup
+    createdFixtures.prices.push(fixture);
+    return fixture;
+  }
+
+  // Create new price via canonical path
   const actor = { userId, canManageCompanyDefaults: true };
 
   const price = await itemPricesAdapter.createItemPrice(companyId, {
     item_id: itemId,
-    outlet_id: options?.outletId ?? null,
-    variant_id: options?.variantId ?? null,
-    price: options?.price ?? 10000,
-    is_active: options?.isActive ?? true,
+    outlet_id: outletId,
+    variant_id: variantId,
+    price: priceValue,
+    is_active: isActive,
   }, actor);
 
   createdFixtures.prices.push(price);
@@ -1325,6 +1365,179 @@ export async function createTestStock(
   });
 
   return fixture;
+}
+
+/**
+ * Create a test inventory_stock record for variant-level stock.
+ *
+ * PARTIAL FIXTURE MODE — EXCEPTION: This helper uses raw SQL INSERT for
+ * inventory_stock because no canonical @jurnapod/modules-inventory service
+ * exists for test-only fixture creation with variant_id scope.
+ *
+ * SCOPE: Variant-level stock only (not product-level). For product-level
+ * stock, use createTestStock() which delegates to adjustStock.
+ *
+ * RATIONALE FOR EXCEPTION: The production stock domain lives in
+ * @jurnapod/modules-inventory which does not expose a test-only fixture path.
+ * Retaining raw SQL here is the pragmatic trade-off for Q49-001 fixture policy
+ * compliance. This scope is narrow (inventory_stock INSERT only) and bounded
+ * (variant_id + outlet_id + company_id composite key).
+ *
+ * OWNER: @jurnapod/modules-inventory (owns the inventory_stock domain invariant)
+ *
+ * Idempotent: If a row already exists for the same company_id+variant_id+outlet_id
+ * composite key, updates the quantity instead of creating a duplicate.
+ *
+ * Used for POS cart-validate tests that need to verify stock availability
+ * from the inventory_stock.available_quantity column (not item_variants.stock_quantity).
+ *
+ * @param companyId   - Tenant ID
+ * @param itemId     - Item/product ID
+ * @param variantId  - Variant ID (required — distinguishes from product-level stock)
+ * @param outletId   - Outlet ID (use null for company-level stock)
+ * @param quantity   - Quantity to set (maps to quantity, reserved_quantity, available_quantity)
+ * @param options    - Partial options
+ * @param options.reservedQuantity - Reserved quantity (default: 0)
+ */
+export async function createTestInventoryStock(
+  companyId: number,
+  itemId: number,
+  variantId: number,
+  outletId: number | null,
+  quantity: number,
+  options?: Partial<{
+    reservedQuantity: number;
+  }>
+): Promise<void> {
+  const db = getDb();
+  const reservedQty = options?.reservedQuantity ?? 0;
+  const availableQty = quantity - reservedQty;
+
+  // Idempotent: check for existing row and update-or-insert
+  const existing = await sql`
+    SELECT id, quantity, reserved_quantity, available_quantity
+    FROM inventory_stock
+    WHERE company_id = ${companyId}
+      AND variant_id = ${variantId}
+      AND outlet_id ${outletId === null ? sql`IS NULL` : sql`= ${outletId}`}
+    LIMIT 1
+  `.execute(db);
+
+  if (existing.rows.length > 0) {
+    // Update existing row instead of duplicate insert
+    await sql`
+      UPDATE inventory_stock
+      SET quantity = ${quantity},
+          reserved_quantity = ${reservedQty},
+          available_quantity = ${availableQty},
+          updated_at = CURRENT_TIMESTAMP
+      WHERE company_id = ${companyId}
+        AND variant_id = ${variantId}
+        AND outlet_id ${outletId === null ? sql`IS NULL` : sql`= ${outletId}`}
+    `.execute(db);
+  } else {
+    await sql`
+      INSERT INTO inventory_stock (
+        company_id,
+        outlet_id,
+        product_id,
+        variant_id,
+        quantity,
+        reserved_quantity,
+        available_quantity,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${companyId},
+        ${outletId},
+        ${itemId},
+        ${variantId},
+        ${quantity},
+        ${reservedQty},
+        ${availableQty},
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP
+      )
+    `.execute(db);
+  }
+
+  registerFixtureCleanup(`inv-stock-${variantId}-${outletId ?? 'global'}`, async () => {
+    await sql`DELETE FROM inventory_stock WHERE company_id = ${companyId} AND variant_id = ${variantId} AND outlet_id ${outletId === null ? sql`IS NULL` : sql`= ${outletId}`}`.execute(db);
+  });
+}
+
+// Re-export TransactionType for test fixture helpers
+export { TransactionType } from "./stock.js";
+import { TransactionType } from "./stock.js";
+
+/**
+ * Create a test inventory transaction using the canonical adjustStock path.
+ *
+ * Uses the same production-invariant flow as createTestStock but allows
+ * creating additional transactions beyond the initial stock set.
+ * Each call creates a new ADJUSTMENT transaction with a deterministic reference_id
+ * so tests can filter/query specific transactions without raw SQL.
+ *
+ * For initial stock setup, use createTestStock() instead (it handles the
+ * company+item+outlet cost-layer derivation internally).
+ * This helper is for creating supplemental ADJUSTMENT transactions that need
+ * to exist before querying stock/transactions endpoints.
+ *
+ * @param companyId   - Tenant ID
+ * @param itemId      - Item ID
+ * @param outletId    - Outlet ID (use null for company-level)
+ * @param userId      - User performing the adjustment
+ * @param quantityDelta - Positive or negative quantity delta
+ * @param options     - Partial options
+ * @param options.referenceId - Deterministic reference ID (auto-generated if not provided)
+ */
+export async function createTestInventoryTransaction(
+  companyId: number,
+  itemId: number,
+  outletId: number | null,
+  userId: number,
+  quantityDelta: number,
+  options?: Partial<{
+    referenceId: string;
+  }>
+): Promise<{ transactionId: number; referenceId: string }> {
+  const db = getDb();
+  const refId = options?.referenceId ?? `TEST-ADJ-${Date.now().toString(36)}`;
+
+  // Use adjustStock which creates the inventory_transactions record atomically
+  const ok = await adjustStock({
+    company_id: companyId,
+    outlet_id: outletId,
+    product_id: itemId,
+    adjustment_quantity: quantityDelta,
+    reason: "TEST_SETUP",
+    reference_id: refId,
+    user_id: userId,
+  });
+
+  if (!ok) {
+    throw new Error(`Failed to create inventory transaction for item ${itemId}`);
+  }
+
+  // Retrieve the transaction ID using the deterministic reference_id
+  const result = await sql`
+    SELECT id FROM inventory_transactions
+    WHERE company_id = ${companyId}
+      AND product_id = ${itemId}
+      AND reference_id = ${refId}
+      AND transaction_type = ${TransactionType.ADJUSTMENT}
+    LIMIT 1
+  `.execute(db);
+
+  if (result.rows.length === 0) {
+    throw new Error(`Failed to retrieve transaction ID for reference ${refId}`);
+  }
+
+  return {
+    transactionId: Number((result.rows[0] as { id: number }).id),
+    referenceId: refId,
+  };
 }
 
 /**

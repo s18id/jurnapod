@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -13,6 +14,7 @@ import {
   createTestItem,
   registerFixtureCleanup
 } from '../../fixtures';
+import { makeTag } from '../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
@@ -22,14 +24,22 @@ describe('inventory.recipes.ingredients.delete', { timeout: 30000 }, () => {
   const getSeedSyncContext = async () => seedCtx;
 
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     seedCtx = await loadSeedSyncContext();
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -59,14 +69,14 @@ describe('inventory.recipes.ingredients.delete', { timeout: 30000 }, () => {
     const ctx = await getSeedSyncContext();
     
     const recipe = await createTestItem(ctx.companyId, {
-      sku: `DELETE-RECIPE-${Date.now()}`,
+      sku: makeTag('DR'),
       name: 'Recipe To Delete From',
       type: 'RECIPE'
     });
     registerFixtureCleanup(`item-${recipe.id}`, async () => {});
 
     const ingredient = await createTestItem(ctx.companyId, {
-      sku: `DELETE-ING-${Date.now()}`,
+      sku: makeTag('DI'),
       name: 'Ingredient To Delete',
       type: 'INGREDIENT'
     });
@@ -109,14 +119,14 @@ describe('inventory.recipes.ingredients.delete', { timeout: 30000 }, () => {
     const ctx = await getSeedSyncContext();
     
     const recipe = await createTestItem(ctx.companyId, {
-      sku: `DELETE-PERM-RECIPE-${Date.now()}`,
+      sku: makeTag('DP'),
       name: 'Permission Test Recipe',
       type: 'RECIPE'
     });
     registerFixtureCleanup(`item-${recipe.id}`, async () => {});
 
     const ingredient = await createTestItem(ctx.companyId, {
-      sku: `DELETE-PERM-ING-${Date.now()}`,
+      sku: makeTag('DI'),
       name: 'Permission Test Ingredient',
       type: 'INGREDIENT'
     });

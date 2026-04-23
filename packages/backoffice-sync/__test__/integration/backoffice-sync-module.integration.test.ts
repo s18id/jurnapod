@@ -23,6 +23,35 @@ import { BatchProcessor } from '../../src/batch/batch-processor.js';
 import { ExportScheduler } from '../../src/scheduler/export-scheduler.js';
 
 // ============================================================================
+// Deterministic ID / Time Base
+// ============================================================================
+
+/**
+ * Frozen base timestamp for deterministic test timestamps.
+ * All request_ids and timestamps are computed as deterministic offsets
+ * from this fixed epoch to ensure test reproducibility.
+ */
+const FROZEN_BASE_MS = 1_700_000_000_000; // 2023-11-13T16:53:20.000Z
+
+/** Monotonic counter for deterministic request_id generation */
+let _requestIdCounter = 0;
+
+/**
+ * Returns deterministic request ID to replace crypto.randomUUID() calls.
+ * Format: deterministic-{counter}-{baseMs}
+ */
+function makeDeterministicRequestId(): string {
+  return `deterministic-${++_requestIdCounter}-${FROZEN_BASE_MS}`;
+}
+
+/**
+ * Returns deterministic ISO timestamp offset by given days from FROZEN_BASE_MS.
+ */
+function deterministicTimestamp(daysOffset = 0): string {
+  return new Date(FROZEN_BASE_MS + daysOffset * 86_400_000).toISOString();
+}
+
+// ============================================================================
 // Test Configuration
 // ============================================================================
 
@@ -165,8 +194,8 @@ describe('BackofficeSyncModule Integration', () => {
         user_id: userId,
         outlet_id: outletId,
         client_type: 'BACKOFFICE' as const,
-        request_id: crypto.randomUUID(),
-        timestamp: new Date().toISOString(),
+        request_id: makeDeterministicRequestId(),
+        timestamp: deterministicTimestamp(),
       };
     }
 
@@ -429,12 +458,14 @@ describe('BackofficeSyncModule Integration', () => {
 
     test('should not start twice', async () => {
       await batchProcessor.start();
-      const firstStartTime = Date.now();
-      
-      // Try to start again - should be no-op
+
+      // Try to start again - should be no-op (isRunning prevents double-start)
       await batchProcessor.start();
-      
-      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Verify start was idempotent by checking the isRunning internal flag
+      const isRunning = (batchProcessor as any).isRunning;
+      expect(isRunning).toBe(true);
+
       await batchProcessor.stop();
     });
   });
@@ -583,8 +614,8 @@ describe('BackofficeSyncModule Integration', () => {
         user_id: userId,
         outlet_id: outletId,
         client_type: 'BACKOFFICE' as const,
-        request_id: crypto.randomUUID(),
-        timestamp: new Date().toISOString(),
+        request_id: makeDeterministicRequestId(),
+        timestamp: deterministicTimestamp(),
       };
     }
 

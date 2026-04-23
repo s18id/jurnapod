@@ -6,24 +6,34 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../../helpers/env';
 import { closeTestDb } from '../../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
   registerFixtureCleanup
 } from '../../../fixtures';
+import { makeTag } from '../../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
 
 describe('inventory.item-groups.create', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -36,7 +46,7 @@ describe('inventory.item-groups.create', { timeout: 30000 }, () => {
   });
 
   it('creates item group with valid data', async () => {
-    const uniqueName = `Test Group ${Date.now()}`;
+    const uniqueName = makeTag('TG');
 
     const res = await fetch(`${baseUrl}/api/inventory/item-groups`, {
       method: 'POST',
@@ -55,8 +65,8 @@ describe('inventory.item-groups.create', { timeout: 30000 }, () => {
   });
 
   it('creates item group with code', async () => {
-    const uniqueCode = `GRP-CODE-${Date.now()}`.slice(0, 20);
-    const uniqueName = `Coded Group ${Date.now()}`;
+    const uniqueCode = makeTag('GC');
+    const uniqueName = makeTag('CG');
 
     const res = await fetch(`${baseUrl}/api/inventory/item-groups`, {
       method: 'POST',
@@ -73,8 +83,8 @@ describe('inventory.item-groups.create', { timeout: 30000 }, () => {
   });
 
   it('supports hierarchical parent-child relationships', async () => {
-    const parentName = `Parent Group ${Date.now()}`;
-    const childName = `Child Group ${Date.now()}`;
+    const parentName = makeTag('PG');
+    const childName = makeTag('CG');
 
     // Create parent
     const parentRes = await fetch(`${baseUrl}/api/inventory/item-groups`, {

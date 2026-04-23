@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../../helpers/env';
 import { closeTestDb } from '../../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -13,6 +14,7 @@ import {
   createTestVariant,
   registerFixtureCleanup
 } from '../../../fixtures';
+import { makeTag } from '../../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
@@ -22,14 +24,22 @@ describe('inventory.item-prices.variant-prices', { timeout: 30000 }, () => {
   const getSeedSyncContext = async () => seedCtx;
 
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     seedCtx = await loadSeedSyncContext();
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -62,7 +72,7 @@ describe('inventory.item-prices.variant-prices', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `VAR-PRICE-${Date.now()}`,
+        sku: makeTag('VP'),
         name: 'Item for Variant Prices',
         type: 'PRODUCT'
       })
@@ -120,7 +130,7 @@ describe('inventory.item-prices.variant-prices', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `VAR-OUTLET-${Date.now()}`,
+        sku: makeTag('VO'),
         name: 'Item for Variant Outlet',
         type: 'PRODUCT'
       })
@@ -157,7 +167,7 @@ describe('inventory.item-prices.variant-prices', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `VAR-PERM-${Date.now()}`,
+        sku: makeTag('VP'),
         name: 'Item for Variant Permission',
         type: 'PRODUCT'
       })
@@ -189,7 +199,7 @@ describe('inventory.item-prices.variant-prices', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `VAR-NONEX-${Date.now()}`,
+        sku: makeTag('VN'),
         name: 'Item for Non-Existent Variant',
         type: 'PRODUCT'
       })

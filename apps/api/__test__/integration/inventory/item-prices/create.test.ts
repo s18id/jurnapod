@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../../helpers/env';
 import { closeTestDb } from '../../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -13,6 +14,7 @@ import {
   createTestItem,
   registerFixtureCleanup
 } from '../../../fixtures';
+import { makeTag } from '../../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
@@ -23,13 +25,14 @@ describe('inventory.item-prices.create', { timeout: 30000 }, () => {
   const getSeedSyncContext = async () => seedCtx;
 
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     // Create a minimal item for auth/validation tests (ID used only when auth passes)
     seedCtx = await loadSeedSyncContext();
     const ctx = seedCtx;
     const item = await createTestItem(ctx.companyId, {
-      sku: `AUTH-TEST-${Date.now()}`,
+      sku: makeTag('AT'),
       name: 'Auth Test Item',
       type: 'PRODUCT',
     });
@@ -37,8 +40,15 @@ describe('inventory.item-prices.create', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -61,7 +71,7 @@ describe('inventory.item-prices.create', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `PRICE-CREATE-${Date.now()}`,
+        sku: makeTag('PC'),
         name: 'Item for Price Create',
         type: 'PRODUCT'
       })
@@ -121,7 +131,7 @@ describe('inventory.item-prices.create', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `PRICE-NEG-${Date.now()}`,
+        sku: makeTag('PN'),
         name: 'Item for Negative Price Test',
         type: 'PRODUCT'
       })
@@ -156,7 +166,7 @@ describe('inventory.item-prices.create', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `PRICE-OUTLET-${Date.now()}`,
+        sku: makeTag('PO'),
         name: 'Item for Outlet Price',
         type: 'PRODUCT'
       })
@@ -195,7 +205,7 @@ describe('inventory.item-prices.create', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `PRICE-COMPANY-${Date.now()}`,
+        sku: makeTag('PD'),
         name: 'Item for Company Default',
         type: 'PRODUCT'
       })

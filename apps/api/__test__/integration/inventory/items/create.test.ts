@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../../helpers/env';
 import { closeTestDb } from '../../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -13,6 +14,7 @@ import {
   createTestItem,
   registerFixtureCleanup
 } from '../../../fixtures';
+import { makeTag } from '../../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
@@ -22,14 +24,22 @@ describe('inventory.items.create', { timeout: 30000 }, () => {
   const getSeedSyncContext = async () => seedCtx;
 
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     seedCtx = await loadSeedSyncContext();
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -43,7 +53,7 @@ describe('inventory.items.create', { timeout: 30000 }, () => {
 
   it('creates item with valid data', async () => {
     const ctx = await getSeedSyncContext();
-    const uniqueSku = `CREATE-SKU-${Date.now()}`;
+    const uniqueSku = makeTag('OC');
 
     const res = await fetch(`${baseUrl}/api/inventory/items`, {
       method: 'POST',
@@ -70,7 +80,7 @@ describe('inventory.items.create', { timeout: 30000 }, () => {
 
   it('validates SKU uniqueness within company', async () => {
     const ctx = await getSeedSyncContext();
-    const uniqueSku = `DUP-SKU-${Date.now()}`;
+    const uniqueSku = makeTag('DU');
 
     // Create first item via API
     const firstRes = await fetch(`${baseUrl}/api/inventory/items`, {

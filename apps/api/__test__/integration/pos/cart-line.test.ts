@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { getTestDb, closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -16,6 +17,7 @@ import {
   createTestPrice,
   registerFixtureCleanup
 } from '../../fixtures';
+import { makeTag } from '../../helpers/tags';
 import { sql } from 'kysely';
 
 let baseUrl: string;
@@ -27,6 +29,7 @@ describe('pos.cart-line', { timeout: 30000 }, () => {
   const getSeedSyncContext = async () => seedCtx;
 
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     // Query a valid item ID for auth/validation tests (ID used only when auth passes)
@@ -40,8 +43,15 @@ describe('pos.cart-line', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth token', async () => {
@@ -104,7 +114,7 @@ describe('pos.cart-line', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `CART-LINE-PRICE-${Date.now()}`,
+      sku: makeTag('CLP'),
       name: 'Cart Line Price Test',
       type: 'PRODUCT'
     });
@@ -147,7 +157,7 @@ describe('pos.cart-line', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `CART-LINE-VAR-${Date.now()}`,
+      sku: makeTag('CLV'),
       name: 'Cart Line Variant Test',
       type: 'PRODUCT'
     });
@@ -206,14 +216,14 @@ describe('pos.cart-line', { timeout: 30000 }, () => {
 
     // Create two test items
     const item1 = await createTestItem(ctx.companyId, {
-      sku: `CART-LINE-ITEM1-${Date.now()}`,
+      sku: makeTag('CLI1'),
       name: 'Cart Line Item 1',
       type: 'PRODUCT'
     });
     registerFixtureCleanup(`item-${item1.id}`, async () => {});
 
     const item2 = await createTestItem(ctx.companyId, {
-      sku: `CART-LINE-ITEM2-${Date.now()}`,
+      sku: makeTag('CLI2'),
       name: 'Cart Line Item 2',
       type: 'PRODUCT'
     });
@@ -252,7 +262,7 @@ describe('pos.cart-line', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `CART-LINE-NO-VAR-${Date.now()}`,
+      sku: makeTag('CLNV'),
       name: 'Cart Line No Variant',
       type: 'PRODUCT'
     });
@@ -283,7 +293,7 @@ describe('pos.cart-line', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `CART-LINE-INACTIVE-${Date.now()}`,
+      sku: makeTag('CLI'),
       name: 'Cart Line Inactive Variant',
       type: 'PRODUCT'
     });
@@ -328,7 +338,7 @@ describe('pos.cart-line', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `CART-LINE-DISC-${Date.now()}`,
+      sku: makeTag('CLD'),
       name: 'Cart Line Discount Test',
       type: 'PRODUCT'
     });
@@ -372,7 +382,7 @@ describe('pos.cart-line', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `CART-LINE-STRUCT-${Date.now()}`,
+      sku: makeTag('CLS'),
       name: 'Cart Line Structure Test',
       type: 'PRODUCT'
     });

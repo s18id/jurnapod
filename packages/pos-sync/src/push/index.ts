@@ -123,6 +123,13 @@ function normalizeTrxAtForHash(trxAt: string | number): number {
 // ============================================================================
 
 function canonicalizeTransactionForHash(tx: TransactionPush): string {
+  const trxAtMs = normalizeTrxAtForHash(tx.trx_at);
+  // Canonical for fallback values - must match what gets stored in DB
+  // DB stores: toMysqlDateTimeStrict(tx.trx_at) for null opened_at/closed_at
+  // Hash must match: use same canonical string format for consistency
+  const trxAtCanonical = toMysqlDateTimeStrict(tx.trx_at);
+  const openedAtVal = tx.opened_at ? toMysqlDateTimeStrict(tx.opened_at) : trxAtCanonical;
+  const closedAtVal = tx.closed_at ? toMysqlDateTimeStrict(tx.closed_at) : trxAtCanonical;
   return JSON.stringify({
     client_tx_id: tx.client_tx_id,
     company_id: tx.company_id,
@@ -134,10 +141,10 @@ function canonicalizeTransactionForHash(tx: TransactionPush): string {
     reservation_id: tx.reservation_id ?? null,
     guest_count: tx.guest_count ?? null,
     order_status: tx.order_status ?? "COMPLETED",
-    opened_at: tx.opened_at ? toMysqlDateTimeStrict(tx.opened_at) : null,
-    closed_at: tx.closed_at ? toMysqlDateTimeStrict(tx.closed_at) : null,
+    opened_at: openedAtVal,
+    closed_at: closedAtVal,
     notes: tx.notes ?? null,
-    trx_at: normalizeTrxAtForHash(tx.trx_at),
+    trx_at: trxAtMs,
     items: tx.items.map((item) => ({
       item_id: item.item_id,
       variant_id: item.variant_id ?? null,

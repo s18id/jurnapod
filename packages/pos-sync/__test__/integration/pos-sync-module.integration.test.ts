@@ -145,11 +145,46 @@ async function closeDb(db: KyselySchema): Promise<void> {
 describe('PosSyncModule Integration', () => {
   let fixtures: TestFixtures;
   let module: PosSyncModule;
+  const TEST_ID_PREFIX = 's495';
+  // Stable correlationId — deterministic per test run
+  const CORRELATION_ID_BASE = 'test-correlation-001';
   let correlationId: string;
 
   beforeAll(async () => {
     // Setup database connection
     fixtures = await setupTestFixtures();
+
+    // Teardown-only cleanup for deterministic test keys to keep reruns stable.
+    // This removes rows created by this suite in previous runs.
+    await sql`
+      DELETE FROM pos_transactions
+      WHERE company_id = ${fixtures.testCompanyId}
+        AND client_tx_id LIKE ${`${TEST_ID_PREFIX}-%`}
+    `.execute(fixtures.db);
+
+    await sql`
+      DELETE FROM pos_order_updates
+      WHERE company_id = ${fixtures.testCompanyId}
+        AND update_id LIKE ${`${TEST_ID_PREFIX}-%`}
+    `.execute(fixtures.db);
+
+    await sql`
+      DELETE FROM pos_item_cancellations
+      WHERE company_id = ${fixtures.testCompanyId}
+        AND cancellation_id LIKE ${`${TEST_ID_PREFIX}-%`}
+    `.execute(fixtures.db);
+
+    await sql`
+      DELETE FROM variant_sales
+      WHERE company_id = ${fixtures.testCompanyId}
+        AND client_tx_id LIKE ${`${TEST_ID_PREFIX}-%`}
+    `.execute(fixtures.db);
+
+    await sql`
+      DELETE FROM variant_stock_adjustments
+      WHERE company_id = ${fixtures.testCompanyId}
+        AND client_tx_id LIKE ${`${TEST_ID_PREFIX}-%`}
+    `.execute(fixtures.db);
 
     // Seed pos_order_snapshots for FK-dependent tests (order_updates, item_cancellations)
     // Insert multiple orders so tests can use distinct order_ids
@@ -181,7 +216,7 @@ describe('PosSyncModule Integration', () => {
       config: { env: 'test' },
     });
 
-    correlationId = `test-${Date.now()}`;
+    correlationId = 'test-initial-correlation';
   });
 
   afterAll(async () => {
@@ -197,7 +232,8 @@ describe('PosSyncModule Integration', () => {
   });
 
   beforeEach(() => {
-    correlationId = `test-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    // Correlation ID resets per test but stays deterministic (no Date.now/Math.random)
+    correlationId = `${CORRELATION_ID_BASE}-${expect.getState().currentTestName ?? 'unknown'}`;
   });
 
   // ===========================================================================
@@ -301,15 +337,25 @@ describe('PosSyncModule Integration', () => {
   // ===========================================================================
 
   describe('handlePushSync', () => {
-    // Helper to create a unique transaction ID
-    function uniqueId(prefix: string): string {
-      return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    }
+    // Deterministic idempotency key generator per test case
+    // Uses describe block index + test case counter to ensure uniqueness without Date.now/Math.random
+    const _txCounter = { c: 0 };
+    const _orderCounter = { c: 0 };
+    const _updateCounter = { c: 0 };
+    const _cancelCounter = { c: 0 };
+    const _saleCounter = { c: 0 };
+    const _adjustCounter = { c: 0 };
+    function txId(prefix: string) { return `${TEST_ID_PREFIX}-${prefix}-t${_txCounter.c++}`; }
+    function orderId(prefix: string) { return `${TEST_ID_PREFIX}-${prefix}-o${_orderCounter.c++}`; }
+    function updateId(prefix: string) { return `${TEST_ID_PREFIX}-${prefix}-u${_updateCounter.c++}`; }
+    function cancelId(prefix: string) { return `${TEST_ID_PREFIX}-${prefix}-c${_cancelCounter.c++}`; }
+    function saleId(prefix: string) { return `${TEST_ID_PREFIX}-${prefix}-s${_saleCounter.c++}`; }
+    function adjustId(prefix: string) { return `${TEST_ID_PREFIX}-${prefix}-a${_adjustCounter.c++}`; }
 
     describe('transaction push with idempotency', () => {
       it('should process new transaction successfully', async () => {
         const transaction: TransactionPush = {
-          client_tx_id: uniqueId('tx'),
+          client_tx_id: txId('tx'),
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
           cashier_user_id: fixtures.testUserId,
@@ -346,7 +392,7 @@ describe('PosSyncModule Integration', () => {
       });
 
       it('should detect duplicate transaction (idempotency)', async () => {
-        const clientTxId = uniqueId('tx-dup');
+        const clientTxId = txId('tx-dup');
 
         const transaction: TransactionPush = {
           client_tx_id: clientTxId,
@@ -403,7 +449,7 @@ describe('PosSyncModule Integration', () => {
 
       it('should reject transaction with company_id mismatch', async () => {
         const transaction: TransactionPush = {
-          client_tx_id: uniqueId('tx-company-mismatch'),
+          client_tx_id: txId('tx-company-mismatch'),
           company_id: fixtures.testCompanyId + 9999, // Wrong company
           outlet_id: fixtures.testOutletId,
           cashier_user_id: fixtures.testUserId,
@@ -441,7 +487,7 @@ describe('PosSyncModule Integration', () => {
 
       it('should reject DINE_IN without table_id', async () => {
         const transaction: TransactionPush = {
-          client_tx_id: uniqueId('tx-dinein'),
+          client_tx_id: txId('tx-dinein'),
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
           cashier_user_id: fixtures.testUserId,
@@ -481,7 +527,7 @@ describe('PosSyncModule Integration', () => {
     describe('active orders push', () => {
       it('should process active orders successfully', async () => {
         const activeOrder: ActiveOrderPush = {
-          order_id: uniqueId('order'),
+          order_id: orderId('order'),
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
           service_type: 'TAKEAWAY',
@@ -542,7 +588,7 @@ describe('PosSyncModule Integration', () => {
     describe('order updates push', () => {
       it('should process order updates successfully', async () => {
         const orderUpdate: OrderUpdatePush = {
-          update_id: uniqueId('update'),
+          update_id: updateId('update'),
           order_id: 'test-seed-order-1',
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
@@ -570,9 +616,9 @@ describe('PosSyncModule Integration', () => {
       });
 
       it('should detect duplicate order update (idempotency)', async () => {
-        const updateId = uniqueId('update-dup');
+        const dupUpdateId = updateId('update-dup');
         const orderUpdate: OrderUpdatePush = {
-          update_id: updateId,
+          update_id: dupUpdateId,
           order_id: 'test-seed-order-2',
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
@@ -620,7 +666,7 @@ describe('PosSyncModule Integration', () => {
     describe('item cancellations push', () => {
       it('should process item cancellations successfully', async () => {
         const cancellation: ItemCancellationPush = {
-          cancellation_id: uniqueId('cancel'),
+          cancellation_id: cancelId('cancel'),
           order_id: 'test-seed-order-3',
           item_id: fixtures.testItemId,
           variant_id: undefined,
@@ -649,7 +695,7 @@ describe('PosSyncModule Integration', () => {
       });
 
       it('should detect duplicate item cancellation (idempotency)', async () => {
-        const cancellationId = uniqueId('cancel-dup');
+        const cancellationId = cancelId('cancel-dup');
         const cancellation: ItemCancellationPush = {
           cancellation_id: cancellationId,
           order_id: 'test-seed-order-4',
@@ -715,7 +761,7 @@ describe('PosSyncModule Integration', () => {
         }
 
         const sale: VariantSalePush = {
-          client_tx_id: uniqueId('sale'),
+          client_tx_id: saleId('sale'),
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
           variant_id: testVariant.id,
@@ -750,7 +796,7 @@ describe('PosSyncModule Integration', () => {
         }
 
         const sale: VariantSalePush = {
-          client_tx_id: uniqueId('sale-company-mismatch'),
+          client_tx_id: saleId('sale-company-mismatch'),
           company_id: fixtures.testCompanyId + 9999, // Wrong company
           outlet_id: fixtures.testOutletId,
           variant_id: testVariant!.id,
@@ -784,7 +830,7 @@ describe('PosSyncModule Integration', () => {
           return; // Skip if no variants
         }
 
-        const clientTxId = uniqueId('sale-dup');
+        const clientTxId = saleId('sale-dup');
         const sale: VariantSalePush = {
           client_tx_id: clientTxId,
           company_id: fixtures.testCompanyId,
@@ -839,7 +885,7 @@ describe('PosSyncModule Integration', () => {
 
         // First sale
         const sale1: VariantSalePush = {
-          client_tx_id: uniqueId('sale-diff-tx-1'),
+          client_tx_id: saleId('sale-diff-tx-1'),
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
           variant_id: testVariant.id,
@@ -852,7 +898,7 @@ describe('PosSyncModule Integration', () => {
 
         // Second sale with SAME variant and same trx_at but DIFFERENT client_tx_id
         const sale2: VariantSalePush = {
-          client_tx_id: uniqueId('sale-diff-tx-2'), // Different client_tx_id!
+          client_tx_id: saleId('sale-diff-tx-2'), // Different client_tx_id!
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
           variant_id: testVariant.id,
@@ -917,7 +963,7 @@ describe('PosSyncModule Integration', () => {
         }
 
         const adjustment: VariantStockAdjustmentPush = {
-          client_tx_id: uniqueId('adjust'),
+          client_tx_id: adjustId('adjust'),
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
           variant_id: stockTestVariant.id,
@@ -951,7 +997,7 @@ describe('PosSyncModule Integration', () => {
         }
 
         const adjustment: VariantStockAdjustmentPush = {
-          client_tx_id: uniqueId('adjust-invalid'),
+          client_tx_id: adjustId('adjust-invalid'),
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
           variant_id: stockTestVariant.id,
@@ -983,7 +1029,7 @@ describe('PosSyncModule Integration', () => {
         if (!stockTestVariant) {
           return; // Skip if no variants
         }
-        const clientTxId = uniqueId('adjust-dup');
+        const clientTxId = adjustId('adjust-dup');
 
         const adjustment: VariantStockAdjustmentPush = {
           client_tx_id: clientTxId,
@@ -1034,7 +1080,7 @@ describe('PosSyncModule Integration', () => {
     describe('combined push scenarios', () => {
       it('should process multiple operation types in single call', async () => {
         const transaction: TransactionPush = {
-          client_tx_id: uniqueId('tx-combined'),
+          client_tx_id: txId('tx-combined'),
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
           cashier_user_id: fixtures.testUserId,
@@ -1046,7 +1092,7 @@ describe('PosSyncModule Integration', () => {
         };
 
         const activeOrder: ActiveOrderPush = {
-          order_id: uniqueId('order-combined'),
+          order_id: orderId('order-combined'),
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
           service_type: 'TAKEAWAY',
@@ -1060,7 +1106,7 @@ describe('PosSyncModule Integration', () => {
         };
 
         const orderUpdate: OrderUpdatePush = {
-          update_id: uniqueId('update-combined'),
+          update_id: updateId('update-combined'),
           order_id: 'test-seed-order-3',  // Use seeded order that exists in DB
           company_id: fixtures.testCompanyId,
           outlet_id: fixtures.testOutletId,
@@ -1071,7 +1117,7 @@ describe('PosSyncModule Integration', () => {
         };
 
         const cancellation: ItemCancellationPush = {
-          cancellation_id: uniqueId('cancel-combined'),
+          cancellation_id: cancelId('cancel-combined'),
           order_id: 'test-seed-order-4',  // Use seeded order that exists in DB
           item_id: fixtures.testItemId,
           company_id: fixtures.testCompanyId,

@@ -197,6 +197,15 @@ All sync operations must use these field names:
 
 > ⚠️ Do not dismiss findings as "minor" by default. Every review finding must map to a concrete risk or be explicitly marked out-of-scope.
 
+### Review Batching Policy (MANDATORY)
+
+To control execution overhead and avoid fragmented review loops:
+
+- Reviewers MUST review changes in **story-sized or batch-sized scope**, not single-file micro-scopes, unless explicitly requested by the user.
+- Implementers MUST batch related changes first, then request one consolidated review per batch.
+- Reviewers MUST return one consolidated severity table (P0/P1/P2/P3) for the whole batch.
+- Micro-scope re-review MAY be used only for targeted blocker verification after a NO-GO finding.
+
 ### Global Invariants
 
 - Accounting/GL stays at center — journals are the financial source of truth

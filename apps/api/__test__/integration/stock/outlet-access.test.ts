@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import {
   cleanupTestFixtures,
   getTestAccessToken,
@@ -18,6 +19,7 @@ import {
   getSeedSyncContext,
   type UserFixture
 } from '../../fixtures';
+import { makeTag } from '../../helpers/tags';
 
 // Use a known password so we can log in as the created user
 const KNOWN_PASSWORD = 'TestPassword123!';
@@ -32,6 +34,7 @@ let scopedOutletId: number;
 
 describe('stock.outlet-access', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     await getTestAccessToken(baseUrl);
 
@@ -47,7 +50,7 @@ describe('stock.outlet-access', { timeout: 30000 }, () => {
 
     // Create a user for the seeded company with a KNOWN PASSWORD so we can log in
     scopedUser = await createTestUser(companyId, {
-      email: `stock-scope-user-${Date.now()}@example.com`,
+      email: `stock-scope-user-${makeTag('SSU')}@example.com`,
       name: 'Stock Scope User',
       password: KNOWN_PASSWORD
     });
@@ -59,8 +62,15 @@ describe('stock.outlet-access', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    await cleanupTestFixtures();
-    await closeTestDb();
+    try {
+      await cleanupTestFixtures();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('returns 403 when user accesses stock for outlet they do not belong to', async () => {

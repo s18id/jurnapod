@@ -6,24 +6,34 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../../helpers/env';
 import { closeTestDb } from '../../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
   registerFixtureCleanup
 } from '../../../fixtures';
+import { makeTag } from '../../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
 
 describe('inventory.item-groups.update', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -43,7 +53,7 @@ describe('inventory.item-groups.update', { timeout: 30000 }, () => {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ name: `Original Name ${Date.now()}` })
+      body: JSON.stringify({ name: makeTag('ON') })
     });
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
@@ -64,8 +74,6 @@ describe('inventory.item-groups.update', { timeout: 30000 }, () => {
   });
 
   it('updates item group code', async () => {
-    const timestamp = Date.now();
-
     // Create a group first
     const createRes = await fetch(`${baseUrl}/api/inventory/item-groups`, {
       method: 'POST',
@@ -73,13 +81,13 @@ describe('inventory.item-groups.update', { timeout: 30000 }, () => {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ name: `Group For Code Update ${timestamp}` })
+      body: JSON.stringify({ name: makeTag('GC') })
     });
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     registerFixtureCleanup(`group-${created.data.id}`, async () => {});
 
-    const newCode = `UPDATED-CODE-${timestamp}`;
+    const newCode = makeTag('UC');
     const res = await fetch(`${baseUrl}/api/inventory/item-groups/${created.data.id}`, {
       method: 'PATCH',
       headers: {
@@ -106,8 +114,6 @@ describe('inventory.item-groups.update', { timeout: 30000 }, () => {
   });
 
   it('rejects update with invalid parent_id', async () => {
-    const timestamp = Date.now();
-
     // Create a group first
     const createRes = await fetch(`${baseUrl}/api/inventory/item-groups`, {
       method: 'POST',
@@ -115,7 +121,7 @@ describe('inventory.item-groups.update', { timeout: 30000 }, () => {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ name: `Group For Parent Test ${timestamp}` })
+      body: JSON.stringify({ name: makeTag('GP') })
     });
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
@@ -133,8 +139,6 @@ describe('inventory.item-groups.update', { timeout: 30000 }, () => {
   });
 
   it('updates is_active status', async () => {
-    const timestamp = Date.now();
-
     // Create an active group
     const createRes = await fetch(`${baseUrl}/api/inventory/item-groups`, {
       method: 'POST',
@@ -142,7 +146,7 @@ describe('inventory.item-groups.update', { timeout: 30000 }, () => {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ name: `Group For Active Test ${timestamp}`, is_active: true })
+      body: JSON.stringify({ name: makeTag('GA'), is_active: true })
     });
     expect(createRes.status).toBe(201);
     const created = await createRes.json();

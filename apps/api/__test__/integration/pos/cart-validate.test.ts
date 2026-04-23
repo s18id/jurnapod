@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { getTestDb, closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -14,8 +15,10 @@ import {
   createTestItem,
   createTestVariant,
   createTestPrice,
+  createTestInventoryStock,
   registerFixtureCleanup
 } from '../../fixtures';
+import { makeTag } from '../../helpers/tags';
 import { sql } from 'kysely';
 
 let baseUrl: string;
@@ -27,6 +30,7 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
   const getSeedSyncContext = async () => seedCtx;
 
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     // Query a valid item ID for auth/validation tests (ID used only when auth passes)
@@ -40,8 +44,15 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth token', async () => {
@@ -89,7 +100,7 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `VALIDATE-BASIC-${Date.now()}`,
+      sku: makeTag('VB'),
       name: 'Validate Basic Test',
       type: 'PRODUCT'
     });
@@ -132,7 +143,7 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `VALIDATE-STOCK-${Date.now()}`,
+      sku: makeTag('VST'),
       name: 'Validate Stock Test',
       type: 'PRODUCT'
     });
@@ -192,7 +203,7 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `VALIDATE-LOW-${Date.now()}`,
+      sku: makeTag('VLL'),
       name: 'Validate Low Stock Test',
       type: 'PRODUCT'
     });
@@ -250,14 +261,14 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
 
     // Create two test items
     const item1 = await createTestItem(ctx.companyId, {
-      sku: `VALIDATE-ITEM1-${Date.now()}`,
+      sku: makeTag('VI1'),
       name: 'Validate Item 1',
       type: 'PRODUCT'
     });
     registerFixtureCleanup(`item-${item1.id}`, async () => {});
 
     const item2 = await createTestItem(ctx.companyId, {
-      sku: `VALIDATE-ITEM2-${Date.now()}`,
+      sku: makeTag('VI2'),
       name: 'Validate Item 2',
       type: 'PRODUCT'
     });
@@ -297,7 +308,7 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `VALIDATE-NO-VAR-${Date.now()}`,
+      sku: makeTag('VNV'),
       name: 'Validate No Variant',
       type: 'PRODUCT'
     });
@@ -329,7 +340,7 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `VALIDATE-INACTIVE-${Date.now()}`,
+      sku: makeTag('VIN'),
       name: 'Validate Inactive Variant',
       type: 'PRODUCT'
     });
@@ -375,7 +386,7 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `VALIDATE-INVSTOCK-${Date.now()}`,
+      sku: makeTag('VIS'),
       name: 'Validate Inv Stock Test',
       type: 'PRODUCT'
     });
@@ -404,15 +415,8 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
       .where('id', '=', variant.id)
       .execute();
 
-    // Create inventory_stock record with higher availability
-    await sql`
-      INSERT INTO inventory_stock (company_id, outlet_id, product_id, variant_id, quantity, reserved_quantity, available_quantity, created_at, updated_at)
-      VALUES (${ctx.companyId}, ${ctx.outletId}, ${item.id}, ${variant.id}, 20, 0, 20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `.execute(db);
-
-    registerFixtureCleanup(`inv-stock-${variant.id}`, async () => {
-      await sql`DELETE FROM inventory_stock WHERE variant_id = ${variant.id} AND outlet_id = ${ctx.outletId}`.execute(db);
-    });
+    // Create inventory_stock record with higher availability (canonical helper — Q49-001)
+    await createTestInventoryStock(ctx.companyId, item.id, variant.id, ctx.outletId, 20);
 
     // Validate cart line
     const res = await fetch(`${baseUrl}/api/pos/cart/validate`, {
@@ -444,7 +448,7 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `VALIDATE-STRUCT-${Date.now()}`,
+      sku: makeTag('VSTR'),
       name: 'Validate Structure Test',
       type: 'PRODUCT'
     });
@@ -490,7 +494,7 @@ describe('pos.cart-validate', { timeout: 30000 }, () => {
 
     // Create a test item
     const item = await createTestItem(ctx.companyId, {
-      sku: `VALIDATE-OUTLET-${Date.now()}`,
+      sku: makeTag('VOUT'),
       name: 'Validate Outlet Pricing Test',
       type: 'PRODUCT'
     });

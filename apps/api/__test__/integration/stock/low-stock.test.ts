@@ -7,7 +7,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext, createTestItem, createTestPrice, createTestStock, setTestItemLowStockThreshold } from '../../fixtures';
+import { makeTag } from '../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
@@ -17,6 +19,7 @@ let cashierUserId: number;
 
 describe('stock.low', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     const syncContext = await getSeedSyncContext();
@@ -26,8 +29,15 @@ describe('stock.low', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth token', async () => {
@@ -54,7 +64,7 @@ describe('stock.low', { timeout: 30000 }, () => {
     // Create test item with low stock threshold
     // createItem now has built-in deadlock retry
     const item = await createTestItem(companyId, {
-      sku: `LOW-STOCK-TEST-${Date.now()}`,
+      sku: makeTag('LST'),
       name: 'Low Stock Test Item',
       type: 'PRODUCT',
       trackStock: true
@@ -83,7 +93,7 @@ describe('stock.low', { timeout: 30000 }, () => {
   it('does not return items above low_stock_threshold', async () => {
     // Create test item with low stock threshold
     const item = await createTestItem(companyId, {
-      sku: `NORMAL-STOCK-TEST-${Date.now()}`,
+      sku: makeTag('NST'),
       name: 'Normal Stock Test Item',
       type: 'PRODUCT',
       trackStock: true
@@ -119,11 +129,9 @@ describe('stock.low', { timeout: 30000 }, () => {
     // (This is implicit in the query which joins with items WHERE track_stock = 1)
   });
 
-  it('includes sku and name in alert response', async () => {
-    // Create test item
-    const testTimestamp = Date.now();
+it('includes sku and name in alert response', async () => {
     const item = await createTestItem(companyId, {
-      sku: `LOW-SKU-${testTimestamp}`,
+      sku: makeTag('LSK'),
       name: 'Low Stock Alert Item',
       type: 'PRODUCT',
       trackStock: true
@@ -142,7 +150,7 @@ describe('stock.low', { timeout: 30000 }, () => {
     
     const foundAlert = body.data.alerts.find((a: any) => a.product_id === item.id);
     expect(foundAlert).toBeDefined();
-    expect(foundAlert.sku).toBe(`LOW-SKU-${testTimestamp}`);
+    expect(foundAlert.sku).toBe(item.sku);
     expect(foundAlert.name).toBe('Low Stock Alert Item');
   });
 });

@@ -4,29 +4,38 @@
 // Integration tests for GET /outlets/:outletId/stock
 // Tests stock levels retrieval for outlet products
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
-import { getTestDb, closeTestDb } from '../../helpers/db';
-import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext, createTestItem, registerFixtureCleanup } from '../../fixtures';
-import { sql } from 'kysely';
+import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
+import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext, createTestItem, createTestStock, createTestPrice } from '../../fixtures';
 
 let baseUrl: string;
 let accessToken: string;
 let outletId: number;
 let companyId: number;
+let seedCtx: Awaited<ReturnType<typeof getSeedSyncContext>>;
 
 describe('stock.levels', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
-    const syncContext = await getSeedSyncContext();
-    outletId = syncContext.outletId;
-    companyId = syncContext.companyId;
+    seedCtx = await getSeedSyncContext();
+    outletId = seedCtx.outletId;
+    companyId = seedCtx.companyId;
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth token', async () => {
@@ -51,22 +60,17 @@ describe('stock.levels', { timeout: 30000 }, () => {
   it('returns stock levels filtered by product_id', async () => {
     // First create a test item
     const item = await createTestItem(companyId, {
-      sku: `STOCK-LEVEL-TEST-${Date.now()}`,
+      sku: 'STOCK-LEVEL-TEST-001',
       name: 'Stock Level Test Item',
       type: 'PRODUCT',
       trackStock: true
     });
 
-    // Set up inventory_stock for the item
-    const db = getTestDb();
-    await sql`
-      INSERT INTO inventory_stock (company_id, outlet_id, product_id, quantity, reserved_quantity, available_quantity, created_at, updated_at)
-      VALUES (${companyId}, ${outletId}, ${item.id}, 100, 0, 100, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `.execute(db);
-
-    registerFixtureCleanup(`inventory_stock_${item.id}`, async () => {
-      await sql`DELETE FROM inventory_stock WHERE product_id = ${item.id} AND outlet_id = ${outletId}`.execute(db);
-    });
+    // Use canonical createTestStock for inventory_stock (Q49-001 fixture policy)
+    // This helper creates stock record AND inventory_transaction atomically
+    // First create price so adjustStock can derive unit cost for cost layer
+    await createTestPrice(companyId, item.id, seedCtx.cashierUserId, { price: 15000 });
+    await createTestStock(companyId, item.id, outletId, 100, seedCtx.cashierUserId);
 
     // Query with product_id filter
     const res = await fetch(`${baseUrl}/api/outlets/${outletId}/stock?product_id=${item.id}`, {

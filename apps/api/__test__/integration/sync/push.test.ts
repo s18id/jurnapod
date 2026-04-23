@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext } from '../../fixtures';
 
 let baseUrl: string;
@@ -14,6 +15,7 @@ let outletId: number;
 
 describe('sync.push', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     const syncContext = await getSeedSyncContext();
@@ -21,8 +23,15 @@ describe('sync.push', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('requires auth', async () => {

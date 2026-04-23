@@ -7,7 +7,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext, createTestItem, createTestPrice, createTestStock } from '../../fixtures';
+import { makeTag } from '../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
@@ -18,6 +20,7 @@ let authTestProductId: number;
 
 describe('stock.adjustments', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     const syncContext = await getSeedSyncContext();
@@ -27,7 +30,7 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
 
     // Create a valid product ID for auth/validation tests
     const authTestItem = await createTestItem(companyId, {
-      sku: `ADJ-AUTH-${Date.now()}`,
+      sku: makeTag('ADJ'),
       name: 'Auth Validation Product',
       type: 'PRODUCT',
       trackStock: true,
@@ -36,8 +39,15 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth token', async () => {
@@ -52,7 +62,7 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
   it('validates adjustment_quantity is integer', async () => {
     // Create test item with price (for cost resolution)
     const item = await createTestItem(companyId, {
-      sku: `ADJ-POS-${Date.now()}`,
+      sku: makeTag('ADJ'),
       name: 'Positive Adjustment Test',
       type: 'PRODUCT',
       trackStock: true
@@ -87,7 +97,7 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
   it('rejects negative adjustment when insufficient stock', async () => {
     // Create test item
     const item = await createTestItem(companyId, {
-      sku: `ADJ-NEG-${Date.now()}`,
+      sku: makeTag('ADJ'),
       name: 'Negative Adjustment Test',
       type: 'PRODUCT',
       trackStock: true
@@ -120,7 +130,7 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
   it('creates negative adjustment when sufficient stock exists', async () => {
     // Create test item
     const item = await createTestItem(companyId, {
-      sku: `ADJ-VALID-NEG-${Date.now()}`,
+      sku: makeTag('ADJ'),
       name: 'Valid Negative Adjustment Test',
       type: 'PRODUCT',
       trackStock: true
@@ -153,7 +163,7 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
   it('validates required reason field', async () => {
     // Create test item
     const item = await createTestItem(companyId, {
-      sku: `ADJ-NO-REASON-${Date.now()}`,
+      sku: makeTag('ADJ'),
       name: 'No Reason Test',
       type: 'PRODUCT',
       trackStock: true
@@ -181,7 +191,7 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
 
   it('validates reason is not empty string', async () => {
     const item = await createTestItem(companyId, {
-      sku: `ADJ-EMPTY-REASON-${Date.now()}`,
+      sku: makeTag('ADJ'),
       name: 'Empty Reason Test',
       type: 'PRODUCT',
       trackStock: true
@@ -238,7 +248,7 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
 
   it('accepts zero adjustment (no-op)', async () => {
     const item = await createTestItem(companyId, {
-      sku: `ADJ-ZERO-${Date.now()}`,
+      sku: makeTag('ADJ'),
       name: 'Zero Adjustment Test',
       type: 'PRODUCT',
       trackStock: true
@@ -265,7 +275,7 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
   it('creates adjustment transaction record', async () => {
     // Create test item
     const item = await createTestItem(companyId, {
-      sku: `ADJ-TXN-${Date.now()}`,
+      sku: makeTag('ADJ'),
       name: 'Transaction Record Test',
       type: 'PRODUCT',
       trackStock: true

@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -13,6 +14,7 @@ import {
   createTestItem,
   registerFixtureCleanup
 } from '../../fixtures';
+import { makeTag } from '../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
@@ -22,14 +24,22 @@ describe('inventory.recipes.cost', { timeout: 30000 }, () => {
   const getSeedSyncContext = async () => seedCtx;
 
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     seedCtx = await loadSeedSyncContext();
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -56,7 +66,7 @@ describe('inventory.recipes.cost', { timeout: 30000 }, () => {
     
     // Create a PRODUCT type item (not a recipe)
     const product = await createTestItem(ctx.companyId, {
-      sku: `COST-NON-RECIPE-${Date.now()}`,
+      sku: makeTag('CNR'),
       name: 'Not A Recipe',
       type: 'PRODUCT'
     });
@@ -72,7 +82,7 @@ describe('inventory.recipes.cost', { timeout: 30000 }, () => {
     const ctx = await getSeedSyncContext();
     
     const recipe = await createTestItem(ctx.companyId, {
-      sku: `COST-EMPTY-${Date.now()}`,
+      sku: makeTag('CER'),
       name: 'Empty Recipe',
       type: 'RECIPE'
     });
@@ -92,7 +102,7 @@ describe('inventory.recipes.cost', { timeout: 30000 }, () => {
     const ctx = await getSeedSyncContext();
     
     const recipe = await createTestItem(ctx.companyId, {
-      sku: `COST-WITH-ING-${Date.now()}`,
+      sku: makeTag('CWI'),
       name: 'Recipe With Ingredients',
       type: 'RECIPE'
     });
@@ -100,14 +110,14 @@ describe('inventory.recipes.cost', { timeout: 30000 }, () => {
 
     // Create ingredient items
     const ingredient1 = await createTestItem(ctx.companyId, {
-      sku: `COST-ING1-${Date.now()}`,
+      sku: makeTag('CI1'),
       name: 'Coffee Beans',
       type: 'INGREDIENT'
     });
     registerFixtureCleanup(`item-${ingredient1.id}`, async () => {});
 
     const ingredient2 = await createTestItem(ctx.companyId, {
-      sku: `COST-ING2-${Date.now()}`,
+      sku: makeTag('CI2'),
       name: 'Milk',
       type: 'PRODUCT'
     });
@@ -156,7 +166,7 @@ describe('inventory.recipes.cost', { timeout: 30000 }, () => {
     const ctx = await getSeedSyncContext();
     
     const recipe = await createTestItem(ctx.companyId, {
-      sku: `COST-PERM-${Date.now()}`,
+      sku: makeTag('CPT'),
       name: 'Permission Test Recipe',
       type: 'RECIPE'
     });

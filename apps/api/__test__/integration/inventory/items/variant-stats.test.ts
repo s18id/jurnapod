@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../../helpers/env';
 import { closeTestDb } from '../../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -14,6 +15,7 @@ import {
   createTestVariant,
   registerFixtureCleanup
 } from '../../../fixtures';
+import { makeTag } from '../../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
@@ -23,14 +25,22 @@ describe('inventory.items.variant-stats', { timeout: 30000 }, () => {
   const getSeedSyncContext = async () => seedCtx;
 
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     seedCtx = await loadSeedSyncContext();
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -66,7 +76,7 @@ describe('inventory.items.variant-stats', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `VSTATS-${Date.now()}`,
+        sku: makeTag('VS'),
         name: 'Item With Variants',
         type: 'PRODUCT'
       })
@@ -102,7 +112,7 @@ describe('inventory.items.variant-stats', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `VSTATS1-${Date.now()}`,
+        sku: makeTag('V1'),
         name: 'Item 1',
         type: 'PRODUCT'
       })
@@ -118,7 +128,7 @@ describe('inventory.items.variant-stats', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `VSTATS2-${Date.now()}`,
+        sku: makeTag('V2'),
         name: 'Item 2',
         type: 'PRODUCT'
       })

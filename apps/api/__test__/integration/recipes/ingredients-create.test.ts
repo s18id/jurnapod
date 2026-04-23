@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb, getTestDb } from '../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -13,6 +14,7 @@ import {
   createTestItem,
   registerFixtureCleanup
 } from '../../fixtures';
+import { makeTag } from '../../helpers/tags';
 import { sql } from 'kysely';
 
 let baseUrl: string;
@@ -25,6 +27,7 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
   const getSeedSyncContext = async () => seedCtx;
 
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     // Query valid IDs for auth/validation tests (IDs used only when auth passes)
@@ -47,8 +50,15 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -89,14 +99,14 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
     
     // Create a PRODUCT type item (not a recipe)
     const product = await createTestItem(ctx.companyId, {
-      sku: `CREATE-NONRECIPE-${Date.now()}`,
+      sku: makeTag('RCN'),
       name: 'Not A Recipe',
       type: 'PRODUCT'
     });
     registerFixtureCleanup(`item-${product.id}`, async () => {});
 
     const ingredient = await createTestItem(ctx.companyId, {
-      sku: `CREATE-ING-${Date.now()}`,
+      sku: makeTag('CI1'),
       name: 'Some Ingredient',
       type: 'INGREDIENT'
     });
@@ -120,14 +130,14 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
     const ctx = await getSeedSyncContext();
     
     const recipe = await createTestItem(ctx.companyId, {
-      sku: `CREATE-ADD-ING-${Date.now()}`,
+      sku: makeTag('RCA'),
       name: 'Recipe To Add To',
       type: 'RECIPE'
     });
     registerFixtureCleanup(`item-${recipe.id}`, async () => {});
 
     const ingredient = await createTestItem(ctx.companyId, {
-      sku: `CREATE-ADD-ING2-${Date.now()}`,
+      sku: makeTag('CI2'),
       name: 'New Ingredient',
       type: 'INGREDIENT'
     });
@@ -155,7 +165,7 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
     const ctx = await getSeedSyncContext();
     
     const recipe = await createTestItem(ctx.companyId, {
-      sku: `CREATE-NO-ITEM-${Date.now()}`,
+      sku: makeTag('RCM'),
       name: 'Recipe For Missing Item',
       type: 'RECIPE'
     });
@@ -179,7 +189,7 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
     const ctx = await getSeedSyncContext();
     
     const recipe = await createTestItem(ctx.companyId, {
-      sku: `CREATE-MISSING-${Date.now()}`,
+      sku: makeTag('RMF'),
       name: 'Recipe Missing Fields',
       type: 'RECIPE'
     });
@@ -200,14 +210,14 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
     const ctx = await getSeedSyncContext();
     
     const recipe = await createTestItem(ctx.companyId, {
-      sku: `CREATE-NEG-QTY-${Date.now()}`,
+      sku: makeTag('RNQ'),
       name: 'Recipe Neg Qty',
       type: 'RECIPE'
     });
     registerFixtureCleanup(`item-${recipe.id}`, async () => {});
 
     const ingredient = await createTestItem(ctx.companyId, {
-      sku: `CREATE-NEG-ING-${Date.now()}`,
+      sku: makeTag('CNI'),
       name: 'Ingredient Neg Qty',
       type: 'INGREDIENT'
     });
@@ -231,7 +241,7 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
     const ctx = await getSeedSyncContext();
     
     const recipe = await createTestItem(ctx.companyId, {
-      sku: `CREATE-SELF-${Date.now()}`,
+      sku: makeTag('RSR'),
       name: 'Self Reference Recipe',
       type: 'RECIPE'
     });
@@ -258,7 +268,7 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
     
     // Create Recipe A
     const recipeA = await createTestItem(ctx.companyId, {
-      sku: `CREATE-R2R-A-${Date.now()}`,
+      sku: makeTag('R2A'),
       name: 'Recipe A',
       type: 'RECIPE'
     });
@@ -266,7 +276,7 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
 
     // Create Recipe B
     const recipeB = await createTestItem(ctx.companyId, {
-      sku: `CREATE-R2R-B-${Date.now()}`,
+      sku: makeTag('R2B'),
       name: 'Recipe B',
       type: 'RECIPE'
     });
@@ -294,7 +304,7 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
     const ctx = await getSeedSyncContext();
     
     const recipe = await createTestItem(ctx.companyId, {
-      sku: `CREATE-INVALID-TYPE-${Date.now()}`,
+      sku: makeTag('RIN'),
       name: 'Recipe Invalid Type',
       type: 'RECIPE'
     });
@@ -302,7 +312,7 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
 
     // Create a SERVICE type item (not allowed as ingredient)
     const serviceItem = await createTestItem(ctx.companyId, {
-      sku: `CREATE-SERVICE-${Date.now()}`,
+      sku: makeTag('CSI'),
       name: 'Service Item',
       type: 'SERVICE'
     });
@@ -326,14 +336,14 @@ describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
     const ctx = await getSeedSyncContext();
     
     const recipe = await createTestItem(ctx.companyId, {
-      sku: `CREATE-PERM-${Date.now()}`,
+      sku: makeTag('RPT'),
       name: 'Permission Test Recipe',
       type: 'RECIPE'
     });
     registerFixtureCleanup(`item-${recipe.id}`, async () => {});
 
     const ingredient = await createTestItem(ctx.companyId, {
-      sku: `CREATE-PERM-ING-${Date.now()}`,
+      sku: makeTag('CPI'),
       name: 'Permission Test Ingredient',
       type: 'INGREDIENT'
     });

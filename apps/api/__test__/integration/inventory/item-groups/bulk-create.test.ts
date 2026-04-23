@@ -6,25 +6,34 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../../helpers/env';
 import { closeTestDb } from '../../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
   registerFixtureCleanup
 } from '../../../fixtures';
-import { randomInt } from 'crypto';
+import { makeTag } from '../../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
 
 describe('inventory.item-groups.bulk-create', { timeout: 30000 }, () => {
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -37,7 +46,6 @@ describe('inventory.item-groups.bulk-create', { timeout: 30000 }, () => {
   });
 
   it('creates multiple item groups in bulk', async () => {
-    const timestamp = Date.now();
     const res = await fetch(`${baseUrl}/api/inventory/item-groups/bulk`, {
       method: 'POST',
       headers: {
@@ -46,9 +54,9 @@ describe('inventory.item-groups.bulk-create', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         rows: [
-          { name: `Bulk Group 1 ${timestamp}` },
-          { name: `Bulk Group 2 ${timestamp}` },
-          { name: `Bulk Group 3 ${timestamp}` }
+          { name: makeTag('B1') },
+          { name: makeTag('B2') },
+          { name: makeTag('B3') }
         ]
       })
     });
@@ -65,9 +73,7 @@ describe('inventory.item-groups.bulk-create', { timeout: 30000 }, () => {
   });
 
   it('creates hierarchical groups via parent_code', async () => {
-    const timestamp = Date.now();
-    const randomizer = randomInt(10)
-    const parentCode = `PARENT-${timestamp}-${randomizer}`.slice(0, 20);
+    const parentCode = makeTag('PP');
 
     const res = await fetch(`${baseUrl}/api/inventory/item-groups/bulk`, {
       method: 'POST',
@@ -77,8 +83,8 @@ describe('inventory.item-groups.bulk-create', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         rows: [
-          { code: parentCode, name: `Bulk Parent ${timestamp}` },
-          { name: `Bulk Child ${timestamp}`, parent_code: parentCode }
+          { code: parentCode, name: makeTag('BP') },
+          { name: makeTag('BC'), parent_code: parentCode }
         ]
       })
     });
@@ -94,9 +100,6 @@ describe('inventory.item-groups.bulk-create', { timeout: 30000 }, () => {
   });
 
   it('bulk create handles partial conflicts gracefully', async () => {
-    const timestamp = Date.now();
-
-    // First bulk create
     const res1 = await fetch(`${baseUrl}/api/inventory/item-groups/bulk`, {
       method: 'POST',
       headers: {
@@ -105,7 +108,7 @@ describe('inventory.item-groups.bulk-create', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         rows: [
-          { name: `First Bulk ${timestamp}` }
+          { name: makeTag('F1') }
         ]
       })
     });
@@ -120,7 +123,7 @@ describe('inventory.item-groups.bulk-create', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         rows: [
-          { name: `Second Bulk ${timestamp}` }
+          { name: makeTag('S2') }
         ]
       })
     });
@@ -152,9 +155,8 @@ describe('inventory.item-groups.bulk-create', { timeout: 30000 }, () => {
   });
 
   it('bulk create with codes', async () => {
-    const timestamp = Date.now();
-    const code1 = `BULK-C1-${timestamp}`.slice(0, 20);
-    const code2 = `BULK-C2-${timestamp}`.slice(0, 20);
+    const code1 = makeTag('C1');
+    const code2 = makeTag('C2');
 
     const res = await fetch(`${baseUrl}/api/inventory/item-groups/bulk`, {
       method: 'POST',
@@ -164,8 +166,8 @@ describe('inventory.item-groups.bulk-create', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         rows: [
-          { code: code1, name: `Coded Group 1 ${timestamp}` },
-          { code: code2, name: `Coded Group 2 ${timestamp}` }
+          { code: code1, name: makeTag('BN') },
+          { code: code2, name: makeTag('BN') }
         ]
       })
     });

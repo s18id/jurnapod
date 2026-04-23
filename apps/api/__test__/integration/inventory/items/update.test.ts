@@ -6,12 +6,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../../helpers/env';
 import { closeTestDb } from '../../../helpers/db';
+import { acquireReadLock, releaseReadLock } from '../../../helpers/setup';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
   getSeedSyncContext as loadSeedSyncContext,
   registerFixtureCleanup
 } from '../../../fixtures';
+import { makeTag } from '../../../helpers/tags';
 
 let baseUrl: string;
 let accessToken: string;
@@ -21,14 +23,22 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
   const getSeedSyncContext = async () => seedCtx;
 
   beforeAll(async () => {
+    await acquireReadLock();
     baseUrl = getTestBaseUrl();
     accessToken = await getTestAccessToken(baseUrl);
     seedCtx = await loadSeedSyncContext();
   });
 
   afterAll(async () => {
-    resetFixtureRegistry();
-    await closeTestDb();
+    try {
+      resetFixtureRegistry();
+    } finally {
+      try {
+        await closeTestDb();
+      } finally {
+        await releaseReadLock();
+      }
+    }
   });
 
   it('rejects request without auth', async () => {
@@ -44,7 +54,6 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
     const ctx = await getSeedSyncContext();
 
     // Create item via API - use random suffix to prevent SKU collisions in parallel
-    const skuRand = Math.random().toString(36).slice(2, 8);
     const createRes = await fetch(`${baseUrl}/api/inventory/items`, {
       method: 'POST',
       headers: {
@@ -52,7 +61,7 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `UPDATE-NAME-${Date.now()}-${skuRand}`,
+        sku: makeTag('UN'),
         name: 'Original Name',
         type: 'PRODUCT'
       })
@@ -80,7 +89,6 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
     const ctx = await getSeedSyncContext();
 
     // Create item via API - use random suffix to prevent SKU collisions in parallel
-    const skuRand = Math.random().toString(36).slice(2, 8);
     const createRes = await fetch(`${baseUrl}/api/inventory/items`, {
       method: 'POST',
       headers: {
@@ -88,7 +96,7 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `UPDATE-ACTIVE-${Date.now()}-${skuRand}`,
+        sku: makeTag('UA'),
         name: 'Active Item',
         type: 'PRODUCT',
         is_active: true
@@ -128,7 +136,6 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
     const ctx = await getSeedSyncContext();
 
     // Create item via API - use random suffix to prevent SKU collisions in parallel
-    const skuRand = Math.random().toString(36).slice(2, 8);
     const createRes = await fetch(`${baseUrl}/api/inventory/items`, {
       method: 'POST',
       headers: {
@@ -136,7 +143,7 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `UPDATE-EMPTY-${Date.now()}-${skuRand}`,
+        sku: makeTag('UE'),
         name: 'Item for Empty Update',
         type: 'PRODUCT'
       })
@@ -158,8 +165,8 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
 
   it('rejects SKU conflict on update', async () => {
     const ctx = await getSeedSyncContext();
-    const timestamp = Date.now();
-    const skuRand = Math.random().toString(36).slice(2, 8);
+    const sku1 = makeTag('C1');
+    const sku2 = makeTag('C2');
 
     // Create first item via API
     const createRes1 = await fetch(`${baseUrl}/api/inventory/items`, {
@@ -169,7 +176,7 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `CONFLICT1-${timestamp}-${skuRand}`,
+        sku: sku1,
         name: 'Item 1',
         type: 'PRODUCT'
       })
@@ -186,7 +193,7 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sku: `CONFLICT2-${timestamp}-${skuRand}`,
+        sku: sku2,
         name: 'Item 2',
         type: 'PRODUCT'
       })
@@ -202,7 +209,7 @@ describe('inventory.items.update', { timeout: 30000 }, () => {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ sku: `CONFLICT1-${timestamp}-${skuRand}` })
+      body: JSON.stringify({ sku: sku1 })
     });
     expect(res.status).toBe(409);
   });
