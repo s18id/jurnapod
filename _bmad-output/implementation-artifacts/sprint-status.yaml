@@ -573,5 +573,5 @@ development_status:
   49-3-purchasing-suite-determinism-hardening: done
   49-4-platform-acl-suite-determinism-hardening: done
   49-5-sync-pos-inventory-suite-determinism-hardening: done
-  49-6-ci-pipeline-reliability-enforcement: ready-for-dev
+  49-6-ci-pipeline-reliability-enforcement: done
   49-7-pre-close-validation-final-solid-dry-kiss-gate: ready-for-dev

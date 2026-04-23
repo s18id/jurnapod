@@ -77,7 +77,7 @@ import { DatabaseConflictError } from "./master-data-errors.js";
 import { createVariantAttribute } from "./item-variants";
 import { adjustStock } from "./stock.js";
 import { MODULE_PERMISSION_BITS, buildPermissionMask, type ModulePermission } from "@jurnapod/auth";
-import { InventoryConflictError } from "@jurnapod/modules-inventory";
+
 
 // ============================================================================
 // Types

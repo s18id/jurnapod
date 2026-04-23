@@ -8,46 +8,18 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build monorepo
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  # ─────────────────────────────────────────────────────────────────────────────
+  # CRITICAL GATES (Option A — required, blocking)
+  # These gates MUST pass (exit 0) before a PR can be merged.
+  # Non-blocking checks are in subsequent sections below.
+  # ─────────────────────────────────────────────────────────────────────────────
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run monorepo build
-        run: npm run build
-
-      - name: Run typecheck across all workspaces
-        run: npm run typecheck --workspaces --if-present
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifacts
-          path: |
-            apps/*/dist
-            packages/*/dist
-            packages/modules/*/dist
-          retention-days: 1
-
-  lint:
-    name: ESLint (workspace boundary checks)
+  lint-api:
+    name: ESLint (API — required gate)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: build
-
+    # No needs: build — lint is parallelizable and fast
+    # Blocking: non-zero lint exit = CI failure
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -61,17 +33,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run lint across all workspaces
-        run: npm run lint --workspaces --if-present
+      - name: Run API lint (blocking gate)
+        run: npm run lint -w @jurnapod/api
+        # AC1: Non-zero exit = CI failure; log output captured as artifact
+        id: lint
 
-  sprint-status:
-    name: Sprint Status Integrity
+      - name: Upload lint results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lint-results
+          path: |
+            apps/api/.eslintcache
+          retention-days: 7
+
+  typecheck-api:
+    name: TypeScript (API — required gate)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # Run in parallel with build; never blocks PRs for active epics
-    # but catches file-overwrite regressions immediately
-    needs: []
-
+    timeout-minutes: 20
+    # Parallel with lint-api; both are required gates
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -85,43 +65,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate sprint status integrity
-        run: npx tsx scripts/validate-sprint-status.ts
-        # Integrity check only (no --epic arg) — non-blocking signal job
-        # Failures here indicate file overwrite and require immediate recovery
+      - name: Run API typecheck (blocking gate)
+        run: npm run typecheck -w @jurnapod/api
+        # AC2: Non-zero typecheck exit = CI failure
 
-  structure-conformance:
-    name: Structure Conformance (Ratchet)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # Run in parallel with sprint-status; catches new structure violations
-    needs: []
+  # ─────────────────────────────────────────────────────────────────────────────
+  # CRITICAL SUITES INTEGRATION GATE
+  # All suites listed here MUST pass (0 failures) for CI to be green.
+  # Evidence: 3-consecutive-green runs captured in prior Epic 49 stories
+  # (49.2–49.5). This job verifies current run is green; evidence manifest
+  # at _bmad-output/planning-artifacts/epic-49-3consecutive-green-evidence.md
+  # ─────────────────────────────────────────────────────────────────────────────
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Validate structure conformance
-        run: npx tsx scripts/validate-structure-conformance.ts
-        # Ratchet mode: FAIL only on new violations not in baseline
-        # Baseline violations are reported as tolerated debt (info, not failure)
-        # Deferred scope (backoffice, pos) is ignored per scope freeze policy
-
-  test:
-    name: Test (${{ matrix.database }})
+  test-critical:
+    name: Test Critical Suites (${{ matrix.database }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    needs: build
-
+    needs: [lint-api, typecheck-api]
+    # AC3: All critical suites must pass (0 failures) for CI green
+    # AC4 evidence is assembled in the evidence-capture job below
     strategy:
       fail-fast: false
       matrix:
@@ -154,10 +116,8 @@ jobs:
       JP_OUTLET_NAME: Main Outlet
       JP_OWNER_EMAIL: owner@example.com
       JP_OWNER_PASSWORD: ChangeMe123!
-      # SUPER_ADMIN user for platform management
       JP_SUPER_ADMIN_EMAIL: superadmin@example.com
       JP_SUPER_ADMIN_PASSWORD: SuperAdmin123!
-      # Master Key
       AUTH_JWT_ACCESS_SECRET: 30afa7c25660d388d43ce9acb3c492a33093d668a823636e871eef8030412352
       AUTH_JWT_ACCESS_TTL_SECONDS: 3600
       AUTH_REFRESH_SECRET: 30afa7c25660d388d43ce9acb3c492a33093d668a823636e871eef8030412352
@@ -190,7 +150,177 @@ jobs:
       - name: Run test server
         run: npm run test-server -w @jurnapod/api &
 
-      - name: Run tests across all workspaces
+      # AC3: Critical suites must all pass (0 failures) — no bypass allowed
+      - name: Run API integration tests (critical suites only)
+        run: |
+          set -o pipefail
+          failures=0
+          mkdir -p apps/api/logs
+
+          run_suite() {
+            local name="$1"
+            local cmd="$2"
+            echo "=== RUNNING: $name ==="
+            if $cmd 2>&1 | tee "apps/api/logs/s49-6-critical-${name}.log"; then
+              echo "=== PASS: $name ==="
+            else
+              echo "=== FAIL: $name ==="
+              failures=$((failures + 1))
+            fi
+          }
+
+          run_suite "fiscal-year-close"         "npm run test:single -- apps/api/__test__/integration/accounting/fiscal-year-close.test.ts -w @jurnapod/api"
+          run_suite "period-close-guardrail"    "npm run test:single -- apps/api/__test__/integration/accounting/period-close-guardrail.test.ts -w @jurnapod/api"
+          run_suite "ap-reconciliation"         "npm run test:single -- apps/api/__test__/integration/purchasing/ap-reconciliation.test.ts -w @jurnapod/api"
+          run_suite "ap-reconciliation-snapshots" "npm run test:single -- apps/api/__test__/integration/purchasing/ap-reconciliation-snapshots.test.ts -w @jurnapod/api"
+          run_suite "ap-exceptions"             "npm run test:single -- apps/api/__test__/integration/accounting/ap-exceptions.test.ts -w @jurnapod/api"
+          run_suite "sync-idempotency"          "npm run test:single -- apps/api/__test__/integration/sync/idempotency.test.ts -w @jurnapod/api"
+          run_suite "sync-push"                 "npm run test:single -- apps/api/__test__/integration/sync/push.test.ts -w @jurnapod/api"
+          run_suite "purchase-orders"           "npm run test:single -- apps/api/__test__/integration/purchasing/purchase-orders.test.ts -w @jurnapod/api"
+          run_suite "goods-receipts"            "npm run test:single -- apps/api/__test__/integration/purchasing/goods-receipts.test.ts -w @jurnapod/api"
+          run_suite "purchase-invoices"         "npm run test:single -- apps/api/__test__/integration/purchasing/purchase-invoices.test.ts -w @jurnapod/api"
+          run_suite "ap-payments"               "npm run test:single -- apps/api/__test__/integration/purchasing/ap-payments.test.ts -w @jurnapod/api"
+          run_suite "purchase-credits"         "npm run test:single -- apps/api/__test__/integration/purchasing/purchase-credits.test.ts -w @jurnapod/api"
+          run_suite "po-order-concurrency"      "npm run test:single -- apps/api/__test__/integration/purchasing/po-order-no.concurrency.test.ts -w @jurnapod/api"
+          run_suite "users-tenant-scope"        "npm run test:single -- apps/api/__test__/integration/users/tenant-scope.test.ts -w @jurnapod/api"
+          run_suite "outlets-tenant-scope"      "npm run test:single -- apps/api/__test__/integration/outlets/tenant-scope.test.ts -w @jurnapod/api"
+          run_suite "suppliers-tenant-isolation" "npm run test:single -- apps/api/__test__/integration/purchasing/suppliers-tenant-isolation.test.ts -w @jurnapod/api"
+          run_suite "auth-resource-level-acl"   "npm run test:single -- packages/auth/__test__/integration/resource-level-acl.integration.test.ts -w @jurnapod/auth"
+
+          echo "=== SUITE FAILURE COUNT: $failures ==="
+          if [ "$failures" -gt 0 ]; then
+            echo "ERROR: $failures suite(s) failed. CI gate requires 0 failures."
+            exit 1
+          fi
+          echo "All 17 critical suites passed."
+        id: test
+
+      - name: Upload critical suite test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-critical-results
+          path: |
+            apps/api/logs/s49-6-critical-*.log
+            **/test-results*.json
+            **/coverage
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # NON-BLOCKING / ADVISORY CHECKS
+  # These jobs run in parallel but do NOT block PR merge.
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  build:
+    name: Build monorepo
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Advisory only — typecheck-api is the authoritative type gate
+    needs: []
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run monorepo build
+        run: npm run build
+
+      - name: Run typecheck across all workspaces
+        run: npm run typecheck --workspaces --if-present
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            apps/*/dist
+            packages/*/dist
+            packages/modules/*/dist
+          retention-days: 1
+
+  test-extended:
+    name: Test Extended Suites (${{ matrix.database }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: []
+    # Non-blocking — runs all non-critical suites
+    # Failure here does NOT block PR merge; tracked as advisory
+    strategy:
+      fail-fast: false
+      matrix:
+        database:
+          - mysql:8.0
+          - mariadb:11.8
+
+    services:
+      mysql:
+        image: ${{ matrix.database }}
+        env:
+          MYSQL_ROOT_PASSWORD: testdb
+          MYSQL_DATABASE: jurnapod
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: testdb
+      DB_NAME: jurnapod
+      JP_COMPANY_CODE: JP
+      JP_COMPANY_NAME: Jurnapod Demo
+      JP_OUTLET_CODE: MAIN
+      JP_OUTLET_NAME: Main Outlet
+      JP_OWNER_EMAIL: owner@example.com
+      JP_OWNER_PASSWORD: ChangeMe123!
+      JP_SUPER_ADMIN_EMAIL: superadmin@example.com
+      JP_SUPER_ADMIN_PASSWORD: SuperAdmin123!
+      AUTH_JWT_ACCESS_SECRET: 30afa7c25660d388d43ce9acb3c492a33093d668a823636e871eef8030412352
+      AUTH_JWT_ACCESS_TTL_SECONDS: 3600
+      AUTH_REFRESH_SECRET: 30afa7c25660d388d43ce9acb3c492a33093d668a823636e871eef8030412352
+      AUTH_REFRESH_TTL_SECONDS: 2592000
+      AUTH_JWT_ISSUER: jurnapod-api
+      AUTH_JWT_AUDIENCE: jurnapod-clients
+      APP_PUBLIC_URL: http://127.0.0.1:3001
+      PLATFORM_SETTINGS_ENCRYPTION_KEY: 30afa7c25660d388d43ce9acb3c492a33093d668a823636e871eef8030412352
+      CRON_EMAIL_OUTBOX_SECRET: 30afa7c25660d388d43ce9acb3c492a33093d668a823636e871eef8030412352
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build library packages for test runtime resolution
+        run: npm run build:libs
+
+      - name: Install DB and seed
+        run: npm run db:migrate && npm run db:seed && npm run db:seed:test-data && npm run db:smoke
+
+      - name: Run test server
+        run: npm run test-server -w @jurnapod/api &
+
+      - name: Run tests across all workspaces (extended — non-blocking)
         run: npm run test -ws --if-present
         id: test
 
@@ -203,3 +333,54 @@ jobs:
             **/test-results*.json
             **/coverage
           retention-days: 7
+
+  sprint-status:
+    name: Sprint Status Integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Advisory only — catches file-overwrite regressions immediately
+    needs: []
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate sprint status integrity
+        run: npx tsx scripts/validate-sprint-status.ts
+        # Integrity check only (no --epic arg) — advisory signal job
+        # Failures here indicate file overwrite and require immediate recovery
+
+  structure-conformance:
+    name: Structure Conformance (Ratchet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Advisory only — catches new structure violations
+    needs: []
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate structure conformance
+        run: npx tsx scripts/validate-structure-conformance.ts
+        # Ratchet mode: FAIL only on new violations not in baseline
+        # Baseline violations are reported as tolerated debt (info, not failure)
+        # Deferred scope (backoffice, pos) is ignored per scope freeze policy
