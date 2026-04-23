@@ -108,3 +108,25 @@
   rg 'SYNC_PUSH_POSTING_FORCE_UNBALANCED' --type ts -l
   rg 'isTestUnbalancedPostingEnabled' --type ts -l
   ```
+
+---
+
+## Appendix: Cross-Story Traceability (E50-A4)
+
+> **Append-only section — do not modify existing ACs above.**
+
+### Relationship to Story 50.5 (FX Acknowledgment)
+
+Story 50.5 (`story-50.5.md`) implements Sales AR FX Acknowledgment which adds a new `fx_acknowledged_at` guard to payment posting. Story 50.1 resolves unbalanced posting override risk in POS sync. The two stories operate in different areas but share the `journal posting` correctness domain:
+
+| Risk | Story 50.1 Scope | Story 50.5 Scope | Interaction |
+|------|------------------|-------------------|-------------|
+| Unbalanced journal | `SYNC_PUSH_POSTING_FORCE_UNBALANCED` in pos-sync | FX delta journal entry via `modules-accounting` | Story 50.1 resolve override; Story 50.5 adds new balanced FX journal |
+| Guard enforcement | Hardened `isTestUnbalancedPostingEnabled` | `fx_acknowledged_at` check in `payment-posting-hook.ts` | Independent guards — no shared code paths |
+| POS sync flow | POS sync push transaction flow | Sales payment post with FX delta | Different transaction types — no overlap |
+
+### Coordination Protocol
+
+1. Story 50.1 resolution (hardening unbalanced override guard) MUST NOT be undone by Story 50.5 FX journal additions.
+2. If Story 50.5 FX delta posting causes any new unbalanced journal exposure in the POS sync path, file as P0 risk in both stories.
+3. Story 50.1 is independent of FX acknowledgment — it can proceed and close before Story 50.5.

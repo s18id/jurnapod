@@ -138,7 +138,8 @@ export type {
 
 export {
   PaymentStatusError,
-  PaymentAllocationError
+  PaymentAllocationError,
+  FxAcknowledgmentRequiredError
 } from "./types/payments.js";
 
 // =============================================================================

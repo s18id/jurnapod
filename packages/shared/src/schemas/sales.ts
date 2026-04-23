@@ -338,6 +338,8 @@ export const SalesPaymentSchema = z.object({
   shortfall_reason: z.string().max(500).nullable().optional(),
   shortfall_settled_by_user_id: NumericIdSchema.nullable().optional(),
   shortfall_settled_at: z.string().datetime().nullable().optional(),
+  fx_acknowledged_at: z.string().datetime().nullable().optional(),
+  fx_acknowledged_by: NumericIdSchema.nullable().optional(),
   splits: z.array(SalesPaymentSplitSchema).optional(),
   created_by_user_id: NumericIdSchema.nullable().optional(),
   updated_by_user_id: NumericIdSchema.nullable().optional(),
@@ -357,7 +359,10 @@ export const SalesPaymentListQuerySchema = PaginationQuerySchema.extend({
 
 export const SalesPaymentPostRequestSchema = z.object({
   settle_shortfall_as_loss: z.boolean().optional(),
-  shortfall_reason: z.string().trim().min(1).max(500).optional()
+  shortfall_reason: z.string().trim().min(1).max(500).optional(),
+  fx_ack: z.object({
+    acknowledged_at: z.string().datetime()
+  }).optional()
 }).refine((data) => {
   if (data.settle_shortfall_as_loss === true) {
     return typeof data.shortfall_reason === "string" && data.shortfall_reason.trim().length > 0;
@@ -366,6 +371,10 @@ export const SalesPaymentPostRequestSchema = z.object({
 }, {
   message: "shortfall_reason is required when settle_shortfall_as_loss is true",
   path: ["shortfall_reason"]
+});
+
+export const AcknowledgeFxRequestSchema = z.object({
+  acknowledged_at: z.string().datetime()
 });
 
 export type SalesPaymentPostRequest = z.infer<typeof SalesPaymentPostRequestSchema>;

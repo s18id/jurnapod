@@ -44,6 +44,8 @@ export type SalesPayment = {
   shortfall_reason?: string | null;
   shortfall_settled_by_user_id?: number | null;
   shortfall_settled_at?: string | null;
+  fx_acknowledged_at?: string | null;
+  fx_acknowledged_by?: number | null;
   created_by_user_id?: number | null;
   updated_by_user_id?: number | null;
   created_at: string;
@@ -151,5 +153,12 @@ export class PaymentAllocationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "PaymentAllocationError";
+  }
+}
+
+export class FxAcknowledgmentRequiredError extends Error {
+  constructor(message: string = "FX delta requires acknowledgment before posting") {
+    super(message);
+    this.name = "FxAcknowledgmentRequiredError";
   }
 }

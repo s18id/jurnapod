@@ -1,5 +1,44 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
+//
+// =============================================================================
+// DEBT RESOLUTION: SYNC_PUSH_POSTING_FORCE_UNBALANCED — REMOVED
+// =============================================================================
+//
+// Context:
+//   During Sprint 2 (Epic 23 extraction), a debugging override was introduced:
+//   `JP_SYNC_PUSH_POSTING_FORCE_UNBALANCED=1` allowed injecting a +0.01 minor unit
+//   imbalance into POS journal lines to force-test the balance guard path.
+//
+// Risk classification (Epic 50 / E49-A2 Tiered Audit Table):
+//   - CRITICAL / P0: The override could enable unbalanced journals in production
+//     if the env var were accidentally set. The guard `NODE_ENV !== "production"`
+//     reduced but did not eliminate the risk (CI pipelines and staging may run
+//     non-production without the flag set).
+//
+// Decision: REMOVE entirely (not harden) because:
+//   1. The guard's non-production fallback is not an airtight production safety
+//      mechanism (e.g. NODE_ENV=staging bypasses the guard but is not production).
+//   2. No production use case requires intentionally unbalanced journals.
+//   3. The flag was debugging instrumentation, not a designed feature.
+//   4. The canonical balance assertion in PostingService is the correct place
+//      to enforce balance; overrides belong in tests only.
+//
+// Resolution applied:
+//   - Removed: SYNC_PUSH_POSTING_FORCE_UNBALANCED_ENV_KEY constant
+//   - Removed: isTestUnbalancedPostingEnabled() function
+//   - Removed: lines 355-361 that injected +0.01 imbalance into first line
+//
+// Audit trail:
+//   - SYNC_PUSH_POSTING_FORCE_UNBALANCED: introduced in commit 0d23e250 (Sprint 2)
+//     only in packages/modules/accounting/src/posting/sync-push.ts
+//   - isTestUnbalancedPostingEnabled() call site: only in buildPosSaleJournalLines
+//   - No other consumers found across the codebase (verified via grep)
+//
+// Verification:
+//   rg 'SYNC_PUSH_POSTING_FORCE_UNBALANCED' --type ts -l  -> 0 results
+//   rg 'isTestUnbalancedPostingEnabled' --type ts -l    -> 0 results
+// =============================================================================
 
 import { sql } from "kysely";
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
@@ -150,7 +189,6 @@ export class PosSyncPushPostingRepository implements PostingRepository {
 // =============================================================================
 
 const MONEY_SCALE = 100;
-const SYNC_PUSH_POSTING_FORCE_UNBALANCED_ENV_KEY = "JP_SYNC_PUSH_POSTING_FORCE_UNBALANCED";
 
 function toMinorUnits(value: number): number {
   return Math.round(value * MONEY_SCALE);
@@ -162,13 +200,6 @@ function normalizePaymentMethodCode(method: string): string {
     throw new Error(UNSUPPORTED_PAYMENT_METHOD_MESSAGE);
   }
   return normalized;
-}
-
-function isTestUnbalancedPostingEnabled(): boolean {
-  return (
-    process.env.NODE_ENV !== "production" &&
-    process.env[SYNC_PUSH_POSTING_FORCE_UNBALANCED_ENV_KEY] === "1"
-  );
 }
 
 export class PosSyncPushPostingMapper implements PostingMapper {
@@ -350,14 +381,6 @@ async function buildPosSaleJournalLines(
         });
       }
     }
-  }
-
-  if (isTestUnbalancedPostingEnabled() && lines.length > 0) {
-    const firstLine = lines[0];
-    lines[0] = {
-      ...firstLine,
-      debit: normalizeMoney(firstLine.debit + 0.01)
-    };
   }
 
   return lines;

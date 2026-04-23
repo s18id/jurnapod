@@ -38,5 +38,7 @@ export {
 export {
   createPaymentService,
   type PaymentService,
-  type PaymentServiceDeps
+  type PaymentServiceDeps,
+  FxAcknowledgmentRequiredError,
+  FxAckUnauthorizedError
 } from "./payment-service.js";

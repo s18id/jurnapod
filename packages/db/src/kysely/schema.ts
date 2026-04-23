@@ -1427,6 +1427,8 @@ export interface SalesPayments {
   payment_at: Date;
   payment_delta_idr: Generated<Decimal>;
   payment_no: string;
+  fx_acknowledged_at: Generated<Date | null>;
+  fx_acknowledged_by: Generated<number | null>;
   shortfall_reason: Generated<string | null>;
   shortfall_settled_as_loss: Generated<number>;
   shortfall_settled_at: Generated<Date | null>;

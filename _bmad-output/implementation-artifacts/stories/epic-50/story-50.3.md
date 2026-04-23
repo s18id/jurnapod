@@ -81,3 +81,34 @@ All tests go in: `packages/modules/accounting/__test__/integration/posting/`
   npm run test:single -- "packages/modules/accounting/__test__/integration/posting/journal-immutability.test.ts" -w @jurnapod/modules-accounting
   npm run test:single -- "packages/modules/accounting/__test__/integration/posting/cogs-posting.test.ts" -w @jurnapod/modules-accounting
   ```
+
+---
+
+## Appendix: Cross-Story Traceability (E50-A4)
+
+> **Append-only section — do not modify existing ACs above.**
+
+### Relationship to Story 50.5 (FX Acknowledgment)
+
+Story 50.5 (`story-50.5.md`) implements Sales AR FX Acknowledgment. Story 50.3 test suites MUST account for the following FX-related posting behavior once Story 50.5 is implemented:
+
+| Scenario | Expected Behavior | Story 50.3 Coverage |
+|----------|-------------------|---------------------|
+| Payment with `payment_delta_idr != 0` and no `fx_acknowledged_at` | 422 `fx_delta_requires_acknowledgment` | `sales-payment-posting.test.ts` MUST verify this guard is exercised |
+| Payment with `payment_delta_idr == 0` | Posts without FX ack requirement | `sales-payment-posting.test.ts` MUST verify zero-delta path |
+| FX delta journal posting | Debit/credit to `fx_gain_loss` account | `sales-payment-posting.test.ts` MUST verify FX journal entry created |
+
+### Test Behavior During FX Implementation Window
+
+During the window where Story 50.5 is not yet complete:
+- Payment posting tests with non-zero delta MAY fail with 422 `fx_delta_requires_acknowledgment` if `fx_acknowledged_at` is not set
+- This is **expected behavior** — tests should be written to explicitly acknowledge and set `fx_acknowledged_at` before posting when delta != 0
+- Zero-delta payments MUST post without FX ack regardless of Story 50.5 status
+
+### Traceability Matrix
+
+| Story 50.5 AC | Story 50.3 Test Suite | Verification Method |
+|---------------|----------------------|----------------------|
+| AC1: reject non-zero delta without FX marker | `sales-payment-posting.test.ts` | 422 on POST without ack when delta != 0 |
+| AC3: zero-delta path posts without marker | `sales-payment-posting.test.ts` | 200 on POST without ack when delta == 0 |
+| AC8: FX delta journal posting | `sales-payment-posting.test.ts` | Journal entry verified in posting transaction |

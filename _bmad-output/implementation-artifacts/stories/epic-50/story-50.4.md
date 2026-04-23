@@ -67,3 +67,25 @@ Story 50.3 will surface defects in the posting flows. This story captures fixing
 - All 5 posting suites 3× consecutive green
 - Risk register updated
 - Sprint status reflects completion
+
+---
+
+## Appendix: Cross-Story Traceability (E50-A4)
+
+> **Append-only section — do not modify existing ACs above.**
+
+### Relationship to Story 50.5 (FX Acknowledgment)
+
+Story 50.5 (`story-50.5.md`) implements Sales AR FX Acknowledgment concurrently in this sprint. If Story 50.3 defect fixes interact with or affect payment posting flows that include FX delta handling, the following rules apply:
+
+| Situation | Required Action |
+|-----------|-----------------|
+| Fix required for FX delta guard logic in posting | Coordinate with Story 50.5 implementation — do not duplicate FX posting logic |
+| Fix surfaces missing `fx_acknowledged_at` check in existing code | File as defect in Story 50.5 scope; Story 50.4 MUST NOT implement FX ack — Story 50.5 owns it |
+| Fix to existing journal balance logic affected by FX journal entry addition | Story 50.4 fix MUST be deterministic; Story 50.5 verifies final integration |
+
+### Coordination Protocol
+
+1. If Story 50.3 defects intersect with Story 50.5 scope (FX acknowledgment + posting), the Story 50.4 fix MUST be reviewed against `docs/tech-specs/sales-ar-fx-ack-settlement.md` before applying.
+2. If a defect fix is needed to unblock Story 50.3 tests but the root cause is in FX ack logic, assign the fix to Story 50.5 with Story 50.4 tracking the dependency.
+3. Story 50.4 defects that are purely in existing posting logic (no FX interaction) proceed independently.

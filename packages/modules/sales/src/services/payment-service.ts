@@ -28,7 +28,7 @@ import type {
   MutationActor,
   CanonicalPaymentInput
 } from "../types/payments.js";
-import { PaymentStatusError, PaymentAllocationError } from "../types/payments.js";
+import { PaymentStatusError, PaymentAllocationError, FxAcknowledgmentRequiredError } from "../types/payments.js";
 import type { SalesDb, SalesDbExecutor } from "./sales-db.js";
 
 // =============================================================================
@@ -48,6 +48,16 @@ export class DatabaseReferenceError extends Error {
     this.name = "DatabaseReferenceError";
   }
 }
+
+export class FxAckUnauthorizedError extends Error {
+  constructor(message: string = "FX acknowledgment requires ACCOUNTANT role or higher") {
+    super(message);
+    this.name = "FxAckUnauthorizedError";
+  }
+}
+
+// Re-export FxAcknowledgmentRequiredError from types for convenience
+export { FxAcknowledgmentRequiredError } from "../types/payments.js";
 
 // =============================================================================
 // Money Helpers (internal to module)
@@ -106,12 +116,24 @@ export interface PaymentService {
     actor?: MutationActor,
     options?: PostPaymentInput
   ): Promise<SalesPayment | null>;
+
+  acknowledgeFxDelta(
+    companyId: number,
+    paymentId: number,
+    acknowledgedAt: Date,
+    actor: MutationActor
+  ): Promise<SalesPayment | null>;
 }
 
 export interface PaymentServiceDeps {
   db: SalesDb;
   accessScopeChecker: AccessScopeChecker;
   postingHook?: PaymentPostingHook;
+  /**
+   * Minimum permission bits required on sales module for FX acknowledgment.
+   * ACCOUNTANT+ = READ(1) + ANALYZE(16) = 17 bits minimum.
+   */
+  fxAckMinPermissionBits?: number;
 }
 
 // =============================================================================
@@ -697,6 +719,14 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
         delta = normalizeMoney(paymentAmount - invoiceAmountApplied);
       }
 
+      // FX Acknowledgment Check: Non-zero delta requires prior acknowledgment
+      // Zero delta bypasses this check entirely (no FX exposure)
+      if (delta !== 0 && !payment.fx_acknowledged_at) {
+        throw new FxAcknowledgmentRequiredError(
+          `Payment has FX delta IDR ${delta} which requires explicit acknowledgment before posting`
+        );
+      }
+
       const userId = actor?.userId ?? null;
       const shortfallSettledAt = options?.settle_shortfall_as_loss ? new Date() : null;
 
@@ -753,11 +783,70 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
     });
   }
 
+  async function acknowledgeFxDelta(
+    companyId: number,
+    paymentId: number,
+    acknowledgedAt: Date,
+    actor: MutationActor
+  ): Promise<SalesPayment | null> {
+    return withTransaction(async (executor) => {
+      const payment = await executor.findPaymentById(companyId, paymentId, true);
+      if (!payment) {
+        return null;
+      }
+
+      // Only DRAFT payments can be acknowledged
+      if (payment.status === "VOID") {
+        throw new PaymentStatusError("Cannot acknowledge FX on voided payment");
+      }
+
+      if (payment.status === "POSTED") {
+        throw new PaymentStatusError("Cannot acknowledge FX on already posted payment");
+      }
+
+      // Reject future-dated acknowledgments
+      if (acknowledgedAt > new Date()) {
+        throw new Error("fx_ack_cannot_be_future_dated: Acknowledgment timestamp cannot be in the future");
+      }
+
+      // Check if delta is non-zero - if zero, this is a no-op but we still record if provided
+      const paymentAmount = payment.payment_amount_idr ?? payment.amount;
+      // Note: actual delta calculation would need invoice data, but we trust the stored delta
+      // If payment_delta_idr is already set and non-zero, acknowledgment is meaningful
+      const hasFxExposure = (payment.payment_delta_idr ?? 0) !== 0;
+
+      if (!hasFxExposure) {
+        // Zero delta - FX ack is no-op but we still update the record if called
+        // This allows idempotent behavior
+      }
+
+      // Use the DB executor's acknowledgeFxDelta method
+      await executor.acknowledgeFxDelta({
+        companyId,
+        paymentId,
+        acknowledgedAt,
+        acknowledgedByUserId: actor.userId
+      });
+
+      const updatedPayment = await executor.findPaymentById(companyId, paymentId);
+      if (!updatedPayment) {
+        return null;
+      }
+
+      const splits = await executor.findPaymentSplits(companyId, paymentId);
+      if (splits.length > 0) {
+        return attachSplitsToPayment(updatedPayment, splits);
+      }
+      return updatedPayment;
+    });
+  }
+
   return {
     createPayment,
     getPayment,
     updatePayment,
     listPayments,
-    postPayment
+    postPayment,
+    acknowledgeFxDelta
   };
 }

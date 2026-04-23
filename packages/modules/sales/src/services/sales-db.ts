@@ -326,7 +326,16 @@ export interface SalesDbExecutor {
     shortfallReason?: string;
     shortfallSettledByUserId?: number;
     shortfallSettledAt?: Date | null;
+    fxAcknowledgedAt?: Date | null;
+    fxAcknowledgedBy?: number;
     updatedByUserId?: number;
+  }): Promise<void>;
+
+  acknowledgeFxDelta(input: {
+    companyId: number;
+    paymentId: number;
+    acknowledgedAt: Date;
+    acknowledgedByUserId: number;
   }): Promise<void>;
 
   updateInvoicePaidTotal(input: {

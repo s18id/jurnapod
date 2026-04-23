@@ -29,6 +29,7 @@ async function findPaymentByIdWithTx(
           sp.account_id, a.name as account_name, sp.method, sp.status,
           sp.amount, sp.invoice_amount_idr, sp.payment_amount_idr, sp.payment_delta_idr,
           sp.shortfall_settled_as_loss, sp.shortfall_reason, sp.shortfall_settled_by_user_id, sp.shortfall_settled_at,
+          sp.fx_acknowledged_at, sp.fx_acknowledged_by,
           sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
    FROM sales_payments sp
    LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
@@ -61,6 +62,8 @@ async function findPaymentByIdWithTx(
     shortfall_reason?: string | null;
     shortfall_settled_by_user_id?: number | null;
     shortfall_settled_at?: string | null;
+    fx_acknowledged_at?: string | null;
+    fx_acknowledged_by?: number | null;
     created_by_user_id?: number | null;
     updated_by_user_id?: number | null;
     created_at: string;
@@ -88,6 +91,8 @@ async function findPaymentByIdWithTx(
     shortfall_reason: row.shortfall_reason ?? undefined,
     shortfall_settled_by_user_id: row.shortfall_settled_by_user_id ? Number(row.shortfall_settled_by_user_id) : undefined,
     shortfall_settled_at: row.shortfall_settled_at ?? undefined,
+    fx_acknowledged_at: row.fx_acknowledged_at ?? undefined,
+    fx_acknowledged_by: row.fx_acknowledged_by ? Number(row.fx_acknowledged_by) : undefined,
     created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : undefined,
     updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : undefined,
     created_at: row.created_at,

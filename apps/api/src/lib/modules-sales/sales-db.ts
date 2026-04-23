@@ -690,6 +690,8 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     shortfall_reason?: string | null;
     shortfall_settled_by_user_id?: number | null;
     shortfall_settled_at?: string | null;
+    fx_acknowledged_at?: string | null;
+    fx_acknowledged_by?: number | null;
     created_by_user_id?: number | null;
     updated_by_user_id?: number | null;
     created_at: string;
@@ -700,6 +702,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
             sp.account_id, a.name as account_name, sp.method, sp.status,
             sp.amount, sp.invoice_amount_idr, sp.payment_amount_idr, sp.payment_delta_idr,
             sp.shortfall_settled_as_loss, sp.shortfall_reason, sp.shortfall_settled_by_user_id, sp.shortfall_settled_at,
+            sp.fx_acknowledged_at, sp.fx_acknowledged_by,
             sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
      FROM sales_payments sp
      LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
@@ -732,6 +735,8 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
       shortfall_reason?: string | null;
       shortfall_settled_by_user_id?: number | null;
       shortfall_settled_at?: string | null;
+      fx_acknowledged_at?: string | null;
+      fx_acknowledged_by?: number | null;
       created_by_user_id?: number | null;
       updated_by_user_id?: number | null;
       created_at: string;
@@ -759,6 +764,8 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
       shortfall_reason: row.shortfall_reason ?? undefined,
       shortfall_settled_by_user_id: row.shortfall_settled_by_user_id ? Number(row.shortfall_settled_by_user_id) : undefined,
       shortfall_settled_at: row.shortfall_settled_at ?? undefined,
+      fx_acknowledged_at: row.fx_acknowledged_at ?? undefined,
+      fx_acknowledged_by: row.fx_acknowledged_by ? Number(row.fx_acknowledged_by) : undefined,
       created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : undefined,
       updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : undefined,
       created_at: row.created_at,
@@ -971,6 +978,8 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     shortfallReason?: string;
     shortfallSettledByUserId?: number;
     shortfallSettledAt?: Date | null;
+    fxAcknowledgedAt?: Date | null;
+    fxAcknowledgedBy?: number;
     updatedByUserId?: number;
   }): Promise<void> {
     await sql`UPDATE sales_payments
@@ -981,7 +990,24 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
            shortfall_reason = ${input.shortfallReason ?? null},
            shortfall_settled_by_user_id = ${input.shortfallSettledByUserId ?? null},
            shortfall_settled_at = ${input.shortfallSettledAt ?? null},
+           fx_acknowledged_at = ${input.fxAcknowledgedAt ?? null},
+           fx_acknowledged_by = ${input.fxAcknowledgedBy ?? null},
            updated_by_user_id = ${input.updatedByUserId ?? null},
+           updated_at = CURRENT_TIMESTAMP
+       WHERE company_id = ${input.companyId}
+         AND id = ${input.paymentId}`.execute(this._getDb());
+  }
+
+  async acknowledgeFxDelta(input: {
+    companyId: number;
+    paymentId: number;
+    acknowledgedAt: Date;
+    acknowledgedByUserId: number;
+  }): Promise<void> {
+    await sql`UPDATE sales_payments
+       SET fx_acknowledged_at = ${input.acknowledgedAt},
+           fx_acknowledged_by = ${input.acknowledgedByUserId},
+           updated_by_user_id = ${input.acknowledgedByUserId},
            updated_at = CURRENT_TIMESTAMP
        WHERE company_id = ${input.companyId}
          AND id = ${input.paymentId}`.execute(this._getDb());
@@ -1032,6 +1058,8 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     shortfall_reason?: string | null;
     shortfall_settled_by_user_id?: number | null;
     shortfall_settled_at?: string | null;
+    fx_acknowledged_at?: string | null;
+    fx_acknowledged_by?: number | null;
     created_by_user_id?: number | null;
     updated_by_user_id?: number | null;
     created_at: string;
@@ -1071,6 +1099,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
             sp.account_id, a.name as account_name, sp.method, sp.status,
             sp.amount, sp.invoice_amount_idr, sp.payment_amount_idr, sp.payment_delta_idr,
             sp.shortfall_settled_as_loss, sp.shortfall_reason, sp.shortfall_settled_by_user_id, sp.shortfall_settled_at,
+            sp.fx_acknowledged_at, sp.fx_acknowledged_by,
             sp.created_by_user_id, sp.updated_by_user_id, sp.created_at, sp.updated_at
      FROM sales_payments sp
      LEFT JOIN accounts a ON a.id = sp.account_id AND a.company_id = sp.company_id
@@ -1103,6 +1132,8 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
       shortfall_reason?: string | null;
       shortfall_settled_by_user_id?: number | null;
       shortfall_settled_at?: string | null;
+      fx_acknowledged_at?: string | null;
+      fx_acknowledged_by?: number | null;
       created_by_user_id?: number | null;
       updated_by_user_id?: number | null;
       created_at: string;
@@ -1129,6 +1160,8 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
         shortfall_reason: row.shortfall_reason ?? undefined,
         shortfall_settled_by_user_id: row.shortfall_settled_by_user_id ? Number(row.shortfall_settled_by_user_id) : undefined,
         shortfall_settled_at: row.shortfall_settled_at ?? undefined,
+        fx_acknowledged_at: row.fx_acknowledged_at ?? undefined,
+        fx_acknowledged_by: row.fx_acknowledged_by ? Number(row.fx_acknowledged_by) : undefined,
         created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : undefined,
         updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : undefined,
         created_at: row.created_at,

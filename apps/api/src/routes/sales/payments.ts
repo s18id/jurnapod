@@ -17,13 +17,17 @@ import {
   NumericIdSchema,
   SalesPaymentCreateRequestSchema,
   SalesPaymentListQuerySchema,
-  SalesPaymentResponseSchema
+  SalesPaymentResponseSchema,
+  SalesPaymentPostRequestSchema,
+  AcknowledgeFxRequestSchema
 } from "@jurnapod/shared";
 import {
   PaymentAllocationError,
   DatabaseConflictError,
   DatabaseReferenceError,
-  DatabaseForbiddenError
+  DatabaseForbiddenError,
+  FxAcknowledgmentRequiredError,
+  PaymentStatusError
 } from "@jurnapod/modules-sales";
 import { getComposedPaymentService } from "@/lib/modules-sales/payment-service-composition";
 import { PaymentVarianceConfigError } from "@/lib/sales-posting";
@@ -218,12 +222,106 @@ paymentRoutes.patch("/:id", async (c) => {
 });
 
 // ============================================================================
+// PATCH /sales/payments/:id/acknowledge-fx - Acknowledge FX delta
+// ============================================================================
+
+paymentRoutes.patch("/:id/acknowledge-fx", async (c) => {
+  const auth = c.get("auth") as AuthContext;
+
+  try {
+    // Check role gate: ACCOUNTANT+ required for FX acknowledgment
+    const accessResult = await requireAccess({
+      roles: ["ACCOUNTANT", "ADMIN", "COMPANY_ADMIN", "OWNER", "SUPER_ADMIN"],
+      module: "sales",
+      permission: "update",
+      resource: "payments"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const paymentId = NumericIdSchema.parse(c.req.param("id"));
+
+    let payload: unknown;
+    try {
+      payload = await c.req.json();
+    } catch {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    let ackInput;
+    try {
+      ackInput = AcknowledgeFxRequestSchema.parse(payload);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+      }
+      throw err;
+    }
+
+    // Validate outlet access before acknowledging
+    const existingPayment = await getComposedPaymentService().getPayment(auth.companyId, paymentId);
+    if (!existingPayment) {
+      return errorResponse("NOT_FOUND", "Payment not found", 404);
+    }
+
+    const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, existingPayment.outlet_id);
+    if (!hasAccess) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
+
+    // Parse the acknowledged_at timestamp
+    const acknowledgedAt = new Date(ackInput.acknowledged_at);
+
+    if (acknowledgedAt > new Date()) {
+      return errorResponse("fx_ack_cannot_be_future_dated", "Acknowledgment timestamp cannot be in the future", 422);
+    }
+
+    const acknowledgedPayment = await getComposedPaymentService().acknowledgeFxDelta(
+      auth.companyId,
+      paymentId,
+      acknowledgedAt,
+      { userId: auth.userId }
+    );
+
+    if (!acknowledgedPayment) {
+      return errorResponse("NOT_FOUND", "Payment not found", 404);
+    }
+
+    return successResponse(acknowledgedPayment);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+    }
+
+    if (err instanceof DatabaseForbiddenError) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
+
+    if (err instanceof PaymentStatusError) {
+      return errorResponse("INVALID_REQUEST", err.message, 400);
+    }
+
+    if (err instanceof DatabaseConflictError) {
+      return errorResponse("CONFLICT", err.message, 409);
+    }
+
+    console.error("PATCH /sales/payments/:id/acknowledge-fx failed", err);
+    return errorResponse("INTERNAL_SERVER_ERROR", "FX acknowledgment failed", 500);
+  }
+});
+
+// ============================================================================
 // POST /sales/payments/:id/post - Post payment
 // ============================================================================
 
 const PostPaymentSchema = z.object({
   settle_shortfall_as_loss: z.boolean().optional(),
-  shortfall_reason: z.string().trim().max(500).optional()
+  shortfall_reason: z.string().trim().max(500).optional(),
+  fx_ack: z.object({
+    acknowledged_at: z.string().datetime()
+  }).optional()
 });
 
 paymentRoutes.post("/:id/post", async (c) => {
@@ -243,10 +341,13 @@ paymentRoutes.post("/:id/post", async (c) => {
 
     const paymentId = NumericIdSchema.parse(c.req.param("id"));
 
-    // Parse optional body for shortfall settlement options
+    // Parse optional body for shortfall settlement options and fx_ack
     let postOptions: { settle_shortfall_as_loss?: boolean; shortfall_reason?: string } = {};
     const contentType = c.req.raw.headers.get("content-type") ?? "";
-    
+
+    // Parse fx_ack if provided in body
+    let fxAckTimestamp: Date | null = null;
+
     // Only try to parse JSON if content-type indicates JSON and body exists
     if (contentType.includes("application/json")) {
       const bodyText = await c.req.raw.text();
@@ -260,6 +361,10 @@ paymentRoutes.post("/:id/post", async (c) => {
                 settle_shortfall_as_loss: parsed.data.settle_shortfall_as_loss,
                 shortfall_reason: parsed.data.shortfall_reason
               };
+              // Extract fx_ack if provided
+              if (parsed.data.fx_ack) {
+                fxAckTimestamp = new Date(parsed.data.fx_ack.acknowledged_at);
+              }
             }
           }
         } catch {
@@ -278,6 +383,35 @@ paymentRoutes.post("/:id/post", async (c) => {
     const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, existingPayment.outlet_id);
     if (!hasAccess) {
       return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
+
+    // Inline fx_ack: if provided in POST body, persist ack marker then post in same request path
+    // Requires ACCOUNTANT+ role gate and non-future timestamp validation
+    if (fxAckTimestamp !== null) {
+      // Enforce ACCOUNTANT+ role gate for inline acknowledgment
+      const ackAccessResult = await requireAccess({
+        roles: ["ACCOUNTANT", "ADMIN", "COMPANY_ADMIN", "OWNER", "SUPER_ADMIN"],
+        module: "sales",
+        permission: "update",
+        resource: "payments"
+      })(c.req.raw, auth);
+
+      if (ackAccessResult !== null) {
+        return ackAccessResult;
+      }
+
+      // Validate non-future timestamp
+      if (fxAckTimestamp > new Date()) {
+        return errorResponse("fx_ack_cannot_be_future_dated", "Acknowledgment timestamp cannot be in the future", 422);
+      }
+
+      // Persist the ack marker
+      await getComposedPaymentService().acknowledgeFxDelta(
+        auth.companyId,
+        paymentId,
+        fxAckTimestamp,
+        { userId: auth.userId }
+      );
     }
 
     const postedPayment = await getComposedPaymentService().postPayment(auth.companyId, paymentId, { userId: auth.userId }, postOptions);
@@ -302,6 +436,14 @@ paymentRoutes.post("/:id/post", async (c) => {
 
     if (error instanceof PaymentVarianceConfigError) {
       return errorResponse("PAYMENT_VARIANCE_GAIN_MISSING", error.message, 409);
+    }
+
+    if (error instanceof PaymentStatusError) {
+      return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+
+    if (error instanceof FxAcknowledgmentRequiredError) {
+      return errorResponse("FX_DELTA_REQUIRES_ACKNOWLEDGMENT", error.message, 422);
     }
 
     console.error("POST /sales/payments/:id/post failed", error);
@@ -708,6 +850,14 @@ export function registerSalesPaymentRoutes(app: { openapi: OpenAPIHonoType["open
       params: zodOpenApi.object({
         id: zodOpenApi.string().openapi({ description: "Payment ID" }),
       }),
+      body: {
+        content: {
+          "application/json": {
+            schema: SalesPaymentPostRequestSchema,
+          },
+        },
+        required: false,
+      },
     },
     responses: {
       200: {
@@ -756,6 +906,7 @@ export function registerSalesPaymentRoutes(app: { openapi: OpenAPIHonoType["open
 
       let postOptions: { settle_shortfall_as_loss?: boolean; shortfall_reason?: string } = {};
       const contentType = c.req.raw.headers.get("content-type") ?? "";
+      let fxAckTimestamp: Date | null = null;
       
       if (contentType.includes("application/json")) {
         const bodyText = await c.req.raw.text();
@@ -769,6 +920,9 @@ export function registerSalesPaymentRoutes(app: { openapi: OpenAPIHonoType["open
                   settle_shortfall_as_loss: parsed.data.settle_shortfall_as_loss,
                   shortfall_reason: parsed.data.shortfall_reason
                 };
+                if (parsed.data.fx_ack) {
+                  fxAckTimestamp = new Date(parsed.data.fx_ack.acknowledged_at);
+                }
               }
             }
           } catch {
@@ -785,6 +939,30 @@ export function registerSalesPaymentRoutes(app: { openapi: OpenAPIHonoType["open
       const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, existingPayment.outlet_id);
       if (!hasAccess) {
         return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+
+      if (fxAckTimestamp !== null) {
+        const ackAccessResult = await requireAccess({
+          roles: ["ACCOUNTANT", "ADMIN", "COMPANY_ADMIN", "OWNER", "SUPER_ADMIN"],
+          module: "sales",
+          permission: "update",
+          resource: "payments"
+        })(c.req.raw, auth);
+
+        if (ackAccessResult !== null) {
+          return ackAccessResult;
+        }
+
+        if (fxAckTimestamp > new Date()) {
+          return errorResponse("fx_ack_cannot_be_future_dated", "Acknowledgment timestamp cannot be in the future", 422);
+        }
+
+        await getComposedPaymentService().acknowledgeFxDelta(
+          auth.companyId,
+          paymentId,
+          fxAckTimestamp,
+          { userId: auth.userId }
+        );
       }
 
       const postedPayment = await getComposedPaymentService().postPayment(auth.companyId, paymentId, { userId: auth.userId }, postOptions);
@@ -809,6 +987,14 @@ export function registerSalesPaymentRoutes(app: { openapi: OpenAPIHonoType["open
 
       if (error instanceof PaymentVarianceConfigError) {
         return errorResponse("PAYMENT_VARIANCE_GAIN_MISSING", error.message, 409);
+      }
+
+      if (error instanceof PaymentStatusError) {
+        return errorResponse("INVALID_REQUEST", error.message, 400);
+      }
+
+      if (error instanceof FxAcknowledgmentRequiredError) {
+        return errorResponse("FX_DELTA_REQUIRES_ACKNOWLEDGMENT", error.message, 422);
       }
 
       console.error("POST /sales/payments/:id/post failed", error);
