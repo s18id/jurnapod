@@ -575,3 +575,11 @@ development_status:
   49-5-sync-pos-inventory-suite-determinism-hardening: done
   49-6-ci-pipeline-reliability-enforcement: done
   49-7-pre-close-validation-final-solid-dry-kiss-gate: done
+  epic-49-retrospective: done
+
+  # Epic 50: Ledger Correctness Hardening
+  epic-50: backlog
+  50-1-pos-sync-unbalanced-override: backlog
+  50-2-q49-001-fixture-extraction: backlog
+  50-3-posting-flow-integration-tests: backlog
+  50-4-correctness-fixes-from-testing: backlog

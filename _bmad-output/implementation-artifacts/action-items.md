@@ -1,6 +1,6 @@
 # Action Items Tracker
 
-**Last Updated:** 2026-04-22T00:00:00Z
+**Last Updated:** 2026-04-23T00:00:00Z
 **Review Cadence:** Monthly at sprint retrospective
 
 ---
@@ -10,10 +10,12 @@
 | Priority | Open | Done | Won't Fix | Total |
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
-| P1 | 0 | 13 | 0 | 13 |
-| P2 | 3 | 17 | 0 | 20 |
-| P3 | 1 | 2 | 3 | 6 |
-| **Total** | **4** | **36** | **3** | **43** |
+| P1 | 0 | 5 | 0 | 5 |
+| P2 | 2 | 3 | 0 | 5 |
+| P3 | 0 | 4 | 3 | 7 |
+| **Total** | **2** | **16** | **3** | **21** |
+
+> **Note:** The Historical section (Pre-Epic 8) is tracked separately (32 items) and excluded from summary totals above.
 
 ---
 
@@ -37,7 +39,6 @@
 |----|--------|------|-------|--------|
 | E45-A5a | Add automated completion-note check to CI pipeline | Epic 44 | Quinn | Open |
 | E45-A5b | Enhance database compatibility testing (MySQL + MariaDB dual-DB CI) | Epic 44 | Quinn | Open |
-| E46-A3 | Investigate automated lint warning threshold tracking in CI (>100 warnings = auto-TD) | Epic 46 | Charlie | Open |
 
 ---
 
@@ -78,6 +79,8 @@
 | **E46-A4** | Verify sprint-status.yaml integrity before marking any epic done (human gate) | Epic 46 | Epic 46 | Pending — E46 backlog |
 | **E48-A2** | Q49-001 execution planning (critical path) | Epic 48 | Epic 49 | Decomposition passes documented; backward-compatibility constraints verified; Pass 1 marked `ready-to-execute` in `_bmad-output/planning-artifacts/epic-49-q49-001-test-fixtures-execution-pass-1.md` |
 | **E48-A1** | Kickoff debt signal improvement | Epic 48 | Epic 49 | Kickoff scorecard now distinguishes sprint-introduced lint errors from pre-existing debt with explicit evidence paths in `_bmad-output/planning-artifacts/epic-49-solid-dry-kiss-scorecard.md` |
+| **E49-A1** | Second-Pass Review for Determinism Work | Epic 49 | Epic 50 | Implemented via `.github/pull_request_template.md` second-pass checklist + Story 50.X mandates |
+| **E49-A2** | Tiered Audit Prioritization Template | Epic 49 | Epic 50 | Implemented via Story 50.1 tiered audit table with Critical→High→Medium and rationale |
 
 ### P2
 

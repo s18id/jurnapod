@@ -1,0 +1,10 @@
+retro_session:
+  epic_number: 49
+  started_at: "2026-04-23T12:00:00Z"
+  completed_at: null
+  abandoned_at: null
+  current_phase: 0
+  phase_name: "Session Init"
+  step_status: "pending"
+  updated_at: "2026-04-23T12:00:00Z"
+  session_status: "active"
