@@ -4,15 +4,22 @@
 /**
  * @jurnapod/db/test-fixtures
  *
- * Deterministic primitive helpers for integration test fixtures.
- * This package provides ONLY non-domain-invariant primitives:
- * - Timestamp generation
- * - ID generation
- * - Basic random primitives
+ * Deterministic primitive helpers and domain constants for integration test fixtures.
+ * This package provides:
+ * - Low-level primitives: timestamp generation, ID generation, deterministic code
+ * - Domain constants: AP exception int-enums (type, status)
  *
- * NO domain logic, NO business invariants, NO database writes.
+ * NO business logic, NO database writes (other than via fixture helpers).
  * Domain fixture creation stays in the package that owns the invariant.
  */
 
 export { CANONICAL_TIMESTAMPS, generateDeterministicRunId, generateDeterministicCode } from './primitives.js';
 export type { DeterministicRunIdOptions } from './primitives.js';
+
+export { AP_EXCEPTION_TYPE, AP_EXCEPTION_STATUS } from './constants.js';
+export type {
+  APExceptionTypeKey,
+  APExceptionTypeValue,
+  APExceptionStatusKey,
+  APExceptionStatusValue,
+} from './constants.js';

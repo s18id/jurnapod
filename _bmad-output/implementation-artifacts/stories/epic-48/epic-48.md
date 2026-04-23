@@ -1,9 +1,9 @@
 # Epic 48: Correctness-First Stability Lockdown (Wave A)
 
-**Status:** in-progress
+**Status:** closed
 **Theme:** Architecture Program — Correctness Baseline
 **Started:** 2026-04-21
-**Completed:** —
+**Completed:** 2026-04-23
 
 ## Context
 
@@ -69,6 +69,9 @@ A hard prerequisite gate must pass before Story 48.2+:
 - Artifacts: `epic-48-solid-dry-kiss-scorecard.md`, `epic-48-risk-register.md`
 - Validation: `npm run lint -w @jurnapod/api`, `npm run typecheck -w @jurnapod/api`
 
-## Retrospective
+## Sign-Off
 
-See: [Epic 48 Retrospective](./epic-48.retrospective.md) _(not yet created — epic in-progress)_
+- **Reviewer GO:** bmad-review (artifact-based) — 2026-04-23
+- **Owner Sign-Off:** Ahmad — 2026-04-23
+
+## Retrospective

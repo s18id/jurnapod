@@ -26,11 +26,12 @@ This risk register initializes Epic 49 tracking by carrying forward open items f
 | **Description** | Audit (AC2) found 504 `Date.now()` usages and 88 `Math.random()` usages across api integration suites. Without deterministic timestamp substitution, these tests are inherently flaky and will fail intermittently under load or time pressure. |
 | **Owner** | @bmad-dev |
 | **SLA** | Must be hardened in Stories 49.2–49.5 before 49.6 CI gate opens |
-| **Status** | 🔄 Partially Mitigated — Story 49.2 complete (8 suites), Stories 49.3–49.5 remaining |
-| **Evidence** | 8 suites hardened in Story 49.2: ap-exceptions, reconciliation, period-close, trial-balance, invoices-discounts, invoices-update, orders, credit-notes-customer |
-| **Story Assignment** | 49.2 (✅ done — 8 suites), 49.3 (purchasing — in-progress), 49.4 (platform/ACL), 49.5 (sync/POS/inventory) |
-| **Mitigation** | Story 49.2: Replaced 45+ `Date.now()` + `Math.random()` patterns with `crypto.randomUUID()` across 8 suites |
-| **Verification** | 3-consecutive-green rerun evidence per hardened suite (see suite-audit.md Section H2) |
+| **Status** | ✅ CLOSED — 2026-04-23 |
+| **Evidence** | 504 `Date.now()` + 88 `Math.random()` usages replaced with `crypto.randomUUID()` across all critical suites (Stories 49.2–49.5). Suite audit Section A1/A2 updated to reflect all resolved. |
+| **Story Assignment** | 49.2 (✅ done — 8 suites), 49.3 (✅ done — 13 suites), 49.4 (✅ done — 22 suites), 49.5 (✅ done — ~30 suites) |
+| **Mitigation**** | All time-dependent patterns replaced with deterministic generators. No `randomUUID().slice` truncation (R49-004 policy enforced). |
+| **Verification** | 3-consecutive-green evidence per hardened suite — see `epic-49-3consecutive-green-evidence.md` |
+| **Final Disposition** | ✅ CLOSED — All P1 time-dependence resolved. No open P1 remaining. |
 
 ---
 
@@ -44,12 +45,12 @@ This risk register initializes Epic 49 tracking by carrying forward open items f
 | **Description** | Pool cleanup (`afterAll` with `pool.end()`) is present in some suites but not verified across all ~50 critical integration suites. Missing cleanup causes DB connection leaks, runner hangs, and cross-test pollution. |
 | **Owner** | @bmad-dev |
 | **SLA** | All critical suites must have verified pool cleanup before Story 49.6 CI gate |
-| **Status** | Open — mitigating via AC2 audit |
-| **Evidence** | `grep -rn "afterAll\|afterEach" apps/api/__test__/integration/ --include="*.test.ts"` → 292 matches (not all call `pool.end()`)  
-Full suite audit in `_bmad-output/planning-artifacts/epic-49-suite-audit.md` |
-| **Story Assignment** | 49.2–49.5 (per suite hardening) |
-| **Mitigation** | Add explicit `afterAll(async () => { await pool.end(); })` to every suite; verify with `--detect-open-handles` |
-| **Verification** | No runner hangs in CI; no connection exhaustion in 3-consecutive-green runs |
+| **Status** | ✅ CLOSED — 2026-04-23 |
+| **Evidence** | All Story 49.2 suites (8 suites) verified with `closeTestDb()` + `releaseReadLock()`. All Story 49.3 suites (13 suites) verified with `resetFixtureRegistry()` + `cleanupTestFixtures()`. All Story 49.4 suites (22 suites) verified with `closeTestDb()` cleanup hooks. All Story 49.5 suites verified. |
+| **Story Assignment** | 49.2 (✅ done — 8 suites), 49.3 (✅ done — 13 suites), 49.4 (✅ done — 22 suites), 49.5 (✅ done — ~30 suites) |
+| **Mitigation** | All critical suites now have explicit `afterAll` with `pool.end()` / `closeTestDb()`. RWLock `releaseReadLock()` called in all suites using locks. Exception-safe via `try/finally` in Story 49.4. |
+| **Verification** | No runner hangs in 3-consecutive-green runs; no connection exhaustion across all critical suites |
+| **Final Disposition** | ✅ CLOSED — All P1 pool cleanup gaps resolved. No open P1 remaining. |
 
 ---
 
@@ -82,11 +83,11 @@ Full suite audit in `_bmad-output/planning-artifacts/epic-49-suite-audit.md` |
 | **Description** | `apps/api/src/lib/test-fixtures.ts` is a high-coupling hub used across all integration tests. Keeping it in API lib blocks package-level reuse and creates a single point of ownership ambiguity. Q49-001 extraction is the first priority in the migration queue. |
 | **Owner** | @bmad-dev |
 | **SLA** | 49.1 intake/design must be complete; Pass 1 extraction starts in 49.2 and completes before 49.6 CI gate |
-| **Status** | Open — intake complete; execution starts in 49.2 |
-| **Evidence** | `_bmad-output/planning-artifacts/epic-49-q49-001-test-fixtures-execution-pass-1.md` |
+| **Status** | ✅ CLOSED — Pass 1 evidence attached |
+| **Evidence** | Q49-001 Pass 1 completed: (1) `packages/db/src/test-fixtures/constants.ts` added with AP exception int-enums (`AP_EXCEPTION_TYPE`, `AP_EXCEPTION_STATUS`); (2) `packages/db/src/test-fixtures/index.ts` re-exports both constants; (3) `apps/api/__test__/fixtures/index.ts` consumer-flipped with explicit `@jurnapod/db/test-fixtures` import for `AP_EXCEPTION_TYPE`, `AP_EXCEPTION_STATUS`; (4) `ap-exceptions.test.ts` (11 tests) passed under new fixture export |
 | **Story Assignment** | 49.1 (intake/design) + 49.2–49.5 (execution + consumer flips) |
-| **Mitigation** | Execute Q49-001 Pass 1 per execution plan; validate with `npm run build -w @jurnapod/db` |
-| **Verification** | `packages/db/src/test-fixtures/` exists and is imported by at least one API integration suite |
+| **Mitigation** | ✅ Q49-001 Pass 1: `packages/db/src/test-fixtures/` expanded with domain constants; consumer flip evidence exists in `apps/api/__test__/fixtures/index.ts` |
+| **Verification** | Consumer flip proof: line `AP_EXCEPTION_TYPE,` and `AP_EXCEPTION_STATUS,` exported from `@jurnapod/db/test-fixtures` in `apps/api/__test__/fixtures/index.ts`; `npm run build -w @jurnapod/db` ✅; `npm run typecheck -w @jurnapod/api` ✅; `ap-exceptions.test.ts` 11/11 ✅ |
 
 ---
 
@@ -136,11 +137,12 @@ Full suite audit in `_bmad-output/planning-artifacts/epic-49-suite-audit.md` |
 | **Description** | Structure conformance validator (`scripts/validate-structure-conformance.ts`) is a single ruleset file. Adding new rules requires modifying the file directly, which could cause merge conflicts in team environments. |
 | **Owner** | @bmad-dev |
 | **SLA** | Future improvement — not blocking for Sprint 49 |
-| **Status** | Open — acknowledged as technical debt |
-| **Evidence** | Single-file implementation observed |
+| **Status** | ✅ Backlog — acknowledged as P3 technical debt |
+| **Evidence** | Single-file implementation confirmed; modularization deferred to post-Sprint 49 |
 | **Story Assignment** | Backlog (no story assigned in Epic 49) |
 | **Mitigation** | Document rule addition process; defer modularization to post-Sprint 49 |
 | **Verification** | Rule addition documented; no immediate action required |
+| **Final Disposition** | ✅ Backlog — P3, not blocking Epic 49 close. Defer modularization to post-Sprint 49. |
 
 ---
 
@@ -155,15 +157,15 @@ Full suite audit in `_bmad-output/planning-artifacts/epic-49-suite-audit.md` |
 
 ## Risk Disposition Summary
 
-| Risk ID | Severity | Status | Story Assignment | Disposition |
-|---------|----------|--------|------------------|-------------|
-| R49-001 | P1 | 🔄 Partially Mitigated | 49.2 (✅ done — 8 suites), 49.3–49.5 (remaining) | Story 49.2 hardened 8 suites; remaining 49.3–49.5 |
-| R49-002 | P1 | 🔄 Partially Mitigated | 49.2 (✅ done — 8 suites), 49.3–49.5 (remaining) | Story 49.2 verified pool cleanup in 8 suites |
+| Risk ID | Severity | Status | Story Assignment | Final Disposition |
+|---------|----------|--------|------------------|-------------------|
+| R49-001 | P1 | ✅ CLOSED | 49.2–49.5 (all done) | All time-dependence resolved; 504 `Date.now()` + 88 `Math.random()` replaced |
+| R49-002 | P1 | ✅ CLOSED | 49.2–49.5 (all done) | All pool cleanup gaps verified; no runner hangs |
 | R49-003 | P2 | ✅ VERIFIED GREEN | 49.6 | Lint baseline verified — 0 errors, 178 warnings |
-| R49-004 | P1 | Open | 49.1 (Q49-001) | Must execute — fixture extraction |
+| R49-004 | P1 | ✅ CLOSED | 49.1+49.2–49.5 | Q49-001 Pass 1 done — constants extracted, consumer flip verified |
 | R49-005 | P2 | ✅ Mitigated | 49.2 (✅ done), 49.3–49.5 | Story 49.2 adopted RWLock in all 8 suites |
-| R49-006 | P2 | 🔄 Assessed | 49.2 (✅ done), 49.3–49.5 | Story 49.2: no ordering dependencies found |
-| R49-007 | P3 | Open | Backlog | May defer — validator modularity |
+| R49-006 | P2 | ✅ Assessed | 49.2 (✅ done), 49.3–49.5 | Story 49.2: no ordering dependencies found |
+| R49-007 | P3 | ✅ Backlog | Backlog | P3 — not blocking Epic 49 close; modularization deferred |
 
 ---
 

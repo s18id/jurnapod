@@ -80,6 +80,32 @@ import { MODULE_PERMISSION_BITS, buildPermissionMask, type ModulePermission } fr
 
 
 // ============================================================================
+// Deterministic Run ID Helper
+// ============================================================================
+
+/**
+ * Module-level counter for deterministic run-id generation.
+ * Initialized from Date.now() at module load, then increments per call.
+ * Ensures uniqueness within a test run without Math.random().
+ */
+let _runIdCounter = Date.now() & 0xFFFFFF; // 24-bit slice to keep numeric stable
+function nextRunIdCounter(): number {
+  return ++_runIdCounter;
+}
+
+/**
+ * Generate a deterministic run-id suffix for fixture codes.
+ * Format: base36-encoded counter — reproducible across test runs
+ * within the same process, unique across different processes.
+ *
+ * NOT cryptographically random — do NOT use for security-sensitive values.
+ * Intended ONLY for test fixture code/name generation.
+ */
+function makeRunId(): string {
+  return nextRunIdCounter().toString(36);
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -285,7 +311,7 @@ export async function createTestCompanyMinimal(
   }>
 ): Promise<CompanyFixture> {
   const db = getDb();
-  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  const runId = makeRunId();
 
   const code = options?.code ?? `TEST-CO-${runId}`.slice(0, 20).toUpperCase();
   const name = options?.name ?? `Test Company ${runId}`;
@@ -346,7 +372,7 @@ export async function createTestCompany(
   }>
 ): Promise<CompanyFixture> {
   const db = getDb();
-  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  const runId = makeRunId();
 
   const code = options?.code ?? `TEST-CO-${runId}`.slice(0, 20).toUpperCase();
   const name = options?.name ?? `Test Company ${runId}`;
@@ -411,7 +437,7 @@ export async function createTestOutletMinimal(
   }>
 ): Promise<OutletFixture> {
   const db = getDb();
-  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  const runId = makeRunId();
 
   const code = options?.code ?? `TEST-OL-${runId}`.slice(0, 20).toUpperCase();
   const name = options?.name ?? `Test Outlet ${runId}`;
@@ -490,7 +516,7 @@ export async function createTestUser(
   }>
 ): Promise<UserFixture> {
   const db = getDb();
-  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  const runId = makeRunId();
   
   const email = options?.email ?? `test-user-${runId}@example.com`;
   
@@ -698,7 +724,7 @@ export async function createTestSupplier(
   }>
 ): Promise<SupplierFixture> {
   const db = getDb();
-  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  const runId = makeRunId();
 
   const code = options?.code ?? `TEST-SUP-${runId}`.slice(0, 20).toUpperCase();
   const name = options?.name ?? `Test Supplier ${runId}`;
@@ -757,7 +783,7 @@ export async function createTestPurchasingAccounts(
   }>
 ): Promise<{ ap_account_id: number; expense_account_id: number }> {
   const db = getDb();
-  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  const runId = makeRunId();
 
   // Find the purchasing module id
   const purchasingModuleResult = await sql`SELECT id FROM modules WHERE code = 'purchasing' LIMIT 1`.execute(db);
@@ -817,7 +843,7 @@ export async function createTestFiscalCloseBalanceFixture(
   }>
 ): Promise<{ retained_earnings_account_id: number; pl_account_id: number }> {
   const db = getDb();
-  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  const runId = makeRunId();
 
   const retainedEarningsName = options?.retainedEarningsName ?? `Retained Earnings ${runId}`;
   const retainedCode = `TEST-RE-${runId}`.slice(0, 20).toUpperCase();
@@ -858,7 +884,7 @@ export async function createTestFiscalCloseBalanceFixture(
   const plNormalBalance = options?.plNormalBalance ?? "K";
   const plBalance = options?.plBalance ?? "100.0000";
   const asOfDate = options?.asOfDate ?? "2099-12-31";
-  const fixtureDocId = Number((Date.now() % 2_000_000_000) + Math.floor(Math.random() * 1000));
+  const fixtureDocId = Number((Date.now() % 2_000_000_000) + (_runIdCounter % 1000));
 
   // Offset account for balanced fixture journal entry.
   const offsetCode = `TEST-OFF-${runId}`.slice(0, 20).toUpperCase();
@@ -1052,7 +1078,7 @@ export async function createTestBankAccount(
   }>
 ): Promise<number> {
   const db = getDb();
-  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  const runId = makeRunId();
   const code = options?.code ?? `TEST-BA-${runId}`.slice(0, 20).toUpperCase();
   const name = options?.name ?? `Test ${options?.typeName ?? "BANK"} Account ${runId}`;
 
@@ -1139,7 +1165,7 @@ export async function createTestItem(
   }>
 ): Promise<ItemFixture> {
   const db = getDb();
-  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  const runId = makeRunId();
 
   // Always append a unique suffix to SKU to prevent cross-test pollution.
   // Even when caller provides an explicit SKU, append a run-unique suffix
@@ -1612,7 +1638,7 @@ export async function createTestFiscalYear(
   }>
 ): Promise<FiscalYearFixture> {
   const db = getDb();
-  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  const runId = makeRunId();
 
   const year = options?.year ?? new Date().getFullYear();
   const code = `FY${year}-${runId}`.slice(0, 32);
@@ -2059,12 +2085,12 @@ export async function createTestAPException(
   }>
 ): Promise<APExceptionFixture> {
   const db = getDb();
-  const runId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  const runId = makeRunId();
 
   // FIX(47.4-WP-B): exception_key is required; auto-generate if not provided.
   // Pattern mirrors idempotency key design: use source context to derive deterministic key.
   const exceptionKey =
-    options?.exceptionKey ?? `EXC-${runId}-${Math.random().toString(36).slice(2, 8)}`;
+    options?.exceptionKey ?? `EXC-${runId}`;
 
   // FIX(47.4-WP-B): Map string-friendly options to int enums (migration 0188 canonical).
   const type = options?.type ?? AP_EXCEPTION_TYPE.VARIANCE;

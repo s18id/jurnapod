@@ -109,3 +109,16 @@ export {
   type PriceFixture,
   type SeedSyncContext,
 } from '../../src/lib/test-fixtures';
+
+// Re-export canonical constants from @jurnapod/db/test-fixtures
+// Q49-001 Pass 1: evidence of consumer flip to package fixture export
+export {
+  AP_EXCEPTION_TYPE,
+  AP_EXCEPTION_STATUS,
+} from '@jurnapod/db/test-fixtures';
+export type {
+  APExceptionTypeKey,
+  APExceptionTypeValue,
+  APExceptionStatusKey,
+  APExceptionStatusValue,
+} from '@jurnapod/db/test-fixtures';

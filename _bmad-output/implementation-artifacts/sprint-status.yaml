@@ -567,11 +567,11 @@ development_status:
   epic-48-retrospective: done
 
   # Epic 49: Test Determinism + CI Reliability
-  epic-49: in_progress
+  epic-49: done
   49-1-kickoff-gate-test-reliability-audit: done
   49-2-accounting-suite-determinism-hardening: done
   49-3-purchasing-suite-determinism-hardening: done
   49-4-platform-acl-suite-determinism-hardening: done
   49-5-sync-pos-inventory-suite-determinism-hardening: done
   49-6-ci-pipeline-reliability-enforcement: done
-  49-7-pre-close-validation-final-solid-dry-kiss-gate: ready-for-dev
+  49-7-pre-close-validation-final-solid-dry-kiss-gate: done
