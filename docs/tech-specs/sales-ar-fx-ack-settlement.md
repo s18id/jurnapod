@@ -1,6 +1,6 @@
 # Tech Spec: Sales AR FX Acknowledgment Settlement
 
-**Status:** Draft
+**Status:** Approved (Locked)
 **Date:** 2026-04-23
 **Owner:** bmad-quick-spec workflow
 
