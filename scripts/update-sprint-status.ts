@@ -13,6 +13,8 @@ const SPRINT_STATUS_PATH = resolve(
   "_bmad-output/implementation-artifacts/sprint-status.yaml"
 );
 
+const ACCEPTED_STATUSES = new Set(["backlog", "ready-for-dev", "in-progress", "review", "done"]);
+
 interface CliArgs {
   epic?: string;
   story?: string;
@@ -43,6 +45,10 @@ function parseArgs(): CliArgs {
   return args;
 }
 
+function normalizeStatusInput(s: string): string {
+  return s.trim().toLowerCase().replace(/_/g, "-");
+}
+
 function validateArgs(args: CliArgs): void {
   const errors: string[] = [];
 
@@ -59,11 +65,11 @@ function validateArgs(args: CliArgs): void {
   if (args.title && args.multi) {
     errors.push("--title cannot be used with --multi");
   }
-  if (
-    args.status &&
-    !["backlog", "ready-for-dev", "in-progress", "review", "done"].includes(args.status)
-  ) {
-    errors.push("--status must be one of: backlog, ready-for-dev, in-progress, review, done");
+  if (args.status) {
+    const normalized = normalizeStatusInput(args.status);
+    if (!ACCEPTED_STATUSES.has(normalized)) {
+      errors.push(`--status must be one of: ${[...ACCEPTED_STATUSES].join(", ")}`);
+    }
   }
 
   if (errors.length > 0) {

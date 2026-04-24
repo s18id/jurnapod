@@ -32,6 +32,8 @@ const PLANNING_ARTIFACTS_PATH = resolve(
 
 const MIN_EXPECTED_EPICS = 40;
 
+const ACCEPTED_STATUSES = new Set(["backlog", "ready-for-dev", "in-progress", "review", "done"]);
+
 interface CliArgs {
   epic?: number;
 }
@@ -144,6 +146,48 @@ function parseSprintStatus(): Map<string, string> {
   }
 
   return statuses;
+}
+
+/**
+ * Validate that all epic and story statuses in the parsed map are within accepted values.
+ * Returns a list of errors: ["line N: key 'foo' has invalid status 'bar' (allowed: ...)"]
+ */
+function validateStatusValues(statuses: Map<string, string>): string[] {
+  const errors: string[] = [];
+  const content = readFileSync(SPRINT_STATUS_PATH, "utf-8");
+  const lines = content.split("\n");
+
+  // Epic lines: "epic-48: done"
+  const epicPattern = /^\s*epic-(\d+)\s*:\s*([\w-]+)/;
+  // Story lines: "48-5-ci-quality-gate-enforcement: done"
+  const storyPattern = /^\s*(\d+-\d+(?:[-.\w+]+)?)\s*:\s*([\w-]+)/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const epicMatch = line.match(epicPattern);
+    if (epicMatch) {
+      const key = `epic-${epicMatch[1]}`;
+      const status = normalizeStatus(epicMatch[2]);
+      if (!ACCEPTED_STATUSES.has(status)) {
+        errors.push(
+          `line ${i + 1}: key '${key}' has invalid status '${status}' (allowed: ${[...ACCEPTED_STATUSES].join(", ")})`
+        );
+      }
+      continue;
+    }
+    const storyMatch = line.match(storyPattern);
+    if (storyMatch) {
+      const key = storyMatch[1];
+      const status = normalizeStatus(storyMatch[2]);
+      if (!ACCEPTED_STATUSES.has(status)) {
+        errors.push(
+          `line ${i + 1}: key '${key}' has invalid status '${status}' (allowed: ${[...ACCEPTED_STATUSES].join(", ")})`
+        );
+      }
+    }
+  }
+
+  return errors;
 }
 
 /**
@@ -365,6 +409,17 @@ function main() {
     details.forEach((d) => console.log(`   ${d}`));
     console.log("");
 
+    // Strict status value validation — always runs
+    const statusErrors = validateStatusValues(parseSprintStatus());
+    if (statusErrors.length > 0) {
+      console.log("❌ Status value validation failed:");
+      statusErrors.forEach((e) => console.log(`   ${e}`));
+      console.log("");
+      console.log("✅ sprint-status.yaml is healthy (append-only structure OK)");
+      console.log("   but status values above are invalid. Fix them before proceeding.");
+      process.exit(1);
+    }
+
     if (healthy) {
       console.log("✅ sprint-status.yaml is healthy");
       process.exit(0);
@@ -383,6 +438,14 @@ function main() {
   console.log(`   Mode: epic ${args.epic} gate check`);
   const gateResult = validateEpicGate(args.epic!);
   printGateResult(gateResult);
+
+  // Strict status value validation — always runs on epic gate too
+  const statusErrors = validateStatusValues(parseSprintStatus());
+  if (statusErrors.length > 0) {
+    console.log("❌ Status value validation failed:");
+    statusErrors.forEach((e) => console.log(`   ${e}`));
+    gateResult.passed = false;
+  }
 
   if (!gateResult.passed) {
     console.log("");
