@@ -47,7 +47,7 @@ These are preconditions to make later sprint extractions predictable.
 
 | Queue ID | Item | Current API lib area | Target location | Owner | Target Sprint | Severity |
 |---|---|---|---|---|---|---|
-| Q49-001 | Canonical fixture extraction | `apps/api/src/lib/test-fixtures.ts` | `packages/db/test-fixtures.ts` (+ API re-export adapter only if needed) | @bmad-dev | 49.1 intake / 49.2 execution | P1 |
+| Q49-001 | Canonical fixture extraction | `apps/api/src/lib/test-fixtures.ts` | owner-package fixtures (`packages/modules-{domain}/src/test-fixtures/`) + `@jurnapod/db/test-fixtures` for DB-generic primitives/assertions only | @bmad-dev | 49.1 intake / 49.2 execution | P1 |
 | Q49-002 | DB/audit infra extraction | `db.ts`, `audit.ts`, `audit-logs.ts`, `batch.ts` | `packages/db` | @bmad-dev | 49.1 intake / 49.2 execution | P1 |
 | Q49-003 | Shared utility boundary cleanup | `date-helpers.ts`, `pagination.ts`, `retry.ts`, `response.ts`, `request-meta.ts`, `correlation-id.ts`, `shared/*` | `packages/shared` | @bmad-dev | 49.1 intake / 49.2 execution | P1 |
 | Q49-004 | Purchasing module skeleton | `purchasing/*` (future extraction target) | create `packages/modules/purchasing` package scaffold | @bmad-architect + @bmad-dev | 49.1 intake / 49.2 execution | P1 |

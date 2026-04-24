@@ -107,7 +107,7 @@ Reference: `_bmad-output/planning-artifacts/epic-49-api-lib-boundary-migration-q
 
 ### Q49-001 — Canonical fixture extraction
 - [x] Follow execution pass document: `_bmad-output/planning-artifacts/epic-49-q49-001-test-fixtures-execution-pass-1.md`
-- [x] Design target `packages/db/test-fixtures.ts` API
+- [x] Design target owner-package fixture APIs (`modules-platform`, `modules-accounting`, `modules-purchasing`) with `@jurnapod/db/test-fixtures` reserved for DB-generic primitives/assertions
 - [x] Identify API routes/tests currently coupled to `apps/api/src/lib/test-fixtures.ts`
 - [x] Create migration plan and acceptance tests
 

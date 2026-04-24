@@ -109,6 +109,8 @@ Primary baseline: `_bmad-output/planning-artifacts/epic-49-q49-001-test-fixtures
 
 Epic 50 correction for this story: extraction destination MUST follow the Ownership Matrix above. Any step in the baseline that conflicts with ownership MUST be treated as superseded by this story spec.
 
+**Batch migration execution:** Epic 50 purchasing migration execution MUST follow `_bmad-output/planning-artifacts/epic-50-purchasing-migration-batch-runbook.md`. Q49-001 Pass 1 remains the baseline for fixture extraction patterns only — it does not govern batch execution steps.
+
 ---
 
 ## Exit Criteria

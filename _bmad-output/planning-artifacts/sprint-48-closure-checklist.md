@@ -42,7 +42,7 @@ Before Epic 48 can be marked **done**, all items below must be verified.
 | Schema dedup | Pass | Zod/TypeScript contracts centralized |
 | SQL dedup | Pass | Repository helpers in packages/db |
 | ACL dedup | Pass | `requireAccess()` centralized |
-| Fixture dedup | Pass | Canonical fixtures in packages/db/test-fixtures.ts |
+| Fixture dedup | Pass | Canonical domain fixtures in owner packages (`packages/modules-{domain}/src/test-fixtures/`); `@jurnapod/db/test-fixtures` reserved for DB-generic primitives/assertions |
 | No over-engineering | Pass | Simple feature flags over elaborate abstraction |
 | Readable over clever | Pass | Explicit over implicit patterns |
 | Small interfaces | Pass | No interface >7 methods |

@@ -81,11 +81,13 @@ Investigate `SYNC_PUSH_POSTING_FORCE_UNBALANCED` purpose, produce a recommendati
 ---
 
 ### Story 50.2 — Q49-001 Fixture Extraction (Pass 1)
-**Status:** backlog  
-**Owner:** @bmad-dev  
+**Status:** backlog
+**Owner:** @bmad-dev
 **Type:** Architecture/correctness (mandatory program requirement)
 
 Execute Pass 1 of Q49-001 per `epic-49-q49-001-test-fixtures-execution-pass-1.md`. Move domain fixtures from `apps/api/src/lib/test-fixtures.ts` to owner packages (`modules-platform`, `modules-accounting`, `modules-purchasing`). Keep `@jurnapod/db/test-fixtures` DB-generic only. Keep API wrapper as a transitional re-export layer. Flip at least one consumer path.
+
+> **Execution note:** Batch migration steps for Epic 50 purchasing work MUST follow `_bmad-output/planning-artifacts/epic-50-purchasing-migration-batch-runbook.md`. Q49-001 Pass 1 baseline governs fixture extraction patterns only, not batch execution sequencing.
 
 **AC1:** Ownership model enforced (`@jurnapod/db/test-fixtures` DB-generic only; domain fixtures in owner packages)  
 **AC2:** Owner package fixture scaffolds created (`modules-platform`, `modules-accounting`, `modules-purchasing`)  
@@ -137,7 +139,7 @@ Fix all defects surfaced by Story 50.3. Epic cannot close until this story is do
 | Risk | Severity | Mitigation | Status |
 |------|----------|------------|--------|
 | R50-001: POS sync unbalanced override leaks to production | P1 | Story 50.1 | backlog |
-| R50-002: Q49-001 execution uncovers hidden API-only fixture dependencies | P1 | Story 50.2 scope freeze + wrapper | backlog |
+| R50-002: Q49-001 execution uncovers hidden API-only fixture dependencies | P1 | Story 50.2 scope freeze + wrapper; batch execution steps at `_bmad-output/planning-artifacts/epic-50-purchasing-migration-batch-runbook.md` | backlog |
 | R50-003: REFUND reversal mechanism missing | P1 | Story 50.3 surfaces; Story 50.4 fixes | backlog |
 | R50-004: Story 50.3 finds many defects, scope creep risk | P2 | Story 50.4 is carry-forward; epic gate | backlog |
 | R50-005: Subledger reconciliation gaps (RECEIVABLES, PAYABLES, INVENTORY) | P2 | Enter Epic 51 scope | backlog |

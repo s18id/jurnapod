@@ -81,6 +81,14 @@ import {
   ensureSalesOutletMappings,
   ensurePaymentVarianceMappings
 } from "@jurnapod/modules-accounting";
+import {
+  createSupplierFixture,
+  setSupplierActiveFixture,
+  createPurchasingAccountsFixture,
+  createPurchasingSettingsFixture,
+  setPurchasingDefaultApAccountFixture,
+  type SupplierFixture as PackageSupplierFixture,
+} from "@jurnapod/modules-purchasing/test-fixtures";
 
 
 // ============================================================================
@@ -90,9 +98,10 @@ import {
 /**
  * Module-level counter for deterministic run-id generation.
  * Initialized from Date.now() at module load, then increments per call.
- * Ensures uniqueness within a test run without Math.random().
+ * Seed includes process identity to reduce cross-worker collisions.
  */
-let _runIdCounter = Date.now() & 0xFFFFFF; // 24-bit slice to keep numeric stable
+const _runIdSeed = (Date.now() ^ (process.pid << 8) ^ (Number(process.env.VITEST_POOL_ID ?? 0) << 16)) & 0x7fffffff;
+let _runIdCounter = _runIdSeed;
 function nextRunIdCounter(): number {
   return ++_runIdCounter;
 }
@@ -100,7 +109,7 @@ function nextRunIdCounter(): number {
 /**
  * Generate a deterministic run-id suffix for fixture codes.
  * Format: base36-encoded counter — reproducible across test runs
- * within the same process, unique across different processes.
+ * within the same process, practically unique across test workers.
  *
  * NOT cryptographically random — do NOT use for security-sensitive values.
  * Intended ONLY for test fixture code/name generation.
@@ -816,6 +825,8 @@ export async function createTestCustomerForCompany(
 // Supplier Fixtures
 // ============================================================================
 
+// API-level SupplierFixture type (transitional - matches pre-migration shape)
+// Package-level SupplierFixture is more complete with currency, payment_terms_days, is_active
 export type SupplierFixture = {
   id: number;
   company_id: number;
@@ -825,7 +836,8 @@ export type SupplierFixture = {
 
 /**
  * Create a test supplier directly via DB (no API call needed).
- * Used for purchasing tests that need a valid supplier_id.
+ * Delegates to @jurnapod/modules-purchasing/test-fixtures createSupplierFixture.
+ * Maintains backward compatibility by returning only the fields in SupplierFixture.
  *
  * @param companyId - Parent company ID
  * @param options - Partial supplier options
@@ -842,52 +854,26 @@ export async function createTestSupplier(
   }>
 ): Promise<SupplierFixture> {
   const db = getDb();
-  const runId = makeRunId();
-
-  const code = options?.code ?? `TEST-SUP-${runId}`.slice(0, 20).toUpperCase();
-  const name = options?.name ?? `Test Supplier ${runId}`;
-  const currency = options?.currency ?? "IDR";
-
-  try {
-    await sql`
-      INSERT INTO suppliers (company_id, code, name, currency, payment_terms_days, is_active, created_at, updated_at)
-      VALUES (${companyId}, ${code}, ${name}, ${currency}, ${options?.paymentTermsDays ?? null}, ${options?.isActive ?? 1}, NOW(), NOW())
-    `.execute(db);
-
-    const result = await sql`SELECT id, company_id, code, name FROM suppliers WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
-    if (result.rows.length === 0) {
-      throw new Error(`Failed to create supplier with code ${code}`);
-    }
-    const row = result.rows[0] as { id: number; company_id: number; code: string; name: string };
-    const supplier: SupplierFixture = {
-      id: Number(row.id),
-      company_id: Number(row.company_id),
-      code: row.code,
-      name: row.name,
-    };
-    return supplier;
-  } catch (error: unknown) {
-    // Handle duplicate - fetch existing
-    const mysqlErr = error as { code?: string };
-    if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
-      const result = await sql`SELECT id, company_id, code, name FROM suppliers WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
-      if (result.rows.length > 0) {
-        const row = result.rows[0] as { id: number; company_id: number; code: string; name: string };
-        return {
-          id: Number(row.id),
-          company_id: Number(row.company_id),
-          code: row.code,
-          name: row.name,
-        };
-      }
-    }
-    throw error;
-  }
+  const fixture = await createSupplierFixture(db, {
+    companyId,
+    code: options?.code,
+    name: options?.name,
+    currency: options?.currency,
+    isActive: options?.isActive,
+    paymentTermsDays: options?.paymentTermsDays,
+  });
+  // Return only the fields in the API-level SupplierFixture type for backward compatibility
+  return {
+    id: fixture.id,
+    company_id: fixture.company_id,
+    code: fixture.code,
+    name: fixture.name,
+  };
 }
 
 /**
  * Create test accounts needed for purchasing (AP and expense).
- * Uses the accounts service to create proper account records.
+ * Delegates to @jurnapod/modules-purchasing/test-fixtures createPurchasingAccountsFixture.
  *
  * @param companyId - Parent company ID
  * @param options - Partial account options
@@ -901,46 +887,11 @@ export async function createTestPurchasingAccounts(
   }>
 ): Promise<{ ap_account_id: number; expense_account_id: number }> {
   const db = getDb();
-  const runId = makeRunId();
-
-  // Find the purchasing module id
-  const purchasingModuleResult = await sql`SELECT id FROM modules WHERE code = 'purchasing' LIMIT 1`.execute(db);
-  if (purchasingModuleResult.rows.length === 0) {
-    throw new Error('Purchasing module not found');
-  }
-  const purchasingModuleId = Number((purchasingModuleResult.rows[0] as { id: number }).id);
-
-  // Create AP account (creditor/payable type)
-  const apAccountCode = `TEST-AP-${runId}`.slice(0, 20);
-  const apAccountName = options?.apAccountName ?? `Test AP Account ${runId}`;
-
-  const apResult = await sql`
-    INSERT INTO accounts (company_id, code, name, type_name, is_active, is_payable, created_at, updated_at)
-    VALUES (${companyId}, ${apAccountCode}, ${apAccountName}, 'CREDITOR', 1, 1, NOW(), NOW())
-  `.execute(db);
-  const apAccountId = Number((apResult as { insertId?: number }).insertId ?? 0);
-
-  // Create Expense account
-  const expenseAccountCode = `TEST-EXP-${runId}`.slice(0, 20);
-  const expenseAccountName = options?.expenseAccountName ?? `Test Expense Account ${runId}`;
-
-  const expenseResult = await sql`
-    INSERT INTO accounts (company_id, code, name, type_name, is_active, is_payable, created_at, updated_at)
-    VALUES (${companyId}, ${expenseAccountCode}, ${expenseAccountName}, 'EXPENSE', 1, 0, NOW(), NOW())
-  `.execute(db);
-  const expenseAccountId = Number((expenseResult as { insertId?: number }).insertId ?? 0);
-
-  // Upsert company_modules entry for purchasing with the AP and expense accounts
-  await sql`
-    INSERT INTO company_modules (company_id, module_id, enabled, config_json, updated_at,
-      purchasing_default_ap_account_id, purchasing_default_expense_account_id)
-    VALUES (${companyId}, ${purchasingModuleId}, 1, '{}', CURRENT_TIMESTAMP, ${apAccountId}, ${expenseAccountId})
-    ON DUPLICATE KEY UPDATE
-      purchasing_default_ap_account_id = ${apAccountId},
-      purchasing_default_expense_account_id = ${expenseAccountId}
-  `.execute(db);
-
-  return { ap_account_id: apAccountId, expense_account_id: expenseAccountId };
+  return createPurchasingAccountsFixture(db, {
+    companyId,
+    apAccountName: options?.apAccountName,
+    expenseAccountName: options?.expenseAccountName,
+  });
 }
 
 /**
@@ -1150,6 +1101,7 @@ export async function createTestFiscalCloseBalanceFixture(
 
 /**
  * Configure purchasing module settings for a company.
+ * Delegates to @jurnapod/modules-purchasing/test-fixtures createPurchasingSettingsFixture.
  *
  * Sets `purchasing_default_ap_account_id` and `purchasing_default_expense_account_id`
  * on `company_modules` for the purchasing module.
@@ -1160,27 +1112,7 @@ export async function createTestPurchasingSettings(
   expenseAccountId: number
 ): Promise<{ company_id: number; ap_account_id: number; expense_account_id: number }> {
   const db = getDb();
-
-  const purchasingModuleResult = await sql`SELECT id FROM modules WHERE code = 'purchasing' LIMIT 1`.execute(db);
-  if (purchasingModuleResult.rows.length === 0) {
-    throw new Error('Purchasing module not found');
-  }
-  const purchasingModuleId = Number((purchasingModuleResult.rows[0] as { id: number }).id);
-
-  await sql`
-    INSERT INTO company_modules (company_id, module_id, enabled, config_json, updated_at,
-      purchasing_default_ap_account_id, purchasing_default_expense_account_id)
-    VALUES (${companyId}, ${purchasingModuleId}, 1, '{}', CURRENT_TIMESTAMP, ${apAccountId}, ${expenseAccountId})
-    ON DUPLICATE KEY UPDATE
-      purchasing_default_ap_account_id = ${apAccountId},
-      purchasing_default_expense_account_id = ${expenseAccountId}
-  `.execute(db);
-
-  return {
-    company_id: companyId,
-    ap_account_id: apAccountId,
-    expense_account_id: expenseAccountId,
-  };
+  return createPurchasingSettingsFixture(db, companyId, apAccountId, expenseAccountId);
 }
 
 /**
@@ -1216,6 +1148,7 @@ export async function createTestBankAccount(
 
 /**
  * Update supplier active status for tests that validate posting safeguards.
+ * Delegates to @jurnapod/modules-purchasing/test-fixtures setSupplierActiveFixture.
  */
 export async function setTestSupplierActive(
   companyId: number,
@@ -1223,11 +1156,7 @@ export async function setTestSupplierActive(
   isActive: boolean
 ): Promise<void> {
   const db = getDb();
-  await sql`
-    UPDATE suppliers
-    SET is_active = ${isActive ? 1 : 0}, updated_at = NOW()
-    WHERE id = ${supplierId} AND company_id = ${companyId}
-  `.execute(db);
+  await setSupplierActiveFixture(db, companyId, supplierId, isActive);
 }
 
 /**
@@ -1248,19 +1177,14 @@ export async function setTestBankAccountActive(
 
 /**
  * Override purchasing default AP account id for AP posting validation tests.
+ * Delegates to @jurnapod/modules-purchasing/test-fixtures setPurchasingDefaultApAccountFixture.
  */
 export async function setTestPurchasingDefaultApAccount(
   companyId: number,
   accountId: number
 ): Promise<void> {
   const db = getDb();
-  await sql`
-    UPDATE company_modules cm
-    INNER JOIN modules m ON m.id = cm.module_id
-    SET cm.purchasing_default_ap_account_id = ${accountId}, cm.updated_at = NOW()
-    WHERE cm.company_id = ${companyId}
-      AND m.code = 'purchasing'
-  `.execute(db);
+  await setPurchasingDefaultApAccountFixture(db, companyId, accountId);
 }
 
 // ============================================================================

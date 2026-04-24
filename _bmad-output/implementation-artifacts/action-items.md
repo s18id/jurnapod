@@ -77,7 +77,7 @@
 | **E46-A1** | Add sprint-status utility + validation as mandatory pre-step in story template | Epic 46 | Epic 46 | Pending — E46 backlog |
 | **E46-A2** | Limit retrospectives to MAX 2 action items with explicit owners/deadlines | Epic 46 | Epic 46 | Pending — E46 backlog |
 | **E46-A4** | Verify sprint-status.yaml integrity before marking any epic done (human gate) | Epic 46 | Epic 46 | Pending — E46 backlog |
-| **E48-A2** | Q49-001 execution planning (critical path) | Epic 48 | Epic 49 | Decomposition passes documented; backward-compatibility constraints verified; Pass 1 marked `ready-to-execute` in `_bmad-output/planning-artifacts/epic-49-q49-001-test-fixtures-execution-pass-1.md` |
+| **E48-A2** | Q49-001 execution planning (critical path) | Epic 48 | Epic 49 | Decomposition passes documented; consumer-path integrity constraints verified; Pass 1 marked `ready-to-execute` in `_bmad-output/planning-artifacts/epic-49-q49-001-test-fixtures-execution-pass-1.md` |
 | **E48-A1** | Kickoff debt signal improvement | Epic 48 | Epic 49 | Kickoff scorecard now distinguishes sprint-introduced lint errors from pre-existing debt with explicit evidence paths in `_bmad-output/planning-artifacts/epic-49-solid-dry-kiss-scorecard.md` |
 | **E49-A1** | Second-Pass Review for Determinism Work | Epic 49 | Epic 50 | Implemented via `.github/pull_request_template.md` second-pass checklist + Story 50.X mandates |
 | **E49-A2** | Tiered Audit Prioritization Template | Epic 49 | Epic 50 | Implemented via Story 50.1 tiered audit table with Critical→High→Medium and rationale |

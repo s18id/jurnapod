@@ -1,0 +1,36 @@
+{
+  "name": "@jurnapod/modules-purchasing",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./test-fixtures": {
+      "types": "./dist/test-fixtures/index.d.ts",
+      "default": "./dist/test-fixtures/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --config eslint.config.mjs",
+    "test": "vitest run",
+    "test:unit": "vitest run __test__/unit",
+    "test:integration": "vitest run __test__/integration",
+    "test:single": "vitest run"
+  },
+  "dependencies": {
+    "@jurnapod/db": "0.3.0",
+    "@jurnapod/shared": "0.3.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^1.6.1"
+  }
+}
