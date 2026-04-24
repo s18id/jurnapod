@@ -424,25 +424,64 @@ async function ensureModules(db: KyselySchema): Promise<void> {
   }
 }
 
-async function upsertSetting(
+// Typed settings helpers — company-scoped rows, ON DUPLICATE KEY UPDATE
+async function upsertStringSetting(
   db: KyselySchema,
+  companyId: number,
   key: string,
   value: string
 ): Promise<void> {
   await sql`
-    INSERT INTO settings (setting_key, setting_value)
-    VALUES (${key}, ${value})
-    ON DUPLICATE KEY UPDATE
-      setting_value = VALUES(setting_value)
+    INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value)
+    VALUES (${companyId}, NULL, ${key}, ${value})
+    ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
   `.execute(db);
 }
 
-async function ensureSettings(db: KyselySchema): Promise<void> {
+async function upsertNumberSetting(
+  db: KyselySchema,
+  companyId: number,
+  key: string,
+  value: number
+): Promise<void> {
+  await sql`
+    INSERT INTO settings_numbers (company_id, outlet_id, setting_key, setting_value)
+    VALUES (${companyId}, NULL, ${key}, ${value})
+    ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
+  `.execute(db);
+}
+
+async function upsertBooleanSetting(
+  db: KyselySchema,
+  companyId: number,
+  key: string,
+  value: boolean
+): Promise<void> {
+  await sql`
+    INSERT INTO settings_booleans (company_id, outlet_id, setting_key, setting_value)
+    VALUES (${companyId}, NULL, ${key}, ${value ? 1 : 0})
+    ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
+  `.execute(db);
+}
+
+async function ensureSettings(db: KyselySchema, companyId: number): Promise<void> {
   for (const setting of SETTINGS_DEFINITIONS) {
     const envValue = process.env[setting.envKey];
     const parsedValue = setting.parse(envValue);
-    const stringValue = String(parsedValue);
-    await upsertSetting(db, setting.key, stringValue);
+    // Guard: reject null/undefined after parsing (indicates misconfiguration)
+    if (parsedValue == null) {
+      throw new Error(
+        `${setting.envKey} resolved to null/undefined — check env var or fallback for key ${setting.key}`
+      );
+    }
+    if (setting.valueType === "boolean") {
+      await upsertBooleanSetting(db, companyId, setting.key, parsedValue as boolean);
+    } else if (setting.valueType === "int") {
+      await upsertNumberSetting(db, companyId, setting.key, parsedValue as number);
+    } else {
+      // "string" | "enum" — both stored as strings
+      await upsertStringSetting(db, companyId, setting.key, String(parsedValue));
+    }
   }
 }
 
@@ -451,7 +490,7 @@ async function ensureDefaultTaxRate(
   companyId: number
 ): Promise<void> {
   await sql`
-    INSERT IGNORE INTO tax_rates (company_id, name, rate, code)
+    INSERT IGNORE INTO tax_rates (company_id, name, rate_percent, code)
     VALUES (${companyId}, 'VAT', 0.11, 'VAT')
   `.execute(db);
 }
@@ -557,7 +596,7 @@ async function bootstrapCompanyDefaults(
   await ensureDefaultOutlet(db, params.companyId);
   await ensureRoles(db);
   await ensureModules(db);
-  await ensureSettings(db);
+  await ensureSettings(db, params.companyId);
   await ensureDefaultTaxRate(db, params.companyId);
   await ensureCompanyModules(db, params.companyId);
 

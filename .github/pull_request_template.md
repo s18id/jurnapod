@@ -38,6 +38,13 @@
 - [ ] **MUST** verify deterministic fixtures used (canonical patterns from `@jurnapod/db/test-fixtures`)
 - [ ] **MUST** attach 3× consecutive green evidence to PR for any new test suite
 
+### Fixture Ownership Policy (MANDATORY)
+
+- [ ] **MUST** comply with `docs/policies/fixture-ownership-policy.md`
+- [ ] **MUST NOT** add setup-time raw write SQL (`INSERT`/`UPDATE`/`DELETE`) in `apps/api/__test__/**`
+- [ ] **NO EXCEPTION ALLOWED:** **MUST** use owner-package canonical fixture flow (no inline allowlists/tags)
+- [ ] **MUST NOT** modify fixture policy/validator/CI gate unless explicitly requested by user or story owner
+
 ### ACL / Permissions (Epic 39+)
 
 - [ ] **MUST** use resource-level permissions (`module.resource` format)

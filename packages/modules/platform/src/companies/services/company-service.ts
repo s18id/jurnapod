@@ -11,9 +11,12 @@ import {
   MODULE_DEFINITIONS,
   COMPANY_MODULE_DEFAULTS,
   ROLE_DEFINITIONS,
-  MODULE_ROLE_DEFAULTS,
+  MODULE_ROLE_DEFAULTS_API,
   SETTINGS_DEFINITIONS
 } from "../constants/index.js";
+
+// Use API-scoped permission defaults to guarantee explicit module.resource rows.
+const MODULE_ROLE_DEFAULTS = MODULE_ROLE_DEFAULTS_API;
 
 import type {
   CompanyResponse,
@@ -196,17 +199,48 @@ async function ensureModules(db: KyselySchema): Promise<void> {
   }
 }
 
-async function upsertSetting(
+async function upsertStringSetting(
   db: KyselySchema,
   companyId: number,
   key: string,
   value: string
 ): Promise<void> {
   await sql`
-    INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value)
-    VALUES (${companyId}, NULL, ${key}, ${value})
+    INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value, created_at, updated_at)
+    VALUES (${companyId}, NULL, ${key}, ${value}, NOW(), NOW())
     ON DUPLICATE KEY UPDATE
-      setting_value = VALUES(setting_value)
+      setting_value = VALUES(setting_value),
+      updated_at = NOW()
+  `.execute(db);
+}
+
+async function upsertNumberSetting(
+  db: KyselySchema,
+  companyId: number,
+  key: string,
+  value: number
+): Promise<void> {
+  await sql`
+    INSERT INTO settings_numbers (company_id, outlet_id, setting_key, setting_value, created_at, updated_at)
+    VALUES (${companyId}, NULL, ${key}, ${value}, NOW(), NOW())
+    ON DUPLICATE KEY UPDATE
+      setting_value = VALUES(setting_value),
+      updated_at = NOW()
+  `.execute(db);
+}
+
+async function upsertBooleanSetting(
+  db: KyselySchema,
+  companyId: number,
+  key: string,
+  value: boolean
+): Promise<void> {
+  await sql`
+    INSERT INTO settings_booleans (company_id, outlet_id, setting_key, setting_value, created_at, updated_at)
+    VALUES (${companyId}, NULL, ${key}, ${value ? 1 : 0}, NOW(), NOW())
+    ON DUPLICATE KEY UPDATE
+      setting_value = VALUES(setting_value),
+      updated_at = NOW()
   `.execute(db);
 }
 
@@ -217,8 +251,23 @@ async function ensureSettings(
   for (const setting of SETTINGS_DEFINITIONS) {
     const envValue = process.env[setting.envKey];
     const parsedValue = setting.parse(envValue);
-    const stringValue = String(parsedValue);
-    await upsertSetting(db, companyId, setting.key, stringValue);
+
+    if (parsedValue === null || parsedValue === undefined) {
+      throw new Error(`Invalid setting value for key: ${setting.key}`);
+    }
+
+    if (setting.valueType === 'boolean') {
+      await upsertBooleanSetting(db, companyId, setting.key, Boolean(parsedValue));
+      continue;
+    }
+
+    if (setting.valueType === 'int') {
+      await upsertNumberSetting(db, companyId, setting.key, Number(parsedValue));
+      continue;
+    }
+
+    // valueType "string" | "enum" are both stored in settings_strings
+    await upsertStringSetting(db, companyId, setting.key, String(parsedValue));
   }
 }
 
@@ -269,8 +318,8 @@ async function ensureCompanyModuleRoles(
     
     if (moduleRow) {
       await sql`
-        INSERT IGNORE INTO module_roles (company_id, role_id, module, permission_mask)
-        VALUES (${companyId}, ${roleId}, ${moduleRoleDefault.module}, ${moduleRoleDefault.permissionMask})
+        INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
+        VALUES (${companyId}, ${roleId}, ${moduleRoleDefault.module}, ${moduleRoleDefault.resource}, ${moduleRoleDefault.permissionMask})
       `.execute(db);
     }
   }

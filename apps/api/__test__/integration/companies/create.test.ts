@@ -6,9 +6,10 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
-import { closeTestDb } from '../../helpers/db';
+import { closeTestDb, getTestDb } from '../../helpers/db';
 import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { makeTag } from '../../helpers/tags';
+import { sql } from 'kysely';
 import {
   resetFixtureRegistry,
   getTestAccessToken,
@@ -121,6 +122,61 @@ describe('companies.create', { timeout: 30000 }, () => {
         }
       }
     }
+  });
+
+  it('bootstraps typed settings tables for a newly created company', async () => {
+    if (!superAdminToken) {
+      expect(true).toBe(true);
+      return;
+    }
+
+    const adminToken = superAdminToken;
+    const uniqueCode = `CO-SET-${makeTag('CST')}`;
+    const res = await fetch(`${baseUrl}/api/companies`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        code: uniqueCode,
+        name: 'Typed Settings Bootstrap Company',
+        timezone: 'Asia/Jakarta',
+        currency_code: 'IDR'
+      })
+    });
+
+    expect([200, 201]).toContain(res.status);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    const companyId = Number(body.data.id);
+    expect(Number.isFinite(companyId)).toBe(true);
+
+    const db = getTestDb();
+
+    const stringsCntRows = await sql`
+      SELECT COUNT(*) AS cnt
+      FROM settings_strings
+      WHERE company_id = ${companyId}
+    `.execute(db);
+    const numbersCntRows = await sql`
+      SELECT COUNT(*) AS cnt
+      FROM settings_numbers
+      WHERE company_id = ${companyId}
+    `.execute(db);
+    const boolCntRows = await sql`
+      SELECT COUNT(*) AS cnt
+      FROM settings_booleans
+      WHERE company_id = ${companyId}
+    `.execute(db);
+
+    const stringsCnt = Number((stringsCntRows.rows[0] as { cnt: number | string }).cnt);
+    const numbersCnt = Number((numbersCntRows.rows[0] as { cnt: number | string }).cnt);
+    const boolCnt = Number((boolCntRows.rows[0] as { cnt: number | string }).cnt);
+
+    expect(stringsCnt).toBeGreaterThan(0);
+    expect(numbersCnt).toBeGreaterThan(0);
+    expect(boolCnt).toBeGreaterThan(0);
   });
 
   it('returns 400 for missing required fields', async () => {
