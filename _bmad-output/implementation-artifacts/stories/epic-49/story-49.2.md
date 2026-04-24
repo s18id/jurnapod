@@ -41,7 +41,10 @@ Every in-scope suite must have a verified `afterAll` that:
 Verify by running the suite in isolation with `--detect-open-handles`.
 
 **AC3: Fixture Isolation**
-No test in-scope may share mutable state through persistent tables without explicit tenant isolation. Each `describe` block should use a unique `company_id` and `outlet_id` seed. If this requires fixture refactoring, use canonical helpers from `packages/db/test-fixtures.ts`.
+No test in-scope may share mutable state through persistent tables without explicit tenant isolation. Each `describe` block should use a unique `company_id` and `outlet_id` seed. If this requires fixture refactoring:
+- Use canonical seed helpers from the **owner package** for the domain under test (e.g., `packages/modules-accounting`, `packages/modules-platform`)
+- `packages/db/test-fixtures.ts` is the **DB-generic primitives layer** — constants, enums, and typed helpers with no domain semantics; it MUST NOT be the canonical home for domain fixtures
+- `apps/api/src/lib/test-fixtures.ts` is a **transitional re-export** — it MAY be used only for existing consumer paths during migration
 
 **AC4: RWLock Pattern**
 Any in-scope suite that imports from `helpers/setup` must use `acquireReadLock`/`releaseReadLock` in `beforeAll`/`afterAll`. If a suite is missing the lock pattern, add it.

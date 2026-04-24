@@ -42,7 +42,10 @@ All `Date.now()`, `new Date()`, and `Math.random()` usages within in-scope suite
 Every in-scope suite must have a verified `afterAll` that closes the DB pool and releases any RWLock. Verify with `--detect-open-handles`.
 
 **AC3: Fixture Isolation**
-Each `describe` block uses a unique `company_id` and `outlet_id`. No test may depend on state created by another `it()` block within the same suite. Use canonical seed helpers from `packages/db/test-fixtures.ts`; `apps/api/src/lib/test-fixtures.ts` is deprecated for new fixture code and MAY be used only for migration-compatibility paths.
+Each `describe` block uses a unique `company_id` and `outlet_id`. No test may depend on state created by another `it()` block within the same suite.
+- Use canonical seed helpers from the **owner package** for the domain under test (e.g., `packages/modules-accounting`, `packages/modules-purchasing`)
+- `packages/db/test-fixtures.ts` is the **DB-generic primitives layer** — constants, enums, and typed helpers with no domain semantics; it MUST NOT be the canonical home for domain fixtures
+- `apps/api/src/lib/test-fixtures.ts` is a **transitional re-export** — it MAY be used only for existing consumer paths during migration
 
 **AC4: RWLock Pattern**
 Any in-scope suite that uses the test server (HTTP requests) MUST use `acquireReadLock`/`releaseReadLock`. If missing, it MUST be added.

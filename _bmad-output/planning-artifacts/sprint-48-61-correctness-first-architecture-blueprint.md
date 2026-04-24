@@ -35,14 +35,20 @@ Non-goals:
 3. Sprint closes only when no unresolved **P0/P1** in sprint scope
 4. Any deviation from this baseline requires explicit re-baseline approval
 
-### Fixture Extraction Governance (Q49-001)
+### Fixture Extraction Governance (Q49-001) — Superseded by Owner-Package Model
 
-Q49-001 (Canonical fixture extraction) MUST be treated as an integral part of Sprint 49 execution. The `apps/api/src/lib/test-fixtures.ts` hub MUST be decomposed so portable DB-level fixtures live in `@jurnapod/db/test-fixtures`, and API-runtime fixtures remain in the API wrapper only.
+> **⚠️ Historical note:** The Q49-001 framing (Sprint 49) assumed domain fixtures would be extracted to `@jurnapod/db/test-fixtures`. This assumption has been superseded by the owner-package model adopted in this blueprint. The execution-pass-1 plan and Q49-001 tracking artifacts remain as historical evidence of what was executed; the principles below reflect the current model.
+
+Q49-001 (Canonical fixture extraction) MUST be treated as an integral part of Sprint 49 execution only as a historical record. The current correct model is:
+
+1. **`@jurnapod/db/test-fixtures`** MUST contain **DB-generic primitives and assertions only** — constants, enums, typed helper interfaces, and assertion utilities that carry no domain semantics.
+2. **Domain fixtures** (company, outlet, user, supplier, fiscal-year, AP settings, etc.) MUST live in their **owner packages** (`packages/modules-accounting`, `packages/modules-platform`, `packages/modules-purchasing`, etc.).
+3. **`apps/api/src/lib/test-fixtures.ts`** is a **transitional re-export layer only** — it delegates to owner packages for existing consumers during migration. It MUST NOT contain new domain-invariant logic.
 
 Rules:
-1. Q49-001 extraction MUST proceed in documented passes; each pass MUST preserve backward compatibility for existing consumers.
+1. Fixture extraction scope MUST be tracked against owner packages; `@jurnapod/db/test-fixtures` MUST NOT be the canonical home for domain fixtures.
 2. No new domain-invariant logic MUST be introduced into `apps/api/src/lib/test-fixtures.ts` during the extraction window.
-3. Package fixture build (`npm run build -w @jurnapod/db`) MUST pass before consumer flip.
+3. Package fixture build (`npm run build -w @jurnapod/{owner-package}`) MUST pass before consumer flip.
 4. Fixture extraction scope MUST be tracked in `_bmad-output/planning-artifacts/epic-49-api-lib-boundary-migration-queue.md` (Queue A, Q49-001) and MUST be executed per `_bmad-output/planning-artifacts/epic-49-q49-001-test-fixtures-execution-pass-1.md`.
 
 ### Architecture Cleanup Policy (MANDATORY)
@@ -58,7 +64,7 @@ Cleanup is not optional. Unchecked cleanup debt is a sprint-trackable P1/P2 item
 - **Partial Fixture Mode (global exception):** Fixture setup MAY use decomposed domain parts only when those parts are provided by the same production package that owns the domain invariant. Partial mode MUST be explicitly declared with scope, rationale, and owner.
 - Fixture setup MUST NOT introduce a parallel business-write path.
 
-> **Q49-001 Alignment:** Canonical fixture extraction (Sprint 49, Epic 49 queue item Q49-001) MUST be the primary mechanism for satisfying Section B during this program. All fixture setup MUST comply with the split defined in `epic-49-q49-001-test-fixtures-execution-pass-1.md`: portable DB fixtures in `@jurnapod/db/test-fixtures`, API-runtime helpers in `apps/api/src/lib/test-fixtures.ts` wrapper only.
+> **Q49-001 Historical Alignment Note:** Q49-001 Pass 1 (Sprint 49) extracted AP exception constants to `@jurnapod/db/test-fixtures`. This was a minimal safe-scope execution under the superseded DB-first model. The correct current model is that domain fixtures belong to their owner packages; the Q49-001 artifacts remain as historical evidence only.
 
 **C) No new business DB triggers.**
 All business invariants MUST be enforced in application code where they are testable, reviewable, and version-controllable. Existing triggers MUST NOT be extended with new business logic.
@@ -181,8 +187,8 @@ No story may be marked DONE based solely on self-attestation of the implementing
 - [ ] No duplicated schema definitions — Zod/TypeScript contracts live in packages/shared, consumed by all apps
 - [ ] No duplicated SQL — repeated query patterns become repository helpers in packages/db
 - [ ] No duplicated ACL logic — requireAccess() patterns centralized, not copy-pasted across route handlers
-- [ ] No duplicated test fixtures — canonical fixtures in packages/db/test-fixtures.ts or packages/shared/test/fixtures.ts
-- [ ] Q49-001 progress — portable fixtures extracted to @jurnapod/db/test-fixtures, API wrapper preserves backward compatibility, and no duplicate fixture creation path is introduced
+- [ ] No duplicated test fixtures — canonical fixtures in owner packages (`packages/modules-accounting`, `packages/modules-platform`, `packages/modules-purchasing`, etc.) with DB-generic primitives in `@jurnapod/db/test-fixtures`; `apps/api/src/lib/test-fixtures.ts` is a transitional re-export, not a canonical source
+- [ ] Fixture ownership enforced — domain fixtures in owner packages (`packages/modules-*`), DB-generic primitives in `@jurnapod/db/test-fixtures`, and no domain-invariant logic in `apps/api/src/lib/test-fixtures.ts`
 
 ### KISS Principles Checklist Per Sprint
 - [ ] No over-engineering — simple feature flags over elaborate abstraction layers for speculative future needs

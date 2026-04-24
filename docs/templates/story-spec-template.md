@@ -98,7 +98,7 @@ If any gaps are found, either:
 ### Pre-Implementation Checklist
 - [ ] New patterns identified that need canonical fixtures (timestamps, status IDs, enum values, etc.)
 - [ ] Existing canonical fixtures reviewed for reuse potential
-- [ ] Fixture location determined (`packages/db/test-fixtures.ts`, `packages/shared/test/fixtures.ts`, or package-level equivalent)
+- [ ] Fixture location determined by ownership model (`packages/modules-{domain}/src/test-fixtures/`; `@jurnapod/db/test-fixtures` for DB-generic primitives/assertions only)
 
 ### Fixture Creation/Update
 - [ ] **New fixtures needed:** List patterns requiring canonical fixtures:

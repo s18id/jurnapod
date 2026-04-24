@@ -40,11 +40,14 @@
 - **Path mismatch note:** `platform/users/tenant-scope.test.ts` was not on disk; substituted with `users/tenant-scope.test.ts` (3/3 passed)
 
 ### Queue Intake (Q49-001) — ⚠️ INTAKE/PLAN COMPLETE, EXECUTION PENDING
+
 - Q49-001 execution pass 1 **plan** exists at `_bmad-output/planning-artifacts/epic-49-q49-001-test-fixtures-execution-pass-1.md`
-- Portable fixture extraction scope defined (company/outlet/user/supplier/fiscal/AP settings)
+- Portable fixture extraction scope defined (company/outlet/user/supplier/fiscal/AP settings) — framed under the DB-first model that was current at planning time
 - API wrapper compatibility strategy defined
 - **Status: plan only — actual extraction not yet executed**
 - Q49-001 execution is scheduled follow-on work (49.2–49.5 touch chain) and is **not** a blocker for Story 49.1 kickoff completion
+
+> ⚠️ **Superseded assumption:** The Q49-001 plan assumed domain fixtures would canonicalize in `@jurnapod/db/test-fixtures`. The owner-package model subsequently adopted requires domain fixtures to live in their owner packages. Q49-001 Pass 1 was executed under the DB-first model and is preserved as historical evidence. The correct model: `@jurnapod/db/test-fixtures` = DB-generic primitives/assertions only; domain fixtures belong to owner packages.
 
 ---
 
@@ -74,7 +77,7 @@
 | `_bmad-output/planning-artifacts/epic-49-suite-audit.md` | Full audit table from AC2 |
 | `_bmad-output/planning-artifacts/epic-49-api-lib-boundary-migration-queue.md` | API-lib ownership migration queue aligned to sprint touch chain (S49–S61) |
 | `_bmad-output/planning-artifacts/epic-49-1-execution-checklist.md` | Execution checklist for AC1–AC5 and queue intake tracking |
-| `_bmad-output/planning-artifacts/epic-49-q49-001-test-fixtures-execution-pass-1.md` | First actionable extraction plan for canonical fixtures (`apps/api/src/lib/test-fixtures.ts` → `@jurnapod/db/test-fixtures`) |
+| `_bmad-output/planning-artifacts/epic-49-q49-001-test-fixtures-execution-pass-1.md` | First actionable extraction plan for canonical fixtures (`apps/api/src/lib/test-fixtures.ts` → owner packages per ownership matrix) — ⚠️ Historical: early framing was DB-first and is superseded |
 
 ## Validation Evidence
 

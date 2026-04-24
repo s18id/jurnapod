@@ -252,8 +252,10 @@ it('some test', async () => {
 - Always set deterministic passwords (`process.env.JP_OWNER_PASSWORD`) on login-capable test users
 - Use `resetFixtureRegistry()` in `afterAll()` to clean up
 
-### test-fixtures.ts Library
-**Location**: `apps/api/src/lib/test-fixtures.ts`
+### test-fixtures ownership model
+**Transitional re-export location**: `apps/api/src/lib/test-fixtures.ts`
+**Canonical domain locations**: `packages/modules-{domain}/src/test-fixtures/`
+**DB-generic location**: `@jurnapod/db/test-fixtures`
 
 | Function | Purpose |
 |----------|---------|
@@ -324,7 +326,7 @@ npm test -w @jurnapod/api -- --run
 - Using `teardown` tags for setup writes
 - Hardcoded sentinel IDs (`company_id=1`)
 
-**Thin API wrapper rule:** When a fixture is consumed by multiple apps, add a thin wrapper in `apps/api/src/lib/test-fixtures.ts` that delegates to the package function. The package function is the canonical source; the wrapper is a compatibility shim only.
+**Thin API wrapper rule:** When a fixture is consumed by multiple apps, add a thin wrapper in `apps/api/src/lib/test-fixtures.ts` that delegates to the package function. The package function is the canonical source; the wrapper is a transitional re-export only.
 
 ### ESLint Test Rules
 | Rule | Purpose |

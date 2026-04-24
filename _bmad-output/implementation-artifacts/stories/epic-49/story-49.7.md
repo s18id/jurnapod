@@ -80,7 +80,7 @@ Any candidate items beyond 2 go to `action-items.md` as backlog (not discarded).
 
 ## R49-004 Strict-Close Remediation Evidence (Q49-001 Pass 1)
 
-R49-004 (Canonical Fixtures Not Extracted to `@jurnapod/db/test-fixtures`) has been resolved as a P1 blocker for Story 49.7 strict-close path. Evidence:
+R49-004 (Canonical Fixture Ownership Drift) has been resolved as a P1 blocker for Story 49.7 strict-close path. Evidence:
 
 | Criterion | Evidence |
 |-----------|----------|

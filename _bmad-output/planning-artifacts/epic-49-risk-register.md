@@ -73,21 +73,22 @@ This risk register initializes Epic 49 tracking by carrying forward open items f
 
 ---
 
-### R49-004 — Canonical Fixtures Not Extracted to `@jurnapod/db/test-fixtures` (P1)
+### R49-004 — Canonical Fixture Ownership Drift (P1)
 
 | Field | Value |
 |-------|-------|
 | **Risk ID** | R49-004 |
 | **Severity** | P1 |
 | **Category** | Architecture — Ownership Drift |
-| **Description** | `apps/api/src/lib/test-fixtures.ts` is a high-coupling hub used across all integration tests. Keeping it in API lib blocks package-level reuse and creates a single point of ownership ambiguity. Q49-001 extraction is the first priority in the migration queue. |
+| **Description** | `apps/api/src/lib/test-fixtures.ts` is a high-coupling hub used across all integration tests. Keeping it in API lib blocks package-level reuse and creates a single point of ownership ambiguity. Q49-001 extraction was the first priority in the migration queue. |
 | **Owner** | @bmad-dev |
 | **SLA** | 49.1 intake/design must be complete; Pass 1 extraction starts in 49.2 and completes before 49.6 CI gate |
 | **Status** | ✅ CLOSED — Pass 1 evidence attached |
-| **Evidence** | Q49-001 Pass 1 completed: (1) `packages/db/src/test-fixtures/constants.ts` added with AP exception int-enums (`AP_EXCEPTION_TYPE`, `AP_EXCEPTION_STATUS`); (2) `packages/db/src/test-fixtures/index.ts` re-exports both constants; (3) `apps/api/__test__/fixtures/index.ts` consumer-flipped with explicit `@jurnapod/db/test-fixtures` import for `AP_EXCEPTION_TYPE`, `AP_EXCEPTION_STATUS`; (4) `ap-exceptions.test.ts` (11 tests) passed under new fixture export |
+| **Evidence** | Q49-001 Pass 1 completed under the DB-first model that was current at time of execution: (1) `packages/db/src/test-fixtures/constants.ts` added with AP exception int-enums (`AP_EXCEPTION_TYPE`, `AP_EXCEPTION_STATUS`); (2) `packages/db/src/test-fixtures/index.ts` re-exports both constants; (3) `apps/api/__test__/fixtures/index.ts` consumer-flipped with explicit `@jurnapod/db/test-fixtures` import for `AP_EXCEPTION_TYPE`, `AP_EXCEPTION_STATUS`; (4) `ap-exceptions.test.ts` (11 tests) passed under new fixture export |
 | **Story Assignment** | 49.1 (intake/design) + 49.2–49.5 (execution + consumer flips) |
-| **Mitigation** | ✅ Q49-001 Pass 1: `packages/db/src/test-fixtures/` expanded with domain constants; consumer flip evidence exists in `apps/api/__test__/fixtures/index.ts` |
+| **Mitigation** | ✅ Q49-001 Pass 1: `packages/db/src/test-fixtures/` expanded with DB-generic constants under the DB-first model. Consumer flip evidence exists in `apps/api/__test__/fixtures/index.ts` |
 | **Verification** | Consumer flip proof: line `AP_EXCEPTION_TYPE,` and `AP_EXCEPTION_STATUS,` exported from `@jurnapod/db/test-fixtures` in `apps/api/__test__/fixtures/index.ts`; `npm run build -w @jurnapod/db` ✅; `npm run typecheck -w @jurnapod/api` ✅; `ap-exceptions.test.ts` 11/11 ✅ |
+| **⚠️ Superseded Assumption** | The R49-004 framing assumed domain fixtures would canonicalize in `@jurnapod/db/test-fixtures`. The owner-package model subsequently adopted (Sprint 48-61 blueprint) requires domain fixtures to live in their owner packages (`packages/modules-accounting`, `packages/modules-platform`, `packages/modules-purchasing`, etc.). `@jurnapod/db/test-fixtures` is DB-generic primitives/assertions only. Q49-001 Pass 1 artifacts remain as historical evidence. |
 
 ---
 

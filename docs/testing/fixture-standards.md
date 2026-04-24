@@ -2,6 +2,8 @@
 
 > **Epic 34 Retrospective Action**: Document canonical fixture patterns to prevent FK constraint violations and sentinel ID anti-patterns in tests.
 
+> **Owner-Package Model (Sprint 48-61):** Domain fixtures MUST live in their owner packages (`packages/modules-accounting`, `packages/modules-platform`, `packages/modules-purchasing`, etc.). `@jurnapod/db/test-fixtures` is **DB-generic primitives/assertions only** — constants, enums, typed helper interfaces with no domain semantics. `apps/api/src/lib/test-fixtures.ts` is a **transitional re-export layer** for existing consumers during migration.
+
 ---
 
 ## Core Principle
@@ -12,33 +14,31 @@ Test data must satisfy foreign key constraints. Sentinel values like `userId: 0`
 
 ---
 
-## Canonical Fixture Registry Pattern
+## Fixture Ownership Model
 
-The fixture library (`apps/api/src/lib/test-fixtures.ts`) uses a **registry pattern** that tracks created fixtures in memory and provides two cleanup strategies:
+| Layer | Location | What It Contains | What It MUST NOT Contain |
+|-------|----------|-----------------|------------------------|
+| **DB-generic primitives** | `@jurnapod/db/test-fixtures` | Constants, enums, typed helper interfaces, assertion utilities with no domain semantics | Domain business logic, entity creation helpers |
+| **Domain fixtures** | `packages/modules-{domain}/src/test-fixtures/` | Entity creators (`createTest*`) and seed helpers owned by the domain package | Infrastructure-only concerns |
+| **Transitional re-export** | `apps/api/src/lib/test-fixtures.ts` | Thin re-exports from owner packages during migration | New domain-invariant logic |
 
-### How the Registry Works
+**Rule:** When a canonical fixture function exists in an owner package, tests MUST use the owner-package function. `@jurnapod/db/test-fixtures` is not the canonical home for domain fixtures.
+
+## Transitional API-Runtime Re-export
+
+`apps/api/src/lib/test-fixtures.ts` is a **thin re-export layer** that delegates to owner-package fixtures during migration. It MUST NOT contain new domain-invariant logic.
+
+### How the Wrapper Works
 
 ```typescript
-// Internal state (module-level)
-const createdFixtures: TestFixtures = {
-  companies: [],
-  outlets: [],
-  users: [],
-  items: [],
-  variants: [],
-  prices: []
-};
+// Thin re-export layer — delegates to owner packages and legacy helpers
+// apps/api/src/lib/test-fixtures.ts
 
-// Each createTest* function:
-// 1. Creates the record via library function (validates FK constraints)
-// 2. Pushes the fixture to the registry array
-// 3. Returns the fixture object with .id
+export { createTestCompanyMinimal } from '@jurnapod/modules-platform/test-fixtures';
+// ... other re-exports from owner packages
 
-export async function createTestCompanyMinimal(options?) {
-  const company = await createCompanyBasic({...});
-  createdFixtures.companies.push(company);  // Registry tracking
-  return company;
-}
+// Legacy helpers that predate owner-package model remain here during migration
+// but new domain fixtures belong in owner packages, not here
 ```
 
 ### Two Cleanup Strategies
@@ -190,7 +190,9 @@ Ad-hoc SQL is **only permitted** for:
 
 ## Available Fixtures
 
-### From `apps/api/src/lib/test-fixtures.ts`
+### Transitional API-Runtime Re-export: `apps/api/src/lib/test-fixtures.ts`
+
+> ⚠️ **This file is a transitional re-export.** Domain fixtures belong in their owner packages. This file delegates to owner packages and provides legacy helpers during migration.
 
 | Function | Purpose | Returns |
 |----------|---------|---------|
@@ -385,7 +387,7 @@ const context = {
 If you need test data that the fixture library doesn't cover:
 
 1. **Check if the API creates it** — Use the API endpoint instead of direct DB insert
-2. **Extend the fixture library** — Add a new fixture function to `apps/api/src/lib/test-fixtures.ts`
+2. **Extend the owner package fixture library** — Add a new fixture function to `packages/modules-{domain}/src/test-fixtures/`
 3. **Use `withTestTransaction`** — Create data inside a transaction that auto-rollbacks
 
 **Never** insert directly via `db.insertInto()` unless you're intentionally testing raw SQL behavior.
@@ -398,15 +400,21 @@ When a test requires data that no existing fixture function covers, follow this 
 
 ### Placement Conventions
 
-All owner-package fixture functions MUST live in:
+Domain fixtures MUST live in their **owner packages**:
 
 ```
-packages/{module}/src/test-fixtures/
+packages/modules-{domain}/src/test-fixtures/
 ```
 
-Each package exposes fixtures via its **package index** (`packages/{module}/src/index.ts`). Tests consume fixtures from the package, not from app-layer adapters.
+**Layer responsibilities:**
 
-**Thin API wrapper rule:** When a test needs a fixture from a module package, the wrapper lives in `apps/api/src/lib/test-fixtures.ts` and delegates to the package function. The package function is the canonical source; the wrapper is a compatibility shim.
+| Layer | Responsibility | Location |
+|-------|---------------|----------|
+| **DB-generic primitives** | Constants, enums, typed helpers, no domain semantics | `@jurnapod/db/test-fixtures` |
+| **Domain fixtures** | Entity creators and seed helpers owned by the domain | `packages/modules-{domain}/src/test-fixtures/` |
+| **Transitional re-export** | Thin re-exports from owner packages during migration | `apps/api/src/lib/test-fixtures.ts` |
+
+**Thin API wrapper rule:** When a test needs a fixture from a module package, the wrapper lives in `apps/api/src/lib/test-fixtures.ts` and delegates to the package function. The package function is the canonical source; the wrapper is a transitional re-export. New domain fixtures MUST NOT be added to the wrapper — they belong in the owner package.
 
 ### Step-by-Step Workflow
 
@@ -451,8 +459,8 @@ npm run lint:fixture-flow -w @jurnapod/api
 npm test -w @jurnapod/api -- --run
 ```
 
-**Step 7 — Register the fixture in `apps/api/src/lib/test-fixtures.ts` (if needed).**
-If the fixture is consumed by multiple apps, add a thin wrapper in the API fixture library that delegates to the package function. Do not duplicate business logic in the wrapper.
+**Step 7 — Export from the owner package index and re-export in API wrapper (if needed).**
+If the fixture is consumed by multiple apps, export it from `packages/modules-{domain}/src/index.ts`, then add a thin re-export in `apps/api/src/lib/test-fixtures.ts` only when required for existing consumer paths. Do not duplicate business logic in the wrapper.
 
 ### Function Signature Template
 

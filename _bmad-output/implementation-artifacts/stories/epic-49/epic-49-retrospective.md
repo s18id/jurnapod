@@ -19,11 +19,11 @@
 ### Risk Management
 - **R49-001 (time-dependent tests, P1)**: CLOSED — 504 `Date.now()` + 88 `Math.random()` replaced with `crypto.randomUUID()` across all critical suites
 - **R49-002 (pool cleanup gaps, P1)**: CLOSED — All ~82 critical suites verified with `afterAll` pool cleanup
-- **R49-004 (canonical fixtures, P1)**: CLOSED — Q49-001 Pass 1 executed cleanly with backward-compatibility verified
+- **R49-004 (canonical fixtures, P1)**: CLOSED — Q49-001 Pass 1 executed cleanly with consumer-path integrity verified (⚠️ **Historical note:** Pass 1 was executed under the DB-first model that assumed domain fixtures canonicalize in `@jurnapod/db/test-fixtures`. This assumption has been superseded by the owner-package model. The correct model: `@jurnapod/db/test-fixtures` = DB-generic primitives/assertions only; domain fixtures belong to owner packages. Q49-001 artifacts remain as historical evidence.)
 
 ### Q49-001 Fixture Extraction
 - **Pass 1 scope was correct**: Minimal safe scope (AP exception constants only) avoided high-risk fiscal-close extraction
-- **Backward-compatibility verified**: Consumer flip in `apps/api/__test__/fixtures/index.ts` documented and validated
+- **Consumer-path integrity verified**: Consumer flip in `apps/api/__test__/fixtures/index.ts` documented and validated
 - **Build and typecheck clean**: `npm run build -w @jurnapod/db` ✅, `npm run typecheck -w @jurnapod/api` ✅
 
 ### CI Gates Formalized
@@ -53,10 +53,10 @@
 - **Recommendation**: Add explicit "second-pass review" step in story specs for any suite touching time-dependent patterns
 
 ### Q49-001 Extraction More Work Than Planned
-- **Root cause**: Intake/design thorough but execution required careful backward-compatibility verification at each step
+- **Root cause**: Intake/design thorough but execution required careful consumer-path integrity verification at each step
 - **Impact**: Pass 1 took longer than story estimate implied
 - **Mitigation**: Scoped correctly as minimal safe scope — no high-risk fiscal-close extraction attempted
-- **Recommendation**: Future fixture extraction stories should include explicit backward-compatibility verification tasks
+- **Recommendation**: Future fixture extraction stories should include explicit consumer-path integrity verification tasks
 
 ---
 
@@ -119,7 +119,7 @@ The following items were identified but not prioritized for this retro (per 2-it
 - Sync + POS + Inventory suite determinism hardening (~30 suites)
 - CI pipeline reliability enforcement (3-consecutive-green gate)
 - Pre-close validation with full SOLID/DRY/KISS gate (0 P0/P1 unresolved)
-- Q49-001 Pass 1: canonical fixtures extraction to `@jurnapod/db/test-fixtures`
+- Q49-001 Pass 1: AP exception constants extracted (⚠️ **Historical note:** Pass 1 was executed under the DB-first model; domain fixtures now belong to owner packages per Sprint 48-61 blueprint)
 
 ---
 
@@ -128,7 +128,7 @@ The following items were identified but not prioritized for this retro (per 2-it
 | Action Item | Status | Notes |
 |-------------|--------|-------|
 | E48-A1: Kickoff Debt Signal Improvement | ✅ Done | Epic 49 kickoff scorecard includes dedicated lint debt classification section with evidence paths |
-| E48-A2: Q49-001 Execution Planning | ✅ Done | Pass 1 plan documented and executed; backward-compatibility verified |
+| E48-A2: Q49-001 Execution Planning | ✅ Done | Pass 1 plan documented and executed; consumer-path integrity verified |
 
 ---
 

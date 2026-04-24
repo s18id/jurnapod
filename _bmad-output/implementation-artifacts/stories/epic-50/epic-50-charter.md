@@ -85,15 +85,19 @@ Investigate `SYNC_PUSH_POSTING_FORCE_UNBALANCED` purpose, produce a recommendati
 **Owner:** @bmad-dev  
 **Type:** Architecture/correctness (mandatory program requirement)
 
-Execute Pass 1 of Q49-001 per `epic-49-q49-001-test-fixtures-execution-pass-1.md`. Move portable DB fixtures from `apps/api/src/lib/test-fixtures.ts` to `packages/db/src/test-fixtures/`. Keep API wrapper backward-compatible. Flip at least one consumer path.
+Execute Pass 1 of Q49-001 per `epic-49-q49-001-test-fixtures-execution-pass-1.md`. Move domain fixtures from `apps/api/src/lib/test-fixtures.ts` to owner packages (`modules-platform`, `modules-accounting`, `modules-purchasing`). Keep `@jurnapod/db/test-fixtures` DB-generic only. Keep API wrapper as a transitional re-export layer. Flip at least one consumer path.
 
-**AC1:** Package fixture scaffold created (`packages/db/src/test-fixtures/*`)  
-**AC2:** Portable fixture core moved (company/outlet/user/supplier/fiscal/AP settings + registry)  
-**AC3:** API wrapper backward-compatible (existing tests pass without changes)  
-**AC4:** Consumer flipped (`apps/api/__test__/fixtures/index.ts` imports from package)  
-**AC5:** `npm run build -w @jurnapod/db` passes  
-**AC6:** `npm run typecheck -w @jurnapod/api` passes  
-**AC7:** Representative suites pass (fiscal-year-close, ap-reconciliation)
+**AC1:** Ownership model enforced (`@jurnapod/db/test-fixtures` DB-generic only; domain fixtures in owner packages)  
+**AC2:** Owner package fixture scaffolds created (`modules-platform`, `modules-accounting`, `modules-purchasing`)  
+**AC3:** Domain fixture core moved to owner packages (company/outlet, fiscal/AP-accounting, supplier/purchasing)  
+**AC4:** API wrapper remains functional as transitional re-export for existing consumer paths  
+**AC5:** Consumer flipped (`apps/api/__test__/fixtures/index.ts` imports moved symbols from owner packages)  
+**AC6:** `npm run build -w @jurnapod/db` passes  
+**AC7:** `npm run build -w @jurnapod/modules-platform` passes  
+**AC8:** `npm run build -w @jurnapod/modules-accounting` passes  
+**AC9:** `npm run build -w @jurnapod/modules-purchasing` passes  
+**AC10:** `npm run typecheck -w @jurnapod/api` passes  
+**AC11:** Representative suites pass (fiscal-year-close, ap-reconciliation)
 
 ---
 
@@ -156,7 +160,7 @@ Apply at kickoff, midpoint, and pre-close per Sprint 50 loop.
 - [ ] Schema dedup: Zod contracts in `packages/shared`, consumed by posting
 - [ ] SQL dedup: repeated posting query patterns become repository helpers
 - [ ] ACL dedup: `requireAccess()` centralized, not copy-pasted
-- [ ] Fixture dedup: Q49-001 portable fixtures in `@jurnapod/db/test-fixtures`
+- [ ] Fixture dedup: domain fixtures in owner packages; `@jurnapod/db/test-fixtures` DB-generic only
 
 ### KISS
 - [ ] No over-engineering: simple balance check over elaborate posting abstraction
@@ -172,7 +176,7 @@ Apply at kickoff, midpoint, and pre-close per Sprint 50 loop.
 Epic 50 can be marked `done` only when:
 
 1. Story 50.1: Override resolved, reviewer GO attached
-2. Story 50.2: Q49-001 Pass 1 complete, `npm run build -w @jurnapod/db` passes, API typecheck passes
+2. Story 50.2: Q49-001 Pass 1 complete with owner-package extraction, `npm run build -w @jurnapod/db` + owner package builds pass, API typecheck passes
 3. Story 50.3: All 5 posting integration test suites written and 3× consecutive green
 4. Story 50.4: All Story 50.3 defects fixed, 3× green post-fix, risk register updated
 5. No unresolved P0/P1 in Epic 50 scope
