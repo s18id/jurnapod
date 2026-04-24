@@ -206,23 +206,33 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
   afterAll(async () => {
     try {
       const db = getTestDb();
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up AP payments and lines first (child records)
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`
         DELETE apl
         FROM ap_payment_lines apl
         INNER JOIN ap_payments ap ON ap.id = apl.ap_payment_id
         WHERE ap.company_id = ${testCompanyId}
       `.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM ap_payments WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up journal entries
       await sql`DELETE FROM journal_lines WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM journal_batches WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up purchase invoices
       await sql`DELETE FROM purchase_invoice_lines WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_invoices WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up supplier and FX rows created by tests
       await sql`DELETE FROM exchange_rates WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM suppliers WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up bank account
       await sql`DELETE FROM accounts WHERE company_id = ${testCompanyId}`.execute(db);
     } catch (e) {

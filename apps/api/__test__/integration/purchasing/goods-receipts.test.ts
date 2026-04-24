@@ -74,8 +74,10 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     // Clean up goods receipts and PO lines created by this test
     try {
       const db = getTestDb();
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM goods_receipt_lines WHERE company_id = ${cashierCompanyId}`.execute(db);
       await sql`DELETE FROM goods_receipts WHERE company_id = ${cashierCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_order_lines WHERE company_id = ${cashierCompanyId}`.execute(db);
       await sql`DELETE FROM purchase_orders WHERE company_id = ${cashierCompanyId}`.execute(db);
     } catch (e) {

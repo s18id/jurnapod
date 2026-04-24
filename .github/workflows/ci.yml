@@ -69,6 +69,28 @@ jobs:
         run: npm run typecheck -w @jurnapod/api
         # AC2: Non-zero typecheck exit = CI failure
 
+  fixture-flow:
+    name: Fixture Flow Policy (required gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate fixture ownership flow (blocking gate)
+        run: npm run lint:fixture-flow
+
   # ─────────────────────────────────────────────────────────────────────────────
   # CRITICAL SUITES INTEGRATION GATE
   # All suites listed here MUST pass (0 failures) for CI to be green.
@@ -81,7 +103,7 @@ jobs:
     name: Test Critical Suites (${{ matrix.database }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    needs: [lint-api, typecheck-api]
+    needs: [lint-api, typecheck-api, fixture-flow]
     # AC3: All critical suites must pass (0 failures) for CI green
     # AC4 evidence is assembled in the evidence-capture job below
     strategy:

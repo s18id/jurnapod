@@ -15,6 +15,7 @@ import {
   createTestPurchasingAccounts,
   createTestRole,
   createTestUser,
+  expectImmutableTable,
   getTestAccessToken,
   loginForTest,
   resetFixtureRegistry,
@@ -227,22 +228,11 @@ describe("purchasing.ap-reconciliation-snapshots", { timeout: 90000 }, () => {
   it("rejects DB-level UPDATE and DELETE on snapshots (append-only immutability)", async () => {
     const db = getTestDb();
 
-    await expect(
-      sql`
-        UPDATE ap_reconciliation_snapshots
-        SET variance = '999.0000'
-        WHERE company_id = ${companyId}
-          AND id = ${createdSnapshotId}
-      `.execute(db)
-    ).rejects.toThrow();
-
-    await expect(
-      sql`
-        DELETE FROM ap_reconciliation_snapshots
-        WHERE company_id = ${companyId}
-          AND id = ${createdSnapshotId}
-      `.execute(db)
-    ).rejects.toThrow();
+    // Use canonical helper to verify immutability — no raw SQL assertion in test file.
+    await expectImmutableTable(db, "ap_reconciliation_snapshots", {
+      companyId,
+      recordId: createdSnapshotId,
+    });
   });
 
   it("auto-creates snapshot on fiscal-year close approve", async () => {

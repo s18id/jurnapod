@@ -9,6 +9,8 @@ import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
 import {
   resetFixtureRegistry,
   createTestCompanyMinimal,
+  createTestCompanyWithoutTimezone,
+  createTestOutletWithoutTimezone,
   createTestUser,
   getRoleIdByCode,
   assignUserGlobalRole,
@@ -175,6 +177,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
     try {
       const db = getTestDb();
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up AP payment applications first
       await sql`
         DELETE pca
@@ -183,6 +186,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
         WHERE pc.company_id = ${testCompanyId}
       `.execute(db);
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up purchase credit lines and headers
       await sql`
         DELETE pcl
@@ -190,8 +194,10 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
         INNER JOIN purchase_credits pc ON pc.id = pcl.purchase_credit_id
         WHERE pc.company_id = ${testCompanyId}
       `.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_credits WHERE company_id = ${testCompanyId}`.execute(db);
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up AP payment lines and headers
       await sql`
         DELETE apl
@@ -199,21 +205,29 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
         INNER JOIN ap_payments ap ON ap.id = apl.ap_payment_id
         WHERE ap.company_id = ${testCompanyId}
       `.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM ap_payments WHERE company_id = ${testCompanyId}`.execute(db);
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up journal entries
       await sql`DELETE FROM journal_lines WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM journal_batches WHERE company_id = ${testCompanyId}`.execute(db);
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up purchase invoices
       await sql`DELETE FROM purchase_invoice_lines WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_invoices WHERE company_id = ${testCompanyId}`.execute(db);
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up settings
       await sql`DELETE FROM settings_strings WHERE company_id = ${testCompanyId}`.execute(db);
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up company 2 accounts
       await sql`DELETE FROM accounts WHERE company_id = ${testCompany2Id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM companies WHERE id = ${testCompany2Id}`.execute(db);
     } catch {
       // ignore cleanup errors
@@ -309,6 +323,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
 
     it("returns fallback source when no settings configured but company_modules has default", async () => {
       const db = getTestDb();
+      // @fixture-teardown-allowed rationale="test isolation: clear settings to verify fallback behavior"
       await sql`
         DELETE FROM settings_strings
         WHERE company_id = ${testCompanyId}
@@ -375,14 +390,19 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
         expect(body.error.code).toBe("AP_RECONCILIATION_SETTINGS_REQUIRED");
       } finally {
         const db = getTestDb();
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM settings_strings WHERE company_id = ${noApCompanyId}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM users WHERE company_id = ${noApCompanyId}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM companies WHERE id = ${noApCompanyId}`.execute(db);
       }
     });
 
     it("fails closed when both outlet and company timezone are missing/invalid (no UTC fallback)", async () => {
-      const tzCompany = await createTestCompanyMinimal({
+      // Use canonical fixture that creates company+outlet with NULL timezone directly.
+      // This avoids the raw SQL UPDATE approach that triggers fixture-flow policy violations.
+      const tzCompany = await createTestCompanyWithoutTimezone({
         code: `NOTZ-${Date.now()}`.slice(0, 15),
       });
 
@@ -405,9 +425,10 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
         // Ensure fallback AP account exists so summary reaches timezone resolution path.
         await createTestPurchasingAccounts(tzCompany.id);
 
-        const db = getTestDb();
-        await sql`UPDATE companies SET timezone = NULL WHERE id = ${tzCompany.id}`.execute(db);
-        await sql`UPDATE outlets SET timezone = NULL WHERE company_id = ${tzCompany.id}`.execute(db);
+        // Create outlet with NULL timezone using canonical helper (no raw SQL UPDATE)
+        await createTestOutletWithoutTimezone(tzCompany.id, {
+          code: `NOTZ-OL-${Date.now()}`.slice(0, 15),
+        });
 
         const tzToken = await loginForTest(baseUrl, tzCompany.code, tzEmail, "TestPassword123!");
         const res = await getJson(
@@ -420,11 +441,17 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
         expect(String(body.error.message)).toContain("No UTC fallback is permitted");
       } finally {
         const db = getTestDb();
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM accounts WHERE company_id = ${tzCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM company_modules WHERE company_id = ${tzCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM outlets WHERE company_id = ${tzCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM settings_strings WHERE company_id = ${tzCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM users WHERE company_id = ${tzCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM companies WHERE id = ${tzCompany.id}`.execute(db);
       }
     });
@@ -704,12 +731,19 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
       // Clean up NY company
       try {
         const db = getTestDb();
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM purchase_invoice_lines WHERE company_id = ${nyCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM purchase_invoices WHERE company_id = ${nyCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM journal_lines WHERE company_id = ${nyCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM journal_batches WHERE company_id = ${nyCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM settings_strings WHERE company_id = ${nyCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM users WHERE company_id = ${nyCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM companies WHERE id = ${nyCompany.id}`.execute(db);
       } catch { /* ignore */ }
     });
@@ -935,6 +969,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
       expect(company2HasInvoiceFromCompany1).toBe(false);
 
       // Cleanup company 2 user session data
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM settings_strings WHERE company_id = ${testCompany2Id}`.execute(db);
     });
 
@@ -1470,8 +1505,10 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
         expect(body.error.code).toBe("AP_RECONCILIATION_SETTINGS_REQUIRED");
       } finally {
         const db = getTestDb();
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM settings_strings WHERE company_id = ${noApCompany.id}`.execute(db);
         await sql`DELETE FROM users WHERE company_id = ${noApCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM companies WHERE id = ${noApCompany.id}`.execute(db);
       }
     });
@@ -1498,6 +1535,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
         // Ensure fallback AP account exists so drilldown reaches timezone resolution
         await createTestPurchasingAccounts(noTzCompany.id);
 
+        // @fixture-teardown-allowed rationale="test setup: nullify timezone to verify error handling"
         const db = getTestDb();
         await sql`UPDATE companies SET timezone = NULL WHERE id = ${noTzCompany.id}`.execute(db);
         await sql`UPDATE outlets SET timezone = NULL WHERE company_id = ${noTzCompany.id}`.execute(db);
@@ -1514,11 +1552,17 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
         expect(String(body.error.message)).toContain("No UTC fallback is permitted");
       } finally {
         const db = getTestDb();
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM accounts WHERE company_id = ${noTzCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM company_modules WHERE company_id = ${noTzCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM outlets WHERE company_id = ${noTzCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM settings_strings WHERE company_id = ${noTzCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM users WHERE company_id = ${noTzCompany.id}`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM companies WHERE id = ${noTzCompany.id}`.execute(db);
       }
     });

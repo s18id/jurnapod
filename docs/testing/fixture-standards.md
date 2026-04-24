@@ -392,6 +392,131 @@ If you need test data that the fixture library doesn't cover:
 
 ---
 
+## Missing Owner-Package Fixture Function Workflow
+
+When a test requires data that no existing fixture function covers, follow this workflow **before** writing ad-hoc SQL or app-layer fixture duplication.
+
+### Placement Conventions
+
+All owner-package fixture functions MUST live in:
+
+```
+packages/{module}/src/test-fixtures/
+```
+
+Each package exposes fixtures via its **package index** (`packages/{module}/src/index.ts`). Tests consume fixtures from the package, not from app-layer adapters.
+
+**Thin API wrapper rule:** When a test needs a fixture from a module package, the wrapper lives in `apps/api/src/lib/test-fixtures.ts` and delegates to the package function. The package function is the canonical source; the wrapper is a compatibility shim.
+
+### Step-by-Step Workflow
+
+**Step 1 — Identify the owner package.**
+Determine which package owns the domain invariant for the missing fixture. The owner package is the one whose production code creates or manages the entity.
+
+**Step 2 — Create `packages/{module}/src/test-fixtures/` if absent.**
+Add `test-fixtures.ts` (or split into `fixtures-*.ts`) inside the package's `src/`. Do not place test fixtures in `__test__/` — they are production helpers usable by all consumers.
+
+**Step 3 — Define the fixture function contract.**
+A fixture function MUST satisfy all of the following:
+
+| Requirement | Description |
+|-------------|-------------|
+| **Deterministic defaults** | All optional fields have stable defaults; no `Math.random()` or `Date.now()` for fields that affect business logic |
+| **Typed input** | Accept an `opts` object with explicit TypeScript types; no `any` |
+| **Typed output** | Return a typed fixture object (e.g., `CompanyFixture`) with `.id` and required fields |
+| **Cleanup registration** | Register the created record in the caller's fixture registry so cleanup functions can reach it |
+| **Invariant-safe production path** | Use the same write path (service/repository) that production code uses; do not bypass domain logic with raw INSERTs |
+
+**Step 4 — Export from the package index.**
+```typescript
+// packages/modules/accounting/src/index.ts
+export { createTestFiscalYear } from './test-fixtures/fiscal-year-fixtures';
+```
+
+**Step 5 — Build the owner package first.**
+```bash
+npm run build -w @jurnapod/modules-accounting
+```
+Build MUST succeed before any consuming app can use the new fixture.
+
+**Step 6 — Run validation in order.**
+```bash
+# 1. Build the target app (verifies index export resolution)
+npm run build -w @jurnapod/api
+
+# 2. Run fixture-flow lint to catch violations
+npm run lint:fixture-flow -w @jurnapod/api
+
+# 3. Run the affected tests
+npm test -w @jurnapod/api -- --run
+```
+
+**Step 7 — Register the fixture in `apps/api/src/lib/test-fixtures.ts` (if needed).**
+If the fixture is consumed by multiple apps, add a thin wrapper in the API fixture library that delegates to the package function. Do not duplicate business logic in the wrapper.
+
+### Function Signature Template
+
+```typescript
+// packages/modules/inventory/src/test-fixtures/item-fixtures.ts
+import { Pool } from 'mysql2/promise';
+import { createItem } from '../services/item-service'; // production path
+
+export interface ItemFixture {
+  id: number;
+  companyId: number;
+  name: string;
+  sku: string;
+}
+
+export interface CreateItemFixtureOptions {
+  companyId: number;
+  name?: string;        // deterministic default
+  sku?: string;         // deterministic default
+  pool: Pool;
+}
+
+export async function createTestItem(
+  options: CreateItemFixtureOptions
+): Promise<ItemFixture> {
+  const { companyId, pool } = options;
+  const name = options.name ?? `Test Item ${Date.now()}`;
+  const sku = options.sku ?? `SKU-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+  // Use the production service path — invariant-safe
+  const item = await createItem({ companyId, name, sku }, { db: pool });
+
+  return {
+    id: item.id,
+    companyId: item.companyId,
+    name: item.name,
+    sku: item.sku,
+  };
+}
+```
+
+### Anti-Patterns
+
+| Anti-Pattern | Why Blocked |
+|-------------|-------------|
+| **Raw `INSERT` SQL in test setup** | Bypasses fixture registry, FK validation, and domain invariants. P0 blocker when a fixture function exists or can be created. |
+| **App-layer business fixture duplication** | Re-implements domain logic outside the owner package; diverges from production path over time. |
+| **Using `teardown` tag for setup writes** | Teardown runs after assertions; setup must run in `beforeAll`/`beforeEach`. Misusing teardown causes ordering bugs and cryptic failures. |
+| **`company_id=1` hardcoded** | Sentinel value violates FK constraints; no guarantee the row exists. |
+| **Non-deterministic defaults in business fields** | `Date.now()` in name/sku fields causes test flakiness and makes snapshots unreproducible. |
+
+### Validation Checklist
+
+Before marking a story done when a new fixture was added:
+
+- [ ] Owner package builds without errors (`npm run build -w @jurnapod/{module}`)
+- [ ] Package index exports the new fixture function
+- [ ] Consuming app builds without import errors
+- [ ] `npm run lint:fixture-flow -w @jurnapod/api` passes
+- [ ] Tests using the new fixture run and pass
+- [ ] Function signature follows the contract (deterministic defaults, typed I/O, cleanup registration)
+
+---
+
 ## Troubleshooting FK Violations
 
 ### Error: `FOREIGN KEY constraint failed`

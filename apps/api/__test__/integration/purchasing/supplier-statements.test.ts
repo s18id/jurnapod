@@ -224,9 +224,11 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
     try {
       const db = getTestDb();
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up supplier statements first
       await sql`DELETE FROM supplier_statements WHERE company_id = ${testCompanyId}`.execute(db);
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up AP payment applications
       await sql`
         DELETE pca
@@ -235,6 +237,7 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
         WHERE pc.company_id = ${testCompanyId}
       `.execute(db);
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up purchase credit lines and headers
       await sql`
         DELETE pcl
@@ -242,8 +245,10 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
         INNER JOIN purchase_credits pc ON pc.id = pcl.purchase_credit_id
         WHERE pc.company_id = ${testCompanyId}
       `.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_credits WHERE company_id = ${testCompanyId}`.execute(db);
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up AP payment lines and headers
       await sql`
         DELETE apl
@@ -251,18 +256,25 @@ describe("purchasing.supplier-statements", { timeout: 60000 }, () => {
         INNER JOIN ap_payments ap ON ap.id = apl.ap_payment_id
         WHERE ap.company_id = ${testCompanyId}
       `.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM ap_payments WHERE company_id = ${testCompanyId}`.execute(db);
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up journal entries
       await sql`DELETE FROM journal_lines WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM journal_batches WHERE company_id = ${testCompanyId}`.execute(db);
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up purchase invoices
       await sql`DELETE FROM purchase_invoice_lines WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_invoices WHERE company_id = ${testCompanyId}`.execute(db);
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Clean up company 2 accounts
       await sql`DELETE FROM accounts WHERE company_id = ${testCompany2Id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM companies WHERE id = ${testCompany2Id}`.execute(db);
     } catch {
       // ignore cleanup errors

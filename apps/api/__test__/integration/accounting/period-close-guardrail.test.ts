@@ -233,28 +233,49 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
   afterAll(async () => {
     try {
       const db = getTestDb();
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Teardown company A records (dependency order: child → parent FK)
       await sql`DELETE FROM period_close_overrides WHERE company_id = ${companyA.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_credit_lines WHERE company_id = ${companyA.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_credits WHERE company_id = ${companyA.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM ap_payment_lines WHERE company_id = ${companyA.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM ap_payments WHERE company_id = ${companyA.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_invoice_lines WHERE company_id = ${companyA.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_invoices WHERE company_id = ${companyA.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM journal_lines WHERE company_id = ${companyA.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM journal_batches WHERE company_id = ${companyA.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM fiscal_periods WHERE company_id = ${companyA.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM fiscal_years WHERE company_id = ${companyA.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       // Teardown company B records
       await sql`DELETE FROM purchase_credit_lines WHERE company_id = ${companyB.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_credits WHERE company_id = ${companyB.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM ap_payment_lines WHERE company_id = ${companyB.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM ap_payments WHERE company_id = ${companyB.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_invoice_lines WHERE company_id = ${companyB.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_invoices WHERE company_id = ${companyB.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM journal_lines WHERE company_id = ${companyB.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM journal_batches WHERE company_id = ${companyB.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM fiscal_periods WHERE company_id = ${companyB.id}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM fiscal_years WHERE company_id = ${companyB.id}`.execute(db);
     } catch (e) {
       // ignore teardown errors

@@ -46,6 +46,7 @@ describe('purchasing.exchange-rates', { timeout: 30000 }, () => {
     // Clean up exchange rates created by this test
     try {
       const db = getTestDb();
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM exchange_rates WHERE company_id = ${cashierCompanyId}`.execute(db);
     } catch (e) {
       // ignore cleanup errors

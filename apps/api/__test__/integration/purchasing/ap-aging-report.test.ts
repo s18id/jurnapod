@@ -126,32 +126,30 @@ describe("purchasing.ap-aging-report", { timeout: 40000 }, () => {
   afterAll(async () => {
     try {
       const db = getTestDb();
-      await sql`
-        DELETE pca
-        FROM purchase_credit_applications pca
-        INNER JOIN purchase_credits pc ON pc.id = pca.purchase_credit_id
-        WHERE pc.company_id = ${testCompanyId}
-      `.execute(db);
-      await sql`
-        DELETE pcl
-        FROM purchase_credit_lines pcl
-        INNER JOIN purchase_credits pc ON pc.id = pcl.purchase_credit_id
-        WHERE pc.company_id = ${testCompanyId}
-      `.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
+      await sql`DELETE FROM purchase_credit_lines WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_credits WHERE company_id = ${testCompanyId}`.execute(db);
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`
         DELETE apl
         FROM ap_payment_lines apl
         INNER JOIN ap_payments ap ON ap.id = apl.ap_payment_id
         WHERE ap.company_id = ${testCompanyId}
       `.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM ap_payments WHERE company_id = ${testCompanyId}`.execute(db);
 
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM journal_lines WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM journal_batches WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_invoice_lines WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_invoices WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM accounts WHERE company_id = ${testCompanyId}`.execute(db);
     } catch {
       // ignore cleanup errors

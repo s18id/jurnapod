@@ -23,3 +23,5 @@ export type {
   APExceptionStatusKey,
   APExceptionStatusValue,
 } from './constants.js';
+
+export { expectImmutableTable, type ImmutableTableOptions } from './immutability.js';

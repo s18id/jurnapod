@@ -101,10 +101,13 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
     // Clean up purchase invoices and lines created by this test
     try {
       const db = getTestDb();
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM purchase_invoice_lines WHERE company_id = ${testCompanyId}`.execute(db);
       await sql`DELETE FROM purchase_invoices WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM journal_lines WHERE company_id = ${testCompanyId}`.execute(db);
       await sql`DELETE FROM journal_batches WHERE company_id = ${testCompanyId}`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM exchange_rates WHERE company_id = ${testCompanyId}`.execute(db);
     } catch (e) {
       // ignore cleanup errors

@@ -106,6 +106,7 @@ afterAll(async () => {
   // Clean up any item_images created during tests
   try {
     const db = getTestDb();
+    // @fixture-teardown-allowed rationale="cleanup only"
     await sql`DELETE FROM item_images WHERE company_id = ${company.id}`.execute(db);
   } catch (_) {
     // Ignore cleanup errors
@@ -120,6 +121,7 @@ beforeEach(async () => {
   // Clean up item_images before each test to ensure sort_order calculations are predictable
   try {
     const db = getTestDb();
+    // @fixture-teardown-allowed rationale="cleanup only"
     await sql`DELETE FROM item_images WHERE company_id = ${company.id}`.execute(db);
   } catch (_) {
     // Ignore cleanup errors

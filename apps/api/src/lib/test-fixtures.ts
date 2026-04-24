@@ -77,6 +77,10 @@ import { DatabaseConflictError } from "./master-data-errors.js";
 import { createVariantAttribute } from "./item-variants";
 import { adjustStock } from "./stock.js";
 import { MODULE_PERMISSION_BITS, buildPermissionMask, type ModulePermission } from "@jurnapod/auth";
+import {
+  ensureSalesOutletMappings,
+  ensurePaymentVarianceMappings
+} from "@jurnapod/modules-accounting";
 
 
 // ============================================================================
@@ -278,13 +282,127 @@ export function registerFixtureCleanup(
   registeredCleanupTasks.push({ name, fn });
 }
 
-// ============================================================================
-// Company Fixtures
-// ============================================================================
+/**
+ * Create a test company with NULL timezone — for tests validating
+ * fail-closed behavior when no outlet/company timezone is configured.
+ *
+ * Canonical helper so test files avoid ad-hoc SQL UPDATE that nullifies
+ * timezone after company creation.
+ *
+ * @param options - Partial company options (timezone must NOT be set here)
+ * @returns Company fixture with id, code, name, and null timezone
+ */
+export async function createTestCompanyWithoutTimezone(
+  options?: Partial<{
+    code: string;
+    name: string;
+    currency_code: string;
+  }>
+): Promise<CompanyFixture> {
+  const db = getDb();
+  const runId = makeRunId();
+
+  const code = options?.code ?? `TEST-CO-${runId}`.slice(0, 20).toUpperCase();
+  const name = options?.name ?? `Test Company ${runId}`;
+
+  try {
+    // Insert company row directly with explicit NULL timezone.
+    // No timezone: triggers the no-UTC-fallback code path in AP reconciliation.
+    await sql`
+      INSERT INTO companies (code, name, timezone, currency_code, created_at, updated_at)
+      VALUES (${code}, ${name}, NULL, ${options?.currency_code ?? "IDR"}, NOW(), NOW())
+    `.execute(db);
+
+    const result = await sql`SELECT id, code, name, timezone FROM companies WHERE code = ${code} LIMIT 1`.execute(db);
+    if (result.rows.length === 0) {
+      throw new Error(`Failed to create company without timezone: ${code}`);
+    }
+    const row = result.rows[0] as { id: number; code: string; name: string; timezone: string | null };
+    const company: CompanyFixture = {
+      id: Number(row.id),
+      code: row.code,
+      name: row.name,
+    };
+    createdFixtures.companies.push(company);
+    return company;
+  } catch (error: unknown) {
+    const mysqlErr = error as { code?: string };
+    if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
+      const result = await sql`SELECT id, code, name, timezone FROM companies WHERE code = ${code} LIMIT 1`.execute(db);
+      if (result.rows.length > 0) {
+        const row = result.rows[0] as { id: number; code: string; name: string; timezone: string | null };
+        return {
+          id: Number(row.id),
+          code: row.code,
+          name: row.name,
+        };
+      }
+    }
+    throw error;
+  }
+}
 
 /**
- * Create a test company using PARTIAL (row-only) creation path.
+ * Create a test outlet with NULL timezone for a given company.
+ * Use with createTestCompanyWithoutTimezone() to produce a company+outlet
+ * pair that triggers the no-UTC-fallback error path.
  *
+ * @param companyId - Parent company ID
+ * @param options - Partial outlet options (timezone must NOT be set here)
+ * @returns Outlet fixture with id, company_id, code, name, and null timezone
+ */
+export async function createTestOutletWithoutTimezone(
+  companyId: number,
+  options?: Partial<{
+    code: string;
+    name: string;
+  }>
+): Promise<OutletFixture> {
+  const db = getDb();
+  const runId = makeRunId();
+
+  const code = options?.code ?? `TEST-OL-${runId}`.slice(0, 20).toUpperCase();
+  const name = options?.name ?? `Test Outlet ${runId}`;
+
+  try {
+    // Insert outlet row directly with explicit NULL timezone.
+    await sql`
+      INSERT INTO outlets (company_id, code, name, timezone, created_at, updated_at)
+      VALUES (${companyId}, ${code}, ${name}, NULL, NOW(), NOW())
+    `.execute(db);
+
+    const result = await sql`SELECT id, company_id, code, name, timezone FROM outlets WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
+    if (result.rows.length === 0) {
+      throw new Error(`Failed to create outlet without timezone for company ${companyId}`);
+    }
+    const row = result.rows[0] as { id: number; company_id: number; code: string; name: string; timezone: string | null };
+    const outlet: OutletFixture = {
+      id: Number(row.id),
+      company_id: Number(row.company_id),
+      code: row.code,
+      name: row.name,
+    };
+    createdFixtures.outlets.push(outlet);
+    return outlet;
+  } catch (error: unknown) {
+    const mysqlErr = error as { code?: string };
+    if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
+      const result = await sql`SELECT id, company_id, code, name, timezone FROM outlets WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
+      if (result.rows.length > 0) {
+        const row = result.rows[0] as { id: number; company_id: number; code: string; name: string; timezone: string | null };
+        return {
+          id: Number(row.id),
+          company_id: Number(row.company_id),
+          code: row.code,
+          name: row.name,
+        };
+      }
+    }
+    throw error;
+  }
+}
+
+/**
  * PARTIAL FIXTURE MODE — EXCEPTION: This is a partial fixture path that only creates
  * the company row without full bootstrap. Use only when:
  * 1. Tests need a company FK reference without ACL/module_roles
@@ -1066,7 +1184,8 @@ export async function createTestPurchasingSettings(
 }
 
 /**
- * Create a test BANK/CASH account for AP payment scenarios.
+ * Create a test BANK/CASH account for payment target scenarios.
+ * Use for sales payment disbursements and general cash/bank account fixtures.
  */
 export async function createTestBankAccount(
   companyId: number,
@@ -1075,6 +1194,7 @@ export async function createTestBankAccount(
     name: string;
     typeName: "BANK" | "CASH";
     isActive: boolean;
+    isPayable: boolean;
   }>
 ): Promise<number> {
   const db = getDb();
@@ -1084,7 +1204,7 @@ export async function createTestBankAccount(
 
   const result = await sql`
     INSERT INTO accounts (company_id, code, name, type_name, is_active, is_payable, created_at, updated_at)
-    VALUES (${companyId}, ${code}, ${name}, ${options?.typeName ?? "BANK"}, ${options?.isActive ?? true ? 1 : 0}, 0, NOW(), NOW())
+    VALUES (${companyId}, ${code}, ${name}, ${options?.typeName ?? "BANK"}, ${options?.isActive ?? true ? 1 : 0}, ${options?.isPayable ?? false ? 1 : 0}, NOW(), NOW())
   `.execute(db);
 
   const accountId = Number((result as { insertId?: number }).insertId ?? 0);
@@ -1141,6 +1261,60 @@ export async function setTestPurchasingDefaultApAccount(
     WHERE cm.company_id = ${companyId}
       AND m.code = 'purchasing'
   `.execute(db);
+}
+
+// ============================================================================
+// Sales Account Mapping Fixtures
+// ============================================================================
+
+/**
+ * Ensure AR and SALES_REVENUE account mappings exist for an outlet.
+ *
+ * This is the canonical fixture for sales payment posting tests that need
+ * outlet-scoped account mappings resolved during /post.
+ *
+ * Behavior:
+ * 1) Reuse existing system accounts for the company (AR, SALES) if present
+ * 2) If not present, create deterministic test accounts via fixture-safe SQL
+ * 3) Upsert account_mappings rows for keys AR and SALES_REVENUE scoped to outlet
+ *
+ * Uses ACCOUNT_MAPPING_TYPE_ID_BY_CODE from @jurnapod/shared for type IDs.
+ * Strict tenant/outlet scoping maintained throughout.
+ */
+export async function ensureTestSalesAccountMappings(
+  companyId: number,
+  outletId: number
+): Promise<{ ar_account_id: number; sales_revenue_account_id: number }> {
+  const db = getDb();
+
+  const result = await ensureSalesOutletMappings(db, {
+    companyId,
+    outletId
+  });
+
+  return {
+    ar_account_id: result.arAccountId,
+    sales_revenue_account_id: result.salesRevenueAccountId
+  };
+}
+
+/**
+ * Ensure PAYMENT_VARIANCE_GAIN and PAYMENT_VARIANCE_LOSS account mappings exist
+ * for a company (company-level mapping, outlet_id = NULL).
+ */
+export async function ensureTestPaymentVarianceMappings(
+  companyId: number
+): Promise<{ gain_account_id: number; loss_account_id: number }> {
+  const db = getDb();
+
+  const result = await ensurePaymentVarianceMappings(db, {
+    companyId
+  });
+
+  return {
+    gain_account_id: result.gainAccountId,
+    loss_account_id: result.lossAccountId
+  };
 }
 
 // ============================================================================
@@ -2515,6 +2689,10 @@ export async function setModulePermission(
   await sql`INSERT INTO module_roles (company_id, role_id, module, resource, permission_mask) VALUES (${companyId}, ${roleId}, ${module}, ${trimmedResource}, ${permissionMask}) ON DUPLICATE KEY UPDATE permission_mask = ${permissionMask}`.execute(db);
 }
 
+// ============================================================================
+// Company/Outlet NULL Timezone Fixtures (Epic 47 - Timezone Resolution)
+// ============================================================================
+
 /**
  * Create a complete permission setup for testing canManageCompanyDefaults.
  * This combines: get role ID, assign role to user, set module permission.
@@ -2850,3 +3028,11 @@ export async function getTestAccessToken(baseUrl: string): Promise<string> {
   
   return loginForTest(baseUrl, companyCode, email, password);
 }
+
+// ============================================================================
+// Re-exports from @jurnapod/db/test-fixtures
+// ============================================================================
+
+// Re-export immutability helpers from @jurnapod/db/test-fixtures
+export { expectImmutableTable } from '@jurnapod/db/test-fixtures';
+export type { ImmutableTableOptions } from '@jurnapod/db/test-fixtures';

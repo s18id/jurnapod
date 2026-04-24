@@ -65,9 +65,11 @@ describe('purchasing.suppliers.tenant-isolation', { timeout: 60000 }, () => {
     try {
       const db = getTestDb();
       for (const companyId of [ownerCompanyId, ...createdCompanyIds]) {
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM supplier_contacts WHERE supplier_id IN (
           SELECT id FROM suppliers WHERE company_id = ${companyId}
         )`.execute(db);
+        // @fixture-teardown-allowed rationale="cleanup only"
         await sql`DELETE FROM suppliers WHERE company_id = ${companyId}`.execute(db);
       }
     } catch {

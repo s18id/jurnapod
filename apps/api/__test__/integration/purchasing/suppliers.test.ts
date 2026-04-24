@@ -50,9 +50,11 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
     // Clean up suppliers created by this test
     try {
       const db = getTestDb();
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM supplier_contacts WHERE supplier_id IN (
         SELECT id FROM suppliers WHERE company_id = ${cashierCompanyId}
       )`.execute(db);
+      // @fixture-teardown-allowed rationale="cleanup only"
       await sql`DELETE FROM suppliers WHERE company_id = ${cashierCompanyId}`.execute(db);
     } catch (e) {
       // ignore cleanup errors

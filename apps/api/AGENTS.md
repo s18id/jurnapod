@@ -120,6 +120,14 @@ Any DB mock found in DB-backed tests is a P0 risk and must be treated as a block
 - Any raw SQL `INSERT`/`UPDATE` test setup that bypasses canonical fixtures is a **P0 blocker**
 - Exception: Teardown/cleanup, read-only verification, schema introspection
 
+### Fixture Policy Enforcement Immutability (MANDATORY)
+- Fixture flow rules are enforced by:
+  - `docs/policies/fixture-ownership-policy.md`
+  - `scripts/validate-fixture-flow.ts`
+  - CI gate: `lint:fixture-flow`
+- **NO EXCEPTION ALLOWED:** agents and contributors MUST NOT bypass fixture-flow policy using inline allowlists/tags.
+- Agents and contributors **MUST NOT** modify any of the above enforcement artifacts unless explicitly requested by the user or story owner in the active task.
+
 If an existing fixture/helper is too broad for a test scenario:
 1. Refactor the helper into smaller reusable parts
 2. Add a canonical fixture/helper for the new setup path

@@ -289,6 +289,43 @@ await pool.execute(`INSERT INTO user_role_assignments...`);
 - Partial fixture mode allowed only via decomposed domain parts provided by the same production package that owns the domain invariant, with explicit justification
 - Ad-hoc SQL allowed only for teardown, read-only verification
 
+### Missing Owner-Package Fixture Workflow
+
+When a test requires data that no existing fixture function covers, the following workflow MUST be followed **before** writing ad-hoc SQL or app-layer fixture duplication:
+
+**Step 1 — Identify the owner package.** Determine which package owns the domain invariant for the missing fixture.
+
+**Step 2 — Create fixture in `packages/{module}/src/test-fixtures/`.** Place fixtures in the owner package, not in app-layer adapter files. Do not place test fixtures in `__test__/` directories.
+
+**Step 3 — Satisfy the fixture function contract:**
+- Deterministic defaults for all optional fields (no `Date.now()` or `Math.random()` in business fields)
+- Typed input (`opts` object with explicit TypeScript types, no `any`)
+- Typed output (e.g., `ItemFixture` with `.id`)
+- Cleanup registration (register record in caller's fixture registry)
+- Invariant-safe production path (use the same service/repository that production code uses; do not bypass domain logic with raw INSERTs)
+
+**Step 4 — Export from the package index.**
+```typescript
+// packages/modules/accounting/src/index.ts
+export { createTestFiscalYear } from './test-fixtures/fiscal-year-fixtures';
+```
+
+**Step 5 — Build owner package first, then validate.**
+```bash
+npm run build -w @jurnapod/{module}
+npm run build -w @jurnapod/api
+npm run lint:fixture-flow -w @jurnapod/api
+npm test -w @jurnapod/api -- --run
+```
+
+**Anti-patterns (P0 blockers):**
+- Raw `INSERT` SQL in test setup
+- App-layer business fixture duplication that diverges from production path
+- Using `teardown` tags for setup writes
+- Hardcoded sentinel IDs (`company_id=1`)
+
+**Thin API wrapper rule:** When a fixture is consumed by multiple apps, add a thin wrapper in `apps/api/src/lib/test-fixtures.ts` that delegates to the package function. The package function is the canonical source; the wrapper is a compatibility shim only.
+
 ### ESLint Test Rules
 | Rule | Purpose |
 |------|---------|
