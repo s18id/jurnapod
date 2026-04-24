@@ -86,7 +86,7 @@ async function findPaymentByIdWithTx(
     actual_amount_idr: row.actual_amount_idr !== undefined && row.actual_amount_idr !== null ? Number(row.actual_amount_idr) : undefined,
     invoice_amount_idr: row.invoice_amount_idr !== undefined && row.invoice_amount_idr !== null ? Number(row.invoice_amount_idr) : undefined,
     payment_amount_idr: row.payment_amount_idr !== undefined && row.payment_amount_idr !== null ? Number(row.payment_amount_idr) : undefined,
-    payment_delta_idr: row.payment_delta_idr !== undefined ? Number(row.payment_delta_idr) : undefined,
+    payment_delta_idr: row.payment_delta_idr !== undefined && row.payment_delta_idr !== null ? Number(row.payment_delta_idr) : undefined,
     shortfall_settled_as_loss: row.shortfall_settled_as_loss === 1 ? true : row.shortfall_settled_as_loss === 0 ? false : undefined,
     shortfall_reason: row.shortfall_reason ?? undefined,
     shortfall_settled_by_user_id: row.shortfall_settled_by_user_id ? Number(row.shortfall_settled_by_user_id) : undefined,

@@ -656,13 +656,17 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     }));
   }
 
-  // Account operations for payment validation
-  async accountIsPayable(companyId: number, accountId: number): Promise<boolean> {
+  /**
+   * Validates that an account is a valid target for sales payment receive/disbursement.
+   * Checks: company_id matches, id matches, is_active=1, type_name is BANK or CASH.
+   */
+  async accountIsTargetAccount(companyId: number, accountId: number): Promise<boolean> {
     const rows = await sql`
       SELECT id FROM accounts
        WHERE company_id = ${companyId}
          AND id = ${accountId}
-         AND is_payable = 1
+         AND is_active = 1
+         AND UPPER(type_name) IN ('BANK', 'CASH')
        LIMIT 1
     `.execute(this._getDb());
     return rows.rows.length > 0;
@@ -759,7 +763,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
       actual_amount_idr: row.actual_amount_idr !== undefined && row.actual_amount_idr !== null ? Number(row.actual_amount_idr) : undefined,
       invoice_amount_idr: row.invoice_amount_idr !== undefined && row.invoice_amount_idr !== null ? Number(row.invoice_amount_idr) : undefined,
       payment_amount_idr: row.payment_amount_idr !== undefined && row.payment_amount_idr !== null ? Number(row.payment_amount_idr) : undefined,
-      payment_delta_idr: row.payment_delta_idr !== undefined ? Number(row.payment_delta_idr) : undefined,
+      payment_delta_idr: row.payment_delta_idr !== undefined && row.payment_delta_idr !== null ? Number(row.payment_delta_idr) : undefined,
       shortfall_settled_as_loss: row.shortfall_settled_as_loss === 1 ? true : row.shortfall_settled_as_loss === 0 ? false : undefined,
       shortfall_reason: row.shortfall_reason ?? undefined,
       shortfall_settled_by_user_id: row.shortfall_settled_by_user_id ? Number(row.shortfall_settled_by_user_id) : undefined,
@@ -1155,7 +1159,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
         actual_amount_idr: row.actual_amount_idr !== undefined && row.actual_amount_idr !== null ? Number(row.actual_amount_idr) : undefined,
         invoice_amount_idr: row.invoice_amount_idr !== undefined && row.invoice_amount_idr !== null ? Number(row.invoice_amount_idr) : undefined,
         payment_amount_idr: row.payment_amount_idr !== undefined && row.payment_amount_idr !== null ? Number(row.payment_amount_idr) : undefined,
-        payment_delta_idr: row.payment_delta_idr !== undefined ? Number(row.payment_delta_idr) : undefined,
+        payment_delta_idr: row.payment_delta_idr !== undefined && row.payment_delta_idr !== null ? Number(row.payment_delta_idr) : undefined,
         shortfall_settled_as_loss: row.shortfall_settled_as_loss === 1 ? true : row.shortfall_settled_as_loss === 0 ? false : undefined,
         shortfall_reason: row.shortfall_reason ?? undefined,
         shortfall_settled_by_user_id: row.shortfall_settled_by_user_id ? Number(row.shortfall_settled_by_user_id) : undefined,

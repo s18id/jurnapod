@@ -223,10 +223,10 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
     }
   }
 
-  async function ensureAccountIsPayable(executor: SalesDbExecutor, companyId: number, accountId: number): Promise<void> {
-    const isPayable = await executor.accountIsPayable(companyId, accountId);
-    if (!isPayable) {
-      throw new DatabaseReferenceError("Account not found or not payable");
+  async function ensureAccountIsTarget(executor: SalesDbExecutor, companyId: number, accountId: number): Promise<void> {
+    const isTarget = await executor.accountIsTargetAccount(companyId, accountId);
+    if (!isTarget) {
+      throw new DatabaseReferenceError("Account not found or not a valid payment target account");
     }
   }
 
@@ -278,9 +278,9 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
           throw new PaymentAllocationError("Sum of split amounts must equal payment amount");
         }
 
-        // Validate each split account is payable and belongs to company
+        // Validate each split account is a valid target account and belongs to company
         for (const split of input.splits!) {
-          await ensureAccountIsPayable(executor, companyId, split.account_id);
+          await ensureAccountIsTarget(executor, companyId, split.account_id);
         }
 
         effectiveAccountId = input.splits![0].account_id;
@@ -304,8 +304,15 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
           throw new PaymentAllocationError("Amount must have at most 2 decimal places");
         }
 
+        if (typeof input.actual_amount_idr === "number" && hasMoreThanTwoDecimals(input.actual_amount_idr)) {
+          throw new PaymentAllocationError("actual_amount_idr must have at most 2 decimal places");
+        }
+
         effectiveAccountId = input.account_id;
-        splitData = [{ account_id: effectiveAccountId, amount: input.amount }];
+        // For non-split payments, posting consumes split rows when present.
+        // Split debit MUST reflect effective payment amount in IDR to keep
+        // debit/credit balanced when actual_amount_idr differs from amount.
+        splitData = [{ account_id: effectiveAccountId, amount: input.actual_amount_idr ?? input.amount }];
       }
 
       // Check for idempotency via client_ref
@@ -358,7 +365,7 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
         throw new DatabaseReferenceError("Invoice outlet mismatch");
       }
 
-      await ensureAccountIsPayable(executor, companyId, effectiveAccountId);
+      await ensureAccountIsTarget(executor, companyId, effectiveAccountId);
 
       const amount = normalizeMoney(input.amount);
       const effectivePaymentAmount = normalizeMoney(input.actual_amount_idr ?? input.amount);
@@ -562,7 +569,7 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
         }
 
         for (const split of input.splits!) {
-          await ensureAccountIsPayable(executor, companyId, split.account_id);
+          await ensureAccountIsTarget(executor, companyId, split.account_id);
         }
 
         nextAccountId = input.splits![0].account_id;
@@ -587,7 +594,7 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
       }
 
       if (!hasSplits && typeof input.account_id === "number") {
-        await ensureAccountIsPayable(executor, companyId, input.account_id);
+        await ensureAccountIsTarget(executor, companyId, input.account_id);
       }
 
       const nextPaymentNo = input.payment_no ?? current.payment_no;
@@ -740,6 +747,9 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
         shortfallReason: options?.shortfall_reason ?? undefined,
         shortfallSettledByUserId: options?.settle_shortfall_as_loss ? userId ?? undefined : undefined,
         shortfallSettledAt: shortfallSettledAt,
+        // Preserve existing FX acknowledgment markers unless explicitly changed.
+        fxAcknowledgedAt: payment.fx_acknowledged_at ? new Date(payment.fx_acknowledged_at) : undefined,
+        fxAcknowledgedBy: payment.fx_acknowledged_by ?? undefined,
         updatedByUserId: userId ?? undefined
       });
 

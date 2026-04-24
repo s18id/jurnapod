@@ -13,7 +13,8 @@ import type { QueryExecutor } from "@/lib/shared/common-utils";
 import {
   ACCOUNT_MAPPING_TYPE_ID_BY_CODE,
   accountMappingIdToCode,
-  type AccountMappingCode
+  type AccountMappingCode,
+  toRfc3339Required,
 } from "@jurnapod/shared";
 import type { PostingResult } from "@jurnapod/shared";
 import {
@@ -340,7 +341,7 @@ export async function postSalesPaymentToJournal(
   await ensureDateWithinOpenFiscalYearWithExecutor(
     dbExecutor,
     payment.company_id,
-    toDateOnly(payment.payment_at)
+    toDateOnly(toRfc3339Required(payment.payment_at))
   );
 
   const executor = new ApiSalesPostingExecutor(dbExecutor as KyselySchema);
@@ -351,6 +352,7 @@ export async function postSalesPaymentToJournal(
     outlet_id: payment.outlet_id,
     payment_no: payment.payment_no,
     payment_at: payment.payment_at,
+    actual_amount_idr: payment.actual_amount_idr ?? undefined,
     payment_amount_idr: payment.payment_amount_idr ?? undefined,
     amount: payment.amount,
     invoice_amount_idr: payment.invoice_amount_idr ?? undefined,

@@ -349,7 +349,7 @@ export interface SalesDbExecutor {
   listPayments(companyId: number, filters: PaymentListFilters): Promise<{ total: number; payments: SalesPayment[] }>;
 
   // Account operations for payment validation
-  accountIsPayable(companyId: number, accountId: number): Promise<boolean>;
+  accountIsTargetAccount(companyId: number, accountId: number): Promise<boolean>;
 
   // Credit Note operations
   findCreditNoteById(companyId: number, creditNoteId: number, forUpdate?: boolean): Promise<SalesCreditNoteDetail | null>;

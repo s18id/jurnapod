@@ -28,6 +28,7 @@ export interface SalesPaymentPostingData {
   outlet_id: number;
   payment_no: string;
   payment_at: string;
+  actual_amount_idr?: number;
   payment_amount_idr?: number;
   amount: number;
   invoice_amount_idr?: number;
@@ -171,7 +172,7 @@ export class SalesPaymentPostingMapper implements PostingMapper {
 
     const lines: JournalLine[] = [];
 
-    const paymentAmount = this.payment.payment_amount_idr ?? this.payment.amount;
+    const paymentAmount = this.payment.actual_amount_idr ?? this.payment.payment_amount_idr ?? this.payment.amount;
     const invoiceAmountApplied = this.payment.invoice_amount_idr ?? paymentAmount;
     const delta = this.payment.payment_delta_idr ?? 0;
 
@@ -237,7 +238,7 @@ export class SalesPaymentPostingMapper implements PostingMapper {
     const totalDebitsMinor = lines.reduce((sum, line) => sum + Math.round(line.debit * 100), 0);
     const totalCreditsMinor = lines.reduce((sum, line) => sum + Math.round(line.credit * 100), 0);
     if (totalDebitsMinor !== totalCreditsMinor) {
-      throw new Error("PAYMENT_SPLIT_IMBALANCE: Debit/Credit totals do not match");
+      throw new Error(`PAYMENT_SPLIT_IMBALANCE: debits_minor=${totalDebitsMinor}, credits_minor=${totalCreditsMinor}`);
     }
 
     return lines;
@@ -502,6 +503,9 @@ export async function voidCreditNote(
 function toMysqlDateTime(value: string): string {
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
     return value.slice(0, 19).replace("T", " ");
+  }
+  if (/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}$/.test(value)) {
+    return value;
   }
   if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
     return value + " 00:00:00";

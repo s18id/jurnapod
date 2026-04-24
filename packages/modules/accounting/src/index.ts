@@ -9,6 +9,7 @@ export * from "./posting/index.js";
 export * from "./accounts-service";
 export * from "./account-types-service";
 export * from "./journals-service";
+export * from "./account-mappings-service";
 export * from "./reconciliation/index.js";
 export * from "./reconciliation/subledger/index.js";
 export * from "./trial-balance/index.js";
