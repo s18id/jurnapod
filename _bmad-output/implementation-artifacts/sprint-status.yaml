@@ -1,4 +1,4 @@
-last_updated: 2026-04-22T00:00:00Z
+last_updated: 2026-04-25T00:00:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -584,3 +584,4 @@ development_status:
   50-3-posting-flow-integration-tests: done
   50-4-correctness-fixes-from-testing: done
   50-5-sales-ar-fx-acknowledgment: done
+  epic-50-retrospective: done  # 2026-04-25 — 2 action items (E50-A1, E50-A2)
