@@ -17,3 +17,6 @@ export * from "./settings";
 export * from "./customers";
 
 export type { AccessScopeChecker } from "./users/interfaces/access-scope-checker.js";
+
+// Test fixtures (owner-package fixtures for platform domain)
+export * from "./test-fixtures/index.js";

@@ -62,3 +62,6 @@ export class AccountingImportMapper implements PostingMapper {
     return [];
   }
 }
+
+// Test fixtures (owner-package fixtures for accounting domain)
+export * from "./test-fixtures/index.js";

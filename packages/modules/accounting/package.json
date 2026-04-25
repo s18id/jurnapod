@@ -29,6 +29,10 @@
     "./fiscal-year": {
       "types": "./dist/fiscal-year/index.d.ts",
       "default": "./dist/fiscal-year/index.js"
+    },
+    "./test-fixtures": {
+      "types": "./dist/test-fixtures/index.d.ts",
+      "default": "./dist/test-fixtures/index.js"
     }
   },
   "files": ["dist", "README.md"],

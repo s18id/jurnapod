@@ -89,6 +89,25 @@ import {
   setPurchasingDefaultApAccountFixture,
   type SupplierFixture as PackageSupplierFixture,
 } from "@jurnapod/modules-purchasing/test-fixtures";
+import {
+  createTestCompanyMinimal as pkgCreateTestCompanyMinimal,
+  createTestCompanyWithoutTimezone as pkgCreateTestCompanyWithoutTimezone,
+  createTestOutletMinimal as pkgCreateTestOutletMinimal,
+  createTestOutletWithoutTimezone as pkgCreateTestOutletWithoutTimezone,
+  type CompanyFixture as PackageCompanyFixture,
+  type OutletFixture as PackageOutletFixture,
+} from "@jurnapod/modules-platform/test-fixtures";
+import {
+  createTestFiscalYear as pkgCreateTestFiscalYear,
+  createTestFiscalPeriod as pkgCreateTestFiscalPeriod,
+  createTestFiscalCloseBalanceFixture as pkgCreateTestFiscalCloseBalanceFixture,
+  createTestAPReconciliationSettings as pkgCreateTestAPReconciliationSettings,
+  clearTestAPReconciliationSettings as pkgClearTestAPReconciliationSettings,
+  setTestCompanyStringSetting as pkgSetTestCompanyStringSetting,
+  type FiscalYearFixture as PackageFiscalYearFixture,
+  type FiscalPeriodFixture as PackageFiscalPeriodFixture,
+  type APReconciliationSettingsFixture as PackageAPReconciliationSettingsFixture,
+} from "@jurnapod/modules-accounting/test-fixtures";
 
 
 // ============================================================================
@@ -309,46 +328,18 @@ export async function createTestCompanyWithoutTimezone(
   }>
 ): Promise<CompanyFixture> {
   const db = getDb();
-  const runId = makeRunId();
-
-  const code = options?.code ?? `TEST-CO-${runId}`.slice(0, 20).toUpperCase();
-  const name = options?.name ?? `Test Company ${runId}`;
-
-  try {
-    // Insert company row directly with explicit NULL timezone.
-    // No timezone: triggers the no-UTC-fallback code path in AP reconciliation.
-    await sql`
-      INSERT INTO companies (code, name, timezone, currency_code, created_at, updated_at)
-      VALUES (${code}, ${name}, NULL, ${options?.currency_code ?? "IDR"}, NOW(), NOW())
-    `.execute(db);
-
-    const result = await sql`SELECT id, code, name, timezone FROM companies WHERE code = ${code} LIMIT 1`.execute(db);
-    if (result.rows.length === 0) {
-      throw new Error(`Failed to create company without timezone: ${code}`);
-    }
-    const row = result.rows[0] as { id: number; code: string; name: string; timezone: string | null };
-    const company: CompanyFixture = {
-      id: Number(row.id),
-      code: row.code,
-      name: row.name,
-    };
-    createdFixtures.companies.push(company);
-    return company;
-  } catch (error: unknown) {
-    const mysqlErr = error as { code?: string };
-    if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
-      const result = await sql`SELECT id, code, name, timezone FROM companies WHERE code = ${code} LIMIT 1`.execute(db);
-      if (result.rows.length > 0) {
-        const row = result.rows[0] as { id: number; code: string; name: string; timezone: string | null };
-        return {
-          id: Number(row.id),
-          code: row.code,
-          name: row.name,
-        };
-      }
-    }
-    throw error;
-  }
+  const fixture = await pkgCreateTestCompanyWithoutTimezone(db, {
+    code: options?.code,
+    name: options?.name,
+    currency_code: options?.currency_code,
+  });
+  const company: CompanyFixture = {
+    id: fixture.id,
+    code: fixture.code,
+    name: fixture.name,
+  };
+  createdFixtures.companies.push(company);
+  return company;
 }
 
 /**
@@ -368,47 +359,18 @@ export async function createTestOutletWithoutTimezone(
   }>
 ): Promise<OutletFixture> {
   const db = getDb();
-  const runId = makeRunId();
-
-  const code = options?.code ?? `TEST-OL-${runId}`.slice(0, 20).toUpperCase();
-  const name = options?.name ?? `Test Outlet ${runId}`;
-
-  try {
-    // Insert outlet row directly with explicit NULL timezone.
-    await sql`
-      INSERT INTO outlets (company_id, code, name, timezone, created_at, updated_at)
-      VALUES (${companyId}, ${code}, ${name}, NULL, NOW(), NOW())
-    `.execute(db);
-
-    const result = await sql`SELECT id, company_id, code, name, timezone FROM outlets WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
-    if (result.rows.length === 0) {
-      throw new Error(`Failed to create outlet without timezone for company ${companyId}`);
-    }
-    const row = result.rows[0] as { id: number; company_id: number; code: string; name: string; timezone: string | null };
-    const outlet: OutletFixture = {
-      id: Number(row.id),
-      company_id: Number(row.company_id),
-      code: row.code,
-      name: row.name,
-    };
-    createdFixtures.outlets.push(outlet);
-    return outlet;
-  } catch (error: unknown) {
-    const mysqlErr = error as { code?: string };
-    if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
-      const result = await sql`SELECT id, company_id, code, name, timezone FROM outlets WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
-      if (result.rows.length > 0) {
-        const row = result.rows[0] as { id: number; company_id: number; code: string; name: string; timezone: string | null };
-        return {
-          id: Number(row.id),
-          company_id: Number(row.company_id),
-          code: row.code,
-          name: row.name,
-        };
-      }
-    }
-    throw error;
-  }
+  const fixture = await pkgCreateTestOutletWithoutTimezone(db, companyId, {
+    code: options?.code,
+    name: options?.name,
+  });
+  const outlet: OutletFixture = {
+    id: fixture.id,
+    company_id: fixture.company_id,
+    code: fixture.code,
+    name: fixture.name,
+  };
+  createdFixtures.outlets.push(outlet);
+  return outlet;
 }
 
 /**
@@ -438,37 +400,19 @@ export async function createTestCompanyMinimal(
   }>
 ): Promise<CompanyFixture> {
   const db = getDb();
-  const runId = makeRunId();
-
-  const code = options?.code ?? `TEST-CO-${runId}`.slice(0, 20).toUpperCase();
-  const name = options?.name ?? `Test Company ${runId}`;
-
-  try {
-    const company = await createCompanyBasic({
-      code,
-      name,
-      timezone: options?.timezone ?? "Asia/Jakarta",
-      currency_code: options?.currency_code ?? "IDR"
-    });
-
-    createdFixtures.companies.push(company);
-    return company;
-  } catch (error: unknown) {
-    if (error instanceof CompanyCodeExistsError) {
-      // Company with this code already exists - fetch it instead
-      const result = await sql`SELECT id, code, name FROM companies WHERE code = ${code} LIMIT 1`.execute(db);
-      if (result.rows.length > 0) {
-        const row = result.rows[0] as { id: number; code: string; name: string };
-        const existing = {
-          id: Number(row.id),
-          code: row.code,
-          name: row.name
-        };
-        return existing;
-      }
-    }
-    throw error;
-  }
+  const fixture = await pkgCreateTestCompanyMinimal(db, {
+    code: options?.code,
+    name: options?.name,
+    timezone: options?.timezone,
+    currency_code: options?.currency_code,
+  });
+  const company: CompanyFixture = {
+    id: fixture.id,
+    code: fixture.code,
+    name: fixture.name,
+  };
+  createdFixtures.companies.push(company);
+  return company;
 }
 
 /**
@@ -548,9 +492,6 @@ export async function createTestCompany(
  * PARTIAL FIXTURE MODE — EXCEPTION: No package-level service exists for full outlet
  * creation with audit logging. This partial path creates only the row.
  *
- * TODO (Q49-001-Gate-B): When @jurnapod/modules-platform exports a createOutlet service,
- * update createTestOutlet to delegate to it for full bootstrap (audit, default settings).
- *
  * @param companyId - Parent company ID
  * @param options - Partial outlet options
  * @returns Outlet fixture with id, company_id, code, name
@@ -564,38 +505,19 @@ export async function createTestOutletMinimal(
   }>
 ): Promise<OutletFixture> {
   const db = getDb();
-  const runId = makeRunId();
-
-  const code = options?.code ?? `TEST-OL-${runId}`.slice(0, 20).toUpperCase();
-  const name = options?.name ?? `Test Outlet ${runId}`;
-
-  try {
-    const outlet = await createOutletBasic({
-      company_id: companyId,
-      code,
-      name,
-      timezone: options?.timezone ?? "Asia/Jakarta"
-    });
-
-    createdFixtures.outlets.push(outlet);
-    return outlet;
-  } catch (error: unknown) {
-    if (error instanceof OutletCodeExistsError) {
-      // Outlet with this code already exists for this company - fetch it instead
-      const result = await sql`SELECT id, company_id, code, name FROM outlets WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
-      if (result.rows.length > 0) {
-        const row = result.rows[0] as { id: number; company_id: number; code: string; name: string };
-        const existing = {
-          id: Number(row.id),
-          company_id: Number(row.company_id),
-          code: row.code,
-          name: row.name
-        };
-        return existing;
-      }
-    }
-    throw error;
-  }
+  const fixture = await pkgCreateTestOutletMinimal(db, companyId, {
+    code: options?.code,
+    name: options?.name,
+    timezone: options?.timezone,
+  });
+  const outlet: OutletFixture = {
+    id: fixture.id,
+    company_id: fixture.company_id,
+    code: fixture.code,
+    name: fixture.name,
+  };
+  createdFixtures.outlets.push(outlet);
+  return outlet;
 }
 
 /**
@@ -912,191 +834,13 @@ export async function createTestFiscalCloseBalanceFixture(
   }>
 ): Promise<{ retained_earnings_account_id: number; pl_account_id: number }> {
   const db = getDb();
-  const runId = makeRunId();
-
-  const retainedEarningsName = options?.retainedEarningsName ?? `Retained Earnings ${runId}`;
-  const retainedCode = `TEST-RE-${runId}`.slice(0, 20).toUpperCase();
-  const retainedInsert = await sql`
-    INSERT INTO accounts (
-      company_id,
-      code,
-      name,
-      type_name,
-      is_active,
-      is_payable,
-      report_group,
-      normal_balance,
-      created_at,
-      updated_at
-    )
-    VALUES (
-      ${companyId},
-      ${retainedCode},
-      ${retainedEarningsName},
-      'EQUITY',
-      1,
-      0,
-      'EQ',
-      'K',
-      NOW(),
-      NOW()
-    )
-  `.execute(db);
-
-  const retainedEarningsAccountId = Number((retainedInsert as { insertId?: number }).insertId ?? 0);
-  if (!retainedEarningsAccountId) {
-    throw new Error("Failed to create retained earnings account for fiscal close fixture");
-  }
-
-  const plCode = `TEST-PL-${runId}`.slice(0, 20).toUpperCase();
-  const plAccountName = options?.plAccountName ?? `Test Revenue ${runId}`;
-  const plNormalBalance = options?.plNormalBalance ?? "K";
-  const plBalance = options?.plBalance ?? "100.0000";
-  const asOfDate = options?.asOfDate ?? "2099-12-31";
-  const fixtureDocId = Number((Date.now() % 2_000_000_000) + (_runIdCounter % 1000));
-
-  // Offset account for balanced fixture journal entry.
-  const offsetCode = `TEST-OFF-${runId}`.slice(0, 20).toUpperCase();
-  const offsetInsert = await sql`
-    INSERT INTO accounts (
-      company_id,
-      code,
-      name,
-      type_name,
-      is_active,
-      is_payable,
-      report_group,
-      normal_balance,
-      created_at,
-      updated_at
-    )
-    VALUES (
-      ${companyId},
-      ${offsetCode},
-      ${`Test Offset ${runId}`},
-      'ASSET',
-      1,
-      0,
-      'BS',
-      'D',
-      NOW(),
-      NOW()
-    )
-  `.execute(db);
-
-  const offsetAccountId = Number((offsetInsert as { insertId?: number }).insertId ?? 0);
-  if (!offsetAccountId) {
-    throw new Error("Failed to create offset account for fiscal close fixture");
-  }
-
-  const plAccountInsert = await sql`
-    INSERT INTO accounts (
-      company_id,
-      code,
-      name,
-      type_name,
-      is_active,
-      is_payable,
-      report_group,
-      normal_balance,
-      created_at,
-      updated_at
-    )
-    VALUES (
-      ${companyId},
-      ${plCode},
-      ${plAccountName},
-      'REVENUE',
-      1,
-      0,
-      'PL',
-      ${plNormalBalance},
-      NOW(),
-      NOW()
-    )
-  `.execute(db);
-
-  const plAccountId = Number((plAccountInsert as { insertId?: number }).insertId ?? 0);
-  if (!plAccountId) {
-    throw new Error("Failed to create test P&L account for fiscal close fixture");
-  }
-
-  // Seed a balanced manual journal entry in the fiscal-year window.
-  // This ensures close preview derives non-zero PL balances from journal_lines.
-  const journalBatchInsert = await sql`
-    INSERT INTO journal_batches (
-      company_id,
-      outlet_id,
-      doc_type,
-      doc_id,
-      posted_at,
-      client_ref,
-      created_at,
-      updated_at
-    )
-    VALUES (
-      ${companyId},
-      NULL,
-      'MANUAL',
-      ${fixtureDocId},
-      ${asOfDate},
-      ${`FIXTURE-FY-CLOSE-${runId}`},
-      NOW(),
-      NOW()
-    )
-  `.execute(db);
-
-  const journalBatchId = Number((journalBatchInsert as { insertId?: number }).insertId ?? 0);
-  if (!journalBatchId) {
-    throw new Error("Failed to create fixture journal batch for fiscal close fixture");
-  }
-
-  const debitAccountId = plNormalBalance === "D" ? plAccountId : offsetAccountId;
-  const creditAccountId = plNormalBalance === "D" ? offsetAccountId : plAccountId;
-
-  await sql`
-    INSERT INTO journal_lines (
-      company_id,
-      outlet_id,
-      journal_batch_id,
-      account_id,
-      line_date,
-      debit,
-      credit,
-      description,
-      created_at,
-      updated_at
-    )
-    VALUES (
-      ${companyId},
-      NULL,
-      ${journalBatchId},
-      ${debitAccountId},
-      ${asOfDate},
-      ${plBalance},
-      '0.0000',
-      'Fiscal close fixture debit line',
-      NOW(),
-      NOW()
-    ),
-    (
-      ${companyId},
-      NULL,
-      ${journalBatchId},
-      ${creditAccountId},
-      ${asOfDate},
-      '0.0000',
-      ${plBalance},
-      'Fiscal close fixture credit line',
-      NOW(),
-      NOW()
-    )
-  `.execute(db);
-
-  return {
-    retained_earnings_account_id: retainedEarningsAccountId,
-    pl_account_id: plAccountId,
-  };
+  return pkgCreateTestFiscalCloseBalanceFixture(db, companyId, {
+    retainedEarningsName: options?.retainedEarningsName,
+    plAccountName: options?.plAccountName,
+    plBalance: options?.plBalance,
+    plNormalBalance: options?.plNormalBalance,
+    asOfDate: options?.asOfDate,
+  });
 }
 
 /**
@@ -1736,55 +1480,13 @@ export async function createTestFiscalYear(
   }>
 ): Promise<FiscalYearFixture> {
   const db = getDb();
-  const runId = makeRunId();
-
-  const year = options?.year ?? new Date().getFullYear();
-  const code = `FY${year}-${runId}`.slice(0, 32);
-  const name = `Fiscal Year ${year}`;
-  const startDate = options?.startDate ?? `${year}-01-01`;
-  const endDate = options?.endDate ?? `${year}-12-31`;
-  const status = options?.status ?? "OPEN";
-
-  try {
-    await sql`
-      INSERT INTO fiscal_years (company_id, code, name, start_date, end_date, status, created_at, updated_at)
-      VALUES (${companyId}, ${code}, ${name}, ${startDate}, ${endDate}, ${status}, NOW(), NOW())
-    `.execute(db);
-
-    const result = await sql`SELECT id, code, name, start_date, end_date, status FROM fiscal_years WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
-    if (result.rows.length === 0) {
-      throw new Error(`Failed to create fiscal year with code ${code}`);
-    }
-    const row = result.rows[0] as { id: number; code: string; name: string; start_date: Date; end_date: Date; status: string };
-    const fixture: FiscalYearFixture = {
-      id: Number(row.id),
-      company_id: companyId,
-      code: row.code,
-      year,
-      startDate: row.start_date instanceof Date ? row.start_date.toISOString().split("T")[0] : String(row.start_date),
-      endDate: row.end_date instanceof Date ? row.end_date.toISOString().split("T")[0] : String(row.end_date),
-      status: row.status as "OPEN" | "CLOSED",
-    };
-    return fixture;
-  } catch (error: unknown) {
-    const mysqlErr = error as { code?: string };
-    if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
-      const result = await sql`SELECT id, code, name, start_date, end_date, status FROM fiscal_years WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
-      if (result.rows.length > 0) {
-        const row = result.rows[0] as { id: number; code: string; name: string; start_date: Date; end_date: Date; status: string };
-        return {
-          id: Number(row.id),
-          company_id: companyId,
-          code: row.code,
-          year,
-          startDate: row.start_date instanceof Date ? row.start_date.toISOString().split("T")[0] : String(row.start_date),
-          endDate: row.end_date instanceof Date ? row.end_date.toISOString().split("T")[0] : String(row.end_date),
-          status: row.status as "OPEN" | "CLOSED",
-        };
-      }
-    }
-    throw error;
-  }
+  const fixture = await pkgCreateTestFiscalYear(db, companyId, {
+    year: options?.year,
+    startDate: options?.startDate,
+    endDate: options?.endDate,
+    status: options?.status,
+  });
+  return fixture;
 }
 
 // ============================================================================
@@ -1816,7 +1518,6 @@ export type FiscalPeriodFixture = {
  * @param options.status - 'OPEN' | 'CLOSED' (default: 'OPEN')
  * @returns Fiscal period fixture with id, fiscalYearId, periodNumber, startDate, endDate, status
  */
-// FIX(47.5-WP-B): use period_no column and status tinyint mapping (OPEN=1, CLOSED=2)
 export async function createTestFiscalPeriod(
   fiscalYearId: number,
   options?: Partial<{
@@ -1827,90 +1528,13 @@ export async function createTestFiscalPeriod(
   }>
 ): Promise<FiscalPeriodFixture> {
   const db = getDb();
-
-  // Status tinyint mapping
-  const STATUS_OPEN_INT = 1;
-  const STATUS_CLOSED_INT = 2;
-
-  // Check if fiscal_periods table exists before attempting insert
-  const tableCheck = await sql`SELECT COUNT(*) as cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'fiscal_periods'`.execute(db);
-  const tableExists = Number((tableCheck.rows[0] as { cnt: number }).cnt) > 0;
-
-  if (!tableExists) {
-    throw new Error(
-      "fiscal_periods table does not exist. Schema gap: Story 47.1/47.5 requires a fiscal_periods table " +
-      "(typically: id, fiscal_year_id, period_no, start_date, end_date, status). " +
-      "This fixture will work once migration 0180 (or similar) creates the table."
-    );
-  }
-
-  const periodNo = options?.periodNumber ?? 1;
-  // Derive default dates from fiscal year if not provided
-  const fyResult = await sql`SELECT start_date, end_date FROM fiscal_years WHERE id = ${fiscalYearId} LIMIT 1`.execute(db);
-  let startDate = options?.startDate ?? "2026-01-01";
-  let endDate = options?.endDate ?? "2026-01-31";
-
-  if (fyResult.rows.length > 0) {
-    const fyRow = fyResult.rows[0] as { start_date: Date; end_date: Date };
-    if (!options?.startDate) {
-      startDate = fyRow.start_date instanceof Date ? fyRow.start_date.toISOString().split("T")[0] : String(fyRow.start_date);
-    }
-    if (!options?.endDate) {
-      endDate = fyRow.end_date instanceof Date ? fyRow.end_date.toISOString().split("T")[0] : String(fyRow.end_date);
-    }
-  }
-
-  const statusInput = options?.status ?? "OPEN";
-  // Map label to tinyint
-  const statusInt = statusInput === "OPEN" ? STATUS_OPEN_INT : STATUS_CLOSED_INT;
-
-  try {
-    // FIX(47.5-WP-B): Derive company_id from parent fiscal_year_id (fiscal_periods.company_id is NOT NULL)
-    const fyCompanyResult = await sql`SELECT company_id FROM fiscal_years WHERE id = ${fiscalYearId} LIMIT 1`.execute(db);
-    if (fyCompanyResult.rows.length === 0) {
-      throw new Error(`Fiscal year ${fiscalYearId} not found — cannot derive company_id for fiscal period`);
-    }
-    const periodCompanyId = Number((fyCompanyResult.rows[0] as { company_id: number }).company_id);
-
-    // FIX(47.5-WP-B): use period_no (not period_number), status as tinyint, and company_id from parent FY
-    await sql`
-      INSERT INTO fiscal_periods (fiscal_year_id, company_id, period_no, start_date, end_date, status, created_at, updated_at)
-      VALUES (${fiscalYearId}, ${periodCompanyId}, ${periodNo}, ${startDate}, ${endDate}, ${statusInt}, NOW(), NOW())
-    `.execute(db);
-
-    const result = await sql`SELECT id, fiscal_year_id, period_no, start_date, end_date, status FROM fiscal_periods WHERE fiscal_year_id = ${fiscalYearId} AND period_no = ${periodNo} LIMIT 1`.execute(db);
-    if (result.rows.length === 0) {
-      throw new Error(`Failed to create fiscal period for fiscal_year_id ${fiscalYearId}`);
-    }
-    const row = result.rows[0] as { id: number; fiscal_year_id: number; period_no: number; start_date: Date; end_date: Date; status: number };
-    // Map status tinyint back to label for ergonomics
-    const fixture: FiscalPeriodFixture = {
-      id: Number(row.id),
-      fiscalYearId: Number(row.fiscal_year_id),
-      periodNumber: Number(row.period_no),
-      startDate: row.start_date instanceof Date ? row.start_date.toISOString().split("T")[0] : String(row.start_date),
-      endDate: row.end_date instanceof Date ? row.end_date.toISOString().split("T")[0] : String(row.end_date),
-      status: row.status === STATUS_OPEN_INT ? "OPEN" : "CLOSED",
-    };
-    return fixture;
-  } catch (error: unknown) {
-    const mysqlErr = error as { code?: string };
-    if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
-      const result = await sql`SELECT id, fiscal_year_id, period_no, start_date, end_date, status FROM fiscal_periods WHERE fiscal_year_id = ${fiscalYearId} AND period_no = ${periodNo} LIMIT 1`.execute(db);
-      if (result.rows.length > 0) {
-        const row = result.rows[0] as { id: number; fiscal_year_id: number; period_no: number; start_date: Date; end_date: Date; status: number };
-        return {
-          id: Number(row.id),
-          fiscalYearId: Number(row.fiscal_year_id),
-          periodNumber: Number(row.period_no),
-          startDate: row.start_date instanceof Date ? row.start_date.toISOString().split("T")[0] : String(row.start_date),
-          endDate: row.end_date instanceof Date ? row.end_date.toISOString().split("T")[0] : String(row.end_date),
-          status: row.status === STATUS_OPEN_INT ? "OPEN" : "CLOSED",
-        };
-      }
-    }
-    throw error;
-  }
+  const fixture = await pkgCreateTestFiscalPeriod(db, fiscalYearId, {
+    periodNumber: options?.periodNumber,
+    startDate: options?.startDate,
+    endDate: options?.endDate,
+    status: options?.status,
+  });
+  return fixture;
 }
 
 // ============================================================================
@@ -1944,20 +1568,7 @@ export async function createTestAPReconciliationSettings(
   }>
 ): Promise<APReconciliationSettingsFixture> {
   const db = getDb();
-  const settingKey = "ap_reconciliation_account_ids";
-  const settingValue = JSON.stringify(accountIds);
-
-  // Upsert into settings_strings
-  await sql`
-    INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value, created_at, updated_at)
-    VALUES (${companyId}, NULL, ${settingKey}, ${settingValue}, NOW(), NOW())
-    ON DUPLICATE KEY UPDATE setting_value = ${settingValue}, updated_at = NOW()
-  `.execute(db);
-
-  return {
-    companyId,
-    accountIds,
-  };
+  return pkgCreateTestAPReconciliationSettings(db, companyId, accountIds);
 }
 
 /**
@@ -1968,22 +1579,7 @@ export async function createTestAPReconciliationSettings(
  */
 export async function clearTestAPReconciliationSettings(companyId: number): Promise<void> {
   const db = getDb();
-  const settingKey = "ap_reconciliation_account_ids";
-
-  await sql`
-    DELETE FROM settings_strings
-    WHERE company_id = ${companyId}
-      AND outlet_id IS NULL
-      AND setting_key = ${settingKey}
-  `.execute(db);
-
-  await sql`
-    UPDATE company_modules cm
-    INNER JOIN modules m ON m.id = cm.module_id
-    SET cm.purchasing_default_ap_account_id = NULL
-    WHERE cm.company_id = ${companyId}
-      AND m.code = 'purchasing'
-  `.execute(db);
+  await pkgClearTestAPReconciliationSettings(db, companyId);
 }
 
 // FIX(47.5-WP-D): Canonical helper for company-level string settings.
@@ -1994,12 +1590,7 @@ export async function setTestCompanyStringSetting(
   settingValue: string
 ): Promise<void> {
   const db = getDb();
-
-  await sql`
-    INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value, created_at, updated_at)
-    VALUES (${companyId}, NULL, ${settingKey}, ${settingValue}, NOW(), NOW())
-    ON DUPLICATE KEY UPDATE setting_value = ${settingValue}, updated_at = NOW()
-  `.execute(db);
+  await pkgSetTestCompanyStringSetting(db, companyId, settingKey, settingValue);
 }
 
 // ============================================================================
