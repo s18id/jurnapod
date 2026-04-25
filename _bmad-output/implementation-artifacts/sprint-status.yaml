@@ -579,8 +579,8 @@ development_status:
 
   # Epic 50: Ledger Correctness Hardening
   epic-50: in-progress
-  50-1-pos-sync-unbalanced-override: review
+  50-1-pos-sync-unbalanced-override: done
   50-2-q49-001-fixture-extraction: done
   50-3-posting-flow-integration-tests: backlog
   50-4-correctness-fixes-from-testing: backlog
-  50-5-sales-ar-fx-acknowledgment: review
+  50-5-sales-ar-fx-acknowledgment: done

@@ -7,7 +7,7 @@
 >
 > **Agent-safe language:** "MUST NOT begin implementation until..." — no ambiguity permitted.
 
-**Status:** review
+**Status:** done
 
 ---
 
