@@ -478,7 +478,7 @@ export async function approveFiscalYearClose(
     }
 
     // 2) Atomically claim execution ownership via guarded PENDING -> IN_PROGRESS transition.
-    const startedAt = Date.now();
+    const startedAt = context.requestedAtEpochMs;
     const claimResult = await tx
       .updateTable("fiscal_year_close_requests")
       .set({
@@ -558,7 +558,7 @@ export async function approveFiscalYearClose(
     }
 
     // 5) Persist SUCCEEDED request result (guarded by IN_PROGRESS).
-    const completedAt = Date.now();
+    const completedAt = context.requestedAtEpochMs;
     const completeResult = await tx
       .updateTable("fiscal_year_close_requests")
       .set({

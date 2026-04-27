@@ -585,3 +585,11 @@ development_status:
   50-4-correctness-fixes-from-testing: done
   50-5-sales-ar-fx-acknowledgment: done
   epic-50-retrospective: done  # 2026-04-25 — 2 action items (E50-A1, E50-A2)
+
+  # Epic 51: Fiscal Correctness Hardening
+  epic-51: in-progress
+  51-1-fiscal-year-close-correctness-hardening: done
+  51-2-receivables-subledger-reconciliation: backlog
+  51-3-payables-subledger-reconciliation: backlog
+  51-4-inventory-subledger-reconciliation: backlog
+  51-5-follow-up-closure-bucket: backlog

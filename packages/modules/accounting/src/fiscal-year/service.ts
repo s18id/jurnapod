@@ -801,6 +801,7 @@ export class FiscalYearService {
     companyId: number,
     requestedByUserId: number
   ): Promise<CloseFiscalYearResult> {
+    const { requestedAtEpochMs } = context;
 
     // Lock fiscal_year row FIRST to prevent deadlocks
     const lockedFiscalYear = await trx
@@ -826,30 +827,47 @@ export class FiscalYearService {
       );
     }
 
-    // Transition to IN_PROGRESS
-    await trx
+    // Transition to IN_PROGRESS — guarded with row-count verification
+    const startedAt = requestedAtEpochMs;
+    const claimResult = await trx
       .updateTable("fiscal_year_close_requests")
       .set({
         status: FISCAL_YEAR_CLOSE_STATUS.IN_PROGRESS,
         fiscal_year_status_before: lockedFiscalYear.status,
-        started_at_ts: Date.now(),
-        updated_at_ts: Date.now()
+        started_at_ts: startedAt,
+        updated_at_ts: startedAt
       })
       .where("id", "=", closeRequestDbId)
-      .execute();
+      .where("status", "=", FISCAL_YEAR_CLOSE_STATUS.PENDING)
+      .executeTakeFirst();
 
-    // Perform the actual close operation - Update fiscal year status to CLOSED
-    await trx
+    const claimedRows = Number(claimResult.numUpdatedRows ?? 0n);
+    if (claimedRows !== 1) {
+      throw new FiscalYearCloseConflictError(
+        `Fiscal year close request already claimed or in unexpected state (expected PENDING, closeRequestDbId=${closeRequestDbId})`
+      );
+    }
+
+    // Perform the actual close operation — guarded OPEN→CLOSED transition with row-count verification
+    const fiscalYearResult = await trx
       .updateTable("fiscal_years")
       .set({
         status: "CLOSED",
         updated_by_user_id: requestedByUserId
       })
       .where("id", "=", fiscalYearId)
-      .execute();
+      .where("status", "=", "OPEN")
+      .executeTakeFirst();
+
+    const fiscalYearRows = Number(fiscalYearResult.numUpdatedRows ?? 0n);
+    if (fiscalYearRows !== 1) {
+      throw new FiscalYearCloseConflictError(
+        `Fiscal year state changed during close execution (expected OPEN, fiscalYearId=${fiscalYearId})`
+      );
+    }
 
     // Complete the close request
-    const completedAt = Date.now();
+    const completedAt = requestedAtEpochMs;
     await trx
       .updateTable("fiscal_year_close_requests")
       .set({
@@ -953,9 +971,9 @@ export class FiscalYearService {
         }
       }
       throw dbError;
-    }
-
-    throw new Error("Failed to claim fiscal year close idempotency key");
+    // Note: line 976 throw was unreachable — ER_DUP_ENTRY always finds the row
+    // due to the unique constraint uq_fy_close_idem (company_id, fiscal_year_id, close_request_id).
+  }
   }
 
   private async closeFiscalYearWithTransaction(
@@ -1062,30 +1080,47 @@ export class FiscalYearService {
       );
     }
 
-    // Transition to IN_PROGRESS
-    await trx
+    // Transition to IN_PROGRESS — guarded with row-count verification
+    const startedAt = requestedAtEpochMs;
+    const claimResult = await trx
       .updateTable("fiscal_year_close_requests")
       .set({
         status: FISCAL_YEAR_CLOSE_STATUS.IN_PROGRESS,
         fiscal_year_status_before: lockedFiscalYear.status,
-        started_at_ts: Date.now(),
-        updated_at_ts: Date.now()
+        started_at_ts: startedAt,
+        updated_at_ts: startedAt
       })
       .where("id", "=", closeRequestDbId)
-      .execute();
+      .where("status", "=", FISCAL_YEAR_CLOSE_STATUS.PENDING)
+      .executeTakeFirst();
 
-    // Perform the actual close operation
-    await trx
+    const claimedRows = Number(claimResult.numUpdatedRows ?? 0n);
+    if (claimedRows !== 1) {
+      throw new FiscalYearCloseConflictError(
+        `Fiscal year close request already claimed or in unexpected state (expected PENDING, closeRequestDbId=${closeRequestDbId})`
+      );
+    }
+
+    // Perform the actual close operation — guarded OPEN→CLOSED transition with row-count verification
+    const fiscalYearResult = await trx
       .updateTable("fiscal_years")
       .set({
         status: "CLOSED",
         updated_by_user_id: requestedByUserId
       })
       .where("id", "=", fiscalYearId)
-      .execute();
+      .where("status", "=", "OPEN")
+      .executeTakeFirst();
+
+    const fiscalYearRows = Number(fiscalYearResult.numUpdatedRows ?? 0n);
+    if (fiscalYearRows !== 1) {
+      throw new FiscalYearCloseConflictError(
+        `Fiscal year state changed during close execution (expected OPEN, fiscalYearId=${fiscalYearId})`
+      );
+    }
 
     // Complete the close request
-    const completedAt = Date.now();
+    const completedAt = requestedAtEpochMs;
     await trx
       .updateTable("fiscal_year_close_requests")
       .set({
