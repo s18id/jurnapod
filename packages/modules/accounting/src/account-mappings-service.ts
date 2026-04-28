@@ -33,8 +33,8 @@ async function findOrCreateAccount(
     : null;
 
   const inserted = await sql`
-    INSERT INTO accounts (company_id, code, name, account_type_id, is_active, is_payable, created_at, updated_at)
-    VALUES (${input.companyId}, ${input.code}, ${input.name}, ${accountTypeId}, 1, 0, NOW(), NOW())
+    INSERT INTO accounts (company_id, code, name, account_type_id, is_active, is_payable, is_receivable, created_at, updated_at)
+    VALUES (${input.companyId}, ${input.code}, ${input.name}, ${accountTypeId}, 1, 0, ${input.code === "AR" || input.code === "RECEIVABLE" ? 1 : 0}, NOW(), NOW())
   `.execute(db);
 
   return Number((inserted as { insertId?: number }).insertId ?? 0);

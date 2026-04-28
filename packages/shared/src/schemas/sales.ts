@@ -593,3 +593,67 @@ export type SalesCreditNoteDetail = z.infer<typeof SalesCreditNoteDetailSchema>;
 export type SalesCreditNoteResponse = z.infer<typeof SalesCreditNoteResponseSchema>;
 export type SalesCreditNoteListQuery = z.infer<typeof SalesCreditNoteListQuerySchema>;
 export type SalesLineType = z.infer<typeof SalesLineTypeSchema>;
+
+// =============================================================================
+// AR Reconciliation Schemas (Story 51.2)
+// =============================================================================
+
+/**
+ * AR Reconciliation Settings Update Schema
+ * Body for PUT /accounting/reports/ar-reconciliation/settings
+ */
+export const ARReconciliationSettingsUpdateSchema = z.object({
+  account_ids: z
+    .array(z.number().int().positive())
+    .min(1, "At least one account is required")
+    .max(50, "Maximum 50 accounts allowed")
+    .refine((arr) => new Set(arr).size === arr.length, {
+      message: "Account IDs must be unique",
+    }),
+});
+
+/**
+ * AR Reconciliation Settings Response Schema
+ */
+export const ARReconciliationSettingsResponseSchema = z.object({
+  account_ids: z.array(z.number().int().positive()),
+  source: z.enum(["settings", "fallback_company_default", "none"]),
+});
+
+/**
+ * AR Reconciliation Summary Query Schema
+ */
+export const ARReconciliationSummaryQuerySchema = z.object({
+  as_of_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format"),
+});
+
+/**
+ * AR Reconciliation Summary Response Schema
+ */
+export const ARReconciliationSummaryResponseSchema = z.object({
+  as_of_date: z.string(),
+  ar_subledger_balance: z.string(),
+  gl_control_balance: z.string(),
+  variance: z.string(),
+  configured_account_ids: z.array(z.number().int().positive()),
+  account_source: z.enum(["settings", "fallback_company_default", "none"]),
+  currency: z.string(),
+});
+
+// Type exports
+export type ARReconciliationSettingsUpdate = z.infer<typeof ARReconciliationSettingsUpdateSchema>;
+export type ARReconciliationSettingsResponse = z.infer<typeof ARReconciliationSettingsResponseSchema>;
+export type ARReconciliationSummaryQuery = z.infer<typeof ARReconciliationSummaryQuerySchema>;
+export type ARReconciliationSummaryResponse = z.infer<typeof ARReconciliationSummaryResponseSchema>;
+
+/**
+ * AR Reconciliation Drilldown Query Schema
+ */
+export const ARReconciliationDrilldownQuerySchema = z.object({
+  as_of_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format"),
+  document_type: z.enum(["sales_invoice", "sales_payment", "sales_credit_note"]).optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(1000).optional(),
+});
+
+export type ARReconciliationDrilldownQuery = z.infer<typeof ARReconciliationDrilldownQuerySchema>;

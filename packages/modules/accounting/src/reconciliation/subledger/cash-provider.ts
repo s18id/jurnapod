@@ -241,7 +241,7 @@ export class CashSubledgerProvider implements SubledgerBalanceProvider {
     `;
 
     const result = await query.execute(this.db);
-    return result.rows.map((r: { id: number }) => Number(r.id));
+    return (result.rows as { id: number }[]).map((r) => Number(r.id));
   }
 
   /**

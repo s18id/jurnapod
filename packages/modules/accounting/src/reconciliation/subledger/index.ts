@@ -49,3 +49,43 @@ export {
 
 // Re-export CASH provider
 export { CashSubledgerProvider, type CashSubledgerDbClient, type CashSubledgerProviderOptions } from "./cash-provider.js";
+
+// Re-export RECEIVABLES provider
+export {
+  ReceivablesSubledgerProvider,
+  type ReceivablesSubledgerDbClient,
+  type ReceivablesSubledgerProviderOptions,
+} from "./receivables-provider.js";
+
+// Re-export AR reconciliation types and service
+export {
+  type ARReconciliationSettings,
+  type ARReconciliationSummaryResult,
+  type ARDocumentType,
+  type ARGLDetailLine,
+  type ARDetailLine,
+  type ARGLDetailResult,
+  type ARDetailResult,
+  type GetARGLDetailParams,
+  type GetARDetailParams,
+  type GetARReconciliationSummaryParams,
+  type GetARReconciliationSettingsParams,
+  type ValidateARReconciliationAccountIdsParams,
+  type SaveARReconciliationSettingsParams,
+  type ARDrilldownCategory,
+  type ARDrilldownLineItem,
+  type ARDrilldownResult,
+  type GetARReconciliationDrilldownParams,
+  ARReconciliationError,
+  ARReconciliationSettingsRequiredError,
+  ARReconciliationInvalidAccountError,
+  ARReconciliationCrossTenantAccountError,
+  ARReconciliationTimezoneRequiredError,
+} from "./ar-reconciliation-types.js";
+
+export {
+  ARReconciliationService,
+  toScaled,
+  fromScaled,
+  fromScaled4,
+} from "./ar-reconciliation-service.js";

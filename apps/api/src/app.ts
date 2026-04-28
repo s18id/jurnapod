@@ -53,6 +53,7 @@ import { auditRoutes } from './routes/audit.js';
 import { swaggerRoutes } from './routes/swagger.js';
 import { purchasingRoutes } from './routes/purchasing/index.js';
 import { apExceptionRoutes } from './routes/accounting/ap-exceptions.js';
+import { accountingRoutes } from './routes/accounting/index.js';
 
 const HTTP_LOG_ENABLED = process.env.JP_HTTP_LOG === "1";
 
@@ -197,6 +198,7 @@ export function createApp(): Hono {
 
   // Register AP exception routes
   app.route("/api/accounting/ap-exceptions", apExceptionRoutes);
+  app.route("/api/accounting", accountingRoutes);
   app.route("/api/reports", reportRoutes);
   app.route("/api/accounts", accountRoutes);
   app.route("/api/companies", companyRoutes);
