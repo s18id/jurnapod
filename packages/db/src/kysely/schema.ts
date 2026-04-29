@@ -1208,6 +1208,7 @@ export interface PosTransactions {
   status: string;
   table_id: Generated<number | null>;
   trx_at: Date;
+  trx_at_ts: number;
   updated_at: Generated<Date>;
 }
 

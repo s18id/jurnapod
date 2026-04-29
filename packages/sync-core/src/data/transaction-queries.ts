@@ -22,6 +22,7 @@ export type PosTransactionQueryResult = {
   closed_at: Date | null;
   notes: string | null;
   trx_at: Date;
+  trx_at_ts: number;
   discount_percent: string;
   discount_fixed: string;
   discount_code: string | null;
@@ -86,6 +87,7 @@ export type PosTransactionInsertInput = {
   closed_at?: string | null;
   notes?: string | null;
   trx_at: string;
+  trx_at_ts: number;
   discount_percent?: number;
   discount_fixed?: number;
   discount_code?: string | null;
@@ -127,24 +129,26 @@ export type PosTransactionTaxInsertInput = {
 // ============================================================================
 
 /**
- * Read a single POS transaction by client_tx_id + company_id.
+ * Read a single POS transaction by client_tx_id + company_id + outlet_id.
  * Used for idempotency checks in sync push.
  */
 export async function readPosTransactionByClientTxId(
   db: KyselySchema,
   clientTxId: string,
-  companyId: number
+  companyId: number,
+  outletId: number
 ): Promise<PosTransactionQueryResult | null> {
   const result = await db
     .selectFrom('pos_transactions')
     .select([
       'id', 'company_id', 'outlet_id', 'cashier_user_id', 'client_tx_id', 'status',
       'service_type', 'table_id', 'reservation_id', 'guest_count', 'order_status',
-      'opened_at', 'closed_at', 'notes', 'trx_at', 'discount_percent', 'discount_fixed',
+      'opened_at', 'closed_at', 'notes', 'trx_at', 'trx_at_ts', 'discount_percent', 'discount_fixed',
       'discount_code', 'payload_sha256', 'payload_hash_version', 'created_at', 'updated_at'
     ])
     .where('client_tx_id', '=', clientTxId)
     .where('company_id', '=', companyId)
+    .where('outlet_id', '=', outletId)
     .limit(1)
     .executeTakeFirst();
 
@@ -169,6 +173,9 @@ export async function readPosTransactionByClientTxId(
     closed_at: row.closed_at,
     notes: row.notes,
     trx_at: row.trx_at,
+    trx_at_ts: row.trx_at_ts == null
+      ? (() => { throw new Error('trx_at_ts must not be null'); })()
+      : Number(row.trx_at_ts),
     discount_percent: row.discount_percent,
     discount_fixed: row.discount_fixed,
     discount_code: row.discount_code,
@@ -180,14 +187,15 @@ export async function readPosTransactionByClientTxId(
 }
 
 /**
- * Batch read POS transactions by client_tx_id + company_id.
+ * Batch read POS transactions by client_tx_id + company_id + outlet_id.
  * Used for idempotency checks when processing multiple transactions.
  * Returns a Map for efficient lookup by client_tx_id.
  */
 export async function batchReadPosTransactionsByClientTxIds(
   db: KyselySchema,
   clientTxIds: string[],
-  companyId: number
+  companyId: number,
+  outletId: number
 ): Promise<Map<string, PosTransactionQueryResult>> {
   if (clientTxIds.length === 0) {
     return new Map();
@@ -198,11 +206,12 @@ export async function batchReadPosTransactionsByClientTxIds(
     .select([
       'id', 'company_id', 'outlet_id', 'cashier_user_id', 'client_tx_id', 'status',
       'service_type', 'table_id', 'reservation_id', 'guest_count', 'order_status',
-      'opened_at', 'closed_at', 'notes', 'trx_at', 'discount_percent', 'discount_fixed',
+      'opened_at', 'closed_at', 'notes', 'trx_at', 'trx_at_ts', 'discount_percent', 'discount_fixed',
       'discount_code', 'payload_sha256', 'payload_hash_version', 'created_at', 'updated_at'
     ])
     .where('client_tx_id', 'in', clientTxIds)
     .where('company_id', '=', companyId)
+    .where('outlet_id', '=', outletId)
     .execute();
 
   const map = new Map<string, PosTransactionQueryResult>();
@@ -224,6 +233,9 @@ export async function batchReadPosTransactionsByClientTxIds(
       closed_at: r.closed_at,
       notes: r.notes,
       trx_at: r.trx_at,
+      trx_at_ts: r.trx_at_ts == null
+        ? (() => { throw new Error('trx_at_ts must not be null'); })()
+        : Number(r.trx_at_ts),
       discount_percent: r.discount_percent,
       discount_fixed: r.discount_fixed,
       discount_code: r.discount_code,
@@ -249,10 +261,9 @@ export async function insertPosTransaction(
   db: KyselySchema,
   tx: PosTransactionInsertInput
 ): Promise<number> {
-  // Convert string dates to Date objects for Kysely
   const openedAt = tx.opened_at ? new Date(tx.opened_at) : null;
   const closedAt = tx.closed_at ? new Date(tx.closed_at) : null;
-  const trxAt = new Date(tx.trx_at);
+  const trxAt = new Date(tx.trx_at_ts);
 
   const result = await db
     .insertInto('pos_transactions')
@@ -271,6 +282,7 @@ export async function insertPosTransaction(
       closed_at: closedAt,
       notes: tx.notes ?? null,
       trx_at: trxAt,
+      trx_at_ts: tx.trx_at_ts,
       discount_percent: tx.discount_percent ?? 0,
       discount_fixed: tx.discount_fixed ?? 0,
       discount_code: tx.discount_code ?? null,

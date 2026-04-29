@@ -393,6 +393,8 @@ describe('PosSyncModule Integration', () => {
 
       it('should detect duplicate transaction (idempotency)', async () => {
         const clientTxId = txId('tx-dup');
+        const trxAtIso = '2024-01-15T10:30:00+07:00';
+        const expectedTrxAtTs = Date.parse(trxAtIso);
 
         const transaction: TransactionPush = {
           client_tx_id: clientTxId,
@@ -401,7 +403,7 @@ describe('PosSyncModule Integration', () => {
           cashier_user_id: fixtures.testUserId,
           status: 'COMPLETED',
           service_type: 'TAKEAWAY',
-          trx_at: '2024-01-15T10:30:00+07:00',
+          trx_at: trxAtIso,
           items: [
             {
               item_id: fixtures.testItemId,
@@ -445,6 +447,20 @@ describe('PosSyncModule Integration', () => {
 
         expect(secondResult.results).toHaveLength(1);
         expect(secondResult.results[0].result).toBe('DUPLICATE');
+
+        const persistedRows = await sql<{
+          row_count: number;
+          trx_at_ts: number;
+        }>`
+          SELECT COUNT(*) AS row_count, MAX(trx_at_ts) AS trx_at_ts
+          FROM pos_transactions
+          WHERE company_id = ${fixtures.testCompanyId}
+            AND outlet_id = ${fixtures.testOutletId}
+            AND client_tx_id = ${clientTxId}
+        `.execute(fixtures.db);
+
+        expect(Number(persistedRows.rows[0]?.row_count ?? 0)).toBe(1);
+        expect(Number(persistedRows.rows[0]?.trx_at_ts ?? 0)).toBe(expectedTrxAtTs);
       });
 
       it('should reject transaction with company_id mismatch', async () => {

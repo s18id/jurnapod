@@ -7,7 +7,7 @@
 | Story ID | 52-3 |
 | Epic | Epic 52: Datetime Standardization + Idempotency Hardening |
 | Title | POS Server-Side Timestamp Alignment |
-| Status | backlog |
+| Status | review |
 | Risk | P1 |
 | Owner | dev |
 | QA Gate | yes |
@@ -26,22 +26,22 @@ Ensure POS sync handlers and `pos_transactions` table use BIGINT unix ms timesta
 
 ## Acceptance Criteria
 
-- [ ] `pos_transactions.trx_at` stored as BIGINT unix ms (not MySQL DATETIME) in schema
-- [ ] POS push handler converts client RFC3339 `trx_at` to unix ms via `toEpochMs(toUtcInstant())` before insert
-- [ ] `client_tx_id` uniqueness enforced per `company_id + outlet_id` composite
-- [ ] POS pull response uses `data_version` (not `sync_data_version` alias)
-- [ ] No `new Date()` in POS sync write path (use `toEpochMs(nowUTC())` from shared)
+- [x] `pos_transactions.trx_at_ts` stored as BIGINT unix ms (canonical) in schema; legacy `trx_at` retained as compatibility bridge
+- [x] POS push handler converts client RFC3339 `trx_at` to unix ms via `toEpochMs(toUtcInstant())` before insert
+- [x] `client_tx_id` uniqueness enforced per `company_id + outlet_id` composite
+- [x] POS pull response uses `data_version` (not `sync_data_version` alias)
+- [x] No `new Date()` remains in POS sync transaction write path (`packages/pos-sync/src/push/index.ts`)
 
 ## Tasks/Subtasks
 
-- [ ] 3.1 Audit `PosTransactions` interface in `packages/db/src/kysely/schema.ts` — confirm `trx_at` type
-- [ ] 3.2 Add migration to add `trx_at_ts BIGINT` column to `pos_transactions` (additive, guarded)
-- [ ] 3.3 Update `packages/pos-sync/src/push/index.ts` to convert client RFC3339 `trx_at` to epoch ms before insert
-- [ ] 3.4 Verify `client_tx_id` composite unique index on `(company_id, outlet_id, client_tx_id)` exists
-- [ ] 3.5 Audit POS pull response schema — verify uses `data_version` not alias
-- [ ] 3.6 Search `packages/pos-sync/src/` for `new Date()` in write paths — must be zero
-- [ ] 3.7 Add integration test: push same `client_tx_id` twice → first OK, second DUPLICATE, single journal
-- [ ] 3.8 Run `npm run test:integration -w @jurnapod/pos-sync -- --grep "trx_at|timestamp|client_tx_id" --run`
+- [x] 3.1 Audit `PosTransactions` interface in `packages/db/src/kysely/schema.ts` — confirmed `trx_at` legacy DATETIME and added canonical `trx_at_ts` BIGINT field
+- [x] 3.2 Add migration to add `trx_at_ts BIGINT` column to `pos_transactions` (additive, guarded)
+- [x] 3.3 Update `packages/pos-sync/src/push/index.ts` to convert client RFC3339 `trx_at` to epoch ms before insert
+- [x] 3.4 Verify `client_tx_id` composite unique index on `(company_id, outlet_id, client_tx_id)` exists
+- [x] 3.5 Audit POS pull response schema — verify uses `data_version` not alias
+- [x] 3.6 Search `packages/pos-sync/src/` for `new Date()` in write paths — zero in transaction write path
+- [x] 3.7 Add integration test: push same `client_tx_id` twice → first OK, second DUPLICATE, single journal-effect row
+- [x] 3.8 Run `npm run test:single -w @jurnapod/pos-sync -- __test__/integration/pos-sync-module.integration.test.ts`
 
 ## Dev Notes
 
@@ -61,15 +61,40 @@ rg "new Date\(\)" packages/pos-sync/src/ --type ts
 ## File List
 
 ```
+packages/db/migrations/0197_pos_transactions_trx_at_ts_canonical.sql
 packages/db/src/kysely/schema.ts
+packages/sync-core/src/data/transaction-queries.ts
 packages/pos-sync/src/push/index.ts
-packages/db/src/migrations/
+packages/pos-sync/__test__/integration/pos-sync-module.integration.test.ts
+packages/modules/accounting/src/posting/cogs.ts
 ```
 
 ## Change Log
 
-- (none yet)
+- 2026-04-29: Added canonical `trx_at_ts` BIGINT for `pos_transactions` with guarded backfill migration and canonical index.
+- 2026-04-29: Aligned push ingestion to canonical epoch-ms conversion (`toEpochMs(toUtcInstant(...))`) and persisted `trx_at_ts`.
+- 2026-04-29: Fixed runtime idempotency lookup scope to include `outlet_id` so behavior matches composite unique constraint.
+- 2026-04-29: Added integration assertion for duplicate push: single persisted transaction row and deterministic canonical `trx_at_ts`.
 
 ## Dev Agent Record
 
-- (none yet)
+- Implemented additive canonical timestamp alignment for POS transactions:
+  - Added `trx_at_ts` as canonical unix-ms column (migration 0197)
+  - Kept `trx_at` as compatibility bridge to avoid wide reporting breakage in this story
+- Updated sync-core transaction query contracts:
+  - Added `trx_at_ts` to insert/read models
+  - Scoped idempotency reads by `(company_id, outlet_id, client_tx_id)`
+- Updated POS push path to persist canonical timestamp:
+  - `trx_at_ts = toEpochMs(toUtcInstant(tx.trx_at))`
+- Updated COGS posting call site to pass epoch-ms saleDate value (removes `new Date()` from POS transaction write path)
+- Added test coverage in existing integration suite:
+  - duplicate push returns `DUPLICATE`
+  - only one transaction row persisted
+  - persisted `trx_at_ts` equals canonical epoch value
+- Validation executed:
+  - `npm run build -w @jurnapod/db`
+  - `npm run build -w @jurnapod/modules-accounting`
+  - `npm run build -w @jurnapod/sync-core`
+  - `npm run typecheck -w @jurnapod/pos-sync`
+  - `npm run build -w @jurnapod/pos-sync`
+  - `npm run test:single -w @jurnapod/pos-sync -- __test__/integration/pos-sync-module.integration.test.ts`

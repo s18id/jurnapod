@@ -35,7 +35,7 @@ export interface CogsPostingInput {
     unitCost?: number;
     totalCost?: number;
   }>;
-  saleDate: Date;
+  saleDate: Date | number;
   postedBy: number;
   /**
    * Optional pre-calculated costs from deductWithCost.
@@ -718,7 +718,14 @@ async function postCogsForSaleInternal(
   }
 }
 
-function toBusinessDate(value: Date): string {
+function toBusinessDate(value: Date | number): string {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new CogsPostingError("Invalid saleDate for COGS posting");
+    }
+    return new Date(value).toISOString().slice(0, 10);
+  }
+
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
     throw new CogsPostingError("Invalid saleDate for COGS posting");
   }

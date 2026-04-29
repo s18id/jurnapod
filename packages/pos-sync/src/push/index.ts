@@ -264,7 +264,12 @@ async function processTransaction(
     );
 
     // Check for existing transaction (idempotency)
-    const existingRecord = await readPosTransactionByClientTxId(db, tx.client_tx_id, tx.company_id);
+    const existingRecord = await readPosTransactionByClientTxId(
+      db,
+      tx.client_tx_id,
+      tx.company_id,
+      tx.outlet_id
+    );
     if (existingRecord) {
       const idempotencyResult = syncIdempotencyService.determineReplayOutcome(
         {
@@ -299,6 +304,7 @@ async function processTransaction(
 
     // Canonical timestamps
     const trxAtCanonical = toMysqlDateTimeStrict(tx.trx_at);
+    const trxAtTs = toTimestampMs(tx.trx_at, "trx_at");
     const openedAtCanonical = tx.opened_at ? toMysqlDateTimeStrict(tx.opened_at) : trxAtCanonical;
     const closedAtCanonical = tx.closed_at ? toMysqlDateTimeStrict(tx.closed_at) : trxAtCanonical;
 
@@ -318,6 +324,7 @@ async function processTransaction(
       closed_at: closedAtCanonical,
       notes: tx.notes ?? null,
       trx_at: trxAtCanonical,
+      trx_at_ts: trxAtTs,
       discount_percent: tx.discount_percent ?? 0,
       discount_fixed: tx.discount_fixed ?? 0,
       discount_code: tx.discount_code ?? null,
@@ -429,7 +436,7 @@ async function processTransaction(
               outletId: tx.outlet_id,
               items: cogsItems,
               deductionCosts,
-              saleDate: new Date(tx.trx_at),
+              saleDate: trxAtTs,
               postedBy: tx.cashier_user_id
             }, db);
           }
@@ -488,7 +495,12 @@ async function filterNewTransactions(
   }
 
   const clientTxIds = transactions.map((tx) => tx.client_tx_id);
-  const existingRecords = await batchReadPosTransactionsByClientTxIds(db, clientTxIds, companyId);
+  const existingRecords = await batchReadPosTransactionsByClientTxIds(
+    db,
+    clientTxIds,
+    companyId,
+    outletId
+  );
 
   const newTransactions: TransactionPush[] = [];
   const duplicateResults: SyncPushResultItem[] = [];
