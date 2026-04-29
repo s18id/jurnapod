@@ -131,7 +131,7 @@ export interface ReservationDbRow {
   customer_phone: string | null;
   customer_email: string | null;
   reservation_time: string | null;
-  reservation_at: string;
+  reservation_at: string | null;
   reservation_start_ts: number | string | null;
   reservation_end_ts: number | string | null;
   duration_minutes: number | null;

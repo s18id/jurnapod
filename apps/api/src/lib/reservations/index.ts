@@ -14,14 +14,12 @@ export * from './types';
 // Re-export helpers from utils (single source of truth)
 export {
   toIso,
-  toDbDateTime,
   toUnixMs,
   fromUnixMs,
   mapRow,
   mapDbRowToReservation,
   isFinalStatus,
   canTransition,
-  reservationsOverlap,
   columnExists,
   generateReservationCodeWithConnection,
   MAX_CODE_GENERATION_RETRIES,

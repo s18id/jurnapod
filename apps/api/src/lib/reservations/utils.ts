@@ -15,7 +15,6 @@ import type { KyselySchema } from "../db";
 import {
   ReservationStatusV2,
   type ReservationStatus,
-  toMysqlDateTimeFromDateLike,
 } from "@jurnapod/shared";
 import { toEpochMs, fromEpochMs, toUtcInstant } from "../date-helpers";
 import { getSetting } from "../settings";
@@ -54,14 +53,6 @@ export function toIso(value: Date | string | null): string | null {
 }
 
 /**
- * Convert Date or string to MySQL DATETIME format.
- * Delegates to canonical toMysqlDateTimeFromDateLike from @jurnapod/shared.
- */
-export function toDbDateTime(value: Date | string): string {
-  return toMysqlDateTimeFromDateLike(value);
-}
-
-/**
  * Convert Date or string to unix milliseconds
  */
 export function toUnixMs(value: Date | string): number {
@@ -69,7 +60,8 @@ export function toUnixMs(value: Date | string): number {
     const iso = value instanceof Date ? value.toISOString() : value;
     return toEpochMs(iso);
   } catch {
-    throw new ReservationValidationError("Invalid reservation datetime value");
+    const valueType = value instanceof Date ? "Date" : typeof value;
+    throw new ReservationValidationError(`Invalid reservation datetime value (type=${valueType})`);
   }
 }
 
@@ -96,10 +88,10 @@ export function fromUnixMs(value: number | string | null | undefined): number | 
  */
 export function mapRow(row: ReservationDbRow) {
   const reservationStartTs = fromUnixMs(row.reservation_start_ts);
-  const reservationAt =
-    reservationStartTs !== null
-      ? fromEpochMs(reservationStartTs)
-      : toUtcInstant(row.reservation_at);
+  if (reservationStartTs === null) {
+    throw new ReservationValidationError("reservation_start_ts is required for reservation mapping");
+  }
+  const reservationAt = fromEpochMs(reservationStartTs);
   const createdAt = toIso(row.created_at);
   const updatedAt = toIso(row.updated_at);
   if (!reservationAt || !createdAt || !updatedAt) {
@@ -164,10 +156,10 @@ export function mapDbRowToReservation(row: ReservationDbRow): Reservation {
   }
 
   const reservationStartTs = fromUnixMs(row.reservation_start_ts);
-  const reservationTimeStr =
-    reservationStartTs !== null
-      ? new Date(reservationStartTs).toISOString()
-      : toUtcInstant(row.reservation_at ?? "");
+  if (reservationStartTs === null) {
+    throw new ReservationValidationError("reservation_start_ts is required for reservation mapping");
+  }
+  const reservationTimeStr = new Date(reservationStartTs).toISOString();
   const createdAtStr = toIso(row.created_at);
   const updatedAtStr = toIso(row.updated_at);
 
@@ -216,6 +208,10 @@ export function canTransition(fromStatus: ReservationStatus, toStatus: Reservati
     'COMPLETED': []
   };
   return transitions[fromStatus]?.includes(toStatus) ?? false;
+}
+
+function isValidDurationMinutes(value: number): boolean {
+  return Number.isFinite(value) && Number.isInteger(value) && value > 0;
 }
 
 // ============================================================================
@@ -312,6 +308,9 @@ export async function resolveEffectiveDurationMinutes(
   durationMinutes: number | null | undefined
 ): Promise<number> {
   if (durationMinutes !== null && durationMinutes !== undefined) {
+    if (!isValidDurationMinutes(durationMinutes)) {
+      throw new ReservationValidationError("duration_minutes must be a positive integer");
+    }
     return durationMinutes;
   }
 
@@ -324,7 +323,7 @@ export async function resolveEffectiveDurationMinutes(
   if (setting?.value !== null && setting?.value !== undefined) {
     try {
       const parsed = Number(setting.value);
-      if (Number.isFinite(parsed)) {
+      if (isValidDurationMinutes(parsed)) {
         return parsed;
       }
     } catch {
@@ -333,21 +332,4 @@ export async function resolveEffectiveDurationMinutes(
   }
 
   return 90;
-}
-
-// ============================================================================
-// HELPERS FOR AVAILABILITY CHECKING
-// ============================================================================
-
-/**
- * Check if a reservation overlaps with a time range
- * Overlap rule: a_start < b_end && b_start < a_end
- */
-export function reservationsOverlap(
-  aStart: number,
-  aEnd: number,
-  bStart: number,
-  bEnd: number
-): boolean {
-  return aStart < bEnd && bStart < aEnd;
 }

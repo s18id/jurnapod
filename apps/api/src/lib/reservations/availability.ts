@@ -18,7 +18,6 @@ import {
 import type {
   OccupancySnapshotRow,
   OutletTableRow,
-  LegacyOverlapRow,
   OutletTableStatus,
 } from "./types";
 import {
@@ -26,7 +25,7 @@ import {
 } from "./types";
 
 // Import helpers from utils module
-import { toUnixMs, fromUnixMs, resolveEffectiveDurationMinutes } from "./utils";
+import { toUnixMs } from "./utils";
 
 // ============================================================================
 // TABLE OCCUPANCY SNAPSHOT
@@ -252,8 +251,6 @@ export async function checkReservationOverlap(
       AND outlet_id = ${outletId}
       AND table_id = ${tableId}
       AND status NOT IN ('CANCELLED', 'NO_SHOW', 'COMPLETED')
-      AND reservation_start_ts IS NOT NULL
-      AND reservation_end_ts IS NOT NULL
       AND reservation_start_ts < ${newEndTs}
       AND reservation_end_ts > ${newStartTs}
   `;
@@ -266,8 +263,6 @@ export async function checkReservationOverlap(
         AND outlet_id = ${outletId}
         AND table_id = ${tableId}
         AND status NOT IN ('CANCELLED', 'NO_SHOW', 'COMPLETED')
-        AND reservation_start_ts IS NOT NULL
-        AND reservation_end_ts IS NOT NULL
         AND reservation_start_ts < ${newEndTs}
         AND reservation_end_ts > ${newStartTs}
         AND id <> ${excludeReservationId}
@@ -275,63 +270,7 @@ export async function checkReservationOverlap(
   }
 
   const canonicalResult = await canonicalQuery.execute(db);
-  if (Number(canonicalResult.rows[0]?.count ?? 0) > 0) {
-    return true;
-  }
-
-  let legacyQuery = sql<LegacyOverlapRow>`
-    SELECT reservation_start_ts, reservation_end_ts, reservation_at, duration_minutes
-    FROM reservations
-    WHERE company_id = ${companyId}
-      AND outlet_id = ${outletId}
-      AND table_id = ${tableId}
-      AND status NOT IN ('CANCELLED', 'NO_SHOW', 'COMPLETED')
-      AND (reservation_start_ts IS NULL OR reservation_end_ts IS NULL)
-  `;
-
-  if (excludeReservationId) {
-    legacyQuery = sql<LegacyOverlapRow>`
-      SELECT reservation_start_ts, reservation_end_ts, reservation_at, duration_minutes
-      FROM reservations
-      WHERE company_id = ${companyId}
-        AND outlet_id = ${outletId}
-        AND table_id = ${tableId}
-        AND status NOT IN ('CANCELLED', 'NO_SHOW', 'COMPLETED')
-        AND (reservation_start_ts IS NULL OR reservation_end_ts IS NULL)
-        AND id <> ${excludeReservationId}
-    `;
-  }
-
-  const legacyResult = await legacyQuery.execute(db);
-  if (legacyResult.rows.length === 0) {
-    return false;
-  }
-
-  const defaultDurationMinutes = await resolveEffectiveDurationMinutes(Number(companyId), null);
-  for (const row of legacyResult.rows) {
-    const existingDuration = row.duration_minutes ?? defaultDurationMinutes;
-    let existingStartTs = fromUnixMs(row.reservation_start_ts);
-    let existingEndTs = fromUnixMs(row.reservation_end_ts);
-
-    if (existingStartTs === null && row.reservation_at) {
-      existingStartTs = toUnixMs(row.reservation_at);
-    }
-    if (existingEndTs === null && existingStartTs !== null) {
-      existingEndTs = existingStartTs + existingDuration * 60000;
-    }
-    if (existingStartTs === null && existingEndTs !== null) {
-      existingStartTs = existingEndTs - existingDuration * 60000;
-    }
-    if (existingStartTs === null || existingEndTs === null) {
-      continue;
-    }
-
-    if (existingStartTs < newEndTs && existingEndTs > newStartTs) {
-      return true;
-    }
-  }
-
-  return false;
+  return Number(canonicalResult.rows[0]?.count ?? 0) > 0;
 }
 
 // ============================================================================

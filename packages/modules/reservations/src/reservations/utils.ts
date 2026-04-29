@@ -46,6 +46,16 @@ export function fromUnixMsToNumber(value: number | string | null | undefined): n
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+export function assertValidDurationMinutes(durationMinutes: number): void {
+  const isValid = Number.isFinite(durationMinutes)
+    && Number.isInteger(durationMinutes)
+    && durationMinutes > 0;
+
+  if (!isValid) {
+    throw new ReservationValidationError("duration_minutes must be a positive integer");
+  }
+}
+
 /**
  * Map database row to ReservationRecord
  */
@@ -70,9 +80,10 @@ export function mapDbRowToReservation(row: ReservationDbRow): {
   updatedAt: Date;
 } {
   const reservationStartTsRaw = fromUnixMsToNumber(row.reservation_start_ts);
-  const reservationStartTs = reservationStartTsRaw !== null
-    ? reservationStartTsRaw
-    : toUnixMsFromDate(row.reservation_at);
+  if (reservationStartTsRaw === null) {
+    throw new ReservationValidationError("reservation_start_ts is required for reservation mapping");
+  }
+  const reservationStartTs = reservationStartTsRaw;
 
   const reservationEndTsRaw = fromUnixMsToNumber(row.reservation_end_ts);
   const durationMinutes = row.duration_minutes ?? RESERVATION_DEFAULT_DURATION_FALLBACK;

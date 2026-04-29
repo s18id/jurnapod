@@ -1256,10 +1256,10 @@ export interface Reservations {
   linked_order_id: Generated<string | null>;
   notes: Generated<string | null>;
   outlet_id: number;
-  reservation_at: Date;
-  reservation_end_ts: Generated<number | null>;
+  reservation_at: Generated<Date | null>;
+  reservation_end_ts: Generated<number>;
   reservation_group_id: Generated<number | null>;
-  reservation_start_ts: Generated<number | null>;
+  reservation_start_ts: Generated<number>;
   seated_at: Generated<Date | null>;
   status: Generated<string>;
   status_id: number;

@@ -597,7 +597,7 @@ development_status:
   # Epic 52: Datetime Standardization + Idempotency Hardening
   epic-52: in-progress
   52-1-datetime-utility-surface-consolidation: review
-  52-2-reservation-legacy-fallback-removal: backlog
+  52-2-reservation-legacy-fallback-removal: review
   52-3-pos-timestamp-alignment: backlog
   52-4-fiscal-close-idempotency-hardening: backlog
   52-5-ap-idempotency-key-standardization: backlog

@@ -162,12 +162,7 @@ export async function getTableBoard(
       to2.guest_count,
       COALESCE(to2.version, 1) as version,
       (
-        SELECT MIN(
-          CASE
-            WHEN r.reservation_start_ts IS NOT NULL THEN r.reservation_start_ts
-            ELSE UNIX_TIMESTAMP(r.reservation_at) * 1000
-          END
-        )
+        SELECT MIN(r.reservation_start_ts)
         FROM reservations r
         WHERE r.company_id = ot.company_id
           AND r.outlet_id = ot.outlet_id
@@ -176,10 +171,7 @@ export async function getTableBoard(
             r.status_id IN (1, 2)
             OR (r.status_id IS NULL AND r.status IN ('BOOKED', 'CONFIRMED'))
           )
-          AND (
-            (r.reservation_start_ts IS NOT NULL AND r.reservation_start_ts >= (UNIX_TIMESTAMP(NOW()) * 1000))
-            OR (r.reservation_start_ts IS NULL AND r.reservation_at >= NOW())
-          )
+          AND r.reservation_start_ts >= (UNIX_TIMESTAMP(NOW()) * 1000)
       ) as next_reservation_start_at,
       COALESCE(to2.updated_at, ot.updated_at) as updated_at
     FROM outlet_tables ot

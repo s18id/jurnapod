@@ -11,8 +11,6 @@ import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import type { OccupancySnapshotRow } from "./types.js";
 import type { UnixMs } from "../time/timestamp.js";
-import { fromUnixMsToNumber, toUnixMsFromDate } from "./utils.js";
-import { reservationsOverlap } from "../time/overlap.js";
 
 /**
  * Get table occupancy snapshot with row lock (FOR UPDATE)
@@ -117,8 +115,6 @@ export async function checkReservationOverlap(
       AND outlet_id = ${outletId}
       AND table_id = ${tableId}
       AND status NOT IN (4, 5, 6)  -- Not COMPLETED, CANCELLED, NO_SHOW
-      AND reservation_start_ts IS NOT NULL
-      AND reservation_end_ts IS NOT NULL
       AND reservation_start_ts < ${reservationEndTs}
       AND reservation_end_ts > ${reservationStartTs}
   `;
@@ -131,8 +127,6 @@ export async function checkReservationOverlap(
         AND outlet_id = ${outletId}
         AND table_id = ${tableId}
         AND status NOT IN (4, 5, 6)
-        AND reservation_start_ts IS NOT NULL
-        AND reservation_end_ts IS NOT NULL
         AND reservation_start_ts < ${reservationEndTs}
         AND reservation_end_ts > ${reservationStartTs}
         AND id <> ${excludeReservationId}
@@ -140,65 +134,7 @@ export async function checkReservationOverlap(
   }
 
   const result = await query.execute(db);
-  if (Number(result.rows[0]?.count ?? 0) > 0) {
-    return true;
-  }
-
-  // Check legacy rows without canonical timestamps
-  let legacyQuery = sql`
-    SELECT reservation_start_ts, reservation_end_ts, reservation_at, duration_minutes
-    FROM reservations
-    WHERE company_id = ${companyId}
-      AND outlet_id = ${outletId}
-      AND table_id = ${tableId}
-      AND status NOT IN (4, 5, 6)
-      AND (reservation_start_ts IS NULL OR reservation_end_ts IS NULL)
-  `;
-
-  if (excludeReservationId) {
-    legacyQuery = sql`
-      SELECT reservation_start_ts, reservation_end_ts, reservation_at, duration_minutes
-      FROM reservations
-      WHERE company_id = ${companyId}
-        AND outlet_id = ${outletId}
-        AND table_id = ${tableId}
-        AND status NOT IN (4, 5, 6)
-        AND (reservation_start_ts IS NULL OR reservation_end_ts IS NULL)
-        AND id <> ${excludeReservationId}
-    `;
-  }
-
-  const legacyResult = await legacyQuery.execute(db);
-  if (legacyResult.rows.length === 0) {
-    return false;
-  }
-
-  const defaultDurationMinutes = 90;
-  for (const row of legacyResult.rows) {
-    const r = row as { reservation_start_ts: number | string | null; reservation_end_ts: number | string | null; reservation_at: string | null; duration_minutes: number | null };
-    const existingDuration = r.duration_minutes ?? defaultDurationMinutes;
-    let existingStartTs = fromUnixMsToNumber(r.reservation_start_ts);
-    let existingEndTs = fromUnixMsToNumber(r.reservation_end_ts);
-
-    if (existingStartTs === null && r.reservation_at) {
-      existingStartTs = toUnixMsFromDate(r.reservation_at);
-    }
-    if (existingEndTs === null && existingStartTs !== null) {
-      existingEndTs = existingStartTs + existingDuration * 60_000;
-    }
-    if (existingStartTs === null && existingEndTs !== null) {
-      existingStartTs = existingEndTs - existingDuration * 60_000;
-    }
-    if (existingStartTs === null || existingEndTs === null) {
-      continue;
-    }
-
-    if (reservationsOverlap(reservationStartTs, reservationEndTs, existingStartTs, existingEndTs)) {
-      return true;
-    }
-  }
-
-  return false;
+  return Number(result.rows[0]?.count ?? 0) > 0;
 }
 
 /**
