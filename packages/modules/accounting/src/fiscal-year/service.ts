@@ -455,6 +455,9 @@ export class FiscalYearService {
         companyId,
         requestedByUserId
       );
+    }, {
+      maxAttempts: 3,
+      initialDelayMs: 200,
     });
   }
 

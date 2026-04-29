@@ -18,6 +18,7 @@ import type {
   FiscalYearListQuery,
   FiscalYearUpdateRequest
 } from "@jurnapod/shared";
+import { withTransactionRetry } from "@jurnapod/db";
 import { getDb } from "./db.js";
 import { KyselySettingsAdapter } from "@jurnapod/modules-platform/settings";
 
@@ -405,7 +406,7 @@ export async function approveFiscalYearClose(
 ): Promise<ApproveFiscalYearCloseResult> {
   const db = getDb();
 
-  const closeResult = await db.transaction().execute(async (tx) => {
+  const closeResult = await withTransactionRetry(db, async (tx) => {
     const journalsService = new JournalsService(tx as JournalsDbClient);
 
     // 0) Lock idempotency row and resolve status before side effects.
@@ -625,6 +626,9 @@ export async function approveFiscalYearClose(
       replayed: false,
       imbalanceDetails: imbalanceDetails ?? undefined
     };
+  }, {
+    maxAttempts: 3,
+    initialDelayMs: 200,
   });
 
   // Replay-safe + recoverable side-effect rule:
