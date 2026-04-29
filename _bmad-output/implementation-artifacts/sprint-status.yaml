@@ -587,9 +587,22 @@ development_status:
   epic-50-retrospective: done  # 2026-04-25 — 2 action items (E50-A1, E50-A2)
 
   # Epic 51: Fiscal Correctness Hardening
-  epic-51: in-progress
+  epic-51: done
   51-1-fiscal-year-close-correctness-hardening: done
   51-2-receivables-subledger-reconciliation: backlog
   51-3-payables-subledger-reconciliation: backlog
   51-4-inventory-subledger-reconciliation: backlog
   51-5-follow-up-closure-bucket: backlog
+
+  # Epic 52: Datetime Standardization + Idempotency Hardening
+  epic-52: in-progress
+  52-1-datetime-utility-surface-consolidation: review
+  52-2-reservation-legacy-fallback-removal: backlog
+  52-3-pos-timestamp-alignment: backlog
+  52-4-fiscal-close-idempotency-hardening: backlog
+  52-5-ap-idempotency-key-standardization: backlog
+  52-6-sync-contract-standardization: backlog
+  52-7-sync-idempotency-duplicate-vs-error: backlog
+  52-8-ap-payment-journal-atomicity: backlog
+  52-9-observability-idempotency-metrics: backlog
+  52-10-integration-test-gate: backlog

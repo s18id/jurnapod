@@ -16,6 +16,11 @@ import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 
 import {
+  resolveBusinessTimezone,
+  businessDateFromEpochMs,
+  asOfDateToUtcRange,
+} from "@jurnapod/shared";
+import {
   type SubledgerBalanceProvider,
   type SubledgerBalanceQuery,
   type SubledgerBalanceResult,
@@ -125,21 +130,24 @@ export class ReceivablesSubledgerProvider implements SubledgerBalanceProvider {
       };
     }
 
-    // Convert asOfEpochMs to date string (YYYY-MM-DD) for reconciliation
-    // Uses Temporal.Instant per project policy — no native Date in business logic
-    const asOfDate = Temporal.Instant.fromEpochMilliseconds(asOfEpochMs)
-      .toString()
-      .slice(0, 10);
+    // Resolve business timezone from outlet/company
+    const timezone = await this.resolveBusinessTimezone(companyId, outletId);
+
+    // Convert asOfEpochMs to business date string (YYYY-MM-DD) using canonical helper
+    const asOfDate = businessDateFromEpochMs(asOfEpochMs, timezone);
 
     // Get settings for account IDs
     const settings = await this.arReconciliationService.getARReconciliationSettings({ companyId });
     const effectiveAccountIds = accountId !== undefined ? [accountId] : (settings.accountIds.length > 0 ? settings.accountIds : arAccountIds);
 
+    // Compute half-open UTC range for the as-of date
+    const { startUTC, nextDayUTC } = asOfDateToUtcRange(asOfDate, timezone);
+
     // Get AR subledger balance from sales module data
     const arSubledgerBalance = await this.getARSubledgerBalance(companyId, asOfDate);
 
     // Get GL control balance from journal lines
-    const glBalance = await this.getGLBalance(companyId, effectiveAccountIds, asOfDate);
+    const glBalance = await this.getGLBalance(companyId, effectiveAccountIds, startUTC, nextDayUTC);
 
     // Build breakdown
     const breakdown = toSignedAmountBreakdown(
@@ -158,7 +166,8 @@ export class ReceivablesSubledgerProvider implements SubledgerBalanceProvider {
         effectiveAccountIds,
         accountId,
         outletId,
-        asOfDate,
+        startUTC,
+        nextDayUTC,
         signedBalance,
         drilldownLimit ?? 1000
       );
@@ -275,17 +284,17 @@ export class ReceivablesSubledgerProvider implements SubledgerBalanceProvider {
 
   /**
    * Get GL balance from journal lines for AR accounts.
+   * Uses half-open interval: >= startUTC AND < nextDayUTC
    */
   private async getGLBalance(
     companyId: number,
     accountIds: number[],
-    asOfDate: string
+    startUTC: string,
+    nextDayUTC: string
   ): Promise<SignedAmount> {
     if (accountIds.length === 0) {
       return zeroSignedAmount();
     }
-
-    const asOfDateEnd = `${asOfDate} 23:59:59`;
 
     const rows = await sql`
       SELECT
@@ -295,7 +304,8 @@ export class ReceivablesSubledgerProvider implements SubledgerBalanceProvider {
       INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
       WHERE jl.company_id = ${companyId}
         AND jl.account_id IN (${sql.join(accountIds.map(id => sql`${id}`), sql`, `)})
-        AND jb.posted_at <= ${asOfDateEnd}
+        AND jb.posted_at >= ${startUTC}
+        AND jb.posted_at < ${nextDayUTC}
     `.execute(this.db);
 
     if (rows.rows.length === 0) {
@@ -312,19 +322,19 @@ export class ReceivablesSubledgerProvider implements SubledgerBalanceProvider {
 
   /**
    * Build detailed drilldown.
+   * Uses half-open interval: >= startUTC AND < nextDayUTC
    */
   private async buildDrilldown(
     companyId: number,
     accountIds: number[],
     accountId: number | undefined,
     outletId: number | undefined,
-    asOfDate: string,
+    startUTC: string,
+    nextDayUTC: string,
     closingBalance: SignedAmount,
     limit: number
   ): Promise<ReconciliationDrilldown> {
     const lines: ReconciliationDrilldownLine[] = [];
-    const asOfDateStart = `${asOfDate} 00:00:00`;
-    const asOfDateEnd = `${asOfDate} 23:59:59`;
 
     // Get journal line drilldown
     const accountFilter = accountId !== undefined
@@ -351,8 +361,8 @@ export class ReceivablesSubledgerProvider implements SubledgerBalanceProvider {
       FROM journal_lines jl
       INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
       WHERE jl.company_id = ${companyId}
-        AND jb.posted_at >= ${asOfDateStart}
-        AND jb.posted_at <= ${asOfDateEnd}
+        AND jb.posted_at >= ${startUTC}
+        AND jb.posted_at < ${nextDayUTC}
         AND ${accountFilter}
         AND ${outletFilter}
       ORDER BY jb.posted_at ASC, jl.id ASC
@@ -402,12 +412,40 @@ export class ReceivablesSubledgerProvider implements SubledgerBalanceProvider {
     return {
       subledgerType: this.subledgerType,
       accountId,
-      periodStartEpochMs: new Date(asOfDateStart).getTime(),
-      periodEndEpochMs: new Date(asOfDateEnd).getTime(),
+      periodStartEpochMs: new Date(startUTC).getTime(),
+      periodEndEpochMs: new Date(nextDayUTC).getTime(),
       openingSignedBalance: makeSignedAmount(openingSignedBalance),
       movementsSignedNet,
       closingSignedBalance: closingBalance,
       lines: Object.freeze(lines),
     };
+  }
+
+  /**
+   * Resolve business timezone for this company/outlet.
+   * Uses outlet timezone if available, falls back to company timezone.
+   */
+  private async resolveBusinessTimezone(companyId: number, outletId?: number): Promise<string> {
+    let outletTz: string | null = null;
+    let companyTz: string | null = null;
+
+    if (outletId !== undefined) {
+      const outlet = await this.db
+        .selectFrom("outlets")
+        .select("timezone")
+        .where("id", "=", outletId)
+        .where("company_id", "=", companyId)
+        .executeTakeFirst();
+      outletTz = outlet?.timezone ?? null;
+    }
+
+    const company = await this.db
+      .selectFrom("companies")
+      .select("timezone")
+      .where("id", "=", companyId)
+      .executeTakeFirst();
+    companyTz = company?.timezone ?? null;
+
+    return resolveBusinessTimezone(outletTz, companyTz);
   }
 }

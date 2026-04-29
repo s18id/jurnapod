@@ -21,17 +21,6 @@ import { ReservationValidationError } from "./errors.js";
 export { isFinalStatus, canTransition, VALID_STATUS_TRANSITIONS } from "../interfaces/shared.js";
 
 /**
- * Convert UTC ISO instant to MySQL DATETIME format
- */
-export function toDbDateTime(value: Date | string): string {
-  const parsed = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new ReservationValidationError("Invalid reservation datetime value");
-  }
-  return parsed.toISOString().slice(0, 19).replace("T", " ");
-}
-
-/**
  * Convert Date or string to unix milliseconds
  */
 export function toUnixMsFromDate(value: Date | string): number {

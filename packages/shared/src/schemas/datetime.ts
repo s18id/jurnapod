@@ -755,6 +755,23 @@ export function nowUTC(): string {
 }
 
 /**
+ * Add days to a YYYY-MM-DD calendar date string, returning the resulting date string.
+ *
+ * Uses Temporal.PlainDate for correct calendar arithmetic (handles month-end overflow,
+ * leap years, year-end rollover), unlike `addDays` which operates on UTC instants.
+ *
+ * @param dateStr - YYYY-MM-DD date string.
+ * @param days - Number of calendar days to add (can be negative).
+ * @returns New YYYY-MM-DD date string.
+ */
+function addCalendarDaysToDateStr(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const plainDate = Temporal.PlainDate.from({ year: y, month: m, day: d });
+  const result = plainDate.add({ days });
+  return `${result.year}-${String(result.month).padStart(2, '0')}-${String(result.day).padStart(2, '0')}`;
+}
+
+/**
  * Add days to a UTC date
  * @param utcISO - UTC ISO string
  * @param days - Number of days to add (can be negative)
@@ -782,4 +799,193 @@ export function compareDates(a: string, b: string): number {
   if (aMs < bMs) return -1;
   if (aMs > bMs) return 1;
   return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Business timezone resolution (dual-mode)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the canonical business timezone using dual-mode resolution.
+ *
+ * With outlet context (outlet-scoped operation):
+ *   outletTz → companyTz → error
+ *
+ * Without outlet context (company-level operation):
+ *   companyTz → error
+ *
+ * UTC MUST NOT be used as a fallback for business date operations.
+ *
+ * @param outletTz - IANA timezone of the outlet (may be null/undefined).
+ * @param companyTz - IANA timezone of the company (may be null/undefined).
+ * @returns The resolved IANA timezone string.
+ * @throws {Error} when neither outlet nor company timezone is valid.
+ *
+ * @example
+ * // Outlet has priority
+ * resolveBusinessTimezone("Asia/Jakarta", "Asia/Singapore")  // "Asia/Jakarta"
+ * // Outlet invalid, falls back to company
+ * resolveBusinessTimezone(null, "Asia/Singapore")  // "Asia/Singapore"
+ * // Both invalid → throws
+ * resolveBusinessTimezone(null, null)  // throws
+ */
+export function resolveBusinessTimezone(
+  outletTz?: string | null,
+  companyTz?: string | null
+): string {
+  // Normalize: treat empty-string as null/undefined; trim whitespace before validation
+  const outlet = outletTz == null || outletTz === "" ? undefined : String(outletTz).trim();
+  const company = companyTz == null || companyTz === "" ? undefined : String(companyTz).trim();
+
+  // Outlet has priority if valid IANA
+  if (outlet !== undefined && isValidTimeZone(outlet)) {
+    return outlet;
+  }
+
+  // Company fallback if valid IANA
+  if (company !== undefined && isValidTimeZone(company)) {
+    return company;
+  }
+
+  // Neither resolved → explicit error, NO UTC fallback
+  const provided = [outlet, company].filter(Boolean).join(", ") || "none";
+  throw new Error(
+    `Unresolved business timezone: outlet="${outlet ?? "null"}", company="${company ?? "null"}". ` +
+    `At least one must be a valid IANA timezone. Provided: ${provided}`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// As-of date to UTC range (half-open interval)
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a YYYY-MM-DD business date in a given timezone to a half-open UTC range.
+ *
+ * Returns `{ startUTC, nextDayUTC }` where the range is:
+ *   `col >= startUTC AND col < nextDayUTC`
+ *
+ * This is the canonical query model for datetime column filtering per
+ * date-time standardization policy (docs/policies/date-time-standardization.md).
+ *
+ * @param dateStr - Business date in YYYY-MM-DD format.
+ * @param timezone - IANA timezone for the business.
+ * @returns Half-open UTC range: `{ startUTC, nextDayUTC }`.
+ * @throws {Error} when `dateStr` is not a valid calendar date or `timezone` is not a valid IANA timezone.
+ *
+ * @example
+ * asOfDateToUtcRange("2026-04-15", "Asia/Jakarta")
+ * // { startUTC: "2026-04-14T17:00:00.000Z", nextDayUTC: "2026-04-15T17:00:00.000Z" }
+ */
+export function asOfDateToUtcRange(
+  dateStr: string,
+  timezone: string
+): { startUTC: string; nextDayUTC: string } {
+  // Validate timezone first for consistent error messages
+  if (!isValidTimeZone(timezone)) {
+    throw new Error(`Invalid timezone: ${timezone}`);
+  }
+
+  // Validate date format and real calendar date
+  if (!isValidDate(dateStr)) {
+    throw new Error(
+      `Invalid date: ${dateStr}. Expected: YYYY-MM-DD format with a real calendar date.`
+    );
+  }
+
+  // startUTC = normalize start-of-day in business timezone
+  const startUTC = normalizeDate(dateStr, timezone, "start");
+
+  // nextDayUTC = start-of-day for (dateStr + 1 calendar day) in business timezone.
+  // Compute next calendar day in business-date terms first (safe date math), then
+  // normalize to UTC. This is correct even on DST transition days because we
+  // operate in business-local date space, not fixed 24h UTC offsets.
+  const nextDateStr = addCalendarDaysToDateStr(dateStr, 1);
+  const nextDayUTC = normalizeDate(nextDateStr, timezone, "start");
+
+  return { startUTC, nextDayUTC };
+}
+
+// ---------------------------------------------------------------------------
+// Epoch ms to business date
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive the business-local date (YYYY-MM-DD) from an epoch milliseconds value
+ * in a given timezone.
+ *
+ * Composition: `toBusinessDate(fromEpochMs(epochMs), timezone)`
+ *
+ * @param epochMs - Unix epoch in milliseconds.
+ * @param timezone - IANA timezone for the business.
+ * @returns Business-local date string in YYYY-MM-DD format.
+ * @throws {Error} when `epochMs` is not a finite number.
+ *
+ * @example
+ * // 2026-04-15 00:00 in Jakarta (UTC+7) → epoch ms representing that instant
+ * businessDateFromEpochMs(1710587400000, "Asia/Jakarta")  // "2026-04-15"
+ */
+export function businessDateFromEpochMs(epochMs: number, timezone: string): string {
+  if (!Number.isFinite(epochMs)) {
+    throw new Error(`Invalid epoch ms: ${epochMs} is not a finite number`);
+  }
+
+  // Validate timezone before doing conversion work
+  if (!isValidTimeZone(timezone)) {
+    throw new Error(`Invalid timezone: ${timezone}`);
+  }
+
+  const utcAt = fromEpochMs(epochMs);
+  return toBusinessDate(utcAt, timezone);
+}
+
+// ---------------------------------------------------------------------------
+// Epoch ms to monthly period boundaries
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive the monthly period boundaries (first day of month → first day of next month)
+ * in UTC from an epoch milliseconds value in a given timezone.
+ *
+ * @param epochMs - Unix epoch in milliseconds.
+ * @param timezone - IANA timezone for the business.
+ * @returns Half-open monthly range: `{ periodStartUTC, periodNextUTC }`.
+ * @throws {Error} when `epochMs` is not a finite number or `timezone` is not a valid IANA timezone.
+ *
+ * @example
+ * epochMsToPeriodBoundaries(1710587400000, "Asia/Jakarta")
+ * // If the epoch falls in April 2026 → returns start of April 2026 and start of May 2026 in UTC
+ */
+export function epochMsToPeriodBoundaries(
+  epochMs: number,
+  timezone: string
+): { periodStartUTC: string; periodNextUTC: string } {
+  if (!Number.isFinite(epochMs)) {
+    throw new Error(`Invalid epoch ms: ${epochMs} is not a finite number`);
+  }
+
+  if (!isValidTimeZone(timezone)) {
+    throw new Error(`Invalid timezone: ${timezone}`);
+  }
+
+  // Derive business-local date from epoch ms
+  const businessDate = businessDateFromEpochMs(epochMs, timezone);
+
+  // Extract year-month from business date
+  const year = parseInt(businessDate.slice(0, 4), 10);
+  const month = parseInt(businessDate.slice(5, 7), 10);
+
+  // Compute first day of this month: YYYY-MM-01
+  const periodStartDate = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+
+  // Compute first day of next month
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextMonthYear = month === 12 ? year + 1 : year;
+  const periodNextDate = `${String(nextMonthYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-01`;
+
+  // Convert both to UTC start boundaries via normalizeDate
+  const periodStartUTC = normalizeDate(periodStartDate, timezone, "start");
+  const periodNextUTC = normalizeDate(periodNextDate, timezone, "start");
+
+  return { periodStartUTC, periodNextUTC };
 }

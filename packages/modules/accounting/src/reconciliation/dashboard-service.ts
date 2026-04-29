@@ -15,6 +15,12 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
+import { Temporal } from "@js-temporal/polyfill";
+import {
+  resolveBusinessTimezone,
+  epochMsToPeriodBoundaries,
+  businessDateFromEpochMs,
+} from "@jurnapod/shared";
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -278,7 +284,7 @@ export class ReconciliationDashboardService {
       trendPeriods = 3,
     } = query;
 
-    const asOfEpochMs = Date.now();
+    const asOfEpochMs = Temporal.Now.instant().epochMilliseconds;
 
     // Resolve period range
     const { periodStart, periodEnd } = await this.resolvePeriodRange(
@@ -429,7 +435,7 @@ export class ReconciliationDashboardService {
     periodId?: number,
     fiscalYearId?: number
   ): Promise<VarianceDrilldownResult | null> {
-    const asOfEpochMs = Date.now();
+    const asOfEpochMs = Temporal.Now.instant().epochMilliseconds;
 
     // Resolve period range
     const { periodStart, periodEnd } = await this.resolvePeriodRange(
@@ -567,6 +573,9 @@ export class ReconciliationDashboardService {
     periodId?: number,
     asOfEpochMs?: number
   ): Promise<{ periodStart: Date; periodEnd: Date }> {
+    // Resolve business timezone for period derivation
+    const timezone = await this.resolveBusinessTimezone(companyId);
+
     // If fiscalYearId is provided, use fiscal year boundaries
     if (fiscalYearId !== undefined) {
       const fyResult = await this.db
@@ -593,19 +602,37 @@ export class ReconciliationDashboardService {
       // TODO: Once periods table exists, query it here
     }
 
-    // Fall back to asOfEpochMs or default to current month
+    // Fall back to asOfEpochMs or default to current month using canonical period boundaries
     if (asOfEpochMs !== undefined) {
-      const asOfDate = new Date(asOfEpochMs);
-      const startOfMonth = new Date(asOfDate.getFullYear(), asOfDate.getMonth(), 1);
-      const endOfMonth = new Date(asOfDate.getFullYear(), asOfDate.getMonth() + 1, 0, 23, 59, 59, 999);
-      return { periodStart: startOfMonth, periodEnd: endOfMonth };
+      const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(asOfEpochMs, timezone);
+      return {
+        periodStart: new Date(periodStartUTC),
+        periodEnd: new Date(periodNextUTC),
+      };
     }
 
-    // Default: current month
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-    return { periodStart: startOfMonth, periodEnd: endOfMonth };
+    // Default: current month using canonical period boundaries
+    const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(
+      Temporal.Now.instant().epochMilliseconds,
+      timezone
+    );
+    return {
+      periodStart: new Date(periodStartUTC),
+      periodEnd: new Date(periodNextUTC),
+    };
+  }
+
+  /**
+   * Resolve business timezone for this company.
+   */
+  private async resolveBusinessTimezone(companyId: number): Promise<string> {
+    const company = await this.db
+      .selectFrom("companies")
+      .select("timezone")
+      .where("id", "=", companyId)
+      .executeTakeFirst();
+
+    return resolveBusinessTimezone(null, company?.timezone ?? null);
   }
 
   /**
@@ -877,8 +904,22 @@ export class ReconciliationDashboardService {
     return lines;
   }
 
-  /**
-   * Get period trends for an account
+/**
+   * Get period trends for an account.
+   *
+   * Trend indexing semantics (backward-compatible, stable):
+   * - trend[0] = oldest period (i=0 = 1 calendar month before the current period anchor)
+   * - trend[trendPeriods-1] = most recent historical period (closest to current period)
+   * - The current period itself is NOT included in trends — excluded by design to avoid
+   *   partial-month data skewing reconciliation ratios.
+   *
+   * Boundary semantics: inclusive DATE filter on both GL and subledger queries
+   * (line_date >= periodStart AND line_date <= periodEnd). Both query paths use the
+   * same canonical month boundaries from epochMsToPeriodBoundaries, so DATE semantics
+   * are consistent across all balance computations.
+   *
+   * Month derivation: uses Temporal.PlainDate arithmetic to step backward by calendar
+   * months (not approximated 30-day months), correctly handling year boundary rollover.
    */
   private async getPeriodTrends(
     companyId: number,
@@ -891,16 +932,32 @@ export class ReconciliationDashboardService {
   ): Promise<PeriodTrend[]> {
     const trends: PeriodTrend[] = [];
 
-    // Calculate previous periods (monthly)
-    const currentYear = currentPeriodStart.getFullYear();
-    const currentMonth = currentPeriodStart.getMonth();
+    // Resolve business timezone for boundary derivation
+    const timezone = await this.resolveBusinessTimezone(companyId);
+
+    // Build a Temporal.PlainDate from the current period anchor (first day of current month in business TZ)
+    const currentPlainDate = Temporal.PlainDate.from({
+      year: parseInt(businessDateFromEpochMs(currentPeriodStart.getTime(), timezone).slice(0, 4), 10),
+      month: parseInt(businessDateFromEpochMs(currentPeriodStart.getTime(), timezone).slice(5, 7), 10),
+      day: 1,
+    });
 
     for (let i = 0; i < trendPeriods; i++) {
-      const periodDate = new Date(currentYear, currentMonth - i, 1);
-      const periodStart = new Date(periodDate.getFullYear(), periodDate.getMonth(), 1);
-      const periodEnd = new Date(periodDate.getFullYear(), periodDate.getMonth() + 1, 0, 23, 59, 59, 999);
+      // Step backward by exactly (i+1) calendar months using Temporal arithmetic.
+      // This replaces the prior 30-day approximation: (i + 1) * 30 * 24 * 60 * 60 * 1000.
+      // Temporal handles year rollover correctly (e.g., Jan - 1 month = Dec of prior year).
+      const targetPlainDate = currentPlainDate.subtract({ months: i + 1 });
+      const targetDate = `${String(targetPlainDate.year).padStart(4, '0')}-${String(targetPlainDate.month).padStart(2, '0')}-01`;
 
-      // Get GL balance for this period
+      // Get epoch ms for first day of target month in business timezone
+      const targetEpochMs = targetPlainDate.toZonedDateTime(timezone).epochMilliseconds;
+
+      // Get canonical month boundaries for target month
+      const { periodStartUTC: pStartUTC, periodNextUTC: pNextUTC } = epochMsToPeriodBoundaries(targetEpochMs, timezone);
+      const periodStart = new Date(pStartUTC);
+      const periodEnd = new Date(pNextUTC);
+
+      // Get GL balance for this period (inclusive boundaries per original)
       const glResult = await this.db
         .selectFrom("journal_lines as jl")
         .innerJoin("journal_batches as jb", "jb.id", "jl.journal_batch_id")
@@ -916,7 +973,7 @@ export class ReconciliationDashboardService {
 
       const glBalance = (Number(glResult?.debit_total) || 0) - (Number(glResult?.credit_total) || 0);
 
-      // Get subledger balance
+      // Get subledger balance (inclusive boundaries to match GL)
       let subledgerBalance = 0;
       if (subledgerType === "CASH") {
         subledgerBalance = await this.getCashSubledgerBalance(
@@ -927,14 +984,17 @@ export class ReconciliationDashboardService {
         );
       }
 
-    // Variance: GL minus subledger (both debit-positive)
-    const variance = glBalance - Number(subledgerBalance);
+      // Variance: GL minus subledger (both debit-positive)
+      const variance = glBalance - Number(subledgerBalance);
       const hasSubledgerData = subledgerBalance !== 0;
       const status = determineStatus(variance, hasSubledgerData);
 
+      // Generate period code from target business date
+      const periodCode = `${targetDate.slice(0, 4)}-${targetDate.slice(5, 7)}`;
+
       trends.push({
         periodId: i + 1,
-        periodCode: `${periodDate.getFullYear()}-${String(periodDate.getMonth() + 1).padStart(2, "0")}`,
+        periodCode,
         glBalance,
         subledgerBalance,
         variance,

@@ -13,7 +13,7 @@ import type { KyselySchema } from "@jurnapod/db";
 import type { ReservationAuditPort } from "../interfaces/audit-port.js";
 import { NOOP_AUDIT_PORT } from "../interfaces/audit-port.js";
 import { toUnixMs } from "../time/timestamp.js";
-import { toDbDateTime } from "../reservations/utils.js";
+import { toMysqlDateTime, toMysqlDateTimeFromDateLike } from "@jurnapod/shared";
 import {
   RESERVATION_STATUS,
   BLOCKING_STATUS_IDS,
@@ -135,7 +135,7 @@ export async function createReservationGroupWithTables(
           ${input.customerName},
           ${input.customerPhone},
           ${input.guestCount},
-          ${toDbDateTime(input.reservationAt)},
+          ${toMysqlDateTime(input.reservationAt)},
           ${startTs},
           ${endTs},
           ${input.durationMinutes ?? 120},
@@ -788,7 +788,7 @@ export async function updateReservationGroup(
         const startTs = toUnixMs(input.updates.reservationAt);
         const durationMs = (input.updates.durationMinutes ?? 120) * 60 * 1000;
         const endTs = startTs + durationMs;
-        updateQuery = sql`${updateQuery}, reservation_at = ${toDbDateTime(input.updates.reservationAt)}`;
+        updateQuery = sql`${updateQuery}, reservation_at = ${toMysqlDateTime(input.updates.reservationAt)}`;
         updateQuery = sql`${updateQuery}, reservation_start_ts = ${startTs}`;
         updateQuery = sql`${updateQuery}, reservation_end_ts = ${endTs}`;
         updateQuery = sql`${updateQuery}, duration_minutes = ${input.updates.durationMinutes ?? 120}`;
@@ -869,7 +869,7 @@ export async function updateReservationGroup(
               ? input.updates.customerPhone
               : firstReservation?.customer_phone ?? null},
             ${input.updates.guestCount ?? group.total_guest_count},
-            ${toDbDateTime(new Date(startTs))},
+            ${toMysqlDateTimeFromDateLike(new Date(startTs))},
             ${startTs},
             ${endTs},
             ${input.updates.durationMinutes ?? 120},

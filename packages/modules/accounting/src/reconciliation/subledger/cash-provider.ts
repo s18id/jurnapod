@@ -14,6 +14,10 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
+import {
+  resolveBusinessTimezone,
+  epochMsToPeriodBoundaries,
+} from "@jurnapod/shared";
 
 import {
   type SubledgerBalanceProvider,
@@ -246,7 +250,7 @@ export class CashSubledgerProvider implements SubledgerBalanceProvider {
 
   /**
    * Resolve period range from fiscal year/period filters.
-   * Returns start and end as Date objects.
+   * Returns start and end as Date objects using canonical timezone-aware helpers.
    */
   private async resolvePeriodRange(
     companyId: number,
@@ -259,6 +263,9 @@ export class CashSubledgerProvider implements SubledgerBalanceProvider {
       // TODO: Once periods table exists, query it here
       // For now, fall through to fiscal year or date-based filtering
     }
+
+    // Resolve business timezone first (needed for period derivation)
+    const timezone = await this.resolveBusinessTimezone(companyId);
 
     // If fiscalYearId is provided, use fiscal year boundaries
     if (fiscalYearId !== undefined) {
@@ -275,13 +282,13 @@ export class CashSubledgerProvider implements SubledgerBalanceProvider {
       }
     }
 
-    // Fall back to asOfEpochMs or epoch 0
+    // Fall back to asOfEpochMs or epoch 0, using canonical period boundaries
     if (asOfEpochMs !== undefined) {
-      const asOfDate = new Date(asOfEpochMs);
-      // Default to start of month to end of month for the as-of date
-      const startOfMonth = new Date(asOfDate.getFullYear(), asOfDate.getMonth(), 1);
-      const endOfMonth = new Date(asOfDate.getFullYear(), asOfDate.getMonth() + 1, 0, 23, 59, 59, 999);
-      return { periodStart: startOfMonth, periodEnd: endOfMonth };
+      const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(asOfEpochMs, timezone);
+      return {
+        periodStart: new Date(periodStartUTC),
+        periodEnd: new Date(periodNextUTC),
+      };
     }
 
     // Default: no filtering (return all periods - backward compatible)
@@ -289,6 +296,19 @@ export class CashSubledgerProvider implements SubledgerBalanceProvider {
       periodStart: new Date(0),
       periodEnd: new Date(8640000000000000), // Max date
     };
+  }
+
+  /**
+   * Resolve business timezone for this company (outlet-level not available in cash context).
+   */
+  private async resolveBusinessTimezone(companyId: number): Promise<string> {
+    const company = await this.db
+      .selectFrom("companies")
+      .select("timezone")
+      .where("id", "=", companyId)
+      .executeTakeFirst();
+
+    return resolveBusinessTimezone(null, company?.timezone ?? null);
   }
 
   /**

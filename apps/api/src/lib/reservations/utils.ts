@@ -15,6 +15,7 @@ import type { KyselySchema } from "../db";
 import {
   ReservationStatusV2,
   type ReservationStatus,
+  toMysqlDateTimeFromDateLike,
 } from "@jurnapod/shared";
 import { toEpochMs, fromEpochMs, toUtcInstant } from "../date-helpers";
 import { getSetting } from "../settings";
@@ -53,14 +54,11 @@ export function toIso(value: Date | string | null): string | null {
 }
 
 /**
- * Convert Date or string to MySQL DATETIME format
+ * Convert Date or string to MySQL DATETIME format.
+ * Delegates to canonical toMysqlDateTimeFromDateLike from @jurnapod/shared.
  */
 export function toDbDateTime(value: Date | string): string {
-  const parsed = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new ReservationValidationError("Invalid reservation datetime value");
-  }
-  return parsed.toISOString().slice(0, 19).replace("T", " ");
+  return toMysqlDateTimeFromDateLike(value);
 }
 
 /**

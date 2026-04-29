@@ -16,6 +16,11 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
+import { Temporal } from "@js-temporal/polyfill";
+import {
+  resolveBusinessTimezone,
+  epochMsToPeriodBoundaries,
+} from "@jurnapod/shared";
 import { CashSubledgerProvider, type CashSubledgerDbClient } from "../reconciliation/subledger/cash-provider.js";
 import { fromSignedAmount } from "../reconciliation/subledger/provider.js";
 
@@ -291,7 +296,7 @@ export class TrialBalanceService {
       outletId,
       fiscalYearId,
       periodId,
-      asOfEpochMs = Date.now(),
+      asOfEpochMs = Temporal.Now.instant().epochMilliseconds,
       accountTypes,
       includeZeroBalances = false,
     } = query;
@@ -411,7 +416,7 @@ export class TrialBalanceService {
    * Run pre-close validation checklist
    */
   async runPreCloseValidation(query: TrialBalanceQuery): Promise<PreCloseValidationResult> {
-    const { companyId, fiscalYearId, periodId, asOfEpochMs = Date.now() } = query;
+    const { companyId, fiscalYearId, periodId, asOfEpochMs = Temporal.Now.instant().epochMilliseconds } = query;
 
     const checks: PreCloseCheckItem[] = [];
     let passed = 0;
@@ -676,6 +681,9 @@ export class TrialBalanceService {
     let periodStart: Date;
     let periodEnd: Date;
 
+    // Resolve business timezone for period derivation
+    const timezone = await this.resolveBusinessTimezone(companyId);
+
     // If fiscalYearId is provided, use fiscal year boundaries
     if (fiscalYearId !== undefined) {
       const fyResult = await this.db
@@ -689,30 +697,54 @@ export class TrialBalanceService {
         periodStart = fyResult.start_date instanceof Date ? fyResult.start_date : new Date(fyResult.start_date);
         periodEnd = fyResult.end_date instanceof Date ? fyResult.end_date : new Date(fyResult.end_date);
       } else {
-        // Fallback to asOfEpochMs
-        const asOfDate = asOfEpochMs !== undefined ? new Date(asOfEpochMs) : new Date();
-        periodStart = new Date(asOfDate.getFullYear(), asOfDate.getMonth(), 1);
-        periodEnd = new Date(asOfDate.getFullYear(), asOfDate.getMonth() + 1, 0, 23, 59, 59, 999);
+        // Fallback to asOfEpochMs using canonical period boundaries
+        const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(
+          asOfEpochMs ?? Temporal.Now.instant().epochMilliseconds,
+          timezone
+        );
+        periodStart = new Date(periodStartUTC);
+        periodEnd = new Date(periodNextUTC);
       }
     } else if (periodId !== undefined) {
       // TODO: Once periods table exists, query it here
-      // For now, fall back to asOfEpochMs or default to current month
-      const asOfDate = asOfEpochMs !== undefined ? new Date(asOfEpochMs) : new Date();
-      periodStart = new Date(asOfDate.getFullYear(), asOfDate.getMonth(), 1);
-      periodEnd = new Date(asOfDate.getFullYear(), asOfDate.getMonth() + 1, 0, 23, 59, 59, 999);
+      // For now, fall back to asOfEpochMs or default to current month using canonical helpers
+      const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(
+        asOfEpochMs ?? Temporal.Now.instant().epochMilliseconds,
+        timezone
+      );
+      periodStart = new Date(periodStartUTC);
+      periodEnd = new Date(periodNextUTC);
     } else {
-      // Default to current month
-      const asOfDate = asOfEpochMs !== undefined ? new Date(asOfEpochMs) : new Date();
-      periodStart = new Date(asOfDate.getFullYear(), asOfDate.getMonth(), 1);
-      periodEnd = new Date(asOfDate.getFullYear(), asOfDate.getMonth() + 1, 0, 23, 59, 59, 999);
+      // Default to current month using canonical period boundaries
+      const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(
+        asOfEpochMs ?? Temporal.Now.instant().epochMilliseconds,
+        timezone
+      );
+      periodStart = new Date(periodStartUTC);
+      periodEnd = new Date(periodNextUTC);
     }
 
-    // Calculate prior period (previous month)
-    const priorPeriodEnd = new Date(periodStart);
-    priorPeriodEnd.setDate(priorPeriodEnd.getDate() - 1);
-    const priorPeriodStart = new Date(priorPeriodEnd.getFullYear(), priorPeriodEnd.getMonth(), 1);
+    // Calculate prior period using canonical half-open boundaries
+    // Prior period is the month before the current period start
+    const priorAsOfEpochMs = periodStart.getTime() - 1; // Last millisecond of prior period
+    const { periodStartUTC: priorStartUTC, periodNextUTC: priorNextUTC } = epochMsToPeriodBoundaries(priorAsOfEpochMs, timezone);
+    const priorPeriodStart = new Date(priorStartUTC);
+    const priorPeriodEnd = new Date(priorNextUTC);
 
     return { periodStart, periodEnd, priorPeriodStart, priorPeriodEnd };
+  }
+
+  /**
+   * Resolve business timezone for this company.
+   */
+  private async resolveBusinessTimezone(companyId: number): Promise<string> {
+    const company = await this.db
+      .selectFrom("companies")
+      .select("timezone")
+      .where("id", "=", companyId)
+      .executeTakeFirst();
+
+    return resolveBusinessTimezone(null, company?.timezone ?? null);
   }
 
   /**
@@ -858,8 +890,13 @@ export class TrialBalanceService {
     let hasSubledgerData = false;
 
     if (subledgerType === "CASH") {
-      // Use the CashSubledgerProvider pattern
-      const cashBalances = await this.getCashSubledgerBalance(companyId, accountId, periodEnd);
+      // Use the CashSubledgerProvider pattern.
+      // Boundary guard: periodEnd is the START of the next period (e.g., May 1 00:00:00).
+      // Passing it directly would cause epochMsToPeriodBoundaries to derive the NEXT period
+      // (May), making subledger query return next-month rows while GL queries current period.
+      // Subtracting 1ms keeps the epoch in the target period so boundaries resolve correctly.
+      const asOfEpochMs = periodEnd.getTime() - 1;
+      const cashBalances = await this.getCashSubledgerBalance(companyId, accountId, asOfEpochMs);
       subledgerBalance = cashBalances;
       hasSubledgerData = Math.abs(cashBalances) > 0 || glBalance !== 0;
     }
@@ -910,19 +947,20 @@ export class TrialBalanceService {
   /**
    * Get cash subledger balance for a specific account.
    * Uses CashSubledgerProvider for canonical subledger calculation.
-   * The provider calculates balance as of the period end date.
+   * The provider computes as-of balance using asOfEpochMs which is already
+   * scoped within the target period (periodEnd - 1ms to avoid next-month drift).
    */
   private async getCashSubledgerBalance(
     companyId: number,
     accountId: number,
-    periodEnd: Date
+    asOfEpochMs: number
   ): Promise<number> {
     // Use CashSubledgerProvider for canonical cash subledger balance
-    // asOfEpochMs represents the point-in-time balance (period end)
+    // asOfEpochMs represents the point-in-time balance within target period
     const balanceResult = await this.cashSubledgerProvider.getBalance({
       companyId,
       accountId,
-      asOfEpochMs: periodEnd.getTime(),
+      asOfEpochMs,
     });
 
     // CashSubledgerProvider returns signed balance (debit-positive)

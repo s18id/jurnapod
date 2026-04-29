@@ -35,7 +35,6 @@ export { RESERVATION_DEFAULT_DURATION_KEY, RESERVATION_DEFAULT_DURATION_FALLBACK
 
 // Utilities
 export {
-  toDbDateTime,
   toUnixMsFromDate,
   fromUnixMsToNumber,
   mapDbRowToReservation,

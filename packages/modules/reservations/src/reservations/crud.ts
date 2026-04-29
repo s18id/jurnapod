@@ -9,6 +9,7 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
+import { toMysqlDateTimeFromDateLike } from "@jurnapod/shared";
 import type { ReservationDbRow } from "./types.js";
 import {
   type CreateReservationInput,
@@ -21,7 +22,6 @@ import {
   ReservationConflictError,
 } from "./errors.js";
 import {
-  toDbDateTime,
   toUnixMsFromDate,
   mapDbRowToReservation,
   generateReservationCodeWithConnection,
@@ -317,7 +317,7 @@ export async function createReservation(
     // Calculate timestamps
     const reservationStartTs = input.reservationStartTs;
     const reservationEndTs = reservationStartTs + input.durationMinutes * 60_000;
-    const reservationAt = toDbDateTime(new Date(reservationStartTs));
+    const reservationAt = toMysqlDateTimeFromDateLike(new Date(reservationStartTs));
 
     const caps = await getReservationSchemaCaps(trx);
 
@@ -396,7 +396,7 @@ export async function updateReservation(
       customer_name: input.customerName ?? current.customerName,
       customer_phone: input.customerPhone === undefined ? current.customerPhone : input.customerPhone,
       guest_count: input.partySize ?? current.partySize,
-      reservation_at: toDbDateTime(new Date(nextReservationStartTs)),
+      reservation_at: toMysqlDateTimeFromDateLike(new Date(nextReservationStartTs)),
       duration_minutes: nextDurationMinutes,
       notes: input.notes === undefined ? current.notes : input.notes,
       updated_at: new Date(),
