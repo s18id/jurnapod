@@ -12,7 +12,6 @@ import type { KyselySchema } from "@jurnapod/db";
 import { sql } from "kysely";
 import {
   AP_PAYMENT_STATUS,
-  PURCHASE_CREDIT_STATUS,
   PURCHASE_INVOICE_STATUS,
   type ApPaymentLineResponse,
 } from "@jurnapod/shared";
@@ -41,80 +40,8 @@ import {
   APPaymentMissingAPAccountError,
   APPaymentInvalidAPAccountTypeError,
 } from "../types/ap-payment.js";
-
-// =============================================================================
-// BigInt Scaled Decimal Helpers
-// =============================================================================
-
-function toScaled(value: string, scale: number): bigint {
-  const trimmed = value.trim();
-  const re = new RegExp(`^\\d+(\\.\\d{1,${scale}})?$`);
-  if (!re.test(trimmed)) {
-    throw new Error(`Invalid decimal value: ${value}`);
-  }
-  const [integer, fraction = ""] = trimmed.split(".");
-  const scaleFactor = 10n ** BigInt(scale);
-  const fracScaled = (fraction + "0".repeat(scale)).slice(0, scale);
-  return BigInt(integer) * scaleFactor + BigInt(fracScaled);
-}
-
-function toScaled4(value: string): bigint {
-  return toScaled(value, 4);
-}
-
-function fromScaled4(value: bigint): string {
-  const sign = value < 0n ? "-" : "";
-  const abs = value < 0n ? -value : value;
-  const intPart = abs / 10000n;
-  const fracPart = (abs % 10000n).toString().padStart(4, "0");
-  return `${sign}${intPart.toString()}.${fracPart}`;
-}
-
-// =============================================================================
-// Compute PI Open Amount
-// =============================================================================
-
-async function computePIOpenAmount(
-  db: KyselySchema,
-  companyId: number,
-  invoiceId: number
-): Promise<bigint> {
-  const baseTotalResult = await sql<{ base_grand_total: string }>`
-    SELECT COALESCE(ROUND(grand_total * exchange_rate, 4), 0) AS base_grand_total
-    FROM purchase_invoices
-    WHERE id = ${invoiceId}
-      AND company_id = ${companyId}
-    LIMIT 1
-  `.execute(db);
-
-  if (baseTotalResult.rows.length === 0) {
-    return 0n;
-  }
-
-  const baseGrandTotal = toScaled4(String(baseTotalResult.rows[0]?.base_grand_total ?? "0"));
-
-  const paidResult = await sql<{ total: string }>`
-    SELECT COALESCE(SUM(apl.allocation_amount), 0) as total
-    FROM ap_payment_lines apl
-    INNER JOIN ap_payments ap ON ap.id = apl.ap_payment_id
-    WHERE apl.purchase_invoice_id = ${invoiceId}
-      AND ap.company_id = ${companyId}
-      AND ap.status = ${AP_PAYMENT_STATUS.POSTED}
-  `.execute(db);
-
-  const creditedResult = await sql<{ total: string }>`
-    SELECT COALESCE(SUM(pca.applied_amount), 0) as total
-    FROM purchase_credit_applications pca
-    INNER JOIN purchase_credits pc ON pc.id = pca.purchase_credit_id
-    WHERE pca.purchase_invoice_id = ${invoiceId}
-      AND pca.company_id = ${companyId}
-      AND pc.status IN (${PURCHASE_CREDIT_STATUS.PARTIAL}, ${PURCHASE_CREDIT_STATUS.APPLIED})
-  `.execute(db);
-
-  const paidAmount = toScaled4(String(paidResult.rows[0]?.total ?? "0"));
-  const creditedAmount = toScaled4(String(creditedResult.rows[0]?.total ?? "0"));
-  return baseGrandTotal - paidAmount - creditedAmount;
-}
+import { fromScaled4, toScaled4 } from "./decimal-scale4.js";
+import { computePurchaseInvoiceOpenAmount } from "./purchase-invoice-open-amount.js";
 
 // =============================================================================
 // Validate Bank Account Ownership
@@ -225,6 +152,22 @@ export class APPaymentService {
   async createDraftAPPayment(
     input: APPaymentCreateInput
   ): Promise<APPaymentGetResult> {
+    if (input.idempotencyKey) {
+      const existingByIdempotency = await this.db
+        .selectFrom("ap_payments")
+        .where("company_id", "=", input.companyId)
+        .where("idempotency_key", "=", input.idempotencyKey)
+        .select(["id"])
+        .executeTakeFirst();
+
+      if (existingByIdempotency) {
+        const existingPayment = await this.getAPPaymentById(input.companyId, Number(existingByIdempotency.id));
+        if (existingPayment) {
+          return existingPayment;
+        }
+      }
+    }
+
     await validateBankAccountOwnership(this.db, input.companyId, input.bankAccountId);
 
     const supplier = await this.db
@@ -251,6 +194,12 @@ export class APPaymentService {
       if (typeof error !== "object" || error === null) return false;
       const err = error as { code?: string; sqlMessage?: string };
       return err.code === "ER_DUP_ENTRY" && (err.sqlMessage?.includes("uk_ap_payments_company_payment_no") ?? false);
+    };
+
+    const isDuplicatePaymentLineError = (error: unknown): boolean => {
+      if (typeof error !== "object" || error === null) return false;
+      const err = error as { code?: string; sqlMessage?: string };
+      return err.code === "ER_DUP_ENTRY" && (err.sqlMessage?.includes("uk_ap_payment_lines_payment_line") ?? false);
     };
 
     let result: { paymentId: number; paymentNo: string } | null = null;
@@ -286,7 +235,11 @@ export class APPaymentService {
               throw new APPaymentInvoiceSupplierMismatchError(invoiceId, input.supplierId, pi.supplier_id);
             }
 
-            const openAmount = await computePIOpenAmount(trx as KyselySchema, input.companyId, invoiceId);
+            const openAmount = await computePurchaseInvoiceOpenAmount(
+              trx as KyselySchema,
+              input.companyId,
+              invoiceId
+            );
             if (allocatedAmount > openAmount) {
               throw new APPaymentOverpaymentError(
                 fromScaled4(allocatedAmount),
@@ -297,10 +250,90 @@ export class APPaymentService {
 
           const paymentNo = await generatePaymentNo(trx as KyselySchema, input.companyId, input.paymentDate);
 
+          if (input.idempotencyKey) {
+            const upsertResult = await sql`
+              INSERT INTO ap_payments (
+                company_id,
+                idempotency_key,
+                payment_no,
+                payment_date,
+                bank_account_id,
+                supplier_id,
+                description,
+                status,
+                created_by_user_id
+              ) VALUES (
+                ${input.companyId},
+                ${input.idempotencyKey},
+                ${paymentNo},
+                ${input.paymentDate},
+                ${input.bankAccountId},
+                ${input.supplierId},
+                ${input.description ?? null},
+                ${AP_PAYMENT_STATUS.DRAFT},
+                ${input.userId}
+              )
+              ON DUPLICATE KEY UPDATE
+                id = LAST_INSERT_ID(id)
+            `.execute(trx);
+
+            const paymentId = Number((upsertResult as { insertId?: unknown }).insertId ?? 0);
+            if (!paymentId) {
+              throw new Error("Failed to create AP payment");
+            }
+
+            const matchedRow = await trx
+              .selectFrom("ap_payments")
+              .where("id", "=", paymentId)
+              .where("company_id", "=", input.companyId)
+              .select(["idempotency_key", "payment_no"])
+              .executeTakeFirst();
+
+            if (!matchedRow) {
+              throw new Error("Failed to fetch idempotent AP payment row");
+            }
+
+            if (matchedRow.idempotency_key !== input.idempotencyKey) {
+              throw { code: "ER_DUP_ENTRY", sqlMessage: "uk_ap_payments_company_payment_no" };
+            }
+
+            const existingLineCountResult = await sql<{ count: number | string }>`
+              SELECT COUNT(*) as count
+              FROM ap_payment_lines
+              WHERE ap_payment_id = ${paymentId}
+            `.execute(trx);
+
+            const existingLineCount = Number(existingLineCountResult.rows[0]?.count ?? 0);
+            if (existingLineCount === 0) {
+              for (let i = 0; i < input.lines.length; i++) {
+                const line = input.lines[i];
+                try {
+                  await trx
+                    .insertInto("ap_payment_lines")
+                    .values({
+                      ap_payment_id: paymentId,
+                      line_no: i + 1,
+                      purchase_invoice_id: line.purchaseInvoiceId,
+                      allocation_amount: line.allocationAmount,
+                      description: line.description ?? null,
+                    })
+                    .executeTakeFirst();
+                } catch (lineInsertError) {
+                  if (!isDuplicatePaymentLineError(lineInsertError)) {
+                    throw lineInsertError;
+                  }
+                }
+              }
+            }
+
+            return { paymentId, paymentNo: matchedRow.payment_no };
+          }
+
           const headerResult = await trx
             .insertInto("ap_payments")
             .values({
               company_id: input.companyId,
+              idempotency_key: null,
               payment_no: paymentNo,
               payment_date: input.paymentDate,
               bank_account_id: input.bankAccountId,
@@ -332,6 +365,26 @@ export class APPaymentService {
         });
         break;
       } catch (error) {
+        if (input.idempotencyKey && typeof error === "object" && error !== null) {
+          const mysqlErr = error as { errno?: number; code?: string };
+          const isDuplicate = mysqlErr.errno === 1062 || mysqlErr.code === "ER_DUP_ENTRY";
+          if (isDuplicate) {
+            const existingByIdempotency = await this.db
+              .selectFrom("ap_payments")
+              .where("company_id", "=", input.companyId)
+              .where("idempotency_key", "=", input.idempotencyKey)
+              .select(["id"])
+              .executeTakeFirst();
+
+            if (existingByIdempotency) {
+              const existingPayment = await this.getAPPaymentById(input.companyId, Number(existingByIdempotency.id));
+              if (existingPayment) {
+                return existingPayment;
+              }
+            }
+          }
+        }
+
         if (attempt < 2 && isDuplicatePaymentNoError(error)) {
           continue;
         }
@@ -631,7 +684,11 @@ export class APPaymentService {
       }
 
       for (const [invoiceId, allocatedAmount] of allocationByInvoiceId.entries()) {
-        const openAmount = await computePIOpenAmount(trx as KyselySchema, companyId, invoiceId);
+        const openAmount = await computePurchaseInvoiceOpenAmount(
+          trx as KyselySchema,
+          companyId,
+          invoiceId
+        );
         if (allocatedAmount > openAmount) {
           throw new APPaymentOverpaymentError(
             fromScaled4(allocatedAmount),

@@ -224,6 +224,113 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
     expect(body.data.currency_code).toBe('IDR');
   });
 
+  it('replays duplicate PI create by idempotency_key and returns same invoice', async () => {
+    const idempotencyKey = makeTag('PIIDEM', ++piTagCounter);
+    const invoiceNo = makeTag('PIIDNO', ++piTagCounter);
+
+    const payload = {
+      supplier_id: testSupplierId,
+      idempotency_key: idempotencyKey,
+      invoice_no: invoiceNo,
+      invoice_date: '2026-04-23',
+      currency_code: 'IDR',
+      notes: 'PI idempotency test',
+      lines: [
+        { description: 'Idempotent invoice line', qty: '1', unit_price: '42000.00', line_type: 'SERVICE' }
+      ]
+    };
+
+    const firstRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    expect(firstRes.status).toBe(201);
+    const firstBody = await firstRes.json();
+
+    const secondRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    expect(secondRes.status).toBe(201);
+    const secondBody = await secondRes.json();
+
+    expect(firstBody.data.id).toBe(secondBody.data.id);
+    expect(firstBody.data.invoice_no).toBe(secondBody.data.invoice_no);
+
+    const db = getTestDb();
+    const idemCount = await sql<{ c: string }>`
+      SELECT COUNT(*) as c
+      FROM purchase_invoices
+      WHERE company_id = ${testCompanyId}
+        AND idempotency_key = ${idempotencyKey}
+    `.execute(db);
+    expect(Number(idemCount.rows[0]?.c ?? 0)).toBe(1);
+  });
+
+  it('replays concurrent duplicate PI create by idempotency_key without creating duplicates', async () => {
+    const idempotencyKey = makeTag('PIIDEMCONC', ++piTagCounter);
+    const invoiceNo = makeTag('PIIDCONCNO', ++piTagCounter);
+
+    const payload = {
+      supplier_id: testSupplierId,
+      idempotency_key: idempotencyKey,
+      invoice_no: invoiceNo,
+      invoice_date: '2026-04-24',
+      currency_code: 'IDR',
+      notes: 'PI concurrent idempotency test',
+      lines: [
+        { description: 'Concurrent PI line', qty: '1', unit_price: '51000.00', line_type: 'SERVICE' }
+      ]
+    };
+
+    const [res1, res2] = await Promise.all([
+      fetch(`${baseUrl}/api/purchasing/invoices`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${ownerToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      }),
+      fetch(`${baseUrl}/api/purchasing/invoices`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${ownerToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      })
+    ]);
+
+    expect(res1.status).toBe(201);
+    expect(res2.status).toBe(201);
+
+    const body1 = await res1.json();
+    const body2 = await res2.json();
+
+    expect(body1.success).toBe(true);
+    expect(body2.success).toBe(true);
+    expect(body1.data.id).toBe(body2.data.id);
+    expect(body1.data.invoice_no).toBe(body2.data.invoice_no);
+
+    const db = getTestDb();
+    const idemCount = await sql<{ c: string }>`
+      SELECT COUNT(*) as c
+      FROM purchase_invoices
+      WHERE company_id = ${testCompanyId}
+        AND idempotency_key = ${idempotencyKey}
+    `.execute(db);
+    expect(Number(idemCount.rows[0]?.c ?? 0)).toBe(1);
+  });
+
   it('returns 400 when creating PI with empty lines', async () => {
     const res = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',

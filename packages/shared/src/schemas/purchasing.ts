@@ -233,6 +233,7 @@ export const PurchaseOrderLineSchema = z.object({
  */
 export const PurchaseOrderCreateSchema = z.object({
   supplier_id: NumericIdSchema,
+  idempotency_key: z.string().trim().min(1).max(64).optional(),
   order_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format").transform((d) => new Date(d)),
   currency_code: CurrencyCodeSchema.optional().default("IDR"),
   expected_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).transform((d) => new Date(d)).nullable().optional(),
@@ -333,6 +334,7 @@ export const GoodsReceiptLineSchema = z.object({
  */
 export const GoodsReceiptCreateSchema = z.object({
   supplier_id: NumericIdSchema,
+  idempotency_key: z.string().trim().min(1).max(64).optional(),
   reference_number: z.string().trim().min(1).max(64),
   receipt_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format").transform((d) => new Date(d)),
   notes: z.string().trim().max(1000).nullable().optional(),
@@ -410,6 +412,7 @@ export const PurchaseInvoiceLineSchema = z.object({
  */
 export const PurchaseInvoiceCreateSchema = z.object({
   supplier_id: NumericIdSchema,
+  idempotency_key: z.string().trim().min(1).max(64).optional(),
   invoice_no: z.string().trim().min(1).max(64),
   invoice_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format").transform((d) => new Date(d)),
   due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).transform((d) => new Date(d)).nullable().optional(),
@@ -518,6 +521,7 @@ export const ApPaymentLineCreateSchema = z.object({
  * FIX(47.5-WP-C): Added optional override_reason for closed-period override
  */
 export const ApPaymentCreateSchema = z.object({
+  idempotency_key: z.string().trim().min(1).max(64).optional(),
   payment_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format").transform((d) => new Date(d)),
   bank_account_id: NumericIdSchema,
   supplier_id: NumericIdSchema,
@@ -603,6 +607,7 @@ export const PurchaseCreditLineCreateSchema = z.object({
 
 export const PurchaseCreditCreateSchema = z.object({
   supplier_id: NumericIdSchema,
+  idempotency_key: z.string().trim().min(1).max(64).optional(),
   credit_no: z.string().trim().min(1).max(64),
   credit_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format").transform((d) => new Date(d)),
   description: z.string().trim().max(1000).nullable().optional(),

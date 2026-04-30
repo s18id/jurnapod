@@ -54,6 +54,7 @@ export async function getPurchaseOrderById(input: {
 export async function createPurchaseOrder(input: {
   companyId: number;
   userId: number;
+  idempotencyKey?: string | null;
   supplierId: number;
   orderDate: Date;
   expectedDate?: Date;

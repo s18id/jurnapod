@@ -120,6 +120,7 @@ export class PurchaseCreditJournalNotBalancedError extends PurchaseCreditError {
 export interface PurchaseCreditCreateInput {
   companyId: number;
   userId: number;
+  idempotencyKey?: string | null;
   supplierId: number;
   creditNo: string;
   creditDate: Date;
@@ -204,7 +205,7 @@ export interface PurchaseCreditApplyResult {
 
 export interface PurchaseCreditVoidResult {
   id: number;
-  reversal_batch_id: number;
+  reversal_batch_id: number | null;
 }
 
 export interface PurchaseCreditApplyParams {

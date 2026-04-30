@@ -211,6 +211,58 @@ describe("purchasing.purchase-credits", { timeout: 30000 }, () => {
     expect(body.data.lines.length).toBe(2);
   });
 
+  it("replays concurrent duplicate credit create by idempotency_key without creating duplicates", async () => {
+    const invoiceId = await createAndPostInvoice({
+      invoiceNo: makeTag('PCPICONC', ++pcTagCounter),
+      invoiceDate: '2026-04-21',
+      amount: '95.0000',
+    });
+
+    const idempotencyKey = makeTag('PCCONCIDEM', ++pcTagCounter);
+    const creditNo = makeTag('PCCONCNO', ++pcTagCounter);
+
+    const payload = {
+      supplier_id: supplierId,
+      idempotency_key: idempotencyKey,
+      credit_no: creditNo,
+      credit_date: '2026-04-22',
+      description: 'Concurrent credit idempotency test',
+      lines: [
+        {
+          purchase_invoice_id: invoiceId,
+          description: 'Concurrent credit line',
+          qty: '1',
+          unit_price: '95.0000',
+          reason: 'return',
+        },
+      ],
+    };
+
+    const [res1, res2] = await Promise.all([
+      postJson('/api/purchasing/credits', ownerToken, payload),
+      postJson('/api/purchasing/credits', ownerToken, payload),
+    ]);
+
+    expect(res1.status).toBe(201);
+    expect(res2.status).toBe(201);
+
+    const body1 = await res1.json();
+    const body2 = await res2.json();
+
+    expect(body1.success).toBe(true);
+    expect(body2.success).toBe(true);
+    expect(body1.data.id).toBe(body2.data.id);
+    expect(body1.data.credit_no).toBe(body2.data.credit_no);
+
+    const idemCount = await sql<{ c: string }>`
+      SELECT COUNT(*) as c
+      FROM purchase_credits
+      WHERE company_id = ${testCompanyId}
+        AND idempotency_key = ${idempotencyKey}
+    `.execute(getTestDb());
+    expect(Number(idemCount.rows[0]?.c ?? 0)).toBe(1);
+  });
+
   it("applies a referenced credit partially when PI open amount is smaller", async () => {
     const invoiceId = await createAndPostInvoice({
       invoiceNo: makeTag('PCPIPART', ++pcTagCounter),
@@ -365,5 +417,57 @@ describe("purchasing.purchase-credits", { timeout: 30000 }, () => {
     `.execute(getTestDb());
 
     expect(Number(batchCount.rows[0]?.count ?? 0)).toBe(2);
+  });
+
+  it("returns OK when voiding an already voided purchase credit (idempotent replay)", async () => {
+    const invoiceId = await createAndPostInvoice({
+      invoiceNo: makeTag('PCPIIDEM', ++pcTagCounter),
+      invoiceDate: '2026-04-05',
+      amount: '55.0000',
+    });
+
+    const createRes = await postJson('/api/purchasing/credits', ownerToken, {
+      supplier_id: supplierId,
+      idempotency_key: makeTag('PCIDEM', ++pcTagCounter),
+      credit_no: makeTag('PCVOID2', ++pcTagCounter),
+      credit_date: '2026-04-20',
+      lines: [
+        {
+          purchase_invoice_id: invoiceId,
+          description: 'Idempotent void test',
+          qty: '1',
+          unit_price: '55.0000',
+          reason: 'return',
+        },
+      ],
+    });
+    expect(createRes.status).toBe(201);
+    const created = await createRes.json();
+    const creditId = Number(created.data.id);
+
+    const applyRes = await postJson(`/api/purchasing/credits/${creditId}/apply`, ownerToken);
+    expect(applyRes.status).toBe(200);
+
+    const firstVoidRes = await postJson(`/api/purchasing/credits/${creditId}/void`, ownerToken);
+    expect(firstVoidRes.status).toBe(200);
+    const firstVoidBody = await firstVoidRes.json();
+    const firstReversalBatchId = Number(firstVoidBody.data.reversal_batch_id);
+    expect(firstReversalBatchId).toBeGreaterThan(0);
+
+    const secondVoidRes = await postJson(`/api/purchasing/credits/${creditId}/void`, ownerToken);
+    expect(secondVoidRes.status).toBe(200);
+    const secondVoidBody = await secondVoidRes.json();
+    expect(Number(secondVoidBody.data.id)).toBe(creditId);
+    expect(Number(secondVoidBody.data.reversal_batch_id)).toBe(firstReversalBatchId);
+
+    const batchCount = await sql<{ count: string }>`
+      SELECT COUNT(*) as count
+      FROM journal_batches
+      WHERE company_id = ${testCompanyId}
+        AND doc_id = ${creditId}
+        AND doc_type = 'PURCHASE_CREDIT_VOID'
+    `.execute(getTestDb());
+
+    expect(Number(batchCount.rows[0]?.count ?? 0)).toBe(1);
   });
 });

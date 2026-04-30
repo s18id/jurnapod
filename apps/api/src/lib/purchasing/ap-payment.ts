@@ -45,6 +45,7 @@ export async function createDraftAPPayment(
   companyId: number,
   userId: number,
   input: {
+    idempotencyKey?: string | null;
     paymentDate: Date;
     bankAccountId: number;
     supplierId: number;
@@ -92,6 +93,7 @@ export async function createDraftAPPayment(
   const serviceInput: APPaymentCreateInput = {
     companyId,
     userId,
+    idempotencyKey: input.idempotencyKey,
     paymentDate: input.paymentDate,
     bankAccountId: input.bankAccountId,
     supplierId: input.supplierId,

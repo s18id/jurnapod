@@ -183,6 +183,55 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(body.data.total_amount).toBe('220000.0000');
   });
 
+  it('replays duplicate PO create by idempotency_key and returns same record', async () => {
+    const idempotencyKey = `po-idem-${++poTagCounter}`;
+
+    const payload = {
+      supplier_id: testSupplierId,
+      idempotency_key: idempotencyKey,
+      order_date: '2026-04-21',
+      currency_code: 'IDR',
+      notes: 'PO idempotency test',
+      lines: [
+        { qty: '3', unit_price: '15000.00', tax_rate: '0.10', description: 'Idempotent line' }
+      ]
+    };
+
+    const firstRes = await fetch(`${baseUrl}/api/purchasing/orders`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    expect(firstRes.status).toBe(201);
+    const firstBody = await firstRes.json();
+
+    const secondRes = await fetch(`${baseUrl}/api/purchasing/orders`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    expect(secondRes.status).toBe(201);
+    const secondBody = await secondRes.json();
+
+    expect(firstBody.data.id).toBe(secondBody.data.id);
+    expect(firstBody.data.order_no).toBe(secondBody.data.order_no);
+
+    const db = getTestDb();
+    const idemCount = await sql<{ c: string }>`
+      SELECT COUNT(*) as c
+      FROM purchase_orders
+      WHERE company_id = ${cashierCompanyId}
+        AND idempotency_key = ${idempotencyKey}
+    `.execute(db);
+    expect(Number(idemCount.rows[0]?.c ?? 0)).toBe(1);
+  });
+
   it('creates a purchase order with minimum required fields', async () => {
     const supplierId = testSupplierId;
     const res = await fetch(`${baseUrl}/api/purchasing/orders`, {

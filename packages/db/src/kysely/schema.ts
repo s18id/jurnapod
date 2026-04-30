@@ -120,6 +120,7 @@ export interface ApPayments {
   created_by_user_id: Generated<number | null>;
   description: Generated<string | null>;
   id: Generated<number>;
+  idempotency_key: Generated<string | null>;
   journal_batch_id: Generated<number | null>;
   payment_date: Date;
   payment_no: string;
@@ -1549,6 +1550,8 @@ export interface GoodsReceipts {
   created_at: Generated<Date>;
   created_by_user_id: Generated<number | null>;
   id: Generated<number>;
+  idempotency_key: Generated<string | null>;
+  idempotency_warnings_json: Generated<string | null>;
   notes: Generated<string | null>;
   receipt_date: Generated<Date>;
   reference_number: string;
@@ -1640,6 +1643,7 @@ export interface PurchaseCredits {
   credit_no: string;
   description: Generated<string | null>;
   id: Generated<number>;
+  idempotency_key: Generated<string | null>;
   journal_batch_id: Generated<number | null>;
   posted_at: Generated<Date | null>;
   posted_by_user_id: Generated<number | null>;
@@ -1660,6 +1664,7 @@ export interface PurchaseInvoices {
   exchange_rate: Generated<Decimal>;
   grand_total: Generated<Decimal>;
   id: Generated<number>;
+  idempotency_key: Generated<string | null>;
   invoice_date: Date;
   invoice_no: string;
   journal_batch_id: Generated<number | null>;
@@ -1700,6 +1705,7 @@ export interface PurchaseOrders {
   currency_code: Generated<string>;
   expected_date: Generated<Date | null>;
   id: Generated<number>;
+  idempotency_key: Generated<string | null>;
   notes: Generated<string | null>;
   order_date: Generated<Date>;
   order_no: string;

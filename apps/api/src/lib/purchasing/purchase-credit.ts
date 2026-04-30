@@ -46,6 +46,7 @@ export async function createDraftPurchaseCredit(
   companyId: number,
   userId: number,
   input: {
+    idempotencyKey?: string | null;
     supplierId: number;
     creditNo: string;
     creditDate: Date;
@@ -97,6 +98,7 @@ export async function createDraftPurchaseCredit(
   const serviceInput: PurchaseCreditCreateInput = {
     companyId,
     userId,
+    idempotencyKey: input.idempotencyKey,
     supplierId: input.supplierId,
     creditNo: input.creditNo,
     creditDate: input.creditDate,

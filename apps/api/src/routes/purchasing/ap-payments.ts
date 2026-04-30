@@ -198,6 +198,7 @@ paymentRoutes.post("/", async (c) => {
 
     // FIX(47.5-WP-C): Pass override_reason directly to service — no eager ACL check here.
     const payment = await createDraftAPPayment(auth.companyId, auth.userId, {
+      idempotencyKey: input.idempotency_key ?? null,
       paymentDate: new Date(input.payment_date),
       bankAccountId: input.bank_account_id,
       supplierId: input.supplier_id,

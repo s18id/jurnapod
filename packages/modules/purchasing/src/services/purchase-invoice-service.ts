@@ -35,41 +35,14 @@ import {
   PITaxAccountMissingError,
 } from "../types/purchase-invoice.js";
 import { ExchangeRateService } from "./exchange-rate-service.js";
+import { fromScaled4, scale4Mul, toScaled, toScaled4 } from "./decimal-scale4.js";
 
 // =============================================================================
 // BigInt Scaled Decimal Helpers
 // =============================================================================
 
-function toScaled(value: string, scale: number): bigint {
-  const trimmed = value.trim();
-  const re = new RegExp(`^\\d+(\\.\\d{1,${scale}})?$`);
-  if (!re.test(trimmed)) {
-    throw new Error(`Invalid decimal value: ${value}`);
-  }
-  const [integer, fraction = ""] = trimmed.split(".");
-  const scaleFactor = 10n ** BigInt(scale);
-  const fracScaled = (fraction + "0".repeat(scale)).slice(0, scale);
-  return BigInt(integer) * scaleFactor + BigInt(fracScaled);
-}
-
-function toScaled4(value: string): bigint {
-  return toScaled(value, 4);
-}
-
 function toScaled8(value: string): bigint {
   return toScaled(value, 8);
-}
-
-function fromScaled4(value: bigint): string {
-  const sign = value < 0n ? "-" : "";
-  const abs = value < 0n ? -value : value;
-  const intPart = abs / 10000n;
-  const fracPart = (abs % 10000n).toString().padStart(4, "0");
-  return `${sign}${intPart.toString()}.${fracPart}`;
-}
-
-function scale4Mul(a: bigint, b: bigint): bigint {
-  return (a * b) / 10000n;
 }
 
 // =============================================================================
@@ -172,6 +145,22 @@ export class PurchaseInvoiceService {
   // ---------------------------------------------------------------------------
 
   async createDraftPI(input: PICreateInput): Promise<PIGetResult> {
+    if (input.idempotencyKey) {
+      const existingByIdempotency = await this.db
+        .selectFrom("purchase_invoices")
+        .where("company_id", "=", input.companyId)
+        .where("idempotency_key", "=", input.idempotencyKey)
+        .select(["id"])
+        .executeTakeFirst();
+
+      if (existingByIdempotency) {
+        const existingPI = await this.getPIById(input.companyId, Number(existingByIdempotency.id));
+        if (existingPI) {
+          return existingPI;
+        }
+      }
+    }
+
     // Validate supplier ownership (tenant isolation)
     const supplier = await this.db
       .selectFrom("suppliers")
@@ -184,11 +173,14 @@ export class PurchaseInvoiceService {
       throw { code: "SUPPLIER_NOT_FOUND", message: "Supplier not found" };
     }
 
-    const result = await this.db.transaction().execute(async (trx) => {
+    let result: { piId: number };
+    try {
+      result = await this.db.transaction().execute(async (trx) => {
       const headerResult = await trx
         .insertInto("purchase_invoices")
         .values({
           company_id: input.companyId,
+          idempotency_key: input.idempotencyKey ?? null,
           supplier_id: input.supplierId,
           invoice_no: input.invoiceNo,
           invoice_date: input.invoiceDate,
@@ -266,7 +258,30 @@ export class PurchaseInvoiceService {
         .executeTakeFirst();
 
       return { piId };
-    });
+      });
+    } catch (error: unknown) {
+      if (input.idempotencyKey && typeof error === "object" && error !== null) {
+        const mysqlErr = error as { errno?: number; code?: string };
+        const isDuplicate = mysqlErr.errno === 1062 || mysqlErr.code === "ER_DUP_ENTRY";
+        if (isDuplicate) {
+          const existingByIdempotency = await this.db
+            .selectFrom("purchase_invoices")
+            .where("company_id", "=", input.companyId)
+            .where("idempotency_key", "=", input.idempotencyKey)
+            .select(["id"])
+            .executeTakeFirst();
+
+          if (existingByIdempotency) {
+            const existingPI = await this.getPIById(input.companyId, Number(existingByIdempotency.id));
+            if (existingPI) {
+              return existingPI;
+            }
+          }
+        }
+      }
+
+      throw error;
+    }
 
     const pi = await this.getPIById(input.companyId, result.piId);
     if (!pi) throw new Error("Failed to fetch created purchase invoice");

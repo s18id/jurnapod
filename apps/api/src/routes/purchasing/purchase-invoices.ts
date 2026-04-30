@@ -168,6 +168,7 @@ invoiceRoutes.post("/", async (c) => {
     // Service evaluates period status first; if open, no MANAGE permission needed.
     // If closed+override_required, service validates reason length (→400) and MANAGE (→403).
     const pi = await createDraftPI(auth.companyId, auth.userId, {
+      idempotencyKey: input.idempotency_key ?? null,
       supplierId: input.supplier_id,
       invoiceNo: input.invoice_no,
       invoiceDate: input.invoice_date,

@@ -84,6 +84,7 @@ export class PITaxAccountMissingError extends PIError {
 export interface PICreateInput {
   companyId: number;
   userId: number;
+  idempotencyKey?: string | null;
   supplierId: number;
   invoiceNo: string;
   invoiceDate: Date;

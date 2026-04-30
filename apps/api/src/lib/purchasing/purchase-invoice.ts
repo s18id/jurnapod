@@ -40,6 +40,7 @@ export async function createDraftPI(
   companyId: number,
   userId: number,
   input: {
+    idempotencyKey?: string | null;
     supplierId: number;
     invoiceNo: string;
     invoiceDate: Date;
@@ -95,6 +96,7 @@ export async function createDraftPI(
   const serviceInput: PICreateInput = {
     companyId,
     userId,
+    idempotencyKey: input.idempotencyKey,
     supplierId: input.supplierId,
     invoiceNo: input.invoiceNo,
     invoiceDate: input.invoiceDate,

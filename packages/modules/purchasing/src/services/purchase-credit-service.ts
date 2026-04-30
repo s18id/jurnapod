@@ -11,7 +11,6 @@
 import type { KyselySchema } from "@jurnapod/db";
 import { sql } from "kysely";
 import {
-  AP_PAYMENT_STATUS,
   PURCHASE_CREDIT_STATUS,
   PURCHASE_INVOICE_STATUS,
   toPurchaseCreditStatusLabel,
@@ -44,85 +43,8 @@ import {
   PurchaseCreditNoApplicableInvoiceError,
   PurchaseCreditJournalNotBalancedError,
 } from "../types/purchase-credit.js";
-
-// =============================================================================
-// BigInt scaled decimal helpers
-// =============================================================================
-
-function toScaled(value: string, scale: number): bigint {
-  const trimmed = value.trim();
-  const re = new RegExp(`^\\d+(\\.\\d{1,${scale}})?$`);
-  if (!re.test(trimmed)) {
-    throw new Error(`Invalid decimal value: ${value}`);
-  }
-  const [integer, fraction = ""] = trimmed.split(".");
-  const scaleFactor = 10n ** BigInt(scale);
-  const fracScaled = (fraction + "0".repeat(scale)).slice(0, scale);
-  return BigInt(integer) * scaleFactor + BigInt(fracScaled);
-}
-
-function toScaled4(value: string): bigint {
-  return toScaled(value, 4);
-}
-
-function fromScaled4(value: bigint): string {
-  const sign = value < 0n ? "-" : "";
-  const abs = value < 0n ? -value : value;
-  const intPart = abs / 10000n;
-  const fracPart = (abs % 10000n).toString().padStart(4, "0");
-  return `${sign}${intPart.toString()}.${fracPart}`;
-}
-
-function scale4Mul(a: bigint, b: bigint): bigint {
-  return (a * b) / 10000n;
-}
-
-// =============================================================================
-// Open amount calculation
-// =============================================================================
-
-async function computePIOpenAmount(
-  db: KyselySchema,
-  companyId: number,
-  invoiceId: number
-): Promise<bigint> {
-  const baseTotalResult = await sql<{ base_grand_total: string }>`
-    SELECT COALESCE(ROUND(grand_total * exchange_rate, 4), 0) AS base_grand_total
-    FROM purchase_invoices
-    WHERE id = ${invoiceId}
-      AND company_id = ${companyId}
-    LIMIT 1
-  `.execute(db);
-
-  if (baseTotalResult.rows.length === 0) {
-    return 0n;
-  }
-
-  const baseGrandTotal = toScaled4(String(baseTotalResult.rows[0]?.base_grand_total ?? "0"));
-
-  const paidResult = await sql<{ total: string }>`
-    SELECT COALESCE(SUM(apl.allocation_amount), 0) as total
-    FROM ap_payment_lines apl
-    INNER JOIN ap_payments ap ON ap.id = apl.ap_payment_id
-    WHERE apl.purchase_invoice_id = ${invoiceId}
-      AND ap.company_id = ${companyId}
-      AND ap.status = ${AP_PAYMENT_STATUS.POSTED}
-  `.execute(db);
-
-  const creditedResult = await sql<{ total: string }>`
-    SELECT COALESCE(SUM(pca.applied_amount), 0) as total
-    FROM purchase_credit_applications pca
-    INNER JOIN purchase_credits pc ON pc.id = pca.purchase_credit_id
-    WHERE pca.purchase_invoice_id = ${invoiceId}
-      AND pca.company_id = ${companyId}
-      AND pc.status IN (${PURCHASE_CREDIT_STATUS.PARTIAL}, ${PURCHASE_CREDIT_STATUS.APPLIED})
-  `.execute(db);
-
-  const paidAmount = toScaled4(String(paidResult.rows[0]?.total ?? "0"));
-  const creditedAmount = toScaled4(String(creditedResult.rows[0]?.total ?? "0"));
-  const open = baseGrandTotal - paidAmount - creditedAmount;
-  return open > 0n ? open : 0n;
-}
+import { fromScaled4, scale4Mul, toScaled4 } from "./decimal-scale4.js";
+import { computePurchaseInvoiceOpenAmount } from "./purchase-invoice-open-amount.js";
 
 async function getPurchasingAccountsForUpdate(
   db: KyselySchema,
@@ -234,6 +156,22 @@ export class PurchaseCreditService {
   async createDraftPurchaseCredit(
     input: PurchaseCreditCreateInput
   ): Promise<PurchaseCreditGetResult> {
+    if (input.idempotencyKey) {
+      const existingByIdempotency = await this.db
+        .selectFrom("purchase_credits")
+        .where("company_id", "=", input.companyId)
+        .where("idempotency_key", "=", input.idempotencyKey)
+        .select(["id"])
+        .executeTakeFirst();
+
+      if (existingByIdempotency) {
+        const existingCredit = await this.getPurchaseCreditById(input.companyId, Number(existingByIdempotency.id));
+        if (existingCredit) {
+          return existingCredit;
+        }
+      }
+    }
+
     const supplier = await this.db
       .selectFrom("suppliers")
       .where("id", "=", input.supplierId)
@@ -276,13 +214,16 @@ export class PurchaseCreditService {
       }
     }
 
-    const result = await this.db.transaction().execute(async (trx) => {
+    let result: { creditId: number };
+    try {
+      result = await this.db.transaction().execute(async (trx) => {
       let totalCredit = 0n;
 
       const headerResult = await trx
         .insertInto("purchase_credits")
         .values({
           company_id: input.companyId,
+          idempotency_key: input.idempotencyKey ?? null,
           supplier_id: input.supplierId,
           credit_no: input.creditNo,
           credit_date: input.creditDate,
@@ -330,7 +271,30 @@ export class PurchaseCreditService {
         .executeTakeFirst();
 
       return { creditId };
-    });
+      });
+    } catch (error: unknown) {
+      if (input.idempotencyKey && typeof error === "object" && error !== null) {
+        const mysqlErr = error as { errno?: number; code?: string };
+        const isDuplicate = mysqlErr.errno === 1062 || mysqlErr.code === "ER_DUP_ENTRY";
+        if (isDuplicate) {
+          const existingByIdempotency = await this.db
+            .selectFrom("purchase_credits")
+            .where("company_id", "=", input.companyId)
+            .where("idempotency_key", "=", input.idempotencyKey)
+            .select(["id"])
+            .executeTakeFirst();
+
+          if (existingByIdempotency) {
+            const existingCredit = await this.getPurchaseCreditById(input.companyId, Number(existingByIdempotency.id));
+            if (existingCredit) {
+              return existingCredit;
+            }
+          }
+        }
+      }
+
+      throw error;
+    }
 
     const credit = await this.getPurchaseCreditById(input.companyId, result.creditId);
     if (!credit) {
@@ -688,7 +652,7 @@ export class PurchaseCreditService {
           const invoiceId = line.purchase_invoice_id;
           await ensureInvoiceEligible(invoiceId);
 
-          const open = await computePIOpenAmount(trx as KyselySchema, companyId, invoiceId);
+          const open = await computePurchaseInvoiceOpenAmount(trx as KyselySchema, companyId, invoiceId);
           const alreadyApplied = appliedByInvoiceId.get(invoiceId) ?? 0n;
           const effectiveOpen = open - alreadyApplied;
           const effectiveOpenSafe = effectiveOpen > 0n ? effectiveOpen : 0n;
@@ -720,7 +684,7 @@ export class PurchaseCreditService {
             break;
           }
 
-          const open = await computePIOpenAmount(trx as KyselySchema, companyId, invoiceId);
+          const open = await computePurchaseInvoiceOpenAmount(trx as KyselySchema, companyId, invoiceId);
           const alreadyApplied = appliedByInvoiceId.get(invoiceId) ?? 0n;
           const effectiveOpen = open - alreadyApplied;
           const effectiveOpenSafe = effectiveOpen > 0n ? effectiveOpen : 0n;
@@ -861,6 +825,22 @@ export class PurchaseCreditService {
       const credit = creditResult.rows[0];
       if (!credit) {
         throw new PurchaseCreditNotFoundError(creditId);
+      }
+
+      if (credit.status === PURCHASE_CREDIT_STATUS.VOID) {
+        const existingReversal = await sql<{ id: number }>`
+          SELECT id
+          FROM journal_batches
+          WHERE company_id = ${companyId}
+            AND doc_type = 'PURCHASE_CREDIT_VOID'
+            AND doc_id = ${creditId}
+          ORDER BY id DESC
+          LIMIT 1
+        `.execute(trx);
+
+        return {
+          reversalBatchId: existingReversal.rows[0]?.id ?? null,
+        };
       }
 
       if (

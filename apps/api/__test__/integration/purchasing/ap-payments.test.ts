@@ -313,6 +313,139 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
     expect(body.data.bank_account_id).toBe(bankAccountId);
   });
 
+  it('replays duplicate payment create by idempotency_key and keeps single payment + journal', async () => {
+    const idempotencyKey = makeTag('APPIDEM', ++apTagCounter);
+
+    const payload = {
+      idempotency_key: idempotencyKey,
+      payment_date: '2026-04-24',
+      bank_account_id: bankAccountId,
+      supplier_id: testSupplierId,
+      description: 'Idempotent payment',
+      lines: [
+        { purchase_invoice_id: postedPi3Id, allocation_amount: '10000.0000', description: 'Idempotent allocation' }
+      ]
+    };
+
+    const firstRes = await fetch(`${baseUrl}/api/purchasing/payments`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    expect(firstRes.status).toBe(201);
+    const firstBody = await firstRes.json();
+
+    const secondRes = await fetch(`${baseUrl}/api/purchasing/payments`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    expect(secondRes.status).toBe(201);
+    const secondBody = await secondRes.json();
+
+    expect(firstBody.data.id).toBe(secondBody.data.id);
+    expect(firstBody.data.payment_no).toBe(secondBody.data.payment_no);
+
+    const paymentId = Number(firstBody.data.id);
+
+    const db = getTestDb();
+    const paymentCount = await sql<{ c: string }>`
+      SELECT COUNT(*) as c
+      FROM ap_payments
+      WHERE company_id = ${testCompanyId}
+        AND idempotency_key = ${idempotencyKey}
+    `.execute(db);
+    expect(Number(paymentCount.rows[0]?.c ?? 0)).toBe(1);
+
+    const postRes = await fetch(`${baseUrl}/api/purchasing/payments/${paymentId}/post`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    expect(postRes.status).toBe(200);
+    const postBody = await postRes.json();
+    expect(Number(postBody.data.journal_batch_id)).toBeGreaterThan(0);
+
+    const journalCount = await sql<{ c: string }>`
+      SELECT COUNT(*) as c
+      FROM journal_batches
+      WHERE company_id = ${testCompanyId}
+        AND doc_type = 'AP_PAYMENT'
+        AND doc_id = ${paymentId}
+    `.execute(db);
+    expect(Number(journalCount.rows[0]?.c ?? 0)).toBe(1);
+  });
+
+  it('replays concurrent duplicate payment create by idempotency_key without duplicate-line errors', async () => {
+    const idempotencyKey = makeTag('APPIDEMCONC', ++apTagCounter);
+
+    const payload = {
+      idempotency_key: idempotencyKey,
+      payment_date: '2026-04-25',
+      bank_account_id: bankAccountId,
+      supplier_id: testSupplierId,
+      description: 'Concurrent idempotent payment',
+      lines: [
+        { purchase_invoice_id: postedPi2Id, allocation_amount: '12000.0000', description: 'Concurrent allocation' }
+      ]
+    };
+
+    const [res1, res2] = await Promise.all([
+      fetch(`${baseUrl}/api/purchasing/payments`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${ownerToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      }),
+      fetch(`${baseUrl}/api/purchasing/payments`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${ownerToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      })
+    ]);
+
+    expect(res1.status).toBe(201);
+    expect(res2.status).toBe(201);
+
+    const body1 = await res1.json();
+    const body2 = await res2.json();
+    expect(body1.success).toBe(true);
+    expect(body2.success).toBe(true);
+    expect(body1.data.id).toBe(body2.data.id);
+    expect(body1.data.payment_no).toBe(body2.data.payment_no);
+
+    const paymentId = Number(body1.data.id);
+    const db = getTestDb();
+
+    const paymentCount = await sql<{ c: string }>`
+      SELECT COUNT(*) as c
+      FROM ap_payments
+      WHERE company_id = ${testCompanyId}
+        AND idempotency_key = ${idempotencyKey}
+    `.execute(db);
+    expect(Number(paymentCount.rows[0]?.c ?? 0)).toBe(1);
+
+    const lineCount = await sql<{ c: string }>`
+      SELECT COUNT(*) as c
+      FROM ap_payment_lines
+      WHERE ap_payment_id = ${paymentId}
+    `.execute(db);
+    expect(Number(lineCount.rows[0]?.c ?? 0)).toBe(1);
+  });
+
   it('creates unique payment_no values under concurrent draft creation', async () => {
     const piRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
@@ -1540,6 +1673,36 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
   // AC: posting already posted rejected
   // -------------------------------------------------------------------------
   it('rejects posting an already posted payment', async () => {
+    // Create a fresh posted PI dedicated to this test
+    const piRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        supplier_id: testSupplierId,
+        invoice_no: makeTag('APIPOSTREJ', ++apTagCounter),
+        invoice_date: '2026-04-25',
+        currency_code: 'IDR',
+        lines: [
+          { description: 'PI for post-reject test', qty: '1', unit_price: '60000.0000', line_type: 'SERVICE' }
+        ]
+      })
+    });
+    expect(piRes.status).toBe(201);
+    const pi = await piRes.json();
+    const piId = pi.data.id;
+
+    const piPostRes = await fetch(`${baseUrl}/api/purchasing/invoices/${piId}/post`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    expect(piPostRes.status).toBe(200);
+
     // Create and post a payment
     const createRes = await fetch(`${baseUrl}/api/purchasing/payments`, {
       method: 'POST',
@@ -1552,7 +1715,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
         bank_account_id: bankAccountId,
         supplier_id: testSupplierId,
         lines: [
-          { purchase_invoice_id: postedPi3Id, allocation_amount: '60000.0000' }
+          { purchase_invoice_id: piId, allocation_amount: '60000.0000' }
         ]
       })
     });

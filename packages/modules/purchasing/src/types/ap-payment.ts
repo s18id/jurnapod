@@ -129,6 +129,7 @@ export class APPaymentInvalidAPAccountTypeError extends APPaymentError {
 export interface APPaymentCreateInput {
   companyId: number;
   userId: number;
+  idempotencyKey?: string | null;
   paymentDate: Date;
   bankAccountId: number;
   supplierId: number;

@@ -180,6 +180,7 @@ creditRoutes.post("/", async (c) => {
 
     // FIX(47.5-WP-C): Pass override_reason directly to service — no eager ACL check here.
     const result = await createDraftPurchaseCredit(auth.companyId, auth.userId, {
+      idempotencyKey: input.idempotency_key ?? null,
       supplierId: input.supplier_id,
       creditNo: input.credit_no,
       creditDate: new Date(input.credit_date),

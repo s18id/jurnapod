@@ -158,6 +158,7 @@ export interface CreatePOLineInput {
 export interface CreatePurchaseOrderInput {
   companyId: number;
   userId: number;
+  idempotencyKey?: string | null;
   supplierId: number;
   orderDate: Date;
   expectedDate?: Date;

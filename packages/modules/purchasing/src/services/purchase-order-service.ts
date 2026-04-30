@@ -183,6 +183,22 @@ export class PurchaseOrderService {
   async createPurchaseOrder(
     input: CreatePurchaseOrderInput
   ): Promise<CreatePurchaseOrderResult> {
+    if (input.idempotencyKey) {
+      const existingByIdempotency = await this.db
+        .selectFrom("purchase_orders")
+        .where("company_id", "=", input.companyId)
+        .where("idempotency_key", "=", input.idempotencyKey)
+        .select(["id"])
+        .executeTakeFirst();
+
+      if (existingByIdempotency) {
+        const existingOrder = await this.getPurchaseOrderById(input.companyId, Number(existingByIdempotency.id));
+        if (existingOrder) {
+          return { receipt: existingOrder };
+        }
+      }
+    }
+
     const processedLines = input.lines.map((line, idx) => {
       const lineTotal = computeLineTotal(line.qty, line.unit_price, line.tax_rate ?? "0");
       return { ...line, line_no: idx + 1, line_total: lineTotal };
@@ -229,6 +245,7 @@ export class PurchaseOrderService {
             .insertInto("purchase_orders")
             .values({
               company_id: input.companyId,
+              idempotency_key: input.idempotencyKey ?? null,
               supplier_id: input.supplierId,
               order_no: orderNo,
               order_date: input.orderDate,
@@ -270,10 +287,28 @@ export class PurchaseOrderService {
         return { receipt: order };
       } catch (err: unknown) {
         lastError = err;
-        if (typeof err === "object" && err !== null && "errno" in err) {
-          const mysqlErr = err as { errno: number };
-          if (mysqlErr.errno === 1062) {
-            // Duplicate key - retry with new orderNo
+        if (typeof err === "object" && err !== null) {
+          const mysqlErr = err as { errno?: number; code?: string };
+          const isDuplicate = mysqlErr.errno === 1062 || mysqlErr.code === "ER_DUP_ENTRY";
+
+          if (isDuplicate && input.idempotencyKey) {
+            const existingByIdempotency = await this.db
+              .selectFrom("purchase_orders")
+              .where("company_id", "=", input.companyId)
+              .where("idempotency_key", "=", input.idempotencyKey)
+              .select(["id"])
+              .executeTakeFirst();
+
+            if (existingByIdempotency) {
+              const existingOrder = await this.getPurchaseOrderById(input.companyId, Number(existingByIdempotency.id));
+              if (existingOrder) {
+                return { receipt: existingOrder };
+              }
+            }
+          }
+
+          if (isDuplicate) {
+            // Duplicate order_no collision - retry with new generated order no.
             continue;
           }
         }

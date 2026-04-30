@@ -23,6 +23,22 @@ import {
   type CreateGoodsReceiptResult,
 } from "../types/goods-receipt.js";
 
+function parseIdempotencyWarningsJson(value: string | null | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter((item): item is string => typeof item === "string");
+  } catch {
+    return [];
+  }
+}
+
 // =============================================================================
 // Service
 // =============================================================================
@@ -213,6 +229,25 @@ export class GoodsReceiptService {
     userId: number,
     input: GoodsReceiptCreate
   ): Promise<CreateGoodsReceiptResult> {
+    if (input.idempotency_key) {
+      const existingByIdempotency = await this.db
+        .selectFrom("goods_receipts")
+        .where("company_id", "=", companyId)
+        .where("idempotency_key", "=", input.idempotency_key)
+        .select(["id", "idempotency_warnings_json"])
+        .executeTakeFirst();
+
+      if (existingByIdempotency) {
+        const existingReceipt = await this.getGoodsReceiptById(companyId, Number(existingByIdempotency.id));
+        if (existingReceipt) {
+          return {
+            receipt: existingReceipt,
+            warnings: parseIdempotencyWarningsJson(existingByIdempotency.idempotency_warnings_json),
+          };
+        }
+      }
+    }
+
     // Validate supplier ownership (tenant isolation)
     const supplier = await this.db
       .selectFrom("suppliers")
@@ -225,7 +260,9 @@ export class GoodsReceiptService {
       throw { code: "SUPPLIER_NOT_FOUND", message: "Supplier not found" };
     }
 
-    const result = await this.db.transaction().execute(async (trx) => {
+    let result: { insertedId: number; overReceiptWarnings: string[] };
+    try {
+      result = await this.db.transaction().execute(async (trx) => {
       const overReceiptWarnings: string[] = [];
 
       // First pass: validate PO lines and collect over-receipt warnings
@@ -305,6 +342,8 @@ export class GoodsReceiptService {
         .insertInto("goods_receipts")
         .values({
           company_id: companyId,
+          idempotency_key: input.idempotency_key ?? null,
+          idempotency_warnings_json: JSON.stringify(overReceiptWarnings),
           supplier_id: input.supplier_id,
           reference_number: input.reference_number,
           receipt_date: input.receipt_date,
@@ -406,7 +445,33 @@ export class GoodsReceiptService {
       }
 
       return { insertedId, overReceiptWarnings };
-    });
+      });
+    } catch (error: unknown) {
+      if (input.idempotency_key && typeof error === "object" && error !== null) {
+        const mysqlErr = error as { errno?: number; code?: string };
+        const isDuplicate = mysqlErr.errno === 1062 || mysqlErr.code === "ER_DUP_ENTRY";
+        if (isDuplicate) {
+          const existingByIdempotency = await this.db
+            .selectFrom("goods_receipts")
+            .where("company_id", "=", companyId)
+            .where("idempotency_key", "=", input.idempotency_key)
+            .select(["id", "idempotency_warnings_json"])
+            .executeTakeFirst();
+
+          if (existingByIdempotency) {
+            const existingReceipt = await this.getGoodsReceiptById(companyId, Number(existingByIdempotency.id));
+            if (existingReceipt) {
+              return {
+                receipt: existingReceipt,
+                warnings: parseIdempotencyWarningsJson(existingByIdempotency.idempotency_warnings_json),
+              };
+            }
+          }
+        }
+      }
+
+      throw error;
+    }
 
     // Fetch full GR result
     const receipt = await this.getGoodsReceiptById(companyId, result.insertedId);

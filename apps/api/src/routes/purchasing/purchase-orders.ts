@@ -216,6 +216,7 @@ orderRoutes.post("/", async (c) => {
     const order = await createPurchaseOrder({
       companyId: auth.companyId,
       userId: auth.userId,
+      idempotencyKey: input.idempotency_key ?? null,
       supplierId: input.supplier_id,
       orderDate: input.order_date ?? undefined,
       expectedDate: input.expected_date ?? undefined,

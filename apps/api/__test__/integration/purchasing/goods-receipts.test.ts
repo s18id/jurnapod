@@ -299,6 +299,54 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     expect(line1.received_qty).toBe('2.0000');
   });
 
+  it('replays duplicate GR create by idempotency_key, keeps single receipt, and replays warnings', async () => {
+    const supplierId = testSupplierId;
+    const po = await createSentPO(supplierId, [{ qty: '8', unit_price: '4000.00', tax_rate: '0' }]);
+    const idempotencyKey = makeTag('GRIDEM', ++grTagCounter);
+    const referenceNumber = makeTag('GRIDREF', ++grTagCounter);
+
+    const payload = {
+      supplier_id: supplierId,
+      idempotency_key: idempotencyKey,
+      reference_number: referenceNumber,
+      receipt_date: '2026-04-22',
+      lines: [{ po_line_id: po.lineIds[0], qty: '10', unit: 'pcs' }]
+    };
+
+    const firstRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    expect(firstRes.status).toBe(201);
+    const firstBody = await firstRes.json();
+
+    const secondRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    expect(secondRes.status).toBe(201);
+    const secondBody = await secondRes.json();
+
+    expect(firstBody.data.id).toBe(secondBody.data.id);
+    expect(firstBody.data.reference_number).toBe(secondBody.data.reference_number);
+    expect(firstBody.data.warnings).toBeDefined();
+    expect(Array.isArray(firstBody.data.warnings)).toBe(true);
+    expect(firstBody.data.warnings.length).toBeGreaterThan(0);
+    expect(secondBody.data.warnings).toEqual(firstBody.data.warnings);
+
+    const db = getTestDb();
+    const idemCount = await sql<{ c: string }>`
+      SELECT COUNT(*) as c
+      FROM goods_receipts
+      WHERE company_id = ${cashierCompanyId}
+        AND idempotency_key = ${idempotencyKey}
+    `.execute(db);
+
+    expect(Number(idemCount.rows[0]?.c ?? 0)).toBe(1);
+  });
+
   // -------------------------------------------------------------------------
   // AC2: GR with item_id only (no PO line reference)
   // -------------------------------------------------------------------------
