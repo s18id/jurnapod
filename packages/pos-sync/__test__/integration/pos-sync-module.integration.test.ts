@@ -291,6 +291,25 @@ describe('PosSyncModule Integration', () => {
       expect(result.payload).toBeDefined();
     });
 
+    it('should follow canonical pull cursor contract (since_version -> data_version)', async () => {
+      const initial = await module.handlePullSync({
+        companyId: fixtures.testCompanyId,
+        outletId: fixtures.testOutletId,
+        sinceVersion: 0,
+      });
+
+      expect(initial.payload.data_version).toBe(initial.currentVersion);
+      expect(initial.payload.data_version).toBeGreaterThanOrEqual(0);
+
+      const incremental = await module.handlePullSync({
+        companyId: fixtures.testCompanyId,
+        outletId: fixtures.testOutletId,
+        sinceVersion: initial.payload.data_version,
+      });
+
+      expect(incremental.payload.data_version).toBeGreaterThanOrEqual(initial.payload.data_version);
+    });
+
     it('should return empty result when no changes since version', async () => {
       // Use a very high version number that likely exceeds any actual data version
       const highVersion = 999999999;
@@ -353,6 +372,101 @@ describe('PosSyncModule Integration', () => {
     function adjustId(prefix: string) { return `${TEST_ID_PREFIX}-${prefix}-a${_adjustCounter.c++}`; }
 
     describe('transaction push with idempotency', () => {
+      it('should return canonical push statuses only (OK/DUPLICATE/ERROR)', async () => {
+        const canonicalStatuses = new Set(['OK', 'DUPLICATE', 'ERROR']);
+        const clientTxId = txId('tx-canonical-status');
+
+        const validTransaction: TransactionPush = {
+          client_tx_id: clientTxId,
+          company_id: fixtures.testCompanyId,
+          outlet_id: fixtures.testOutletId,
+          cashier_user_id: fixtures.testUserId,
+          status: 'COMPLETED',
+          service_type: 'TAKEAWAY',
+          trx_at: '2024-01-15T10:30:00+07:00',
+          items: [
+            {
+              item_id: fixtures.testItemId,
+              qty: 1,
+              price_snapshot: 15000,
+              name_snapshot: 'Test Item',
+            },
+          ],
+          payments: [{ method: 'CASH', amount: 15000 }],
+        };
+
+        const invalidTransaction: TransactionPush = {
+          client_tx_id: txId('tx-canonical-error'),
+          company_id: fixtures.testCompanyId,
+          outlet_id: fixtures.testOutletId,
+          cashier_user_id: fixtures.testUserId,
+          status: 'COMPLETED',
+          service_type: 'DINE_IN',
+          trx_at: '2024-01-15T10:30:00+07:00',
+          items: [
+            {
+              item_id: fixtures.testItemId,
+              qty: 1,
+              price_snapshot: 15000,
+              name_snapshot: 'Test Item',
+            },
+          ],
+          payments: [{ method: 'CASH', amount: 15000 }],
+        };
+
+        const first = await module.handlePushSync({
+          db: fixtures.db,
+          companyId: fixtures.testCompanyId,
+          outletId: fixtures.testOutletId,
+          transactions: [validTransaction],
+          activeOrders: [],
+          orderUpdates: [],
+          itemCancellations: [],
+          variantSales: [],
+          variantStockAdjustments: [],
+          correlationId,
+        });
+
+        const duplicate = await module.handlePushSync({
+          db: fixtures.db,
+          companyId: fixtures.testCompanyId,
+          outletId: fixtures.testOutletId,
+          transactions: [validTransaction],
+          activeOrders: [],
+          orderUpdates: [],
+          itemCancellations: [],
+          variantSales: [],
+          variantStockAdjustments: [],
+          correlationId,
+        });
+
+        const invalid = await module.handlePushSync({
+          db: fixtures.db,
+          companyId: fixtures.testCompanyId,
+          outletId: fixtures.testOutletId,
+          transactions: [invalidTransaction],
+          activeOrders: [],
+          orderUpdates: [],
+          itemCancellations: [],
+          variantSales: [],
+          variantStockAdjustments: [],
+          correlationId,
+        });
+
+        const statuses = [
+          ...first.results.map((r) => r.result),
+          ...duplicate.results.map((r) => r.result),
+          ...invalid.results.map((r) => r.result),
+        ];
+
+        expect(statuses).toContain('OK');
+        expect(statuses).toContain('DUPLICATE');
+        expect(statuses).toContain('ERROR');
+        for (const status of statuses) {
+          expect(canonicalStatuses.has(status)).toBe(true);
+        }
+      });
+
       it('should process new transaction successfully', async () => {
         const transaction: TransactionPush = {
           client_tx_id: txId('tx'),

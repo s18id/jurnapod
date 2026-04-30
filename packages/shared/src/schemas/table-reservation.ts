@@ -431,7 +431,7 @@ export function validatePosSyncRequest(data: unknown): PosTableSyncRequest {
 // ============================================================================
 
 // Push result status enum
-export const TableSyncPushStatusSchema = z.enum(['OK', 'DUPLICATE', 'ERROR', 'CONFLICT']);
+export const TableSyncPushStatusSchema = z.enum(['OK', 'DUPLICATE', 'ERROR']);
 export type TableSyncPushStatus = z.infer<typeof TableSyncPushStatusSchema>;
 
 // Table event for push request
@@ -479,7 +479,7 @@ export const TableSyncPushResultSchema = z.object({
   status: TableSyncPushStatusSchema,
   table_version: z.number().int().positive().optional().nullable(),
   conflict_payload: TableSyncConflictPayloadSchema.optional().nullable(),
-  errorMessage: z.string().optional().nullable(),
+  error_message: z.string().optional().nullable(),
 });
 
 export type TableSyncPushResult = z.infer<typeof TableSyncPushResultSchema>;

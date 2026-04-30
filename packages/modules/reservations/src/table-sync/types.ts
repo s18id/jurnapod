@@ -33,10 +33,10 @@ export interface PushTableEventsParams {
  */
 export interface PushTableEventResult {
   clientTxId: string;
-  status: 'OK' | 'DUPLICATE' | 'ERROR' | 'CONFLICT';
+  status: 'OK' | 'DUPLICATE' | 'ERROR';
   tableVersion?: number;
   conflictPayload?: TableSyncConflictPayload;
-  errorMessage?: string;
+  error_message?: string;
 }
 
 /**

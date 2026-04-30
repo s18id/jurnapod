@@ -70,7 +70,7 @@ async function columnExists(
 }
 
 // ============================================================================
-// SCOPE D: CONFLICT CANONICALIZATION HELPER
+// SCOPE D: VERSION CONFLICT PAYLOAD HELPER
 // ============================================================================
 
 /**
@@ -387,9 +387,10 @@ async function applyTableEventWithTransaction(
 
       return {
         clientTxId: event.client_tx_id,
-        status: 'CONFLICT' as const,
+        status: 'ERROR' as const,
         tableVersion: currentVersion,
         conflictPayload,
+        error_message: conflictReason,
       };
     }
 
@@ -783,7 +784,7 @@ export async function pushTableEvents(
       results.push({
         clientTxId,
         status: 'ERROR',
-        errorMessage: `Invalid table_id: ${event.table_id}`,
+        error_message: `Invalid table_id: ${event.table_id}`,
       });
       continue;
     }
@@ -805,7 +806,7 @@ export async function pushTableEvents(
           results.push({
             clientTxId,
             status: "ERROR",
-            errorMessage: `Table ${event.table_id} not found`,
+            error_message: `Table ${event.table_id} not found`,
           });
           break;
         }
@@ -875,7 +876,7 @@ export async function pushTableEvents(
         results.push({
           clientTxId,
           status: 'ERROR',
-          errorMessage: error instanceof Error ? error.message : 'Unknown error',
+          error_message: error instanceof Error ? error.message : 'Unknown error',
         });
         break;
       }
