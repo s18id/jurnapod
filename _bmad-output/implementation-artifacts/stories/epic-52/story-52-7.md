@@ -66,7 +66,7 @@ Skipped (DUPLICATE) transactions must be logged with `result=SKIPPED` in the ide
 - Existing retry with exponential backoff: `5s → 10s → 20s → 40s → ...` (unbounded)
 - **MISSING (FIXED):** No max retry ceiling — added `MAX_RETRY_ATTEMPTS = 3` enforcement
 - After attempt > 3: job marked `FAILED` with `next_attempt_at` in far future (year 275760), effectively terminal
-- Manual retry via `recovery-service.ts` still works (resets status to PENDING + `next_attempt_at` to now)
+- Manual retry via `recovery-service.ts` resets status to PENDING + `next_attempt_at` to now + `attempts` to 0 — restart retry cycle
 
 ### Layer 3 — POS outbox sender (`apps/pos/src/offline/outbox-sender.ts`)
 - `classifySyncResultError` checks `RETRYABLE_SYNC_RESULT_MESSAGES` set — unchanged
@@ -85,7 +85,7 @@ Skipped (DUPLICATE) transactions must be logged with `result=SKIPPED` in the ide
   - `CASHIER_USER_ID_MISMATCH` — cashier_user_id not found in company
   - `IDEMPOTENCY_CONFLICT` — same `client_tx_id` but different payload (replay mismatch)
 - **SKIPPED audit:** `audit_logs.result = 'SKIPPED'` — this is an internal logging value, NOT a public response status. Public push response remains `OK | DUPLICATE | ERROR` per 52-6 contract
-- **3-retry ceiling:** After `attempt > 3`, outbox job is FAILED with `next_attempt_at` in year 275760 (effectively infinite). Manual retry via recovery service resets status to PENDING + now-timestamp, which restarts retry cycle
+- **3-retry ceiling:** After `attempt > 3`, outbox job is FAILED with `next_attempt_at` in year 275760 (effectively infinite). Manual retry via recovery service resets status to PENDING + now-timestamp + `attempts` to 0, which restarts retry cycle
 - **Backoff curve (unchanged):** `min(5000 × 2^(attempt-1), 60000)` with jitter for retryable; `300000 + jitter` for non-retryable
 
 ## Validation Commands
@@ -178,3 +178,26 @@ _bmad-output/implementation-artifacts/sprint-status.yaml  # Status update
 - Company_id/outlet_id mismatch transactions are silently filtered in `handlePushSync` pre-filter before reaching `processTransaction` — the `COMPANY_ID_MISMATCH`/`OUTLET_ID_MISMATCH` codes in `processTransaction` are defensive safety nets
 - POS tests use Node `node:test` (not Vitest) — new drainer test follows existing `.test.mjs` pattern
 - No table-sync integration test harness exists (pre-existing, noted in 52-6 deferred)
+
+## Review Notes (2026-05-02)
+
+**Reviewer:** `bmad-review` adversarial re-review
+**Verdict:** GO
+
+### Findings from Re-Review
+
+| ID | Severity | Finding | Status |
+|----|----------|---------|--------|
+| R1 | ~~P2~~ | `RecoveryService.manualRetry()` does NOT reset `attempts` counter. Terminal-FAILED jobs immediately re-terminate on manual retry. ~~Fix: add `attempts: 0` to update patch.~~ **FIXED** in `apps/pos/src/services/recovery-service.ts` line 333 — `attempts: 0` added to `manualRetry()` update patch. | **Fixed** |
+| R2 | — | Missing `manualRetry` test coverage for terminal-FAILED recovery | **Withdrawn** — testing dead code is YAGNI |
+| R3 | — | Retry count semantics: "3 retry attempts" vs 3 send attempts | **Withdrawn** — internally consistent |
+| R4 | P3 | `filterNewTransactions` now has DB write side effects (audit INSERTs) despite read-only name | **Cosmetic — noted** |
+
+### Story Status
+
+- [x] All ACs implemented with evidence
+- [x] Code review completed (initial + adversarial re-review)
+- [x] No P0/P1 blockers
+- [x] Story marked `done` in sprint-status.yaml
+
+**Closed by:** `bmad-review` sign-off (2026-05-02)

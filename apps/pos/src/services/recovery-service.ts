@@ -329,7 +329,8 @@ export class RecoveryService {
       if (job.status === "FAILED") {
         await this.db.outbox_jobs.update(job.job_id, {
           status: "PENDING",
-          next_attempt_at: new Date().toISOString()
+          next_attempt_at: new Date().toISOString(),
+          attempts: 0
         });
       }
     }
