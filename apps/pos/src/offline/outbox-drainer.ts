@@ -14,6 +14,7 @@ import type { OutboxJobRow } from "@jurnapod/offline-db/dexie";
 const DEFAULT_BATCH_SIZE = 10;
 const DEFAULT_SEND_CONCURRENCY = 3;
 const MAX_SEND_CONCURRENCY = 5;
+const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_BACKOFF_BASE_MS = 5_000;
 const RETRY_BACKOFF_MAX_MS = 60_000;
 const NON_RETRYABLE_BACKOFF_MS = 300_000;
@@ -328,6 +329,26 @@ async function processJob(job: OutboxJobRow, p: ProcessJobParams): Promise<JobRe
 
   if (!attempt.claimed || !attempt.lease_token) {
     result.stale = true;
+    return result;
+  }
+
+  // Max retry ceiling: if this attempt exceeds MAX_RETRY_ATTEMPTS, mark terminal FAILED
+  if (attempt.attempt > MAX_RETRY_ATTEMPTS) {
+    const maxRetryUpdate = await updateOutboxJobStatus({
+      job_id: job.job_id,
+      attempt_token: attempt.attempt,
+      lease_token: attempt.lease_token,
+      status: "FAILED",
+      next_attempt_at: new Date(8640000000000000).toISOString(), // Year 275760 — effectively infinite
+      last_error: "MAX_RETRIES_EXCEEDED:Exceeded max 3 retry attempts"
+    }, db);
+
+    if (maxRetryUpdate.applied) {
+      result.failed = true;
+      logOutboxDrainAttempt({ correlationId: null, clientTxId, attempt: attempt.attempt, leaseToken: attempt.lease_token, drainReason, latencyMs: 0, result: "FAILED" });
+    } else {
+      result.stale = true;
+    }
     return result;
   }
 

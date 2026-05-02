@@ -577,6 +577,79 @@ describe('PosSyncModule Integration', () => {
         expect(Number(persistedRows.rows[0]?.trx_at_ts ?? 0)).toBe(expectedTrxAtTs);
       });
 
+      it('should write SKIPPED audit log entry on duplicate detection', async () => {
+        const clientTxId = txId('tx-skipped-audit');
+
+        const transaction: TransactionPush = {
+          client_tx_id: clientTxId,
+          company_id: fixtures.testCompanyId,
+          outlet_id: fixtures.testOutletId,
+          cashier_user_id: fixtures.testUserId,
+          status: 'COMPLETED',
+          service_type: 'TAKEAWAY',
+          trx_at: '2024-01-15T10:30:00+07:00',
+          items: [
+            {
+              item_id: fixtures.testItemId,
+              qty: 1,
+              price_snapshot: 15000,
+              name_snapshot: 'Test Item',
+            },
+          ],
+          payments: [{ method: 'CASH', amount: 15000 }],
+        };
+
+        // First push - OK
+        const firstResult = await module.handlePushSync({
+          db: fixtures.db,
+          companyId: fixtures.testCompanyId,
+          outletId: fixtures.testOutletId,
+          transactions: [transaction],
+          activeOrders: [],
+          orderUpdates: [],
+          itemCancellations: [],
+          variantSales: [],
+          variantStockAdjustments: [],
+          correlationId,
+        });
+        expect(firstResult.results[0].result).toBe('OK');
+
+        // Second push - DUPLICATE, should create SKIPPED audit entry
+        const secondResult = await module.handlePushSync({
+          db: fixtures.db,
+          companyId: fixtures.testCompanyId,
+          outletId: fixtures.testOutletId,
+          transactions: [transaction],
+          activeOrders: [],
+          orderUpdates: [],
+          itemCancellations: [],
+          variantSales: [],
+          variantStockAdjustments: [],
+          correlationId,
+        });
+        expect(secondResult.results[0].result).toBe('DUPLICATE');
+
+        // Verify SKIPPED audit log entry exists
+        const auditRows = await sql<{
+          action: string;
+          result: string;
+          success: number;
+          payload_json: string;
+        }>`
+          SELECT action, result, success, payload_json
+          FROM audit_logs
+          WHERE company_id = ${fixtures.testCompanyId}
+            AND outlet_id = ${fixtures.testOutletId}
+            AND action = 'SYNC_PUSH_DUPLICATE_SKIPPED'
+            AND payload_json LIKE ${'%' + clientTxId + '%'}
+          LIMIT 1
+        `.execute(fixtures.db);
+
+        expect(auditRows.rows.length).toBe(1);
+        expect(auditRows.rows[0].result).toBe('SKIPPED');
+        expect(Number(auditRows.rows[0].success)).toBe(0);
+      });
+
       it('should reject transaction with company_id mismatch', async () => {
         const transaction: TransactionPush = {
           client_tx_id: txId('tx-company-mismatch'),
@@ -650,7 +723,7 @@ describe('PosSyncModule Integration', () => {
         });
 
         expect(result.results[0].result).toBe('ERROR');
-        expect(result.results[0].message).toContain('DINE_IN requires table_id');
+        expect(result.results[0].message).toBe('DINE_IN_REQUIRES_TABLE_ID');
       });
     });
 
@@ -952,7 +1025,7 @@ describe('PosSyncModule Integration', () => {
 
         expect(result.variantSaleResults).toBeDefined();
         expect(result.variantSaleResults![0].result).toBe('ERROR');
-        expect(result.variantSaleResults![0].message).toContain('company_id mismatch');
+        expect(result.variantSaleResults![0].message).toBe('COMPANY_ID_MISMATCH');
       });
 
       it('should detect duplicate by same client_tx_id', async () => {

@@ -427,6 +427,66 @@ test("timeout-like retry then duplicate replay converges to SENT", async () => {
   }
 });
 
+test("3 retry attempts then terminal FAILED with far-future next_attempt_at", async () => {
+  const db = createPosOfflineDb(`jp-pos-outbox-drainer-max-retry-${crypto.randomUUID()}`);
+  const fixedNow = Date.parse("2026-02-21T16:00:00.000Z");
+  const ONE_MINUTE = 60_000;
+
+  try {
+    const job = await seedPendingOutboxJob(db, nowIso(fixedNow - ONE_MINUTE));
+
+    // Helper: drain at time N, always fail
+    async function drainAt(nowMs) {
+      return drainOutboxJobs({
+        now: () => nowMs,
+        random: () => 1,
+        sender: async () => {
+          throw new OutboxSenderError("RETRYABLE", "NETWORK_ERROR", "TIMEOUT");
+        }
+      }, db);
+    }
+
+    // Attempt 1: should FAILED with 5s backoff
+    const r1 = await drainAt(fixedNow);
+    assert.equal(r1.failed_count, 1);
+    let p = await db.outbox_jobs.get(job.job_id);
+    assert.equal(p?.attempts, 1);
+    assert.equal(p?.status, "FAILED");
+
+    // Attempt 2: after 5s backoff, should FAILED with 10s backoff
+    const r2 = await drainAt(fixedNow + 5_000);
+    assert.equal(r2.failed_count, 1);
+    p = await db.outbox_jobs.get(job.job_id);
+    assert.equal(p?.attempts, 2);
+    assert.equal(p?.status, "FAILED");
+
+    // Attempt 3: after 10s backoff, should FAILED with 20s backoff
+    const r3 = await drainAt(fixedNow + 5_000 + 10_000);
+    assert.equal(r3.failed_count, 1);
+    p = await db.outbox_jobs.get(job.job_id);
+    assert.equal(p?.attempts, 3);
+    assert.equal(p?.status, "FAILED");
+
+    // Attempt 4: after 20s backoff — should be TERMINAL (exceeded MAX_RETRIES)
+    const r4 = await drainAt(fixedNow + 5_000 + 10_000 + 20_000);
+    assert.equal(r4.failed_count, 1);
+    p = await db.outbox_jobs.get(job.job_id);
+    assert.equal(p?.attempts, 4);
+    assert.equal(p?.status, "FAILED");
+    assert.match(p?.last_error ?? "", /MAX_RETRIES_EXCEEDED/);
+    // next_attempt_at should be in far future (year 275760+)
+    const nextAttemptMs = Date.parse(p?.next_attempt_at ?? "");
+    assert.ok(nextAttemptMs > Date.parse("2100-01-01T00:00:00.000Z"), "next_attempt_at should be far future");
+
+    // Subsequent drain should NOT select this job (next_attempt_at is far future)
+    const r5 = await drainAt(fixedNow + 5_000 + 10_000 + 20_000 + 30_000);
+    assert.equal(r5.selected_count, 0);
+  } finally {
+    db.close();
+    await db.delete();
+  }
+});
+
 test("order update jobs mark active_order_updates as SENT", async () => {
   const db = createPosOfflineDb(`jp-pos-outbox-drainer-order-update-${crypto.randomUUID()}`);
   const fixedNow = Date.parse("2026-02-21T17:00:00.000Z");

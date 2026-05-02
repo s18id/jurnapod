@@ -361,7 +361,7 @@ describe('persistPushBatch Integration', () => {
       );
 
       expect(results[0].result).toBe('ERROR');
-      expect(results[0].message).toBe('DINE_IN requires table_id');
+      expect(results[0].message).toBe('DINE_IN_REQUIRES_TABLE_ID');
     });
   });
 

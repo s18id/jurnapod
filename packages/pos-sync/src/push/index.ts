@@ -236,7 +236,7 @@ async function processTransaction(
       return {
         client_tx_id: tx.client_tx_id,
         result: "ERROR",
-        message: "company_id mismatch",
+        message: "COMPANY_ID_MISMATCH",
       };
     }
 
@@ -245,7 +245,7 @@ async function processTransaction(
       return {
         client_tx_id: tx.client_tx_id,
         result: "ERROR",
-        message: "outlet_id mismatch",
+        message: "OUTLET_ID_MISMATCH",
       };
     }
 
@@ -254,7 +254,7 @@ async function processTransaction(
       return {
         client_tx_id: tx.client_tx_id,
         result: "ERROR",
-        message: "DINE_IN requires table_id",
+        message: "DINE_IN_REQUIRES_TABLE_ID",
       };
     }
 
@@ -298,7 +298,7 @@ async function processTransaction(
       return {
         client_tx_id: tx.client_tx_id,
         result: "ERROR",
-        message: "cashier_user_id mismatch",
+        message: "CASHIER_USER_ID_MISMATCH",
       };
     }
 
@@ -510,6 +510,11 @@ async function filterNewTransactions(
     // Check for duplicate within current batch first
     if (seenClientTxIds.has(tx.client_tx_id)) {
       duplicateResults.push({ client_tx_id: tx.client_tx_id, result: "DUPLICATE" });
+      // Persist SKIPPED audit entry for within-batch duplicate
+      await sql`
+        INSERT INTO audit_logs (company_id, outlet_id, user_id, action, result, success, payload_json)
+        VALUES (${companyId}, ${outletId}, ${tx.cashier_user_id}, 'SYNC_PUSH_DUPLICATE_SKIPPED', 'SKIPPED', 0, ${JSON.stringify({ client_tx_id: tx.client_tx_id, reason: 'duplicate_within_batch' })})
+      `.execute(db);
       continue; // Skip - don't add to newTransactions
     }
 
@@ -542,6 +547,11 @@ async function filterNewTransactions(
 
       if (idempotencyResult.outcome === "RETURN_CACHED") {
         duplicateResults.push({ client_tx_id: tx.client_tx_id, result: "DUPLICATE" });
+        // Persist SKIPPED audit entry for in-DB duplicate (true idempotent replay)
+        await sql`
+          INSERT INTO audit_logs (company_id, outlet_id, user_id, action, result, success, payload_json)
+          VALUES (${companyId}, ${outletId}, ${tx.cashier_user_id}, 'SYNC_PUSH_DUPLICATE_SKIPPED', 'SKIPPED', 0, ${JSON.stringify({ client_tx_id: tx.client_tx_id, reason: 'idempotent_replay' })})
+        `.execute(db);
       } else {
         duplicateResults.push({ client_tx_id: tx.client_tx_id, result: "ERROR", message: "IDEMPOTENCY_CONFLICT" });
       }
@@ -815,12 +825,12 @@ async function processVariantSales(
     try {
       // Validation
       if (sale.company_id !== companyId) {
-        results.push({ client_tx_id: sale.client_tx_id, result: "ERROR", message: "company_id mismatch" });
+        results.push({ client_tx_id: sale.client_tx_id, result: "ERROR", message: "COMPANY_ID_MISMATCH" });
         continue;
       }
 
       if (sale.outlet_id !== outletId) {
-        results.push({ client_tx_id: sale.client_tx_id, result: "ERROR", message: "outlet_id mismatch" });
+        results.push({ client_tx_id: sale.client_tx_id, result: "ERROR", message: "OUTLET_ID_MISMATCH" });
         continue;
       }
 
@@ -922,12 +932,12 @@ async function processVariantStockAdjustments(
     try {
       // Validation
       if (adjustment.company_id !== companyId) {
-        results.push({ client_tx_id: adjustment.client_tx_id, result: "ERROR", message: "company_id mismatch" });
+        results.push({ client_tx_id: adjustment.client_tx_id, result: "ERROR", message: "COMPANY_ID_MISMATCH" });
         continue;
       }
 
       if (adjustment.outlet_id !== outletId) {
-        results.push({ client_tx_id: adjustment.client_tx_id, result: "ERROR", message: "outlet_id mismatch" });
+        results.push({ client_tx_id: adjustment.client_tx_id, result: "ERROR", message: "OUTLET_ID_MISMATCH" });
         continue;
       }
 
@@ -1163,6 +1173,11 @@ export async function persistPushBatch(
       if (returnedClientTxIds.has(tx.client_tx_id)) {
         // This is a subsequent occurrence - return DUPLICATE
         allResults.push({ client_tx_id: tx.client_tx_id, result: "DUPLICATE" });
+        // Persist SKIPPED audit entry for within-batch duplicate (same client_tx_id multiple times in input)
+        await sql`
+          INSERT INTO audit_logs (company_id, outlet_id, user_id, action, result, success, payload_json)
+          VALUES (${companyId}, ${outletId}, ${tx.cashier_user_id}, 'SYNC_PUSH_DUPLICATE_SKIPPED', 'SKIPPED', 0, ${JSON.stringify({ client_tx_id: tx.client_tx_id, reason: 'within_batch_duplicate_input' })})
+        `.execute(db);
       } else {
         // First occurrence - return the actual result
         allResults.push(result);
