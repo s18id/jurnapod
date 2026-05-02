@@ -42,6 +42,7 @@
 
 import { sql } from "kysely";
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
+import { toMysqlDateTimeFromDateLike } from "@jurnapod/shared";
 import { PostingService, type PostingMapper, type PostingRepository } from "../index.js";
 import { ACCOUNT_MAPPING_TYPE_ID_BY_CODE, accountMappingIdToCode } from "@jurnapod/shared";
 import { normalizeMoney, resolveMappingCode } from "./common.js";
@@ -448,7 +449,7 @@ async function runActivePostingHook(
   };
 
   const postingService = new PostingService(
-    new PosSyncPushPostingRepository(db, toMysqlDateTime(context.trxAt)),
+    new PosSyncPushPostingRepository(db, toMysqlDateTimeFromDateLike(context.trxAt)),
     {
       [POS_SALE_DOC_TYPE]: new PosSyncPushPostingMapper(executor, context)
     }
@@ -505,16 +506,4 @@ function toDateOnly(value: string): string {
   return date.toISOString().slice(0, 10);
 }
 
-function toMysqlDateTime(value: string): string {
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
-    return value.slice(0, 19).replace("T", " ");
-  }
-  if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
-    return value + " 00:00:00";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid datetime for toMysqlDateTime");
-  }
-  return date.toISOString().slice(0, 19).replace("T", " ");
-}
+

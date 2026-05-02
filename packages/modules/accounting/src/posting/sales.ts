@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
+import { toMysqlDateTimeFromDateLike } from "@jurnapod/shared";
 import { PostingService, type PostingMapper, type PostingRepository } from "../index.js";
 import { normalizeMoney, resolveMappingCode } from "./common.js";
 import type { KyselySchema } from "@jurnapod/db";
@@ -413,7 +414,7 @@ export async function postSalesInvoice(
   };
 
   const postingService = new PostingService(
-    new SalesPostingRepository(db, toMysqlDateTime(invoice.updated_at)),
+    new SalesPostingRepository(db, toMysqlDateTimeFromDateLike(invoice.updated_at)),
     {
       [SALES_INVOICE_DOC_TYPE]: new SalesInvoicePostingMapper(executor, invoice)
     }
@@ -439,7 +440,7 @@ export async function postSalesPayment(
   };
 
   const postingService = new PostingService(
-    new SalesPostingRepository(db, toMysqlDateTime(payment.updated_at)),
+    new SalesPostingRepository(db, toMysqlDateTimeFromDateLike(payment.updated_at)),
     {
       [SALES_PAYMENT_IN_DOC_TYPE]: new SalesPaymentPostingMapper(executor, payment, invoiceNo)
     }
@@ -500,23 +501,4 @@ export async function voidCreditNote(
   });
 }
 
-function toMysqlDateTime(value: string): string {
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
-    return value.slice(0, 19).replace("T", " ");
-  }
-  if (/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}$/.test(value)) {
-    return value;
-  }
-  if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
-    return value + " 00:00:00";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid datetime for toMysqlDateTime");
-  }
-  return date.toISOString().slice(0, 19).replace("T", " ");
-}
 
-function toMysqlDateTimeFromDateLike(value: string): string {
-  return toMysqlDateTime(value);
-}

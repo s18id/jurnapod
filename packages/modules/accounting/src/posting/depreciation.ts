@@ -3,6 +3,7 @@
 
 import { sql } from "kysely";
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
+import { toMysqlDateTimeFromDateLike } from "@jurnapod/shared";
 import { PostingService, type PostingMapper, type PostingRepository } from "../index.js";
 import { normalizeMoney } from "./common.js";
 import type { KyselySchema } from "@jurnapod/db";
@@ -157,7 +158,7 @@ export async function postDepreciationRun(
   };
 
   const postingService = new PostingService(
-    new DepreciationPostingRepository(db, toMysqlDateTime(run.updated_at)),
+    new DepreciationPostingRepository(db, toMysqlDateTimeFromDateLike(run.updated_at)),
     {
       [DEPRECIATION_DOC_TYPE]: new DepreciationPostingMapper(db, plan, run)
     }
@@ -168,16 +169,4 @@ export async function postDepreciationRun(
   });
 }
 
-function toMysqlDateTime(value: string): string {
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
-    return value.slice(0, 19).replace("T", " ");
-  }
-  if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
-    return value + " 00:00:00";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid datetime for toMysqlDateTime");
-  }
-  return date.toISOString().slice(0, 19).replace("T", " ");
-}
+

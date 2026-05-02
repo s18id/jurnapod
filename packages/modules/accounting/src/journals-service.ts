@@ -7,7 +7,7 @@ import type {
   JournalListQuery,
   JournalLineResponse
 } from "@jurnapod/shared";
-import { normalizeJournalDocType, toRfc3339Required } from "@jurnapod/shared";
+import { normalizeJournalDocType, toRfc3339Required, toEpochMs, nowUTC } from "@jurnapod/shared";
 import { sql } from "kysely";
 import { withTransactionRetry, type KyselySchema } from "@jurnapod/db";
 
@@ -127,7 +127,7 @@ export class JournalsService {
     }
 
     // For manual entries, we use a unique doc_id based on timestamp
-    const docId = Date.now();
+    const docId = toEpochMs(nowUTC());
 
     const batchId = await (trx 
       ? this.executeManualEntryInsert(trx, data, docId, totalDebit, totalCredit, userId)
