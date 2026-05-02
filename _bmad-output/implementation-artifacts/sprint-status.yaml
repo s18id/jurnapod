@@ -605,4 +605,4 @@ development_status:
   52-7-sync-idempotency-duplicate-vs-error: done
   52-8-ap-payment-journal-atomicity: review
   52-9-observability-idempotency-metrics: done
-  52-10-integration-test-gate: backlog
+  52-10-integration-test-gate: done
