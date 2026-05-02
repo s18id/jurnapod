@@ -5,14 +5,23 @@
  * Sync Idempotency Metrics Collector
  * 
  * Tracks metrics for sync idempotency operations:
- * - Duplicate attempt counts
+ * - Duplicate attempt counts (global and per-tenant)
  * - Dedupe hit rate
  * - Retry counts by error class
  * - Stale-queue age
  * - Sync completion latency
+ * - Per-tenant OK/DUPLICATE/ERROR tracking with percentile latencies
+ * 
+ * Per-tenant tracking (Story 52-9):
+ * Uses Map<company_id, TenantMetrics> to track per-company state.
+ * Latency arrays are maintained for p50/p95 percentile computation.
  */
 
 import type { ErrorClassification } from "./sync-idempotency.js";
+
+// ============================================================================
+// Types
+// ============================================================================
 
 /**
  * Metric types for sync idempotency
@@ -104,25 +113,118 @@ export interface SyncBatchMetrics {
   oldest_item_age_ms: number;
 }
 
+// ============================================================================
+// Per-Tenant Tracking Types (Story 52-9)
+// ============================================================================
+
+/**
+ * Per-tenant latency arrays for percentile computation
+ */
+export interface TenantLatencyData {
+  ok: number[];
+  duplicate: number[];
+  error: number[];
+}
+
+/**
+ * Per-tenant metrics snapshot
+ */
+export interface TenantMetrics {
+  /** Total requests for this tenant */
+  totalRequests: number;
+  /** OK result count */
+  okCount: number;
+  /** DUPLICATE result count */
+  duplicateCount: number;
+  /** ERROR result count */
+  errorCount: number;
+  /** Duplicate rate (0-1) over current window */
+  duplicateRate: number;
+  /** Error rate (0-1) over current window */
+  errorRate: number;
+  /** Latency arrays for percentile computation */
+  latencies: TenantLatencyData;
+}
+
+/**
+ * Compute Nth percentile using nearest-rank method.
+ * Simple and sufficient for operational health metrics.
+ * The array is sorted internally — callers may pass unsorted input.
+ */
+function getPercentile(values: number[], percentile: number): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  if (values.length === 1) {
+    return values[0];
+  }
+
+  // Guard against invalid percentile bounds
+  const p = Math.max(0, Math.min(100, percentile));
+
+  // Sort a copy of the input (never mutate the original)
+  const sorted = [...values].sort((a, b) => a - b);
+
+  // Nearest-rank: index = ceil(p/100 * N) - 1 (0-based)
+  const index = Math.ceil((p / 100) * sorted.length) - 1;
+  return sorted[Math.max(0, Math.min(sorted.length - 1, index))];
+}
+
+/**
+ * Compute p50 and p95 from a latency array
+ */
+export function getLatencyPercentiles(latencies: number[]): { p50: number; p95: number } {
+  return {
+    p50: getPercentile(latencies, 50),
+    p95: getPercentile(latencies, 95),
+  };
+}
+
+/**
+ * Create an empty TenantMetrics for a new tenant
+ */
+function createEmptyTenantMetrics(): TenantMetrics {
+  return {
+    totalRequests: 0,
+    okCount: 0,
+    duplicateCount: 0,
+    errorCount: 0,
+    duplicateRate: 0,
+    errorRate: 0,
+    latencies: { ok: [], duplicate: [], error: [] },
+  };
+}
+
+// ============================================================================
+// Collector
+// ============================================================================
+
 /**
  * Sync idempotency metrics collector
+ * 
+ * Tracks both global aggregate metrics and per-tenant metrics.
+ * Per-tenant metrics are used for per-company alert evaluation.
  */
 export class SyncIdempotencyMetricsCollector {
   private metrics: SyncIdempotencyMetrics;
   private batchStartTime: number | null = null;
   private queueItems: Array<{ enqueued_at: number; client_tx_id: string }> = [];
+  
+  /** Per-tenant metrics state (Story 52-9) */
+  private readonly tenantMetrics: Map<number, TenantMetrics> = new Map();
 
   constructor() {
     this.metrics = { ...DEFAULT_SYNC_IDEMPOTENCY_METRICS };
   }
 
   /**
-   * Reset all metrics
+   * Reset all metrics (global and per-tenant)
    */
   reset(): void {
     this.metrics = { ...DEFAULT_SYNC_IDEMPOTENCY_METRICS };
     this.batchStartTime = null;
     this.queueItems = [];
+    this.tenantMetrics.clear();
   }
 
   /**
@@ -148,6 +250,10 @@ export class SyncIdempotencyMetricsCollector {
       oldest_queue_item_age_ms: this.metrics.oldest_queue_item_age_ms,
     };
   }
+
+  // ========================================================================
+  // Global Aggregate Tracking
+  // ========================================================================
 
   /**
    * Record a sync request received
@@ -271,11 +377,40 @@ export class SyncIdempotencyMetricsCollector {
     this.recordOldestQueueItemAge(oldestAge);
   }
 
+  // ========================================================================
+  // Per-Tenant & Result Tracking (Story 52-9)
+  // ========================================================================
+
   /**
-   * Record multiple operation results at once
+   * Get or create tenant metrics for a company
    */
-  recordResults(results: SyncOperationResult[]): void {
+  private getOrCreateTenantMetrics(companyId: number): TenantMetrics {
+    let tm = this.tenantMetrics.get(companyId);
+    if (!tm) {
+      tm = createEmptyTenantMetrics();
+      this.tenantMetrics.set(companyId, tm);
+    }
+    return tm;
+  }
+
+  /**
+   * Record multiple operation results at once — per-tenant aware (Story 52-9)
+   * 
+   * Tracks OK, DUPLICATE, and ERROR results per company.
+   * Maintains latency arrays for percentile computation.
+   * Also updates global aggregate counts for backward compatibility.
+   * 
+   * @param companyId - Company ID for per-tenant tracking
+   * @param results - Array of operation results
+   */
+  recordResults(companyId: number, results: SyncOperationResult[]): void {
+    // Early return for empty arrays — prevents creating orphan tenant entries
+    if (results.length === 0) return;
+
+    const tm = this.getOrCreateTenantMetrics(companyId);
+
     for (const result of results) {
+      // Global aggregate tracking
       switch (result.result) {
         case "DUPLICATE":
           this.recordDuplicateSubmission();
@@ -290,26 +425,119 @@ export class SyncIdempotencyMetricsCollector {
           }
           break;
       }
+
+      // Per-tenant tracking
+      tm.totalRequests++;
+      const clampedLatency = Math.max(0, result.latency_ms);
+      const MAX_LATENCY_SAMPLES = 1000;
+      switch (result.result) {
+        case "OK":
+          tm.okCount++;
+          tm.latencies.ok.push(clampedLatency);
+          if (tm.latencies.ok.length > MAX_LATENCY_SAMPLES) tm.latencies.ok.shift();
+          break;
+        case "DUPLICATE":
+          tm.duplicateCount++;
+          tm.latencies.duplicate.push(clampedLatency);
+          if (tm.latencies.duplicate.length > MAX_LATENCY_SAMPLES) tm.latencies.duplicate.shift();
+          break;
+        case "ERROR":
+        case "CONFLICT":
+          tm.errorCount++;
+          tm.latencies.error.push(clampedLatency);
+          if (tm.latencies.error.length > MAX_LATENCY_SAMPLES) tm.latencies.error.shift();
+          break;
+      }
+    }
+
+    // Recalculate rates
+    this.recalculateTenantRates(tm);
+  }
+
+  /**
+   * Recalculate tenant rates from current counts
+   */
+  private recalculateTenantRates(tm: TenantMetrics): void {
+    if (tm.totalRequests > 0) {
+      tm.duplicateRate = tm.duplicateCount / tm.totalRequests;
+      tm.errorRate = tm.errorCount / tm.totalRequests;
     }
   }
 
   /**
-   * Get alert conditions for anomaly detection
+   * Get per-tenant metrics snapshot for a company (deep copy)
+   */
+  getTenantMetrics(companyId: number): TenantMetrics | undefined {
+    const tm = this.tenantMetrics.get(companyId);
+    if (!tm) return undefined;
+    return {
+      ...tm,
+      latencies: {
+        ok: [...tm.latencies.ok],
+        duplicate: [...tm.latencies.duplicate],
+        error: [...tm.latencies.error],
+      },
+    };
+  }
+
+  /**
+   * Compute p50 and p95 latency for a specific tenant and result type.
+   * Returns 0 for both if no data is available.
+   */
+  getTenantLatencyPercentiles(
+    companyId: number,
+    resultType: "ok" | "duplicate" | "error"
+  ): { p50: number; p95: number } {
+    const tm = this.tenantMetrics.get(companyId);
+    if (!tm) return { p50: 0, p95: 0 };
+
+    const latencies = tm.latencies[resultType] ?? [];
+    return getLatencyPercentiles(latencies);
+  }
+
+  // ========================================================================
+  // Alert Conditions (Story 52-9 — thresholds updated)
+  // ========================================================================
+
+  /**
+   * Get alert conditions for anomaly detection (global aggregate)
+   * 
+   * Thresholds (Story 52-9):
+   * - Dedupe rate > 5% of total requests
+   * - Error rate > 1% of total requests
+   * - Stale queue > 5 minutes
+   * - High latency > 30s
    */
   getAlertConditions(): Array<{ alert: string; value: number; threshold: number }> {
     const alerts: Array<{ alert: string; value: number; threshold: number }> = [];
 
-    // High dedupe rate (potential replay storm)
-    if (this.metrics.dedupe_hit_rate > 0.1) { // > 10%
+    // High dedupe rate (potential replay storm) — threshold: 5% (Story 52-9)
+    const totalProcessed = this.metrics.total_transactions;
+    const dedupeRate = totalProcessed > 0
+      ? this.metrics.duplicate_submissions / totalProcessed
+      : 0;
+    if (dedupeRate > 0.05) { // > 5%
       alerts.push({
         alert: "HIGH_DEDUPE_RATE",
-        value: this.metrics.dedupe_hit_rate,
-        threshold: 0.1,
+        value: dedupeRate,
+        threshold: 0.05,
       });
     }
 
-    // High retry rate
+    // High error rate — threshold: 1% (Story 52-9)
     const totalErrors = this.metrics.retryable_errors + this.metrics.non_retryable_errors;
+    const errorRate = totalProcessed > 0
+      ? totalErrors / totalProcessed
+      : 0;
+    if (errorRate > 0.01) { // > 1%
+      alerts.push({
+        alert: "HIGH_ERROR_RATE",
+        value: errorRate,
+        threshold: 0.01,
+      });
+    }
+
+    // High retry rate (retryable errors as fraction of all errors)
     const retryRate = totalErrors > 0 
       ? this.metrics.retryable_errors / totalErrors 
       : 0;
@@ -343,17 +571,57 @@ export class SyncIdempotencyMetricsCollector {
   }
 
   /**
-   * Log metrics summary
+   * Get alert conditions for a specific tenant (per-company)
+   * 
+   * Evaluates per-tenant thresholds (Story 52-9):
+   * - Duplicate rate > 5%
+   * - Error rate > 1%
+   */
+  getTenantAlertConditions(companyId: number): Array<{ alert: string; value: number; threshold: number }> {
+    const alerts: Array<{ alert: string; value: number; threshold: number }> = [];
+    const tm = this.tenantMetrics.get(companyId);
+    if (!tm || tm.totalRequests === 0) return alerts;
+
+    // Per-tenant duplicate rate > 5%
+    if (tm.duplicateRate > 0.05) {
+      alerts.push({
+        alert: "TENANT_HIGH_DEDUPE_RATE",
+        value: tm.duplicateRate,
+        threshold: 0.05,
+      });
+    }
+
+    // Per-tenant error rate > 1%
+    if (tm.errorRate > 0.01) {
+      alerts.push({
+        alert: "TENANT_HIGH_ERROR_RATE",
+        value: tm.errorRate,
+        threshold: 0.01,
+      });
+    }
+
+    return alerts;
+  }
+
+  /**
+   * Log metrics summary with alert conditions
    */
   logMetrics(): void {
     console.info("[SyncIdempotencyMetrics]", this.getSummary());
     
     const alerts = this.getAlertConditions();
     for (const { alert, value, threshold } of alerts) {
-      console.warn(`[SyncIdempotencyMetrics] ALERT: ${alert}`, {
-        value,
-        threshold,
-      });
+      console.warn(`[SyncIdempotencyMetrics] ALERT: ${alert}`, { value, threshold });
+    }
+
+    // Log per-tenant alerts
+    for (const companyId of this.tenantMetrics.keys()) {
+      const tenantAlerts = this.getTenantAlertConditions(companyId);
+      for (const { alert, value, threshold } of tenantAlerts) {
+        console.warn(`[SyncIdempotencyMetrics] TENANT ALERT (company=${companyId}): ${alert}`, {
+          value, threshold,
+        });
+      }
     }
   }
 }

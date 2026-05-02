@@ -3,7 +3,8 @@
 
 /**
  * Tests for Sync Idempotency Metrics Collector
- * Story: Epic 11.3 - Sync Idempotency and Retry Resilience Hardening
+ * Story: Epic 11.3 — Sync Idempotency and Retry Resilience Hardening
+ * Story: Epic 52.9 — Observability: Idempotency Metrics
  */
 
 import { describe, it, assert, beforeEach } from "vitest";
@@ -11,7 +12,9 @@ import {
   SyncIdempotencyMetricsCollector,
   syncIdempotencyMetricsCollector,
   DEFAULT_SYNC_IDEMPOTENCY_METRICS,
+  getLatencyPercentiles,
   type SyncOperationResult,
+  type TenantMetrics,
 } from "../../src/idempotency/metrics-collector.js";
 import { ERROR_CLASSIFICATION } from "../../src/idempotency/sync-idempotency.js";
 
@@ -21,6 +24,10 @@ describe("SyncIdempotencyMetricsCollector", () => {
   beforeEach(() => {
     collector = new SyncIdempotencyMetricsCollector();
   });
+
+  // ========================================================================
+  // Existing tests (backward compatibility)
+  // ========================================================================
 
   describe("reset", () => {
     it("should reset all metrics to defaults", () => {
@@ -32,6 +39,15 @@ describe("SyncIdempotencyMetricsCollector", () => {
 
       const metrics = collector.getMetrics();
       assert.deepStrictEqual(metrics, DEFAULT_SYNC_IDEMPOTENCY_METRICS);
+    });
+
+    it("should clear per-tenant metrics on reset", () => {
+      collector.recordResults(1, [{ client_tx_id: "tx-1", result: "OK", latency_ms: 100 }]);
+      assert.isDefined(collector.getTenantMetrics(1));
+
+      collector.reset();
+
+      assert.isUndefined(collector.getTenantMetrics(1));
     });
   });
 
@@ -177,24 +193,19 @@ describe("SyncIdempotencyMetricsCollector", () => {
       collector.endBatch(5);
 
       const metrics = collector.getMetrics();
-      // avg_batch_processing_time_ms is set to the elapsed time
-      // Since there's no real delay, it may be 0, but the mechanism works
       assert.strictEqual(metrics.avg_batch_processing_time_ms >= 0, true);
     });
 
     it("should calculate running average across multiple batches", () => {
-      // Record first batch
       collector.startBatch();
       collector.recordRequest(3);
       collector.endBatch(1);
 
-      // Record second batch
       collector.startBatch();
       collector.recordRequest(2);
       collector.endBatch(2);
 
       const metrics = collector.getMetrics();
-      // Running average should be calculated
       assert.strictEqual(metrics.avg_batch_processing_time_ms >= 0, true);
     });
   });
@@ -217,10 +228,12 @@ describe("SyncIdempotencyMetricsCollector", () => {
     });
   });
 
-  describe("recordResults", () => {
-    it("should process multiple results and update metrics", () => {
-      collector.recordRequest(5);
+  // ========================================================================
+  // Updated recordResults (Story 52-9 — now takes companyId)
+  // ========================================================================
 
+  describe("recordResults", () => {
+    it("should process multiple results with companyId and update both global and per-tenant metrics", () => {
       const results: SyncOperationResult[] = [
         { client_tx_id: "tx-1", result: "OK", latency_ms: 100 },
         { client_tx_id: "tx-2", result: "DUPLICATE", latency_ms: 50 },
@@ -230,7 +243,7 @@ describe("SyncIdempotencyMetricsCollector", () => {
           result: "ERROR", 
           latency_ms: 100,
           error_classification: ERROR_CLASSIFICATION.TRANSIENT,
-          is_retry: true
+          is_retry: true,
         },
         { 
           client_tx_id: "tx-5", 
@@ -240,15 +253,162 @@ describe("SyncIdempotencyMetricsCollector", () => {
         },
       ];
 
-      collector.recordResults(results);
+      collector.recordResults(42, results);
 
+      // Global metrics
       const metrics = collector.getMetrics();
       assert.strictEqual(metrics.duplicate_submissions, 2);
       assert.strictEqual(metrics.dedupe_hits, 2);
       assert.strictEqual(metrics.retryable_errors, 1);
       assert.strictEqual(metrics.non_retryable_errors, 1);
+
+      // Per-tenant metrics
+      const tenantMetrics = collector.getTenantMetrics(42);
+      assert.isDefined(tenantMetrics);
+      assert.strictEqual(tenantMetrics!.totalRequests, 5);
+      assert.strictEqual(tenantMetrics!.okCount, 1);
+      assert.strictEqual(tenantMetrics!.duplicateCount, 2);
+      assert.strictEqual(tenantMetrics!.errorCount, 2);
+    });
+
+    it("should track OK results in per-tenant metrics (new in Story 52-9)", () => {
+      const results: SyncOperationResult[] = [
+        { client_tx_id: "tx-1", result: "OK", latency_ms: 10 },
+        { client_tx_id: "tx-2", result: "OK", latency_ms: 20 },
+        { client_tx_id: "tx-3", result: "OK", latency_ms: 30 },
+      ];
+
+      collector.recordResults(7, results);
+
+      const tm = collector.getTenantMetrics(7);
+      assert.strictEqual(tm!.okCount, 3);
+      assert.strictEqual(tm!.duplicateCount, 0);
+      assert.strictEqual(tm!.errorCount, 0);
+    });
+
+    it("should maintain separate per-tenant state per company", () => {
+      collector.recordResults(1, [
+        { client_tx_id: "tx-1", result: "OK", latency_ms: 10 },
+        { client_tx_id: "tx-2", result: "DUPLICATE", latency_ms: 5 },
+      ]);
+      collector.recordResults(2, [
+        { client_tx_id: "tx-3", result: "ERROR", latency_ms: 50 },
+      ]);
+
+      const tm1 = collector.getTenantMetrics(1);
+      const tm2 = collector.getTenantMetrics(2);
+
+      assert.strictEqual(tm1!.totalRequests, 2);
+      assert.strictEqual(tm1!.okCount, 1);
+      assert.strictEqual(tm1!.duplicateCount, 1);
+
+      assert.strictEqual(tm2!.totalRequests, 1);
+      assert.strictEqual(tm2!.errorCount, 1);
+      assert.strictEqual(tm2!.okCount, 0);
+    });
+
+    it("should treat CONFLICT as error in per-tenant tracking", () => {
+      collector.recordResults(5, [
+        { client_tx_id: "tx-1", result: "CONFLICT", latency_ms: 100 },
+      ]);
+
+      const tm = collector.getTenantMetrics(5);
+      assert.strictEqual(tm!.errorCount, 1);
     });
   });
+
+  // ========================================================================
+  // Per-Tenant Metrics (Story 52-9)
+  // ========================================================================
+
+  describe("getTenantMetrics", () => {
+    it("should return undefined for untracked company", () => {
+      const tm = collector.getTenantMetrics(999);
+      assert.isUndefined(tm);
+    });
+
+    it("should return a snapshot (immutable copy) of tenant metrics", () => {
+      collector.recordResults(3, [
+        { client_tx_id: "tx-1", result: "OK", latency_ms: 10 },
+      ]);
+
+      const tm1 = collector.getTenantMetrics(3);
+      const tm2 = collector.getTenantMetrics(3);
+
+      assert.notStrictEqual(tm1, tm2);
+      assert.notStrictEqual(tm1!.latencies, tm2!.latencies);
+      assert.deepStrictEqual(tm1, tm2);
+
+      // Verify deep copy: mutating returned arrays does NOT affect internal state
+      tm1!.latencies.ok.push(9999);
+      const tm3 = collector.getTenantMetrics(3);
+      assert.strictEqual(tm3!.latencies.ok.length, 1, "Internal ok array should not be affected by mutation of returned copy");
+      assert.notInclude(tm3!.latencies.ok, 9999, "Internal ok array should not contain pushed value");
+    });
+
+    it("should calculate correct duplicate rate and error rate", () => {
+      collector.recordResults(10, [
+        { client_tx_id: "tx-1", result: "OK", latency_ms: 10 },
+        { client_tx_id: "tx-2", result: "OK", latency_ms: 10 },
+        { client_tx_id: "tx-3", result: "DUPLICATE", latency_ms: 5 },
+        { client_tx_id: "tx-4", result: "ERROR", latency_ms: 50 },
+      ]);
+
+      const tm = collector.getTenantMetrics(10);
+      // 2 OK + 1 DUPLICATE + 1 ERROR = 4 total
+      assert.strictEqual(tm!.duplicateRate, 1 / 4);  // 0.25
+      assert.strictEqual(tm!.errorRate, 1 / 4);       // 0.25
+    });
+  });
+
+  // ========================================================================
+  // Percentile Computation (Story 52-9)
+  // ========================================================================
+
+  describe("getLatencyPercentiles", () => {
+    it("should return 0/0 for empty array", () => {
+      const result = getLatencyPercentiles([]);
+      assert.strictEqual(result.p50, 0);
+      assert.strictEqual(result.p95, 0);
+    });
+
+    it("should return correct p50 and p95 for known input", () => {
+      // 100 values from 1 to 100
+      const latencies = Array.from({ length: 100 }, (_, i) => i + 1);
+      const result = getLatencyPercentiles(latencies);
+      // Nearest-rank p50 of 1-100: index = ceil(0.5 * 100) - 1 = 49 -> value 50
+      assert.strictEqual(result.p50, 50);
+      // Nearest-rank p95 of 1-100: index = ceil(0.95 * 100) - 1 = 94 -> value 95
+      assert.strictEqual(result.p95, 95);
+    });
+  });
+
+  describe("getTenantLatencyPercentiles", () => {
+    it("should return 0/0 for untracked company", () => {
+      const result = collector.getTenantLatencyPercentiles(999, "ok");
+      assert.strictEqual(result.p50, 0);
+      assert.strictEqual(result.p95, 0);
+    });
+
+    it("should compute per-tenant latencies by result type", () => {
+      const okResults: SyncOperationResult[] = Array.from({ length: 100 }, (_, i) => ({
+        client_tx_id: `ok-${i}`,
+        result: "OK" as const,
+        latency_ms: i + 1,
+      }));
+      collector.recordResults(1, okResults);
+
+      const result = collector.getTenantLatencyPercentiles(1, "ok");
+      // Nearest-rank p50 of 1-100: index = ceil(0.5 * 100) - 1 = 49 -> value 50
+      assert.strictEqual(result.p50, 50);
+      // Nearest-rank p95 of 1-100: index = ceil(0.95 * 100) - 1 = 94 -> value 95
+      assert.strictEqual(result.p95, 95);
+    });
+  });
+
+  // ========================================================================
+  // Alert Conditions with Updated Thresholds (Story 52-9)
+  // ========================================================================
 
   describe("getAlertConditions", () => {
     it("should not alert when metrics are normal", () => {
@@ -259,15 +419,49 @@ describe("SyncIdempotencyMetricsCollector", () => {
       assert.deepStrictEqual(alerts, []);
     });
 
-    it("should alert on high dedupe rate", () => {
-      collector.recordRequest(10);
+    it("should alert on high dedupe rate (>5%)", () => {
+      collector.recordRequest(20);
       for (let i = 0; i < 5; i++) {
         collector.recordDuplicateSubmission();
         collector.recordDedupeHit();
       }
+      // 5 duplicates / 20 transactions = 25% > 5%
 
       const alerts = collector.getAlertConditions();
-      assert.isTrue(alerts.some(a => a.alert === "HIGH_DEDUPE_RATE"));
+      const dedupeAlert = alerts.find(a => a.alert === "HIGH_DEDUPE_RATE");
+      assert.isDefined(dedupeAlert);
+      assert.strictEqual(dedupeAlert!.threshold, 0.05);
+    });
+
+    it("should NOT alert on dedupe rate below 5%", () => {
+      collector.recordRequest(100);
+      collector.recordDuplicateSubmission();
+      // 1 duplicate / 100 transactions = 1% < 5%
+
+      const alerts = collector.getAlertConditions();
+      const dedupeAlert = alerts.find(a => a.alert === "HIGH_DEDUPE_RATE");
+      assert.isUndefined(dedupeAlert);
+    });
+
+    it("should alert on high error rate (>1%)", () => {
+      collector.recordRequest(50);
+      collector.recordError(ERROR_CLASSIFICATION.VALIDATION, false);
+      // 1 error / 50 transactions = 2% > 1%
+
+      const alerts = collector.getAlertConditions();
+      const errorAlert = alerts.find(a => a.alert === "HIGH_ERROR_RATE");
+      assert.isDefined(errorAlert);
+      assert.strictEqual(errorAlert!.threshold, 0.01);
+    });
+
+    it("should NOT alert on error rate below 1%", () => {
+      collector.recordRequest(200);
+      collector.recordError(ERROR_CLASSIFICATION.VALIDATION, false);
+      // 1 error / 200 transactions = 0.5% < 1%
+
+      const alerts = collector.getAlertConditions();
+      const errorAlert = alerts.find(a => a.alert === "HIGH_ERROR_RATE");
+      assert.isUndefined(errorAlert);
     });
 
     it("should alert on stale queue", () => {
@@ -283,12 +477,63 @@ describe("SyncIdempotencyMetricsCollector", () => {
       const alerts = collector.getAlertConditions();
       assert.isTrue(alerts.some(a => a.alert === "HIGH_SYNC_LATENCY"));
     });
+
+    it("should alert on high retry rate", () => {
+      // Record enough errors to establish base
+      collector.recordRequest(10);
+      collector.recordError(ERROR_CLASSIFICATION.VALIDATION, false); // 1 non-retryable
+      collector.recordError(ERROR_CLASSIFICATION.TRANSIENT, true);   // 1 retryable
+      // 1/2 errors are retries = 50% exactly -> not > 50%
+      // Need more retryable
+      collector.recordError(ERROR_CLASSIFICATION.TRANSIENT, true);   // 2 retryable
+
+      const alerts = collector.getAlertConditions();
+      assert.isTrue(alerts.some(a => a.alert === "HIGH_RETRY_RATE"));
+    });
+  });
+
+  describe("getTenantAlertConditions", () => {
+    it("should return empty for untracked tenant", () => {
+      const alerts = collector.getTenantAlertConditions(999);
+      assert.deepStrictEqual(alerts, []);
+    });
+
+    it("should alert on per-tenant duplicate rate > 5%", () => {
+      collector.recordResults(1, [
+        { client_tx_id: "tx-1", result: "OK", latency_ms: 10 },
+        { client_tx_id: "tx-2", result: "DUPLICATE", latency_ms: 5 },
+      ]);
+      // 1/2 = 50% > 5%
+
+      const alerts = collector.getTenantAlertConditions(1);
+      assert.isTrue(alerts.some(a => a.alert === "TENANT_HIGH_DEDUPE_RATE"));
+    });
+
+    it("should alert on per-tenant error rate > 1%", () => {
+      collector.recordResults(2, [
+        { client_tx_id: "tx-1", result: "ERROR", latency_ms: 50 },
+      ]);
+      // 1/1 = 100% > 1%
+
+      const alerts = collector.getTenantAlertConditions(2);
+      assert.isTrue(alerts.some(a => a.alert === "TENANT_HIGH_ERROR_RATE"));
+    });
+
+    it("should not alert for normal per-tenant rates", () => {
+      collector.recordResults(3, [
+        { client_tx_id: "tx-1", result: "OK", latency_ms: 10 },
+        { client_tx_id: "tx-2", result: "OK", latency_ms: 10 },
+        { client_tx_id: "tx-3", result: "OK", latency_ms: 10 },
+      ]);
+
+      const alerts = collector.getTenantAlertConditions(3);
+      assert.deepStrictEqual(alerts, []);
+    });
   });
 
   describe("getSummary", () => {
     it("should return summary object with string dedupe_hit_rate", () => {
       collector.recordRequest(100);
-      // Simulate duplicate submissions with dedupe hits
       collector.recordDuplicateSubmission();
       collector.recordDedupeHit();
       collector.recordDuplicateSubmission();
@@ -309,7 +554,15 @@ describe("SyncIdempotencyMetricsCollector", () => {
     it("should not throw when logging metrics", () => {
       collector.recordRequest(5);
       
-      // Should not throw
+      assert.doesNotThrow(() => collector.logMetrics());
+    });
+
+    it("should not throw with per-tenant data", () => {
+      collector.recordResults(1, [
+        { client_tx_id: "tx-1", result: "OK", latency_ms: 10 },
+        { client_tx_id: "tx-2", result: "DUPLICATE", latency_ms: 5 },
+      ]);
+
       assert.doesNotThrow(() => collector.logMetrics());
     });
   });
@@ -318,5 +571,11 @@ describe("SyncIdempotencyMetricsCollector", () => {
 describe("Singleton instance", () => {
   it("should export a singleton instance", () => {
     assert.instanceOf(syncIdempotencyMetricsCollector, SyncIdempotencyMetricsCollector);
+  });
+
+  it("should have per-tenant capability", () => {
+    assert.isFunction(syncIdempotencyMetricsCollector.recordResults);
+    assert.isFunction(syncIdempotencyMetricsCollector.getTenantMetrics);
+    assert.isFunction(syncIdempotencyMetricsCollector.getTenantLatencyPercentiles);
   });
 });

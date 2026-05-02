@@ -16,7 +16,7 @@ import { SyncPushRequestSchema } from "@jurnapod/shared";
 import { authenticateRequest, requireAccess, type AuthContext } from "../../lib/auth-guard.js";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
 import { errorResponse, successResponse } from "../../lib/response.js";
-import { SyncIdempotencyMetricsCollector } from "@jurnapod/sync-core";
+import { SyncIdempotencyMetricsCollector, syncIdempotencyMetricsCollector } from "@jurnapod/sync-core";
 import { getSyncPushDbPool } from "../../lib/sync/push/db.js";
 import type { SyncPushTransactionPayload } from "../../lib/sync/push/types.js";
 import { getPosSyncModuleAsync } from "../../lib/sync-modules.js";
@@ -27,7 +27,7 @@ import type {
   VariantSalePush,
   VariantStockAdjustmentPush
 } from "@jurnapod/pos-sync";
-import { outboxMetrics, type OutboxFailureReason } from "../../lib/metrics/index.js";
+import { outboxMetrics, syncMetrics, type OutboxFailureReason } from "../../lib/metrics/index.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -53,6 +53,8 @@ syncPushRoutes.post("/", async (c) => {
   const correlationId = getRequestCorrelationId(c.req.raw);
   const dbPool = getSyncPushDbPool();
   const metricsCollector = new SyncIdempotencyMetricsCollector();
+  const pushStartTime = Date.now();
+  let outlet_id: number = 0;
 
   console.info("POST /sync/push started", {
     correlation_id: correlationId,
@@ -140,25 +142,45 @@ syncPushRoutes.post("/", async (c) => {
       outboxMetrics.recordFailure(auth.companyId, outlet_id, reason);
     }
 
+    // Record sync outcome metrics (Story 52-9) — tenant-isolated
+    const pushElapsed = Date.now() - pushStartTime;
+    const aggregate = recordPushMetrics(phase1Results, auth.companyId, outlet_id, pushElapsed);
+
     console.info("POST /sync/push completed", {
       correlation_id: correlationId,
       company_id: auth.companyId,
       outlet_id,
+      total_items: aggregate.totalItems,
+      ok_count: aggregate.okCount,
+      duplicate_count: aggregate.duplicateCount,
+      error_count: aggregate.errorCount,
+      push_latency_ms: pushElapsed,
       total_transactions: transactions.length,
-      ok_count: phase1Results.results.filter((r) => r.result === "OK").length,
-      duplicate_count: phase1Results.results.filter((r) => r.result === "DUPLICATE").length,
-      error_count: phase1Results.results.filter((r) => r.result === "ERROR").length,
       order_update_results_count: phase1Results.orderUpdateResults.length,
       item_cancellation_results_count: phase1Results.itemCancellationResults.length,
       variant_sale_results_count: phase1Results.variantSaleResults?.length ?? 0,
-      variant_stock_adjustment_results_count: phase1Results.variantStockAdjustmentResults?.length ?? 0
+      variant_stock_adjustment_results_count: phase1Results.variantStockAdjustmentResults?.length ?? 0,
     });
 
     return successResponse(responsePayload);
   } catch (error) {
+    // Record error metrics even on failure (Story 52-9 — P1 alerting blind spot fix)
+    // Guard: only record metrics if outlet_id was successfully parsed (avoids outlet_id=0 phantom metrics)
+    const pushElapsed = Date.now() - pushStartTime;
+    if (outlet_id > 0) {
+      syncMetrics.recordPushResult(auth.companyId, outlet_id, "ERROR", pushElapsed, correlationId);
+      syncIdempotencyMetricsCollector.recordResults(auth.companyId, [{
+        client_tx_id: correlationId ?? "no-correlation-id",
+        result: "ERROR",
+        latency_ms: pushElapsed,
+      }]);
+    }
+
     console.error("POST /sync/push failed", {
       correlation_id: correlationId,
       company_id: auth.companyId,
+      outlet_id: outlet_id > 0 ? outlet_id : "(not yet parsed)",
+      push_latency_ms: pushElapsed,
       error
     });
 
@@ -233,7 +255,8 @@ export function registerSyncPushRoutes(app: { openapi: OpenAPIHonoType["openapi"
     const auth = c.get("auth");
     const correlationId = getRequestCorrelationId(c.req.raw);
     const dbPool = getSyncPushDbPool();
-    const metricsCollector = new SyncIdempotencyMetricsCollector();
+    const pushStartTime = Date.now();
+    let outlet_id: number = 0;
 
     try {
       const body = await c.req.json();
@@ -283,7 +306,6 @@ export function registerSyncPushRoutes(app: { openapi: OpenAPIHonoType["openapi"
         variantSales: (variant_sales ?? []) as VariantSalePush[],
         variantStockAdjustments: (variant_stock_adjustments ?? []) as VariantStockAdjustmentPush[],
         correlationId,
-        metricsCollector
       });
 
       const responsePayload = {
@@ -306,11 +328,40 @@ export function registerSyncPushRoutes(app: { openapi: OpenAPIHonoType["openapi"
         outboxMetrics.recordFailure(auth.companyId, outlet_id, reason);
       }
 
+      // Record sync outcome metrics (Story 52-9) — tenant-isolated
+      const pushElapsed = Date.now() - pushStartTime;
+      const aggregate = recordPushMetrics(phase1Results, auth.companyId, outlet_id, pushElapsed);
+
+      console.info("POST /sync/push completed", {
+        correlation_id: correlationId,
+        company_id: auth.companyId,
+        outlet_id,
+        total_items: aggregate.totalItems,
+        ok_count: aggregate.okCount,
+        duplicate_count: aggregate.duplicateCount,
+        error_count: aggregate.errorCount,
+        push_latency_ms: pushElapsed,
+      });
+
       return successResponse(responsePayload);
     } catch (error) {
+      // Record error metrics even on failure (Story 52-9 — P1 alerting blind spot fix)
+      // Guard: only record metrics if outlet_id was successfully parsed (avoids outlet_id=0 phantom metrics)
+      const pushElapsed = Date.now() - pushStartTime;
+      if (outlet_id > 0) {
+        syncMetrics.recordPushResult(auth.companyId, outlet_id, "ERROR", pushElapsed, correlationId);
+        syncIdempotencyMetricsCollector.recordResults(auth.companyId, [{
+          client_tx_id: correlationId ?? "no-correlation-id",
+          result: "ERROR",
+          latency_ms: pushElapsed,
+        }]);
+      }
+
       console.error("POST /sync/push failed", {
         correlation_id: correlationId,
         company_id: auth.companyId,
+        outlet_id: outlet_id > 0 ? outlet_id : "(not yet parsed)",
+        push_latency_ms: pushElapsed,
         error
       });
 
@@ -321,6 +372,65 @@ export function registerSyncPushRoutes(app: { openapi: OpenAPIHonoType["openapi"
       );
     }
   }) as any);
+}
+
+/**
+ * Record sync push metrics for a batch of results.
+ * Extracts flat result items, records Prometheus and operational metrics,
+ * and returns aggregate counts for structured logging.
+ * 
+ * DRY helper — used by both basic and OpenAPI push handlers.
+ */
+function recordPushMetrics(
+  phase1Results: {
+    results: Array<{ client_tx_id: string; result: string; message?: string }>;
+    orderUpdateResults: Array<{ update_id: string; result: string; message?: string }>;
+    itemCancellationResults: Array<{ cancellation_id: string; result: string; message?: string }>;
+    variantSaleResults?: Array<{ client_tx_id: string; result: string; message?: string }>;
+    variantStockAdjustmentResults?: Array<{ client_tx_id: string; result: string; message?: string }>;
+  },
+  companyId: number,
+  outletId: number,
+  pushElapsed: number,
+): { totalItems: number; okCount: number; duplicateCount: number; errorCount: number } {
+  const allItems = [
+    ...phase1Results.results,
+    ...phase1Results.orderUpdateResults.map((r) => ({ client_tx_id: r.update_id, result: r.result, message: r.message })),
+    ...phase1Results.itemCancellationResults.map((r) => ({ client_tx_id: r.cancellation_id, result: r.result, message: r.message })),
+    ...(phase1Results.variantSaleResults?.filter(r => r.client_tx_id).map((r) => ({ client_tx_id: r.client_tx_id, result: r.result, message: r.message })) ?? []),
+    ...(phase1Results.variantStockAdjustmentResults?.filter(r => r.client_tx_id).map((r) => ({ client_tx_id: r.client_tx_id, result: r.result, message: r.message })) ?? []),
+  ];
+
+  // Record Prometheus metrics
+  for (const item of allItems) {
+    const safeResult = normalizeSyncResult(item.result);
+    syncMetrics.recordPushResult(companyId, outletId, safeResult, pushElapsed, item.client_tx_id);
+  }
+
+  // Record sync-core operational metrics
+  syncIdempotencyMetricsCollector.recordResults(companyId, allItems.map((r) => ({
+    client_tx_id: r.client_tx_id,
+    result: normalizeSyncResult(r.result),
+    latency_ms: pushElapsed,
+  })));
+
+  return {
+    totalItems: allItems.length,
+    okCount: allItems.filter((r) => normalizeSyncResult(r.result) === "OK").length,
+    duplicateCount: allItems.filter((r) => normalizeSyncResult(r.result) === "DUPLICATE").length,
+    errorCount: allItems.filter((r) => normalizeSyncResult(r.result) === "ERROR").length,
+  };
+}
+
+/**
+ * Normalize a sync result string to a valid SyncPushResultType.
+ * Uses runtime validation instead of unsafe type casts.
+ * Unknown/missing results are mapped to "ERROR" to prevent silent data loss.
+ */
+function normalizeSyncResult(result: string | undefined): "OK" | "DUPLICATE" | "ERROR" {
+  if (result === "OK") return "OK";
+  if (result === "DUPLICATE") return "DUPLICATE";
+  return "ERROR"; // Maps CONFLICT and any unexpected values to ERROR
 }
 
 /**

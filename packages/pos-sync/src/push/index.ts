@@ -456,7 +456,7 @@ async function processTransaction(
         latency_ms: Math.max(0, Date.now() - startedAtMs),
         is_retry: false,
       };
-      metricsCollector.recordResults([operationResult]);
+      metricsCollector.recordResults(companyId, [operationResult]);
     }
 
     console.info("pos_sync_push_transaction_processed", {
