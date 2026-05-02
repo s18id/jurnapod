@@ -604,8 +604,9 @@ export class APPaymentService {
         supplier_id: number;
         status: number;
         payment_date: Date;
+        journal_batch_id: number | null;
       }>`
-        SELECT id, payment_no, bank_account_id, supplier_id, status, payment_date
+        SELECT id, payment_no, bank_account_id, supplier_id, status, payment_date, journal_batch_id
         FROM ap_payments
         WHERE id = ${paymentId}
           AND company_id = ${companyId}
@@ -617,6 +618,13 @@ export class APPaymentService {
         throw new APPaymentNotFoundError(paymentId);
       }
 
+      // Idempotent: if already POSTED, return existing payment + journal
+      if (payment.status === AP_PAYMENT_STATUS.POSTED) {
+        if (!payment.journal_batch_id) {
+          throw new APPaymentError("MISSING_JOURNAL_BATCH", "Posted payment has no journal batch");
+        }
+        return { batchId: payment.journal_batch_id };
+      }
       if (payment.status !== AP_PAYMENT_STATUS.DRAFT) {
         throw new APPaymentInvalidStatusTransitionError(payment.status, AP_PAYMENT_STATUS.POSTED);
       }

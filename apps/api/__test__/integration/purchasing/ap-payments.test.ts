@@ -384,6 +384,96 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
     expect(Number(journalCount.rows[0]?.c ?? 0)).toBe(1);
   });
 
+  it('re-posting a posted payment is idempotent — returns same journal_batch_id', async () => {
+    // Create a fresh PI for this test
+    const piRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        supplier_id: testSupplierId,
+        invoice_no: makeTag('APPIREP', ++apTagCounter),
+        invoice_date: '2026-05-01',
+        currency_code: 'IDR',
+        lines: [{ description: 'PI for idempotent re-post test', qty: '1', unit_price: '50000.0000', line_type: 'SERVICE' }]
+      })
+    });
+    expect(piRes.status).toBe(201);
+    const pi = await piRes.json();
+    const piId = pi.data.id;
+
+    // Post the PI
+    const piPostRes = await fetch(`${baseUrl}/api/purchasing/invoices/${piId}/post`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    expect(piPostRes.status).toBe(200);
+
+    // Create a draft payment
+    const idempotencyKey = makeTag('APPIREPKEY', ++apTagCounter);
+    const createPayload = {
+      idempotency_key: idempotencyKey,
+      payment_date: '2026-05-02',
+      bank_account_id: bankAccountId,
+      supplier_id: testSupplierId,
+      description: 'Idempotent re-post test',
+      lines: [{ purchase_invoice_id: piId, allocation_amount: '25000.0000' }]
+    };
+
+    const createRes = await fetch(`${baseUrl}/api/purchasing/payments`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(createPayload)
+    });
+    expect(createRes.status).toBe(201);
+    const createBody = await createRes.json();
+    const paymentId = createBody.data.id;
+
+    // First post — should succeed
+    const firstPostRes = await fetch(`${baseUrl}/api/purchasing/payments/${paymentId}/post`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    expect(firstPostRes.status).toBe(200);
+    const firstPostBody = await firstPostRes.json();
+    expect(Number(firstPostBody.data.journal_batch_id)).toBeGreaterThan(0);
+    const firstBatchId = Number(firstPostBody.data.journal_batch_id);
+
+    // Second post — should be idempotent, return same journal_batch_id
+    const secondPostRes = await fetch(`${baseUrl}/api/purchasing/payments/${paymentId}/post`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    expect(secondPostRes.status).toBe(200);
+    const secondPostBody = await secondPostRes.json();
+    expect(Number(secondPostBody.data.journal_batch_id)).toBe(firstBatchId);
+
+    // Verify only 1 journal batch exists for this payment
+    const db = getTestDb();
+    const journalCount = await sql<{ c: string }>`
+      SELECT COUNT(*) as c
+      FROM journal_batches
+      WHERE company_id = ${testCompanyId}
+        AND doc_type = 'AP_PAYMENT'
+        AND doc_id = ${paymentId}
+    `.execute(db);
+    expect(Number(journalCount.rows[0]?.c ?? 0)).toBe(1);
+  });
+
   it('replays concurrent duplicate payment create by idempotency_key without duplicate-line errors', async () => {
     const idempotencyKey = makeTag('APPIDEMCONC', ++apTagCounter);
 
@@ -1732,8 +1822,11 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       }
     });
     expect(postRes.status).toBe(200);
+    const postBody = await postRes.json();
+    const firstBatchId = postBody.data.journal_batch_id;
+    expect(Number(firstBatchId)).toBeGreaterThan(0);
 
-    // Second post should be rejected
+    // Second post should be idempotent — same success, same journal_batch_id
     const postAgainRes = await fetch(`${baseUrl}/api/purchasing/payments/${paymentId}/post`, {
       method: 'POST',
       headers: {
@@ -1741,10 +1834,10 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
         'Content-Type': 'application/json'
       }
     });
-    expect(postAgainRes.status).toBe(400);
+    expect(postAgainRes.status).toBe(200);
     const postAgainBody = await postAgainRes.json();
-    expect(postAgainBody.success).toBe(false);
-    expect(postAgainBody.error.code).toBe('INVALID_STATUS_TRANSITION');
+    expect(postAgainBody.success).toBe(true);
+    expect(Number(postAgainBody.data.journal_batch_id)).toBe(Number(firstBatchId));
   });
 
   // -------------------------------------------------------------------------
