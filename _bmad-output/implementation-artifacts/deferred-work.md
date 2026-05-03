@@ -41,3 +41,7 @@ This file tracks deferred findings from code reviews and other processes.
 ## Deferred from: code review of story-52-6 (2026-04-30)
 
 - No table-sync integration tests for conflict/ERROR path — deferred, pre-existing infrastructure gap (no table-sync integration test harness exists)
+
+## Deferred from: code review of story-54.3 (2026-05-03)
+
+- No `invoiced_qty` tracking on PO lines — sequential over-invoicing possible when multiple PIs reference the same PO line. Requires new DB column + atomic increment during postPI. Beyond story 54.3 scope.

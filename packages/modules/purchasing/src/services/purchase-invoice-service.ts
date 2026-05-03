@@ -34,6 +34,7 @@ import {
   PIAccountMissingError,
   PICreditLimitExceededError,
   PITaxAccountMissingError,
+  PIGrnInsufficientQtyError,
 } from "../types/purchase-invoice.js";
 import { ExchangeRateService } from "./exchange-rate-service.js";
 import { fromScaled4, scale4Mul, toScaled, toScaled4 } from "./decimal-scale4.js";
@@ -232,6 +233,7 @@ export class PurchaseInvoiceService {
             invoice_id: piId,
             line_no: i + 1,
             item_id: line.itemId ?? null,
+            po_line_id: line.poLineId ?? null,
             description: line.description,
             qty: line.qty,
             unit_price: line.unitPrice,
@@ -608,7 +610,7 @@ export class PurchaseInvoiceService {
       .where("invoice_id", "=", piId)
       .where("company_id", "=", companyId)
       .select([
-        "id", "description", "line_type", "qty", "unit_price", "line_total",
+        "id", "po_line_id", "description", "line_type", "qty", "unit_price", "line_total",
         "tax_rate_id", "tax_amount",
       ])
       .orderBy("line_no", "asc")
@@ -794,6 +796,52 @@ export class PurchaseInvoiceService {
       }
 
       const batchId = Number(batchResult.insertId);
+
+      // GRN qty validation (inside transaction with FOR UPDATE)
+      const poLineIds = lines.map((l) => l.po_line_id).filter((id): id is number => id != null);
+      const uniqueIds = [...new Set(poLineIds)];
+
+      if (uniqueIds.length > 0) {
+        const poLines = await trx
+          .selectFrom("purchase_order_lines")
+          .innerJoin("purchase_orders", "purchase_order_lines.order_id", "purchase_orders.id")
+          .where("purchase_order_lines.id", "in", uniqueIds)
+          .where("purchase_order_lines.company_id", "=", companyId)
+          .select([
+            "purchase_order_lines.id",
+            "purchase_order_lines.received_qty",
+            "purchase_orders.supplier_id",
+          ])
+          .forUpdate()
+          .execute();
+
+        const poLineMap = new Map(poLines.map((pl) => [Number(pl.id), pl]));
+
+        const seenIds = new Set<number>();
+        for (const line of lines) {
+          if (line.po_line_id) {
+            if (!poLineMap.has(line.po_line_id)) {
+              throw new PIError("PO_LINE_NOT_FOUND", `PO line ${line.po_line_id} not found`);
+            }
+            if (seenIds.has(line.po_line_id)) {
+              throw new PIError("DUPLICATE_PO_LINE", `Multiple lines reference the same PO line ${line.po_line_id}`);
+            }
+            seenIds.add(line.po_line_id);
+
+            const poLine = poLineMap.get(line.po_line_id)!;
+            if (Number(poLine.supplier_id) !== pi.supplier_id) {
+              throw new PIError("SUPPLIER_MISMATCH", `PO line ${line.po_line_id} belongs to a different supplier`);
+            }
+
+            const receivedQty = toScaled4(String(poLine.received_qty));
+            const invoiceQty = toScaled4(String(line.qty));
+
+            if (invoiceQty > receivedQty) {
+              throw new PIGrnInsufficientQtyError(line.po_line_id, line.qty, String(poLine.received_qty));
+            }
+          }
+        }
+      }
 
       for (const line of journalLines) {
         await sql`

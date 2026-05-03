@@ -78,6 +78,15 @@ export class PITaxAccountMissingError extends PIError {
   }
 }
 
+export class PIGrnInsufficientQtyError extends PIError {
+  constructor(poLineId: number, invoiceQty: string, receivedQty: string) {
+    super(
+      "GRN_INSUFFICIENT_QTY",
+      `Invoice line (po_line_id=${poLineId}) qty ${invoiceQty} exceeds received qty ${receivedQty}`
+    );
+  }
+}
+
 // =============================================================================
 // Input/Output Types
 // =============================================================================
@@ -96,6 +105,7 @@ export interface PICreateInput {
   notes?: string | null;
   lines: Array<{
     itemId?: number | null;
+    poLineId?: number | null;
     description: string;
     qty: string;
     unitPrice: string;

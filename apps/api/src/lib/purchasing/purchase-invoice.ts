@@ -27,6 +27,7 @@ export {
   PIAccountMissingError,
   PICreditLimitExceededError,
   PITaxAccountMissingError,
+  PIGrnInsufficientQtyError,
 } from "@jurnapod/modules-purchasing";
 import { toUtcIso, fromUtcIso } from "@/lib/date-helpers";
 import type { AuthContext } from "@/lib/auth-guard.js";
@@ -52,6 +53,7 @@ export async function createDraftPI(
     notes?: string | null;
     lines: Array<{
       itemId?: number | null;
+      poLineId?: number | null;
       description: string;
       qty: string;
       unitPrice: string;

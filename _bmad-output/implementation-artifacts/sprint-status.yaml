@@ -629,7 +629,7 @@ development_status:
   epic-54: done
   54-1-ap-invoice-write-path-correctness: done
   54-2-ap-payment-write-path-correctness: done
-  54-3-ap-state-machine-integrity: backlog
+  54-3-ap-state-machine-integrity: done
   54-4-multicurrency-ap-correctness: backlog
   54-5-ap-period-close-enforcement: backlog
   54-6-follow-up-closure-bucket: backlog

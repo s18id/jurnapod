@@ -182,6 +182,7 @@ invoiceRoutes.post("/", async (c) => {
       notes: input.notes ?? null,
       lines: input.lines.map((line) => ({
         itemId: line.item_id ?? null,
+        poLineId: line.po_line_id ?? null,
         description: line.description,
         qty: line.qty,
         unitPrice: line.unit_price,

@@ -399,6 +399,7 @@ export type PurchaseInvoiceStatus = z.infer<typeof PurchaseInvoiceStatusSchema>;
  */
 export const PurchaseInvoiceLineSchema = z.object({
   item_id: NumericIdSchema.nullable().optional(),
+  po_line_id: NumericIdSchema.nullable().optional(),
   description: z.string().trim().min(1).max(255),
   qty: z.string().trim().regex(/^\d+(\.\d{1,4})?$/, "Qty must be positive decimal"),
   unit_price: z.string().trim().regex(/^\d+(\.\d{1,4})?$/, "Unit price must be positive decimal"),
