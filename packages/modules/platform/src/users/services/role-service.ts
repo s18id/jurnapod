@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import type { KyselySchema } from "@jurnapod/db";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 import { withTransactionRetry } from "@jurnapod/db";
 import type { RoleResponse, RoleRow } from "../types/role.js";
 import { FULL_PERMISSION_MASK, type ModuleRoleResponse } from "../types/permission.js";
@@ -315,8 +315,8 @@ export class RoleService {
       module: row.module,
       resource: row.resource,
       permission_mask: Number(row.permission_mask ?? 0),
-      created_at: toRfc3339Required(row.created_at),
-      updated_at: toRfc3339Required(row.updated_at)
+      created_at: toUtcIso.dateLike(row.created_at) as string,
+      updated_at: toUtcIso.dateLike(row.updated_at) as string
     }));
   }
 
@@ -415,8 +415,8 @@ export class RoleService {
         module: row.module,
         resource: row.resource,
         permission_mask: Number(row.permission_mask ?? 0),
-        created_at: toRfc3339Required(row.created_at),
-        updated_at: toRfc3339Required(row.updated_at)
+        created_at: toUtcIso.dateLike(row.created_at) as string,
+        updated_at: toUtcIso.dateLike(row.updated_at) as string
       };
     });
   }

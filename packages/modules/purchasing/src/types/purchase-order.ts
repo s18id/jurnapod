@@ -6,7 +6,7 @@
  */
 
 import type { KyselySchema } from "@jurnapod/db";
-import { PURCHASE_ORDER_STATUS } from "@jurnapod/shared";
+import { PURCHASE_ORDER_STATUS, toUtcIso } from "@jurnapod/shared";
 
 // Re-export the shared constants for convenience
 export { PURCHASE_ORDER_STATUS } from "@jurnapod/shared";
@@ -265,10 +265,7 @@ export function computeTotalAmount(lines: Array<{ line_total: string }>): string
 // =============================================================================
 
 export function toIso(value: Date | string | null): string | null {
-  if (value == null) return null;
-  if (value instanceof Date) return value.toISOString();
-  const parsed = new Date(String(value));
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
+  return toUtcIso.dateLike(value) as string | null;
 }
 
 // =============================================================================

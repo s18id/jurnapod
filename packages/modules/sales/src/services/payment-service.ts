@@ -12,7 +12,7 @@
  * Database access is performed via the injected SalesDb interface.
  */
 
-import { toMysqlDateTime, toMysqlDateTimeFromDateLike } from "@jurnapod/shared";
+import { fromUtcIso, toUtcIso } from "@jurnapod/shared";
 import type { AccessScopeChecker } from "../interfaces/access-scope-checker.js";
 import {
   SalesPermissions
@@ -143,16 +143,16 @@ export interface PaymentServiceDeps {
 // Patch A: Normalize datetimes for idempotency comparison.
 // Mirrors the API's payment-allocation.ts logic exactly.
 function normalizeIncomingDatetimeForCompare(paymentAt: string): string {
-  const persistedValue = toMysqlDateTime(paymentAt);
+  const persistedValue = fromUtcIso.mysql(paymentAt);
   const localInterpreted = new Date(persistedValue.replace(" ", "T"));
   if (Number.isNaN(localInterpreted.getTime())) {
     throw new Error("Invalid datetime");
   }
-  return toMysqlDateTime(localInterpreted.toISOString());
+  return fromUtcIso.mysql(toUtcIso.dateLike(localInterpreted) as string);
 }
 
 function normalizeExistingDatetimeForCompare(paymentAt: string): string {
-  return toMysqlDateTimeFromDateLike(paymentAt);
+  return fromUtcIso.mysql(toUtcIso.dateLike(paymentAt) as string);
 }
 
 function buildCanonicalInput(
@@ -385,7 +385,7 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
           invoiceId: input.invoice_id,
           paymentNo,
           clientRef: input.client_ref,
-          paymentAt: toMysqlDateTime(input.payment_at),
+          paymentAt: fromUtcIso.mysql(input.payment_at),
           accountId: effectiveAccountId,
           method: input.method,
           status: "DRAFT",

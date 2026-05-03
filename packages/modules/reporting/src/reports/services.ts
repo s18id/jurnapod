@@ -12,7 +12,7 @@
 
 import { sql } from "kysely";
 import { withTransaction, type Transaction } from "@jurnapod/db";
-import { normalizeDate, toMysqlDateTime, nowUTC, toDateOnly } from "@jurnapod/shared";
+import { toUtcIso, fromUtcIso, nowUTC } from "@jurnapod/shared";
 import type {
   PosTransactionFilter,
   JournalFilter,
@@ -754,12 +754,12 @@ export async function getReceivablesAgeingReport(filter: ReceivablesAgeingFilter
   let asOfDate: string;
   if (filter.asOfDate) {
     if (filter.timezone && filter.timezone !== 'UTC') {
-      asOfDate = normalizeDate(filter.asOfDate, filter.timezone, 'end');
+      asOfDate = toUtcIso.businessDate(filter.asOfDate, filter.timezone, 'end');
     } else {
       asOfDate = filter.asOfDate + "T23:59:59.999Z";
     }
   } else {
-    asOfDate = toDateOnly(nowUTC());
+    asOfDate = fromUtcIso.dateOnly(nowUTC());
   }
 
   const outletInClause = sql.join(outletIds.map(id => sql`${id}`));

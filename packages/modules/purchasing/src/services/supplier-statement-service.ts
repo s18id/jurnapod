@@ -9,7 +9,7 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
-import { AP_PAYMENT_STATUS, PURCHASE_CREDIT_STATUS, PURCHASE_INVOICE_STATUS } from "@jurnapod/shared";
+import { AP_PAYMENT_STATUS, PURCHASE_CREDIT_STATUS, PURCHASE_INVOICE_STATUS, toUtcIso, fromUtcIso } from "@jurnapod/shared";
 import { toScaled } from "./ap-reconciliation-service.js";
 import { fromScaled4 } from "./ap-reconciliation-service.js";
 import type {
@@ -89,19 +89,15 @@ function mapRowToStatement(row: Record<string, unknown>): SupplierStatement {
     id: Number(row.id),
     companyId: Number(row.company_id),
     supplierId: Number(row.supplier_id),
-    statementDate: row.statement_date instanceof Date
-      ? row.statement_date.toISOString().split("T")[0]
-      : String(row.statement_date),
+    statementDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.statement_date as string | Date | null | undefined) as string),
     closingBalance: String(row.closing_balance),
     currencyCode: String(row.currency_code),
     status: Number(row.status),
-    reconciledAt: row.reconciled_at instanceof Date
-      ? row.reconciled_at.toISOString()
-      : row.reconciled_at ? String(row.reconciled_at) : null,
+    reconciledAt: toUtcIso.dateLike(row.reconciled_at as string | Date | null | undefined, { nullable: true }) as string | null,
     reconciledByUserId: row.reconciled_by_user_id != null ? Number(row.reconciled_by_user_id) : null,
     createdByUserId: row.created_by_user_id != null ? Number(row.created_by_user_id) : null,
-    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
-    updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at),
+    createdAt: toUtcIso.dateLike(row.created_at as string | Date | null | undefined) as string,
+    updatedAt: toUtcIso.dateLike(row.updated_at as string | Date | null | undefined) as string,
   };
 }
 

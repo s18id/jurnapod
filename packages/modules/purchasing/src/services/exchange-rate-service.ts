@@ -8,6 +8,7 @@
  */
 
 import type { KyselySchema } from "@jurnapod/db";
+import { toUtcIso } from "@jurnapod/shared";
 import type {
   ExchangeRate,
   ExchangeRateRow,
@@ -24,30 +25,19 @@ import type {
 // Helpers
 // =============================================================================
 
-function toIso(value: Date | string | null): string {
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-  if (value == null) {
-    return new Date(0).toISOString();
-  }
-  const d = new Date(String(value));
-  return Number.isNaN(d.getTime()) ? String(value) : d.toISOString();
-}
-
 function mapExchangeRate(row: ExchangeRateRow): ExchangeRate {
   return {
     id: row.id,
     company_id: row.company_id,
     currency_code: row.currency_code,
     rate: String(row.rate),
-    effective_date: toIso(row.effective_date),
+    effective_date: toUtcIso.dateLike(row.effective_date) as string,
     notes: row.notes,
     is_active: Boolean(row.is_active),
     created_by_user_id: row.created_by_user_id,
     updated_by_user_id: row.updated_by_user_id,
-    created_at: toIso(row.created_at),
-    updated_at: toIso(row.updated_at),
+    created_at: toUtcIso.dateLike(row.created_at) as string,
+    updated_at: toUtcIso.dateLike(row.updated_at) as string,
   };
 }
 

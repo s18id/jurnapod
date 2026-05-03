@@ -12,6 +12,7 @@
  * Database access is performed via the injected SalesDb interface.
  */
 
+import { fromUtcIso, toUtcIso } from "@jurnapod/shared";
 import type { AccessScopeChecker } from "../interfaces/access-scope-checker.js";
 import {
   SalesPermissions
@@ -77,13 +78,13 @@ function sumMoney(values: number[]): number {
 
 function formatDateOnly(value: string): string {
   if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
-    return value.slice(0, 10);
+    return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toISOString().slice(0, 10);
+  return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
 }
 
 // =============================================================================
@@ -96,7 +97,7 @@ function addDaysToDateOnly(dateOnly: string, days: number): string {
     throw new Error("Invalid date");
   }
   baseDate.setUTCDate(baseDate.getUTCDate() + days);
-  return baseDate.toISOString().slice(0, 10);
+  return fromUtcIso.dateOnly(toUtcIso.dateLike(baseDate) as string);
 }
 
 export interface ResolveDueDateInput {

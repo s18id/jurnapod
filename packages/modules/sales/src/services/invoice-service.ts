@@ -13,6 +13,7 @@
  * Posting integration uses modules-accounting interfaces.
  */
 
+import { fromUtcIso, toUtcIso } from "@jurnapod/shared";
 import type { AccessScopeChecker } from "../interfaces/access-scope-checker.js";
 import {
   SalesPermissions
@@ -83,13 +84,13 @@ function sumMoney(values: number[]): number {
 
 function formatDateOnly(value: string): string {
   if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
-    return value.slice(0, 10);
+    return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toISOString().slice(0, 10);
+  return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
 }
 
 // =============================================================================

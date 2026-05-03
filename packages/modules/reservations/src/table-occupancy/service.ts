@@ -10,6 +10,7 @@
 import { sql } from "kysely";
 import { randomBytes } from "node:crypto";
 import type { KyselySchema } from "@jurnapod/db";
+import { toUtcIso } from "@jurnapod/shared";
 import type {
   TableOccupancyState,
   TableBoardItem,
@@ -269,7 +270,7 @@ export async function holdTableWithKysely(
     clientTxId: randomBytes(16).toString('hex'),
     occupancyVersionBefore: currentState.version,
     occupancyVersionAfter: currentState.version + 1,
-    eventData: { reason: "Table held for reservation", heldUntil: input.heldUntil.toISOString() },
+    eventData: { reason: "Table held for reservation", heldUntil: toUtcIso.dateLike(input.heldUntil) },
     statusIdBefore: currentState.statusId,
     statusIdAfter: TableOccupancyStatus.RESERVED,
     serviceSessionId: null,

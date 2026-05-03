@@ -8,6 +8,7 @@
  */
 
 import type { KyselySchema, Transaction } from "@jurnapod/db";
+import { toUtcIso } from "@jurnapod/shared";
 import type {
   Supplier,
   SupplierWithContacts,
@@ -30,10 +31,7 @@ function formatDecimal(value: unknown): string {
 }
 
 function toIso(value: Date | string | null): string | null {
-  if (value == null) return null;
-  if (value instanceof Date) return value.toISOString();
-  const parsed = new Date(String(value));
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
+  return toUtcIso.dateLike(value) as string | null;
 }
 
 function normalizeSupplier(row: {

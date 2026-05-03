@@ -14,7 +14,7 @@ import {
   PURCHASE_CREDIT_STATUS,
   PURCHASE_INVOICE_STATUS,
   normalizePurchasingDocType,
-  normalizeDate,
+  toUtcIso,
   type DrilldownCategory,
 } from "@jurnapod/shared";
 import {
@@ -60,7 +60,7 @@ async function getGLDetail(
     return { lines: [], nextCursor: null, hasMore: false, totalCount: 0 };
   }
 
-  const asOfDateUtcEnd = normalizeDate(asOfDate, timezone, "end");
+  const asOfDateUtcEnd = toUtcIso.businessDate(asOfDate, timezone, "end");
 
   // Cursor format: journal_line_id (for stable pagination)
   const cursorId = cursor ? Number(cursor) : null;

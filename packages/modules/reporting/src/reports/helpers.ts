@@ -8,7 +8,7 @@
  */
 
 import { sql } from "kysely";
-import { toDateTimeRangeWithTimezone, normalizeDate, toMysqlDateTime, toUtcInstant, nowUTC } from "@jurnapod/shared";
+import { toUtcIso, fromUtcIso, nowUTC } from "@jurnapod/shared";
 
 /**
  * Convert value to number, handling string representations from SQL
@@ -40,21 +40,21 @@ export function buildOutletPredicate(
  * Convert Date or string to ISO datetime string
  */
 export function toIsoDateTime(value: Date | string): string {
-  return new Date(value).toISOString();
+  return toUtcIso.dateLike(value) as string;
 }
 
 /**
  * Convert Date or string to ISO date string (YYYY-MM-DD)
  */
 export function toIsoDate(value: Date | string): string {
-  return new Date(value).toISOString().slice(0, 10);
+  return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
 }
 
 /**
  * Convert MySQL datetime string to UTC Date
  */
 export function mysqlDateTimeToUtcDate(value: string): Date {
-  return new Date(toUtcInstant(value.replace(" ", "T") + "Z"));
+  return new Date(toUtcIso.dateLike(value.replace(" ", "T") + "Z") as string);
 }
 
 /**
@@ -62,9 +62,9 @@ export function mysqlDateTimeToUtcDate(value: string): Date {
  */
 export function toMysqlDateTimeOrNow(value: string): string {
   try {
-    return toMysqlDateTime(value);
+    return fromUtcIso.mysql(value);
   } catch {
-    return toMysqlDateTime(nowUTC());
+    return fromUtcIso.mysql(nowUTC());
   }
 }
 
@@ -78,14 +78,14 @@ export function toDateTimeRange(
 ): { fromStart: string; nextDayStart: string } {
   if (timezone && timezone !== 'UTC') {
     // Use timezone-aware boundaries
-    const range = toDateTimeRangeWithTimezone(dateFrom, dateTo, timezone);
+    const range = toUtcIso.dateRange(dateFrom, dateTo, timezone);
     // Convert to MySQL DATETIME format (YYYY-MM-DD HH:MM:SS)
     const fromStart = range.fromStartUTC.slice(0, 19).replace("T", " ");
     // For end boundary, add 1ms to get the start of the next day in UTC
     const endDate = new Date(range.toEndUTC);
     endDate.setUTCMilliseconds(endDate.getUTCMilliseconds() + 1);
     // Use the full UTC datetime, not just the date portion
-    const nextDayStart = endDate.toISOString().slice(0, 19).replace("T", " ");
+    const nextDayStart = fromUtcIso.mysql(toUtcIso.dateLike(endDate) as string);
     return { fromStart, nextDayStart };
   }
 
@@ -96,7 +96,7 @@ export function toDateTimeRange(
   nextDay.setUTCDate(nextDay.getUTCDate() + 1);
   return {
     fromStart,
-    nextDayStart: `${nextDay.toISOString().slice(0, 10)} 00:00:00`
+    nextDayStart: `${fromUtcIso.dateOnly(toUtcIso.dateLike(nextDay) as string)} 00:00:00`
   };
 }
 

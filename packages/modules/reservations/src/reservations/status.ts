@@ -10,6 +10,7 @@
 import { sql } from "kysely";
 import { randomBytes } from "node:crypto";
 import type { KyselySchema } from "@jurnapod/db";
+import { toUtcIso } from "@jurnapod/shared";
 
 import type { UpdateReservationStatusInput } from "./types.js";
 import {
@@ -160,7 +161,7 @@ export async function updateReservationStatus(
 
       if (now < gracePeriodEnd + gracePeriodMinutes * 60_000) {
         throw new ReservationValidationError(
-          `Grace period not yet passed. Cannot mark as NO_SHOW before ${new Date(gracePeriodEnd + gracePeriodMinutes * 60_000).toISOString()}`
+          `Grace period not yet passed. Cannot mark as NO_SHOW before ${toUtcIso.dateLike(new Date(gracePeriodEnd + gracePeriodMinutes * 60_000))}`
         );
       }
 
@@ -318,7 +319,7 @@ async function holdTableWithKysely(
     clientTxId: randomBytes(16).toString('hex'),
     occupancyVersionBefore: input.expectedVersion,
     occupancyVersionAfter: input.expectedVersion + 1,
-    eventData: { reason: "Table held for reservation", heldUntil: input.heldUntil.toISOString() },
+    eventData: { reason: "Table held for reservation", heldUntil: toUtcIso.dateLike(input.heldUntil) },
     statusIdBefore: TABLE_OCCUPANCY_STATUS.AVAILABLE,
     statusIdAfter: TABLE_OCCUPANCY_STATUS.RESERVED,
     serviceSessionId: null,

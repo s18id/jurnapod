@@ -11,6 +11,7 @@
  */
 
 import type { ReportType } from "../classification/index.js";
+import { nowUTC } from "@jurnapod/shared";
 import type {
   BaseReportFilter,
   ReportResult,
@@ -99,7 +100,7 @@ export function createConsoleReportMetricsEmitter(): ReportMetricsEmitter {
     const sloOk = data.latencyMs < REPORT_SLO_LATENCY_MS;
     console.log(JSON.stringify({
       type: "report_metrics",
-      timestamp: new Date().toISOString(),
+      timestamp: nowUTC(),
       report_type: data.reportType,
       company_id: data.companyId,
       dataset_size_bucket: data.datasetSizeBucket,

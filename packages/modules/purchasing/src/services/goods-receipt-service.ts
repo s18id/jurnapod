@@ -10,7 +10,7 @@
  */
 
 import type { KyselySchema } from "@jurnapod/db";
-import { PURCHASE_ORDER_STATUS, type GoodsReceiptCreate } from "@jurnapod/shared";
+import { PURCHASE_ORDER_STATUS, type GoodsReceiptCreate, toUtcIso } from "@jurnapod/shared";
 import { sql } from "kysely";
 import {
   toScaled4,
@@ -123,13 +123,13 @@ export class GoodsReceiptService {
       supplier_id: r.supplier_id,
       supplier_name: (r as any).supplier_name,
       reference_number: r.reference_number,
-      receipt_date: new Date(r.receipt_date).toISOString(),
+      receipt_date: toUtcIso.dateLike(r.receipt_date) as string,
       status: String(r.status),
       notes: r.notes,
       created_by_user_id: r.created_by_user_id,
       updated_by_user_id: r.updated_by_user_id,
-      created_at: new Date(r.created_at).toISOString(),
-      updated_at: new Date(r.updated_at).toISOString(),
+      created_at: toUtcIso.dateLike(r.created_at) as string,
+      updated_at: toUtcIso.dateLike(r.updated_at) as string,
       po_reference: (r as any).po_reference ?? null
     }));
 

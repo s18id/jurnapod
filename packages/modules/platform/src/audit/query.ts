@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { sql } from "kysely";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 import type { AuditLogQuery, AuditLogResponse, AuditStatusCode } from "@jurnapod/shared";
 import type { KyselySchema } from "@jurnapod/db";
 
@@ -43,7 +43,7 @@ export function normalizeAuditLog(row: AuditLogRow): AuditLogResponse {
     ip_address: row.ip_address ?? null,
     payload_json: row.payload_json,
     changes_json: row.changes_json ?? null,
-    created_at: toRfc3339Required(row.created_at)
+    created_at: toUtcIso.dateLike(row.created_at) as string
   };
 }
 

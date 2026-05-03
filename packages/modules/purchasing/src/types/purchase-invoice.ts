@@ -7,6 +7,7 @@
 
 import type { KyselySchema } from "@jurnapod/db";
 import type { PurchaseInvoiceLineResponse } from "@jurnapod/shared";
+import { toUtcIso, fromUtcIso } from "@jurnapod/shared";
 import type { GuardrailDecision } from "./guardrail.js";
 
 // =============================================================================
@@ -42,7 +43,7 @@ export class PIExchangeRateMissingError extends PIError {
   constructor(currencyCode: string, invoiceDate: Date) {
     super(
       "EXCHANGE_RATE_MISSING",
-      `Exchange rate not found for currency ${currencyCode} on date ${invoiceDate.toISOString().split("T")[0]}`
+      `Exchange rate not found for currency ${currencyCode} on date ${fromUtcIso.dateOnly(toUtcIso.dateLike(invoiceDate) as string)}`
     );
   }
 }

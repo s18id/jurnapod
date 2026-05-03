@@ -11,7 +11,7 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import { AuditService } from "../audit-service";
-import { toRfc3339Required, type AuditEntityType, type AuditAction } from "@jurnapod/shared";
+import { toUtcIso, type AuditEntityType, type AuditAction } from "@jurnapod/shared";
 
 export interface PeriodTransitionAuditLogger {
   logAction: AuditService["logAction"];
@@ -215,7 +215,7 @@ export class PeriodTransitionAuditService {
         prior_state: payload.prior_state as PeriodStatus,
         new_state: payload.new_state as PeriodStatus,
         metadata: payload,
-        created_at: toRfc3339Required(row.created_at)
+        created_at: toUtcIso.dateLike(row.created_at) as string
       };
     });
 
@@ -266,7 +266,7 @@ export class PeriodTransitionAuditService {
       prior_state: payload.prior_state as PeriodStatus,
       new_state: payload.new_state as PeriodStatus,
       metadata: payload,
-      created_at: toRfc3339Required(firstRow.created_at)
+      created_at: toUtcIso.dateLike(firstRow.created_at) as string
     };
   }
 }

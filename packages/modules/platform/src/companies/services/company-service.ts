@@ -4,7 +4,7 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import type { InsertResult } from "kysely";
-import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 import { withTransactionRetry } from "@jurnapod/db";
 
 import {
@@ -73,9 +73,9 @@ function normalizeCompanyRow(row: CompanyRow): CompanyResponse {
     address_line2: row.address_line2,
     city: row.city,
     postal_code: row.postal_code,
-    created_at: toRfc3339Required(row.created_at),
-    updated_at: toRfc3339Required(row.updated_at),
-    deleted_at: toRfc3339(row.deleted_at)
+    created_at: toUtcIso.dateLike(row.created_at) as string,
+    updated_at: toUtcIso.dateLike(row.updated_at) as string,
+    deleted_at: toUtcIso.dateLike(row.deleted_at, { nullable: true })
   };
 }
 

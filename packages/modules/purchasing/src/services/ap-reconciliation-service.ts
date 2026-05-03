@@ -16,7 +16,7 @@ import {
   AP_PAYMENT_STATUS,
   PURCHASE_CREDIT_STATUS,
   PURCHASE_INVOICE_STATUS,
-  normalizeDate,
+  toUtcIso,
   isValidTimeZone,
 } from "@jurnapod/shared";
 import type {
@@ -412,7 +412,7 @@ export class ApReconciliationService {
     const timezone = await this.resolveCompanyTimezone({ companyId });
 
     // Convert YYYY-MM-DD as_of_date to UTC boundaries in the tenant's timezone.
-    const asOfDateUtcEnd = normalizeDate(asOfDate, timezone, "end");
+    const asOfDateUtcEnd = toUtcIso.businessDate(asOfDate, timezone, "end");
 
     const [apBalance, glBalance] = await Promise.all([
       this.getAPSubledgerBalance(companyId, asOfDate),

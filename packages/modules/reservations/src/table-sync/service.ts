@@ -17,6 +17,7 @@ import {
   SETTINGS_REGISTRY,
   parseSettingValue,
   type TableOccupancyStatusType,
+  toUtcIso,
 } from "@jurnapod/shared";
 import type {
   PushTableEventsParams,
@@ -159,7 +160,7 @@ export async function buildConflictPayload(
       activeSession = {
         id: Number(sessionRow.id),
         status_id: sessionRow.status_id,
-        started_at: sessionRow.started_at.toISOString()
+        started_at: toUtcIso.dateLike(sessionRow.started_at) as string
       };
     }
   }
@@ -575,7 +576,7 @@ async function applyTableEventWithTransaction(
 
         eventData = {
           ...eventData,
-          reserved_until: reservedUntil.toISOString(),
+          reserved_until: toUtcIso.dateLike(reservedUntil),
           reservation_id: String(reservationId),
         };
         break;
@@ -885,7 +886,7 @@ export async function pushTableEvents(
 
   return {
     results,
-    syncTimestamp: new Date().toISOString(),
+    syncTimestamp: toUtcIso.dateLike(new Date()) as string,
   };
 }
 
@@ -1068,7 +1069,7 @@ export async function pullTableState(
   // ============================================================================
   // STEP 4: Response Assembly
   // ============================================================================
-  const now = new Date().toISOString();
+  const now = toUtcIso.dateLike(new Date()) as string;
 
   // Map table rows to snapshots with staleness calculation
   const tables: PullTableStateSnapshot[] = tableRows.map(t => ({
@@ -1086,7 +1087,7 @@ export async function pullTableState(
     tableId: Number(e.table_id),
     eventType: String(e.event_type),
     payload: e.payload ? JSON.parse(e.payload) : {},
-    recordedAt: new Date(e.recorded_at).toISOString(),
+    recordedAt: toUtcIso.dateLike(new Date(e.recorded_at)) as string,
   }));
 
   return {

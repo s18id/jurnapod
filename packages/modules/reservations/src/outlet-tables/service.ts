@@ -10,7 +10,7 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import { withTransaction } from "@jurnapod/db";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 import type {
   OutletTableFullResponse,
   CreateOutletTableInput,
@@ -60,8 +60,8 @@ function normalizeOutletTable(row: OutletTableRow): OutletTableFullResponse {
     capacity: row.capacity,
     status: row.status,
     status_id: normalizedStatusId,
-    created_at: toRfc3339Required(row.created_at),
-    updated_at: toRfc3339Required(row.updated_at)
+    created_at: toUtcIso.dateLike(row.created_at) as string,
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   };
 }
 

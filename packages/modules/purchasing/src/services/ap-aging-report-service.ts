@@ -9,7 +9,7 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
-import { AP_PAYMENT_STATUS, PURCHASE_CREDIT_STATUS, PURCHASE_INVOICE_STATUS, toRfc3339Required } from "@jurnapod/shared";
+import { AP_PAYMENT_STATUS, PURCHASE_CREDIT_STATUS, PURCHASE_INVOICE_STATUS, toUtcIso, fromUtcIso } from "@jurnapod/shared";
 import type {
   APAgingSummary,
   APAgingSupplierDetail,
@@ -63,7 +63,7 @@ function divScaled4(numeratorScaled4: bigint, denominatorScaled8: bigint): bigin
 function dateWithOffset(baseDate: string, offsetDays: number): string {
   const date = new Date(`${baseDate}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + offsetDays);
-  return date.toISOString().slice(0, 10);
+  return fromUtcIso.dateOnly(toUtcIso.dateLike(date) as string);
 }
 
 function daysPastDue(asOfDate: string, dueDate: string): number {
@@ -201,9 +201,9 @@ function resolvePaymentTermsDays(row: RawInvoiceBalanceRow): number {
 
 function resolveDueDate(row: RawInvoiceBalanceRow): string {
   if (row.due_date) {
-    return toRfc3339Required(row.due_date).slice(0, 10);
+    return fromUtcIso.dateOnly(toUtcIso.dateLike(row.due_date) as string);
   }
-  return dateWithOffset(toRfc3339Required(row.invoice_date).slice(0, 10), resolvePaymentTermsDays(row));
+  return dateWithOffset(fromUtcIso.dateOnly(toUtcIso.dateLike(row.invoice_date) as string), resolvePaymentTermsDays(row));
 }
 
 function resolveSupplierCurrency(row: RawInvoiceBalanceRow): string {
@@ -370,7 +370,7 @@ export class ApAgingReportService {
       invoices.push({
         purchase_invoice_id: row.purchase_invoice_id,
         pi_number: row.invoice_no,
-        pi_date: toRfc3339Required(row.invoice_date).slice(0, 10),
+        pi_date: fromUtcIso.dateOnly(toUtcIso.dateLike(row.invoice_date) as string),
         due_date: dueDate,
         payment_terms_days: termsDays,
         currency: row.invoice_currency,

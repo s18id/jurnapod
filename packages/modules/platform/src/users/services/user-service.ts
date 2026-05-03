@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import type { KyselySchema } from "@jurnapod/db";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 import { withTransactionRetry } from "@jurnapod/db";
 import type { UserProfile, UserRow, UserOutletRoleAssignment } from "../types/user.js";
 import type { RoleSnapshot } from "../types/role.js";
@@ -363,8 +363,8 @@ function normalizeUserRow(row: UserRow): Omit<UserProfile, "global_roles" | "out
     name: row.name,
     email: row.email,
     is_active: row.is_active === 1,
-    created_at: toRfc3339Required(row.created_at),
-    updated_at: toRfc3339Required(row.updated_at)
+    created_at: toUtcIso.dateLike(row.created_at) as string,
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   };
 }
 

@@ -10,6 +10,7 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import { Temporal } from "@js-temporal/polyfill";
+import { toUtcIso } from "@jurnapod/shared";
 import type { UnixMs } from "../time/timestamp.js";
 import { fromUnixMs, toUnixMs, calculateEndTs } from "../time/timestamp.js";
 import { reservationsOverlap } from "../time/overlap.js";
@@ -25,7 +26,7 @@ export { isFinalStatus, canTransition, VALID_STATUS_TRANSITIONS } from "../inter
  */
 export function toUnixMsFromDate(value: Date | string): number {
   try {
-    const iso = value instanceof Date ? value.toISOString() : value;
+    const iso = value instanceof Date ? toUtcIso.dateLike(value) as string : value;
     return Temporal.Instant.from(iso).epochMilliseconds;
   } catch {
     throw new ReservationValidationError("Invalid reservation datetime value");
