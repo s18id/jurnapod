@@ -606,3 +606,12 @@ development_status:
   52-8-ap-payment-journal-atomicity: review
   52-9-observability-idempotency-metrics: done
   52-10-integration-test-gate: done
+
+  # Epic 53: Datetime API Consolidation Execution
+  epic-53: backlog
+  53-1-core-api-surface-and-route-validation: backlog
+  53-2-accounting-and-inventory-package-migration: backlog
+  53-3-platform-purchasing-and-other-module-migration: backlog
+  53-4-api-lib-sync-and-cross-cutting-touchups: backlog
+  53-5-test-updates-and-z-dollar-assertions: backlog
+  53-6-cleanup-remove-deprecated-wrappers: backlog

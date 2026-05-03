@@ -70,7 +70,8 @@ NFR3: Templates must follow existing project conventions (AGENTS.md, existing pa
 |------|-------|--------|
 | Epic 45 | Tooling Standards & Process Documentation | done | |
 | Epic 46 | Purchasing / Accounts Payable | ready-for-dev | |
-| Epic 47 | AP Reconciliation & Period Close Controls | backlog | |
+| Epic 47 | AP Reconciliation & Period Close Controls | backlog |
+| Epic 53 | Datetime API Consolidation Execution | backlog | |
 
 ---
 
@@ -268,3 +269,27 @@ So that custom lint rules are validated before introduction and do not regress.
 - Closed period policy: blocked by default, explicit high‑privilege audited override path only
 - Supplier statement ingestion: manual entry MVP (no file import)
 - Status/state columns: use `TINYINT` for any new schema
+
+---
+
+## Epic 53: Datetime API Consolidation Execution
+
+**Goal:** Execute the 5-phase consolidation plan from Epic 52 audit: rename ~26 functions to `toUtcIso`/`fromUtcIso` namespaced API, update ~100+ consumer files, fix route validation, clean raw `.toISOString()` patterns, add Z$ test assertions, and remove deprecated wrappers.
+
+### Story Summary
+
+| Story | Title | Risk | Dependencies |
+|-------|-------|------|-------------|
+| 53-1 | Core API Surface + Route Validation | P1 | None |
+| 53-2 | Accounting + Inventory Package Migration | P1 | 53-1 |
+| 53-3 | Platform + Purchasing + Other Module Migration | P1 | 53-1 |
+| 53-4 | API Lib + Sync Packages + Cross-cutting Touch-ups | P1 | 53-1 |
+| 53-5 | Test Updates + Z$ Assertions | P2 | 53-1 through 53-4 |
+| 53-6 | Cleanup — Remove Deprecated Wrappers | P2 | 53-5 |
+
+**Key Decisions:**
+- UTC ISO Z string is the canonical internal + API format (strict — no `{offset: true}`)
+- Namespaced API: `toUtcIso` (produce Z), `fromUtcIso` (consume Z)
+- Execution: incremental per-package (shared → modules → API lib → tests → cleanup)
+- Breaking change (reject offset at validation): documented as known risk with deployment order requirement
+- POS schema change deferred in deployment order: POS app update first, then server
