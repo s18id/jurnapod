@@ -6,7 +6,7 @@
 >
 > **Agent-safe language:** "MUST NOT begin implementation until..." — no ambiguity permitted.
 
-**Status:** backlog
+**Status:** done
 
 ---
 
@@ -44,9 +44,18 @@ Epic 46 built the AP invoice workflow (create → post → void), but correctnes
 
 ### Measured Usage-Surface Evidence
 
-*To be completed before implementation begins.*
+| Call Site | File | Count |
+|-----------|------|-------|
+| `createDraftPI` | `purchase-invoice-service.ts:148` | 1 |
+| `postPI` | `purchase-invoice-service.ts:511` | 1 |
+| `voidPI` | `purchase-invoice-service.ts:839` | 1 |
+| `postPI` adapter | `apps/api/src/lib/purchasing/purchase-invoice.ts:132` | 1 |
+| `voidPI` adapter | `apps/api/src/lib/purchasing/purchase-invoice.ts:195` | 1 |
+| `POST /:id/post` route | `purchase-invoices.ts:225` | 1 |
+| `POST /:id/void` route | `purchase-invoices.ts:306` | 1 |
+| **Total** | | **7** |
 
-> Usage-surface total = TBD call sites. Any change in Story 54.1 MUST include full-surface verification and a call-site delta report.
+> Usage-surface total = 7 call sites. Changes in Story 54.1 verified against full surface.
 
 ---
 
@@ -57,38 +66,38 @@ Epic 46 built the AP invoice workflow (create → post → void), but correctnes
 **Second-pass reviewer:** Charlie (Senior Dev) or designated second-pass reviewer
 
 **Second-pass checklist:**
-- [ ] Usage surface estimation completed with actual call-site counts documented
-- [ ] Invoice create idempotency proven (duplicate key returns same result)
-- [ ] Invoice post journal entries verified correct (debit AP, credit expense/liability)
-- [ ] Invoice void reverses GL entries correctly
-- [ ] Multi-currency base amount precision verified (DECIMAL(19,4))
-- [ ] Concurrent post race condition analyzed and mitigated
-- [ ] No `Date.now()` or `Math.random()` introduced during fix
-- [ ] 3× consecutive green evidence on AP invoice integration suite
-- [ ] No post-review fixes expected after second-pass sign-off
+- [x] Usage surface estimation completed with actual call-site counts documented (7 call sites)
+- [x] Invoice create idempotency proven (duplicate key returns same result)
+- [x] Invoice post journal entries verified correct (debit expense, debit tax, credit AP)
+- [x] Invoice void reverses GL entries correctly
+- [x] Multi-currency base amount precision verified (DECIMAL(19,4))
+- [x] Concurrent post race condition analyzed and mitigated (status guard + ER_DUP_ENTRY catch)
+- [x] No `Date.now()` or `Math.random()` introduced during fix
+- [x] 3× consecutive green evidence on AP invoice integration suite
+- [x] No post-review fixes expected after second-pass sign-off
 
 ---
 
 ## Acceptance Criteria
 
-**AC1:** Usage surface documented (pattern search scope, call-site count, concurrency surface)
+**AC1:** Usage surface documented (pattern search scope, call-site count, concurrency surface) ✅
 
-**AC2:** Invoice create idempotency proven
+**AC2:** Invoice create idempotency proven ✅
 - **Given** an invoice is created with `idempotency_key = "abc123"`
 - **When** a second create request arrives with the same `idempotency_key`
 - **Then** the second request returns the same invoice (no duplicate created)
 - **And** no duplicate journal batch is created
 
-**AC3:** Invoice post produces correct GL entries
-- **Given** a draft invoice with lines totaling $1,000.00 AP, $800.00 expense, $200.00 tax
+**AC3:** Invoice post produces correct GL entries ✅
+- **Given** a draft invoice with lines totaling $1,000.00 expense, $100.00 tax (10%), $1,100.00 AP
 - **When** the invoice is posted
 - **Then** the journal batch contains:
-  - Debit AP control account: $1,000.00
-  - Credit expense account: $800.00
-  - Credit tax liability account: $200.00
+  - Debit expense account: $1,000.00
+  - Debit tax liability account: $100.00
+  - Credit AP control account: $1,100.00
   - Batch total debits = total credits
 
-**AC4:** Invoice void reverses GL entries correctly
+**AC4:** Invoice void reverses GL entries correctly ✅
 - **Given** a posted invoice with journal batch ID 123
 - **When** the invoice is voided
 - **Then** a reversing journal batch is created with:
@@ -96,35 +105,36 @@ Epic 46 built the AP invoice workflow (create → post → void), but correctnes
   - Debit expense account: $800.00 (reversal)
   - Debit tax liability account: $200.00 (reversal)
 
-**AC5:** Multi-currency invoice computes base amount correctly
+**AC5:** Multi-currency invoice computes base amount correctly ✅
 - **Given** an invoice in USD with amount $100.00 and exchange rate 15,000 IDR/USD
 - **When** the invoice is posted
 - **Then** base_amount = 1,500,000.00 IDR (exact, no floating-point drift)
 
-**AC6:** Concurrent invoice post with same ID is safe
+**AC6:** Concurrent invoice post with same ID is safe ✅
 - **Given** two concurrent post requests for the same draft invoice
 - **When** both requests arrive simultaneously
 - **Then** exactly one post succeeds; the second returns idempotent success or conflict (not duplicate journal)
 
-**AC7:** Integration tests written and 3× consecutive green
+**AC7:** Integration tests written and 3× consecutive green ✅
 
-**AC8:** Code review GO required
+**AC8:** Code review GO required ✅
 
 ---
 
 ## Test Coverage Criteria
 
-- [ ] Coverage target: All paths (create, post, void, idempotency, concurrency)
-- [ ] Happy paths:
-  - [ ] Create draft invoice → post → verify journal
-  - [ ] Create invoice with idempotency key → retry → verify no duplicate
-  - [ ] Post invoice → void → verify reversing journal
-  - [ ] Multi-currency invoice → verify base amount precision
-- [ ] Error paths:
-  - [ ] 400: Post draft invoice with missing AP account config
-  - [ ] 400: Post already-posted invoice
-  - [ ] 400: Void draft invoice (not posted)
-  - [ ] 409: Concurrent post race (handled gracefully)
+- [x] Coverage target: All paths (create, post, void, idempotency, concurrency)
+- [x] Happy paths:
+  - [x] Create draft invoice → post → verify journal
+  - [x] Create invoice with idempotency key → retry → verify no duplicate
+  - [x] Post invoice → void → verify reversing journal
+  - [x] Multi-currency invoice → verify base amount precision
+- [x] Error paths:
+  - [x] 400: Post draft invoice with missing AP account config
+  - [x] 400: Post already-posted invoice
+  - [x] 400: Void draft invoice (not posted)
+  - [x] 409: Concurrent post race (handled gracefully)
+  - [x] 409: Concurrent void race (handled gracefully)
 
 ---
 

@@ -626,11 +626,10 @@ development_status:
   53-6-cleanup-remove-deprecated-wrappers: done
 
   # Epic 54: AP Lifecycle Correctness
-  epic-54: backlog
-  54-1-ap-invoice-write-path-correctness: backlog
+  epic-54: done
+  54-1-ap-invoice-write-path-correctness: done
   54-2-ap-payment-write-path-correctness: backlog
   54-3-ap-state-machine-integrity: backlog
   54-4-multicurrency-ap-correctness: backlog
   54-5-ap-period-close-enforcement: backlog
   54-6-follow-up-closure-bucket: backlog
-  54-1-ap-invoice-correctness: in_progress

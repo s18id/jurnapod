@@ -220,7 +220,7 @@ export class PurchaseInvoiceService {
             .executeTakeFirst();
 
           if (taxRate) {
-            const taxRatePercent = toScaled4(String(taxRate.rate_percent));
+            const taxRatePercent = toScaled4(String(taxRate.rate_percent)) / 100n;
             taxAmount = scale4Mul(lineTotal, taxRatePercent);
           }
         }
@@ -776,13 +776,22 @@ export class PurchaseInvoiceService {
     }
 
     const result = await this.db.transaction().execute(async (trx) => {
-      const batchResult = await sql`
-        INSERT INTO journal_batches (
-          company_id, outlet_id, doc_type, doc_id, posted_at
-        ) VALUES (
-          ${companyId}, NULL, 'PURCHASE_INVOICE', ${piId}, NOW()
-        )
-      `.execute(trx);
+      let batchResult;
+      try {
+        batchResult = await sql`
+          INSERT INTO journal_batches (
+            company_id, outlet_id, doc_type, doc_id, posted_at
+          ) VALUES (
+            ${companyId}, NULL, 'PURCHASE_INVOICE', ${piId}, NOW()
+          )
+        `.execute(trx);
+      } catch (error: unknown) {
+        const mysqlErr = error as { errno?: number };
+        if (mysqlErr.errno === 1062) {
+          throw new PIError("ALREADY_POSTED", "Invoice was already posted by another request");
+        }
+        throw error;
+      }
 
       const batchId = Number(batchResult.insertId);
 
@@ -798,7 +807,7 @@ export class PurchaseInvoiceService {
         `.execute(trx);
       }
 
-      await trx
+      const updateResult = await trx
         .updateTable("purchase_invoices")
         .set({
           status: PURCHASE_INVOICE_STATUS.POSTED,
@@ -808,7 +817,12 @@ export class PurchaseInvoiceService {
           posted_by_user_id: userId,
         })
         .where("id", "=", piId)
-        .executeTakeFirst();
+        .where("status", "=", PURCHASE_INVOICE_STATUS.DRAFT)
+        .execute();
+
+      if (Number(updateResult[0]?.numUpdatedRows ?? 0n) === 0) {
+        throw new PIError("ALREADY_POSTED", "Invoice was already posted by another request");
+      }
 
       if (guardrailDecision?.overrideRequired && validOverrideReason !== null && guardrailDecision.periodId) {
         await insertPeriodCloseOverride(trx, {
@@ -869,13 +883,22 @@ export class PurchaseInvoiceService {
       .execute();
 
     const result = await this.db.transaction().execute(async (trx) => {
-      const batchResult = await sql`
-        INSERT INTO journal_batches (
-          company_id, outlet_id, doc_type, doc_id, posted_at
-        ) VALUES (
-          ${companyId}, NULL, 'PURCHASE_INVOICE_VOID', ${piId}, NOW()
-        )
-      `.execute(trx);
+      let batchResult;
+      try {
+        batchResult = await sql`
+          INSERT INTO journal_batches (
+            company_id, outlet_id, doc_type, doc_id, posted_at
+          ) VALUES (
+            ${companyId}, NULL, 'PURCHASE_INVOICE_VOID', ${piId}, NOW()
+          )
+        `.execute(trx);
+      } catch (error: unknown) {
+        const mysqlErr = error as { errno?: number };
+        if (mysqlErr.errno === 1062) {
+          throw new PIError("ALREADY_VOIDED", "Invoice was already voided by another request");
+        }
+        throw error;
+      }
 
       const reversalBatchId = Number(batchResult.insertId);
 
@@ -893,7 +916,7 @@ export class PurchaseInvoiceService {
         `.execute(trx);
       }
 
-      await trx
+      const updateResult = await trx
         .updateTable("purchase_invoices")
         .set({
           status: PURCHASE_INVOICE_STATUS.VOID,
@@ -901,7 +924,12 @@ export class PurchaseInvoiceService {
           voided_by_user_id: userId,
         })
         .where("id", "=", piId)
-        .executeTakeFirst();
+        .where("status", "=", PURCHASE_INVOICE_STATUS.POSTED)
+        .execute();
+
+      if (Number(updateResult[0]?.numUpdatedRows ?? 0n) === 0) {
+        throw new PIError("ALREADY_VOIDED", "Invoice was already voided by another request");
+      }
 
       if (guardrailDecision?.overrideRequired && validOverrideReason !== null && guardrailDecision.periodId) {
         await insertPeriodCloseOverride(trx, {

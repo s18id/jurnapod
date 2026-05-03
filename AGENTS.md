@@ -608,6 +608,7 @@ No story may be marked DONE based solely on self-attestation of the implementing
 - [ ] Schema changes documented (if applicable)
 - [ ] API changes reflected in contracts
 - [ ] Dev Notes include files modified/created
+- [ ] Story completion report created (`story-{N}.{M}.completion.md`) with all AC evidence and second-pass reviewer sign-off (MANDATORY — no story may be marked done without it)
 
 ---
 

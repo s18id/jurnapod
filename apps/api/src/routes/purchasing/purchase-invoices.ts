@@ -277,10 +277,16 @@ invoiceRoutes.post("/:id/post", async (c) => {
       if (err.code === "PERIOD_CLOSED") {
         return errorResponse("PERIOD_CLOSED", err.message ?? "Period is closed for AP transactions", 409);
       }
+      if (err.code === "ALREADY_POSTED") {
+        return errorResponse("ALREADY_POSTED", err.message ?? "Already posted", 409);
+      }
     }
     if (error instanceof PIError) {
       if (error.code === "EXCHANGE_RATE_MISSING") {
         return errorResponse("EXCHANGE_RATE_MISSING", error.message, 400);
+      }
+      if (error.code === "ALREADY_POSTED") {
+        return errorResponse("ALREADY_POSTED", error.message, 409);
       }
       if (error.code === "ACCOUNT_MISSING") {
         return errorResponse("ACCOUNT_MISSING", error.message, 400);
@@ -352,11 +358,17 @@ invoiceRoutes.post("/:id/void", async (c) => {
     if (error instanceof PIError && error.code === "MISSING_JOURNAL_BATCH") {
       return errorResponse("MISSING_JOURNAL_BATCH", error.message, 400);
     }
+    if (error instanceof PIError && error.code === "ALREADY_VOIDED") {
+      return errorResponse("ALREADY_VOIDED", error.message, 409);
+    }
     // FIX(47.5-WP-C): Handle period-close guardrail block response (strict mode → 409)
     if (typeof error === "object" && error !== null && "code" in error) {
       const err = error as { code: string; message?: string };
       if (err.code === "PERIOD_CLOSED") {
         return errorResponse("PERIOD_CLOSED", err.message ?? "Period is closed for AP transactions", 409);
+      }
+      if (err.code === "ALREADY_VOIDED") {
+        return errorResponse("ALREADY_VOIDED", err.message ?? "Already voided", 409);
       }
     }
     console.error("POST /purchasing/invoices/:id/void failed", error);
