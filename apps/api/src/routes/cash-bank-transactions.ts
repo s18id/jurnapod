@@ -15,7 +15,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { NumericIdSchema, DateOnlySchema } from "@jurnapod/shared";
+import { NumericIdSchema, DateOnlySchema, fromUtcIso, nowUTC } from "@jurnapod/shared";
 import {
   authenticateRequest,
   requireAccess,
@@ -145,7 +145,7 @@ cashBankTransactionsRoutes.post("/", async (c) => {
     const transaction = await service.create({
       outlet_id: input.outlet_id,
       transaction_type: input.transaction_type,
-      transaction_date: input.transaction_date || new Date().toISOString().slice(0, 10),
+      transaction_date: input.transaction_date || fromUtcIso.dateOnly(nowUTC()),
       description: input.description,
       source_account_id: input.source_account_id,
       destination_account_id: input.destination_account_id,

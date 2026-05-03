@@ -208,9 +208,9 @@ export const toUtcIso = {
    *
    * Replaces: `toRfc3339`, `toRfc3339Required`, `toUtcInstant`
    */
-  dateLike(value: string | Date | null | undefined, opts?: { nullable?: boolean }): string {
+  dateLike(value: string | Date | null | undefined, opts?: { nullable?: boolean }): string | null {
     if (value === null || value === undefined) {
-      if (opts?.nullable) return null as unknown as string;
+      if (opts?.nullable) return null;
       throw new Error('Invalid datetime: null/undefined');
     }
     const date = typeof value === 'string' ? new Date(value) : value;
@@ -507,7 +507,7 @@ export function toRfc3339(value: string | Date | null | undefined): string | nul
 
 /** @deprecated Use `toUtcIso.dateLike(value)` */
 export function toRfc3339Required(value: string | Date): string {
-  return toUtcIso.dateLike(value);
+  return toUtcIso.dateLike(value) as string;
 }
 
 /** @deprecated Use `toUtcIso.dateLike(input)` */

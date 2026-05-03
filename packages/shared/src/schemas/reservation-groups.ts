@@ -28,7 +28,8 @@ export const ReservationGroupCreateRequestSchema = z.object({
   customer_phone: z.string().trim().max(64).nullable().optional(),
   guest_count: z.coerce.number().int().min(2).max(100), // Multi-table = 2+ guests
   table_ids: z.array(NumericIdSchema).min(2).max(10), // 2-10 tables per group
-  reservation_at: UtcIsoSchema, // ISO 8601 with timezone
+  reservation_at: UtcIsoSchema, // UTC ISO Z string (no offset)
+
   duration_minutes: z.coerce.number().int().min(15).max(480).nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional()
 });
@@ -117,7 +118,7 @@ export const ReservationGroupUpdateRequestSchema = z.object({
   customer_name: z.string().trim().min(1).max(191).optional(),
   customer_phone: z.string().trim().max(64).nullable().optional(),
   guest_count: z.coerce.number().int().min(2).max(100).optional(),
-  reservation_at: UtcIsoSchema.optional(), // ISO 8601
+  reservation_at: UtcIsoSchema.optional(), // UTC ISO Z string (no offset)
   duration_minutes: z.coerce.number().int().min(15).max(480).optional(),
   notes: z.string().trim().max(500).nullable().optional(),
   table_ids: z.array(NumericIdSchema).min(2).max(10).optional() // If provided, replaces all tables
