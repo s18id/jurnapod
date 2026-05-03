@@ -72,7 +72,8 @@ function toApiSupplier(supplier: SupplierWithContacts): unknown {
 
 function toApiSupplierListItem(supplier: SupplierWithContacts): unknown {
   const detail = toApiSupplier(supplier) as Record<string, unknown>;
-  const { contacts: _contacts, ...listItem } = detail;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { contacts, ...listItem } = detail;
   return listItem;
 }
 

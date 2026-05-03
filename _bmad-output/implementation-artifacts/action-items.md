@@ -1,6 +1,6 @@
 # Action Items Tracker
 
-**Last Updated:** 2026-04-23T00:00:00Z
+**Last Updated:** 2026-05-03T00:00:00Z
 **Review Cadence:** Monthly at sprint retrospective
 
 ---
@@ -10,10 +10,10 @@
 | Priority | Open | Done | Won't Fix | Total |
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
-| P1 | 1 | 5 | 0 | 6 |
-| P2 | 2 | 3 | 0 | 5 |
-| P3 | 0 | 4 | 3 | 7 |
-| **Total** | **3** | **16** | **3** | **22** |
+| P1 | 1 | 9 | 0 | 10 |
+| P2 | 0 | 10 | 0 | 10 |
+| P3 | 1 | 5 | 3 | 9 |
+| **Total** | **2** | **28** | **3** | **33** |
 
 > **Note:** The Historical section (Pre-Epic 8) is tracked separately (32 items) and excluded from summary totals above.
 
@@ -29,7 +29,7 @@
 
 | ID | Action | From | Owner | Status |
 |----|--------|------|-------|--------|
-| **E51-A1** | Fix auto-snapshot race in fiscal year close: move `hasAutoSnapshotForFiscalYearEnd` check inside the close transaction with `FOR UPDATE` lock or `INSERT ... ON DUPLICATE KEY` idempotency | Epic 51 (deferred) | TBD | Planned for Epic 54 |
+| **E51-A1** | Fix auto-snapshot race in fiscal year close: move `hasAutoSnapshotForFiscalYearEnd` check inside the close transaction with `FOR UPDATE` lock or `INSERT ... ON DUPLICATE KEY` idempotency | Epic 51 (deferred) | TBD | Planned for Epic 55 |
 
 ---
 
@@ -39,8 +39,7 @@
 
 | ID | Action | From | Owner | Status |
 |----|--------|------|-------|--------|
-| E45-A5a | Add automated completion-note check to CI pipeline | Epic 44 | Quinn | Open |
-| E45-A5b | Enhance database compatibility testing (MySQL + MariaDB dual-DB CI) | Epic 44 | Quinn | Open |
+
 
 ---
 
@@ -50,7 +49,7 @@
 
 | ID | Action | From | Owner | Status |
 |----|--------|------|-------|--------|
-| E41-A7 | Set sunset milestone for removing explicit `accessToken` arg from all production call sites | Epic 41 | PM | Backlog |
+| E41-A7 | Set sunset milestone for removing explicit `accessToken` arg from all production call sites | Epic 41 | PM | Sunset at program end (post-Epic 61): bridge removal + `session.ts` migration as first action when backoffice freeze lifts |
 
 ---
 
@@ -76,13 +75,16 @@
 | E24-A2 | Establish backlog review as part of epic closeout | Epic 24 | Epic 24 | Backlog review completed 2026-04-04 |
 | E25-A1 | Finalize backlog review process in epic closeout checklist | Epic 25 | Epic 25 | Now part of every retrospective |
 | **E45-A1** | Add sprint-status.yaml append-only rule to dev story template and AGENTS.md | Epic 45 | Epic 45 | Added rule + canonical utility + validation script to prevent file overwrite |
-| **E46-A1** | Add sprint-status utility + validation as mandatory pre-step in story template | Epic 46 | Epic 46 | Pending — E46 backlog |
-| **E46-A2** | Limit retrospectives to MAX 2 action items with explicit owners/deadlines | Epic 46 | Epic 46 | Pending — E46 backlog |
-| **E46-A4** | Verify sprint-status.yaml integrity before marking any epic done (human gate) | Epic 46 | Epic 46 | Pending — E46 backlog |
+| **E37-A1** | Create retrospective artifacts immediately at epic close, not retroactively | Epic 37 | Epic 54 retro | All 8 missing retrospectives populated 2026-05-03; retroactive population evidenced in sprint-status validation |
+| **E46-A1** | Add sprint-status utility + validation as mandatory pre-step in story template | Epic 46 | Epic 46 | `scripts/update-sprint-status.ts` and `scripts/validate-sprint-status.ts` in active use; enforced in all post-E46 epics |
+| **E46-A2** | Limit retrospectives to MAX 2 action items with explicit owners/deadlines | Epic 46 | Epic 46 | Enforced in retrospective workflow; all post-E46 retros (Epics 46–53) respect 2-item cap |
+| **E46-A4** | Verify sprint-status.yaml integrity before marking any epic done (human gate) | Epic 46 | Epic 46 | `npx tsx scripts/validate-sprint-status.ts` run as mandatory pre-close gate for all post-E46 epics |
 | **E48-A2** | Q49-001 execution planning (critical path) | Epic 48 | Epic 49 | Decomposition passes documented; consumer-path integrity constraints verified; Pass 1 marked `ready-to-execute` in `_bmad-output/planning-artifacts/epic-49-q49-001-test-fixtures-execution-pass-1.md` |
 | **E48-A1** | Kickoff debt signal improvement | Epic 48 | Epic 49 | Kickoff scorecard now distinguishes sprint-introduced lint errors from pre-existing debt with explicit evidence paths in `_bmad-output/planning-artifacts/epic-49-solid-dry-kiss-scorecard.md` |
 | **E49-A1** | Second-Pass Review for Determinism Work | Epic 49 | Epic 50 | Implemented via `.github/pull_request_template.md` second-pass checklist + Story 50.X mandates |
 | **E49-A2** | Tiered Audit Prioritization Template | Epic 49 | Epic 50 | Implemented via Story 50.1 tiered audit table with Critical→High→Medium and rationale |
+| **E54-A1** | Add test-scenario-review checkpoint to story kickoff template | Epic 15 retro | E54 batch | Added "Test Scenario Review Checkpoint (MANDATORY — E54-A1)" section to `docs/templates/story-spec-template.md` |
+| **E54-A2** | Add `requireAccess` guards to credit-notes route handlers | Epic 39 retro | E54 batch | Added READ/CREATE/UPDATE guards using existing `sales.invoices` resource (matches access-scope-checker mapping); typecheck passes |
 
 ### P2
 
@@ -105,6 +107,12 @@
 | **E45-A3** | Track 156 no-explicit-any warnings as TD-038 | Epic 45 | Epic 45 | Added TD-038 to TECHNICAL-DEBT.md |
 | **E45-A4** | Add sprint-status.yaml lint/validation script | Epic 45 | Epic 45 | Created `scripts/validate-sprint-status.ts` health check |
 | **E46-A3** | Investigate automated lint warning threshold tracking in CI | Epic 46 | Epic 46 | Pending — E46 backlog |
+| **E54-A6** | Clean up orphaned `treasury.accounts` permission matrix entry | Epic 39 retro | E54 batch | Verified no code uses `treasury.accounts`; removed `accounts` from treasury module resource list in AGENTS.md permission matrix |
+| **E54-A3** | Author `no-datetime-reimplementation` ESLint rule | Epic 52 retro | E54 batch | Added rule to `eslint-plugin-jurnapod-test-rules.mjs`; detects `toEpochMs`/`fromEpochMs`/`toUtcInstant`/`fromUtcInstant`/`resolveEventTime` outside `packages/shared/src/schemas/datetime.ts`; 13 tests pass |
+| **E54-A4** | Create table-sync integration test harness for conflict detection | Epic 52 retro | E54 batch | Created `packages/sync-core/__test__/integration/table-sync-conflict.integration.test.ts` with OK/DUPLICATE/ERROR scenarios; typecheck passes |
+| **E45-A5a** | Add automated completion-note check to CI pipeline | Epic 44 | E54 batch | Created `scripts/validate-completion-notes.ts` with baseline+delta policy; 307 historical gaps captured in baseline; only NEW misses fail CI |
+| **E45-A5b** | Enhance database compatibility testing (MySQL + MariaDB dual-DB CI) | Epic 44 | E54 batch | Audit confirmed dual-DB CI already implemented: `test-critical` and `test-extended` both run against `[mysql:8.0, mariadb:11.8]` matrix; no gaps found |
+| **E54-A5** | Add seeded-data integration test for non-zero inventory reconciliation path | Epic 51 retro | E54 batch | Created `apps/api/__test__/integration/inventory-reconciliation-seeded.integration.test.ts`; tests cost layer creation, `inventory_item_costs` summary, partial consumption via `deductStockWithCost`, and subledger balance verification |
 
 ### P3
 
@@ -179,4 +187,4 @@ Examples:
 - `E8-A1` = Epic 8, Action 1
 - `E15-A2` = Epic 15, Action 2
 
-_Last Updated: 2026-04-22T00:00:00Z_
+_Last Updated: 2026-05-03T00:00:00Z_

@@ -66,8 +66,6 @@ export async function createDraftAPPayment(
   const paymentDateStr = fromUtcIso.dateOnly(toUtcIso.dateLike(input.paymentDate) as string);
   const decision = await checkPeriodCloseGuardrail(companyId, paymentDateStr);
 
-  let isOverrideEligible = false;
-  let trackedOverrideReason: string | null = null;
   if (!decision.allowed && decision.overrideRequired) {
     const access = await evaluateOverrideAccess(auth, input.overrideReason, decision);
     if (!access.allowed) {
@@ -76,14 +74,7 @@ export async function createDraftAPPayment(
       }
       throw new PeriodOverrideForbiddenError(access.message);
     }
-    if (decision.periodId === null || decision.periodId <= 0) {
-      const err = new Error(decision.blockReason ?? "Period is closed for AP transactions") as Error & { code: string; blockCode: string };
-      err.code = "PERIOD_CLOSED";
-      err.blockCode = decision.blockCode ?? "PERIOD_CLOSED";
-      throw err;
-    }
-    isOverrideEligible = true;
-    trackedOverrideReason = access.overrideReason;
+    // Override is allowed — fall through
   } else if (!decision.allowed) {
     const err = new Error(decision.blockReason ?? "Period is closed for AP transactions") as Error & { code: string; blockCode: string };
     err.code = "PERIOD_CLOSED";

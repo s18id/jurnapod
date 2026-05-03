@@ -8,7 +8,6 @@
 //  * Part of Story 6.5b-c (Reservations Domain Extraction).
 //  */
 
-import { sql } from "kysely";
 import { getDb, type KyselySchema } from "../db";
 import {
   ReservationStatusV2,

@@ -133,6 +133,6 @@ Stories 51.1–51.4 will surface defects and gaps. This story captures resolving
 
 | Item | Source | Rationale | Deferred To |
 |------|--------|-----------|-------------|
-| Auto-snapshot race in fiscal year close | 51.1 | Pre-existing pattern; snapshot check runs outside close transaction without locking. Non-blocking — snapshot failure is already non-fatal. | **Epic 54 (AP lifecycle correctness)** |
+| Auto-snapshot race in fiscal year close | 51.1 | Pre-existing pattern; snapshot check runs outside close transaction without locking. Non-blocking — snapshot failure is already non-fatal. | **Epic 55 (AP reconciliation/snapshot correctness)** |
 | `DATE(acquired_at)` on indexed column in inventory reconciliation | 51.4 | Performance concern, not correctness. The `DATE()` wrapper may prevent index usage on `acquired_at` for large data volumes. | Future performance pass |
 | Missing seeded-data test for non-zero inventory path | 51.4 | Test coverage gap; requires inventory costing fixtures which don't yet exist in canonical form. | When inventory costing fixtures are extracted |

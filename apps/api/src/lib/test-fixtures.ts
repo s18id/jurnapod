@@ -69,8 +69,7 @@ import { sql } from "kysely";
 import { withTransactionRetry } from "@jurnapod/db";
 import { getAppEnv } from "./env";
 import { hashPassword } from "./password-hash";
-import { createCompanyBasic, createCompany, CompanyCodeExistsError } from "./companies";
-import { createOutletBasic, OutletCodeExistsError } from "./outlets";
+import { createCompany, CompanyCodeExistsError } from "./companies";
 import { createUserBasic, UserEmailExistsError } from "./users";
 import { createItem } from "./items/index.js";
 import { itemPricesAdapter } from "./item-prices/adapter.js";
@@ -88,15 +87,12 @@ import {
   createPurchasingAccountsFixture,
   createPurchasingSettingsFixture,
   setPurchasingDefaultApAccountFixture,
-  type SupplierFixture as PackageSupplierFixture,
 } from "@jurnapod/modules-purchasing/test-fixtures";
 import {
   createTestCompanyMinimal as pkgCreateTestCompanyMinimal,
   createTestCompanyWithoutTimezone as pkgCreateTestCompanyWithoutTimezone,
   createTestOutletMinimal as pkgCreateTestOutletMinimal,
   createTestOutletWithoutTimezone as pkgCreateTestOutletWithoutTimezone,
-  type CompanyFixture as PackageCompanyFixture,
-  type OutletFixture as PackageOutletFixture,
 } from "@jurnapod/modules-platform/test-fixtures";
 import {
   createTestFiscalYear as pkgCreateTestFiscalYear,
@@ -105,9 +101,6 @@ import {
   createTestAPReconciliationSettings as pkgCreateTestAPReconciliationSettings,
   clearTestAPReconciliationSettings as pkgClearTestAPReconciliationSettings,
   setTestCompanyStringSetting as pkgSetTestCompanyStringSetting,
-  type FiscalYearFixture as PackageFiscalYearFixture,
-  type FiscalPeriodFixture as PackageFiscalPeriodFixture,
-  type APReconciliationSettingsFixture as PackageAPReconciliationSettingsFixture,
 } from "@jurnapod/modules-accounting/test-fixtures";
 
 

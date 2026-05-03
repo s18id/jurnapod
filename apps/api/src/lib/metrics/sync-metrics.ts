@@ -235,7 +235,7 @@ export class SyncMetricsCollector {
     outletId: number,
     result: SyncPushResultType,
     latencyMs: number,
-    clientTxId?: string,
+    _clientTxId?: string,
   ): void {
     // Map unexpected result values to ERROR so they are not silently dropped
     const VALID_RESULTS = new Set(["OK", "DUPLICATE", "ERROR"] as const);

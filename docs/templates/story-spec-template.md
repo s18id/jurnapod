@@ -23,6 +23,29 @@ So that **{benefit}**.
 
 ---
 
+## Test Scenario Review Checkpoint (MANDATORY — E54-A1)
+
+> **Purpose:** Before writing any implementation code, review the test scenarios that will prove this story works. Infrastructure and cross-cutting stories MUST include this checkpoint.
+
+### Pre-Implementation Checklist
+
+- [ ] **Happy paths identified:** What are the 1-3 core success paths?
+- [ ] **Error paths identified:** What failure modes must be handled (validation, auth, not-found, conflict)?
+- [ ] **Edge cases identified:** Boundary conditions, empty states, race conditions, concurrent access
+- [ ] **Test fixture needs identified:** What canonical fixtures or seeded data are required?
+- [ ] **Integration test scope defined:** Which tests need real DB vs which are pure unit tests?
+- [ ] **Negative auth test role selected:** For permission-gated routes, use `CASHIER` or a dedicated low-privilege test role (NOT `OWNER`/`SUPER_ADMIN`)
+
+### Review Outcome
+
+| Scenario | Type | Coverage Plan |
+|----------|------|--------------|
+| {description} | Happy / Error / Edge | Unit / Integration / Both |
+
+**Sign-off:** Test scenarios reviewed and approved before implementation begins.
+
+---
+
 ## API Contract Verification (MANDATORY for UI Stories)
 
 > **Purpose:** Verify all API endpoints return expected contract shapes BEFORE starting UI implementation.

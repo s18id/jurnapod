@@ -498,6 +498,83 @@ const noTransactionScopeEscapeRule = {
   },
 };
 
+/**
+ * ESLint Rule: no-datetime-reimplementation
+ * 
+ * Detects deprecated datetime function calls (toEpochMs, fromEpochMs,
+ * toUtcInstant, fromUtcInstant, resolveEventTime) outside the canonical
+ * datetime module location.
+ * 
+ * These functions have been replaced by the namespaced API in:
+ *   packages/shared/src/schemas/datetime.ts
+ * 
+ * The canonical file itself is allowed to define/re-export these functions.
+ */
+const noDatetimeReimplementationRule = {
+  meta: {
+    type: "problem",
+    docs: {
+      description: "Disallow deprecated datetime function calls outside canonical location",
+      category: "Migration",
+      recommended: true,
+    },
+    fixable: null,
+    schema: [],
+    messages: {
+      datetimeReimplementation: "Deprecated datetime function '{{name}}' reimplemented outside canonical location. Use the namespaced API from packages/shared/src/schemas/datetime.ts instead.",
+    },
+  },
+  create(context) {
+    // Deprecated function names to detect
+    const DEPRECATED_FUNCTIONS = [
+      'toEpochMs',
+      'fromEpochMs',
+      'toUtcInstant',
+      'fromUtcInstant',
+      'resolveEventTime',
+    ];
+
+    // Canonical file where these functions are legitimately defined
+    const CANONICAL_PATH = 'packages/shared/src/schemas/datetime.ts';
+
+    const filename = context.getFilename();
+
+    // Skip the canonical file itself (it's the source of truth)
+    if (filename.includes(CANONICAL_PATH)) {
+      return {};
+    }
+
+    return {
+      // Check for function calls to deprecated datetime functions
+      CallExpression(node) {
+        const callee = node.callee;
+
+        // Check for direct identifier calls: toEpochMs(...)
+        if (callee.type === 'Identifier' && DEPRECATED_FUNCTIONS.includes(callee.name)) {
+          context.report({
+            node,
+            messageId: "datetimeReimplementation",
+            data: { name: callee.name },
+          });
+          return;
+        }
+
+        // Check for member expression calls: datetime.toEpochMs(...)
+        if (callee.type === 'MemberExpression' &&
+            callee.object.type === 'Identifier' &&
+            callee.property.type === 'Identifier' &&
+            DEPRECATED_FUNCTIONS.includes(callee.property.name)) {
+          context.report({
+            node,
+            messageId: "datetimeReimplementation",
+            data: { name: callee.property.name },
+          });
+        }
+      },
+    };
+  },
+};
+
 /** @type {import('eslint').Linter.Plugin} */
 const plugin = {
   meta: {
@@ -509,6 +586,7 @@ const plugin = {
     "no-raw-sql-insert-items": noRawSqlInsertItemsRule,
     "no-route-business-logic": noRouteBusinessLogicRule,
     "no-transaction-scope-escape": noTransactionScopeEscapeRule,
+    "no-datetime-reimplementation": noDatetimeReimplementationRule,
   },
   configs: {
     recommended: {
@@ -518,10 +596,11 @@ const plugin = {
         "jurnapod-test-rules/no-raw-sql-insert-items": "error",
         "jurnapod-test-rules/no-route-business-logic": "error",
         "jurnapod-test-rules/no-transaction-scope-escape": "error",
+        "jurnapod-test-rules/no-datetime-reimplementation": "error",
       },
     },
   },
 };
 
 export default plugin;
-export { noHardcodedIdsRule, noRawSqlInsertItemsRule, noRouteBusinessLogicRule, noTransactionScopeEscapeRule };
+export { noHardcodedIdsRule, noRawSqlInsertItemsRule, noRouteBusinessLogicRule, noTransactionScopeEscapeRule, noDatetimeReimplementationRule };

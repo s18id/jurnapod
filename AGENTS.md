@@ -622,7 +622,7 @@ No story may be marked DONE based solely on self-attestation of the implementing
 | `sales` | Invoices, orders, payments |
 | `inventory` | Items, stock movements, costing |
 | `accounting` | Journals, accounts, fiscal years |
-| `treasury` | Cash/bank transactions, accounts |
+| `treasury` | Cash/bank transactions |
 | `purchasing` | Suppliers, purchase orders, receipts, AP invoices/payments/credits |
 | `reservations` | Bookings, tables |
 
@@ -703,7 +703,7 @@ requireAccess({ module: 'inventory', permission: 'READ' })
 **platform**: users, roles, companies, outlets, settings
 **accounting**: journals, accounts, fiscal_years, reports
 **inventory**: items, stock, costing
-**treasury**: transactions, accounts
+**treasury**: transactions
 **sales**: invoices, orders, payments
 **pos**: transactions, config
 **purchasing**: suppliers, exchange_rates, orders, receipts, invoices, payments, credits, reports

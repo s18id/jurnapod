@@ -69,8 +69,6 @@ export async function createDraftPI(
   const invoiceDateStr = fromUtcIso.dateOnly(toUtcIso.dateLike(input.invoiceDate) as string);
   const decision = await checkPeriodCloseGuardrail(companyId, invoiceDateStr);
 
-  let isOverrideEligible = false;
-  let trackedOverrideReason: string | null = null;
   if (!decision.allowed && decision.overrideRequired) {
     const access = await evaluateOverrideAccess(auth, input.overrideReason, decision);
     if (!access.allowed) {
@@ -85,8 +83,7 @@ export async function createDraftPI(
       err.blockCode = decision.blockCode ?? "PERIOD_CLOSED";
       throw err;
     }
-    isOverrideEligible = true;
-    trackedOverrideReason = access.overrideReason;
+    // Override is allowed — fall through
   } else if (!decision.allowed) {
     const err = new Error(decision.blockReason ?? "Period is closed for AP transactions") as Error & { code: string; blockCode: string };
     err.code = "PERIOD_CLOSED";

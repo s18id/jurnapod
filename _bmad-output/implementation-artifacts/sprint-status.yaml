@@ -176,6 +176,7 @@ development_status:
 
   # Epic 15: Foundation Hardening & TD Resolution
   epic-15: done
+  epic-15-retrospective: done
   15-1-connection-guard: done
   15-2-test-fixtures-unique-naming: done
   15-3-td-030-effective-date-filtering: done
@@ -384,6 +385,7 @@ development_status:
 
   # Epic 32: Financial Period Close & Reconciliation Workspace
   epic-32: done
+  epic-32-retrospective: done
   32-0-preparation: done
   32-1-fiscal-year-close: done  # Close procedure with 3-step entries, transaction, idempotency
   32-2-multi-period-reconciliation-dashboard: done  # ReconciliationDashboardService, drilldown endpoint
@@ -441,6 +443,7 @@ development_status:
 
   # Epic 37: Generic File Uploader
   epic-37: done
+  epic-37-retrospective: done
   37-1-generic-uploader-core: done
   37-2-item-image-adapter: done
   37-3-refactor-item-images: done
@@ -456,6 +459,7 @@ development_status:
 
   # Epic 39: ACL Reorganization - Remove Reports Module, Consolidate to 7 Canonical Modules
   epic-39: done
+  epic-39-retrospective: done
   # Phase 1: Foundation
   39-1-shared-package-foundation: done
   39-2-auth-package-updates: done
@@ -534,6 +538,7 @@ development_status:
 
   # Epic 46: Purchasing / Accounts Payable
   epic-46: done
+  epic-46-retrospective: done
   46-1-supplier-master: done
   46-2-exchange-rates: done
   46-3-purchase-orders: done
@@ -579,6 +584,7 @@ development_status:
 
   # Epic 50: Ledger Correctness Hardening
   epic-50: done
+  epic-50-retrospective: done
   50-1-pos-sync-unbalanced-override: done
   50-2-q49-001-fixture-extraction: done
   50-3-posting-flow-integration-tests: done
@@ -588,6 +594,7 @@ development_status:
 
   # Epic 51: Fiscal Correctness Hardening
   epic-51: done
+  epic-51-retrospective: done
   51-1-fiscal-year-close-correctness-hardening: done
   51-2-receivables-subledger-reconciliation: done
   51-3-payables-subledger-reconciliation: done
@@ -596,6 +603,7 @@ development_status:
 
   # Epic 52: Datetime Standardization + Idempotency Hardening
   epic-52: done
+  epic-52-retrospective: done
   52-1-datetime-utility-surface-consolidation: done
   52-2-reservation-legacy-fallback-removal: done
   52-3-pos-timestamp-alignment: done
@@ -609,9 +617,20 @@ development_status:
 
   # Epic 53: Datetime API Consolidation Execution
   epic-53: done
+  epic-53-retrospective: done
   53-1-core-api-surface-and-route-validation: done
   53-2-accounting-and-inventory-package-migration: done
   53-3-platform-purchasing-and-other-module-migration: done
   53-4-api-lib-sync-and-cross-cutting-touchups: done
   53-5-test-updates-and-z-dollar-assertions: done
   53-6-cleanup-remove-deprecated-wrappers: done
+
+  # Epic 54: AP Lifecycle Correctness
+  epic-54: backlog
+  54-1-ap-invoice-write-path-correctness: backlog
+  54-2-ap-payment-write-path-correctness: backlog
+  54-3-ap-state-machine-integrity: backlog
+  54-4-multicurrency-ap-correctness: backlog
+  54-5-ap-period-close-enforcement: backlog
+  54-6-follow-up-closure-bucket: backlog
+  54-1-ap-invoice-correctness: in_progress

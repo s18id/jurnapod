@@ -43,6 +43,16 @@ const creditNoteRoutes = new Hono();
 creditNoteRoutes.get("/", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
+  // Check resource permission using existing sales.invoices mapping
+  const accessResult = await requireAccess({
+    module: "sales",
+    resource: "invoices",
+    permission: "read"
+  })(c.req.raw, auth);
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
   try {
     const url = new URL(c.req.raw.url);
     const outletIdParam = url.searchParams.get("outlet_id");
@@ -87,6 +97,16 @@ creditNoteRoutes.get("/", async (c) => {
 creditNoteRoutes.get("/:id", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
+  // Check resource permission using existing sales.invoices mapping
+  const accessResult = await requireAccess({
+    module: "sales",
+    resource: "invoices",
+    permission: "read"
+  })(c.req.raw, auth);
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
   try {
     const creditNoteId = NumericIdSchema.parse(c.req.param("id"));
     const creditNote = await getCreditNote(auth.companyId, creditNoteId);
@@ -118,6 +138,16 @@ creditNoteRoutes.get("/:id", async (c) => {
 
 creditNoteRoutes.post("/", async (c) => {
   const auth = c.get("auth") as AuthContext;
+
+  // Check resource permission using existing sales.invoices mapping
+  const accessResult = await requireAccess({
+    module: "sales",
+    resource: "invoices",
+    permission: "create"
+  })(c.req.raw, auth);
+  if (accessResult !== null) {
+    return accessResult;
+  }
 
   try {
     let payload: unknown;
@@ -201,6 +231,16 @@ creditNoteRoutes.post("/", async (c) => {
 
 creditNoteRoutes.patch("/:id", async (c) => {
   const auth = c.get("auth") as AuthContext;
+
+  // Check resource permission using existing sales.invoices mapping
+  const accessResult = await requireAccess({
+    module: "sales",
+    resource: "invoices",
+    permission: "update"
+  })(c.req.raw, auth);
+  if (accessResult !== null) {
+    return accessResult;
+  }
 
   try {
     const creditNoteId = NumericIdSchema.parse(c.req.param("id"));

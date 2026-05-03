@@ -66,12 +66,22 @@ NFR3: Templates must follow existing project conventions (AGENTS.md, existing pa
 
 ## Epic List
 
-| Epic | Title | Status |
-|------|-------|--------|
-| Epic 45 | Tooling Standards & Process Documentation | done | |
-| Epic 46 | Purchasing / Accounts Payable | ready-for-dev | |
-| Epic 47 | AP Reconciliation & Period Close Controls | backlog |
-| Epic 53 | Datetime API Consolidation Execution | backlog | |
+| Epic | Title | Status | Sprint |
+|------|-------|--------|--------|
+| Epic 45 | Tooling Standards & Process Documentation | done | — |
+| Epic 46 | Purchasing / Accounts Payable | done | — |
+| Epic 47 | AP Reconciliation & Period Close Controls | done | — |
+| Epic 48–51 | Correctness-First Architecture (Baseline, Determinism, Ledger, Fiscal) | done | 48–51 |
+| Epic 52 | Datetime Standardization + Idempotency Hardening | done | 52 |
+| Epic 53 | Datetime API Consolidation Execution | done | 53 |
+| **Epic 54** | **AP Lifecycle Correctness** | **backlog** | **54** |
+| Epic 55 | AP Reconciliation/Snapshot Correctness | backlog | 55 |
+| Epic 56 | AR + Treasury Correctness | backlog | 56 |
+| Epic 57 | Inventory/Costing Correctness | backlog | 57 |
+| Epic 58 | POS Core Correctness Consolidation | backlog | 58 |
+| Epic 59 | Tenant + ACL Correctness Hardening | backlog | 59 |
+| Epic 60 | Sync Contract Correctness Hardening | backlog | 60 |
+| Epic 61 | Projection Correctness Hardening | backlog | 61 |
 
 ---
 
@@ -292,4 +302,32 @@ So that custom lint rules are validated before introduction and do not regress.
 - Namespaced API: `toUtcIso` (produce Z), `fromUtcIso` (consume Z)
 - Execution: incremental per-package (shared → modules → API lib → tests → cleanup)
 - Breaking change (reject offset at validation): documented as known risk with deployment order requirement
+
+---
+
+## Epic 54: AP Lifecycle Correctness
+
+**Goal:** Prove that existing AP write paths (invoice create/post/void, payment create/post/allocate, state machine transitions, multi-currency handling, period-close enforcement) are correct, idempotent, and produce valid journal entries. No new features — this is a correctness-hardening epic following the Epic 50–51 pattern.
+
+**Program Alignment:** Sprint 54 in the S48–S61 Correctness-First Architecture Blueprint (re-baselined 2026-05-28).
+
+### Story Summary
+
+| Story | Title | Risk | Dependencies |
+|-------|-------|------|-------------|
+| 54.1 | AP Invoice Write-Path Correctness Hardening | P0 | None |
+| 54.2 | AP Payment Write-Path Correctness Hardening | P0 | 54.1 (or concurrent) |
+| 54.3 | AP State Machine Integrity | P1 | 54.1, 54.2 |
+| 54.4 | Multi-Currency AP Correctness | P1 | 54.1, 54.2 |
+| 54.5 | AP Period-Close Enforcement Hardening | P1 | 54.1, 54.2 |
+| 54.6 | Follow-Up Closure Bucket | P2 | 54.1–54.5 |
+
+**Key Decisions:**
+- No new AP features — three-way matching and approval workflows remain deferred
+- Existing feature tests (Epic 46) are presupposed; Epic 54 adds correctness proofs (idempotency, concurrency, edge cases)
+- E51-A1 (auto-snapshot race) is NOT in Epic 54 scope — deferred to Epic 55 (snapshot correctness)
+- Hard gates: E54-A1 (usage surface estimation on 54.1), E54-A2 (second-pass review checklist on all stories)
+- All stories require 3× consecutive green integration tests
+
+**Exit Gate:** No unresolved P0/P1 in AP write flows; all critical suites 3× consecutive green; sprint status validation passes.
 - POS schema change deferred in deployment order: POS app update first, then server

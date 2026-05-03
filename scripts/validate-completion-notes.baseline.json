@@ -1,0 +1,1235 @@
+{
+  "version": 1,
+  "generated": "2026-05-03T12:48:21.680Z",
+  "totalMissing": 307,
+  "missing": [
+    {
+      "storyKey": "1-1-kysely-setup-and-type-generation",
+      "epic": 1
+    },
+    {
+      "storyKey": "1-2-dbclient-integration",
+      "epic": 1
+    },
+    {
+      "storyKey": "1-3-tax-rates-route-migration",
+      "epic": 1
+    },
+    {
+      "storyKey": "1-4-roles-route-migration",
+      "epic": 1
+    },
+    {
+      "storyKey": "1-5-accounts-route-migration",
+      "epic": 1
+    },
+    {
+      "storyKey": "1-6-adr-update-and-documentation",
+      "epic": 1
+    },
+    {
+      "storyKey": "1-7-journals-route-migration",
+      "epic": 1
+    },
+    {
+      "storyKey": "1-8-account-types-route-migration",
+      "epic": 1
+    },
+    {
+      "storyKey": "1-9-epic-1-documentation",
+      "epic": 1
+    },
+    {
+      "storyKey": "2-1-sync-push-layered-architecture",
+      "epic": 2
+    },
+    {
+      "storyKey": "2-2-sync-pull-layered-architecture",
+      "epic": 2
+    },
+    {
+      "storyKey": "2-3-sync-push-kysely-migration",
+      "epic": 2
+    },
+    {
+      "storyKey": "2-4-sync-pull-kysely-migration",
+      "epic": 2
+    },
+    {
+      "storyKey": "2-5-reports-routes-migration",
+      "epic": 2
+    },
+    {
+      "storyKey": "2-6-td-001-cogs-posting-n1-fix",
+      "epic": 2
+    },
+    {
+      "storyKey": "2-7-td-002-cogs-calculation-n1-fix",
+      "epic": 2
+    },
+    {
+      "storyKey": "2-8-td-003-recipe-composition-n1-fix",
+      "epic": 2
+    },
+    {
+      "storyKey": "2-9-epic-2-documentation",
+      "epic": 2
+    },
+    {
+      "storyKey": "3-1-item-groups-domain-extraction",
+      "epic": 3
+    },
+    {
+      "storyKey": "3-2-items-domain-extraction",
+      "epic": 3
+    },
+    {
+      "storyKey": "3-3-item-prices-domain-extraction",
+      "epic": 3
+    },
+    {
+      "storyKey": "3-4-supplies-domain-extraction",
+      "epic": 3
+    },
+    {
+      "storyKey": "3-5-fixed-assets-domain-extraction",
+      "epic": 3
+    },
+    {
+      "storyKey": "3-6-sync-master-data-finalization",
+      "epic": 3
+    },
+    {
+      "storyKey": "4-1-extract-shared-master-data-utilities",
+      "epic": 4
+    },
+    {
+      "storyKey": "4-2-backfill-fixed-assets-route-tests",
+      "epic": 4
+    },
+    {
+      "storyKey": "4-3-document-epic-3-product-enablement",
+      "epic": 4
+    },
+    {
+      "storyKey": "4-4-update-story-template-and-sync-checklist",
+      "epic": 4
+    },
+    {
+      "storyKey": "5-1-import-infrastructure-core",
+      "epic": 5
+    },
+    {
+      "storyKey": "5-2-export-infrastructure-core",
+      "epic": 5
+    },
+    {
+      "storyKey": "5-3-item-price-import-ui",
+      "epic": 5
+    },
+    {
+      "storyKey": "5-4-item-price-export-ui",
+      "epic": 5
+    },
+    {
+      "storyKey": "6-1-a-invoice-types-extraction",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-1-b-payment-types-extraction",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-1-c-order-types-extraction",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-1-d-credit-note-extraction",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-1-e-shared-utilities-consolidation",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-2-a-service-sessions-types",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-2-b-service-sessions-lifecycle",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-2-c-service-sessions-lines",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-2-d-service-sessions-checkpoint",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-3-type-safety-audit",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-4-deprecation-cleanup",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-5-a-reservations-types",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-5-b-reservations-crud",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-5-c-reservations-utils-availability",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-5-d-reservations-status",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-5-e-reservations-consolidation",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-6-adr-documentation",
+      "epic": 6
+    },
+    {
+      "storyKey": "6-7-epic-5-follow-up",
+      "epic": 6
+    },
+    {
+      "storyKey": "7-1-tdb-registry-fix-health-check-template",
+      "epic": 7
+    },
+    {
+      "storyKey": "7-2-import-session-persistence-mysql",
+      "epic": 7
+    },
+    {
+      "storyKey": "7-3-batch-failure-recovery-session-hardening",
+      "epic": 7
+    },
+    {
+      "storyKey": "7-4-fixed-assets-route-test-coverage",
+      "epic": 7
+    },
+    {
+      "storyKey": "7-5-streaming-parser-optimization",
+      "epic": 7
+    },
+    {
+      "storyKey": "7-6-fk-validation-batch-optimization",
+      "epic": 7
+    },
+    {
+      "storyKey": "7-8-export-large-dataset-protection",
+      "epic": 7
+    },
+    {
+      "storyKey": "8-1-import-resume-checkpoint",
+      "epic": 8
+    },
+    {
+      "storyKey": "8-3-progress-persistence",
+      "epic": 8
+    },
+    {
+      "storyKey": "8-5-variant-price-sync",
+      "epic": 8
+    },
+    {
+      "storyKey": "8-7-variant-stock-tracking",
+      "epic": 8
+    },
+    {
+      "storyKey": "8-8-variant-sync-push",
+      "epic": 8
+    },
+    {
+      "storyKey": "8-9-performance-monitoring",
+      "epic": 8
+    },
+    {
+      "storyKey": "9-1-audit-library-functions",
+      "epic": 9
+    },
+    {
+      "storyKey": "9-2-refactor-company-item-tests",
+      "epic": 9
+    },
+    {
+      "storyKey": "9-3-refactor-import-progress-tests",
+      "epic": 9
+    },
+    {
+      "storyKey": "9-4-refactor-variant-sync-tests",
+      "epic": 9
+    },
+    {
+      "storyKey": "9-5-refactor-user-auth-tests",
+      "epic": 9
+    },
+    {
+      "storyKey": "9-6-refactor-route-tests",
+      "epic": 9
+    },
+    {
+      "storyKey": "9-7-batch-refactor-remaining",
+      "epic": 9
+    },
+    {
+      "storyKey": "9-8-add-missing-library-functions",
+      "epic": 9
+    },
+    {
+      "storyKey": "9-9-enforce-library-usage",
+      "epic": 9
+    },
+    {
+      "storyKey": "10-1-add-createoutletbasic",
+      "epic": 10
+    },
+    {
+      "storyKey": "10-2-refactor-variant-stock-tests",
+      "epic": 10
+    },
+    {
+      "storyKey": "10-3-refactor-services-stock-tests",
+      "epic": 10
+    },
+    {
+      "storyKey": "10-4-refactor-routes-stock-tests",
+      "epic": 10
+    },
+    {
+      "storyKey": "11-1-refactor-cost-tracking-tests",
+      "epic": 11
+    },
+    {
+      "storyKey": "11-2-refactor-cogs-posting-tests",
+      "epic": 11
+    },
+    {
+      "storyKey": "11-3-refactor-users-auth-tests",
+      "epic": 11
+    },
+    {
+      "storyKey": "11-4-refactor-remaining-tests",
+      "epic": 11
+    },
+    {
+      "storyKey": "11-5-replace-insert-items-with-createitem",
+      "epic": 11
+    },
+    {
+      "storyKey": "12-1-create-settings-modules-library",
+      "epic": 12
+    },
+    {
+      "storyKey": "12-3-create-sync-check-duplicate-library",
+      "epic": 12
+    },
+    {
+      "storyKey": "12-4-refactor-sync-check-duplicate-route",
+      "epic": 12
+    },
+    {
+      "storyKey": "12-5-extend-export-library",
+      "epic": 12
+    },
+    {
+      "storyKey": "12-7-epic-12-documentation",
+      "epic": 12
+    },
+    {
+      "storyKey": "13-1-create-import-batch-library",
+      "epic": 13
+    },
+    {
+      "storyKey": "13-2-create-import-validation-library",
+      "epic": 13
+    },
+    {
+      "storyKey": "13-3-refactor-import-route",
+      "epic": 13
+    },
+    {
+      "storyKey": "13-4-create-inventory-access-library",
+      "epic": 13
+    },
+    {
+      "storyKey": "13-5-refactor-inventory-route",
+      "epic": 13
+    },
+    {
+      "storyKey": "13-6-analyze-sync-pull-architecture",
+      "epic": 13
+    },
+    {
+      "storyKey": "13-7-create-sync-pull-adapter",
+      "epic": 13
+    },
+    {
+      "storyKey": "13-8-epic-13-documentation",
+      "epic": 13
+    },
+    {
+      "storyKey": "14-1-migrate-validation-to-kysely",
+      "epic": 14
+    },
+    {
+      "storyKey": "14-2-migrate-permissions-to-kysely",
+      "epic": 14
+    },
+    {
+      "storyKey": "14-3-migrate-batch-operations-select",
+      "epic": 14
+    },
+    {
+      "storyKey": "14-4-migrate-batch-operations-write",
+      "epic": 14
+    },
+    {
+      "storyKey": "14-5-epic-14-documentation",
+      "epic": 14
+    },
+    {
+      "storyKey": "15-1-connection-guard",
+      "epic": 15
+    },
+    {
+      "storyKey": "15-2-test-fixtures-unique-naming",
+      "epic": 15
+    },
+    {
+      "storyKey": "15-3-td-030-effective-date-filtering",
+      "epic": 15
+    },
+    {
+      "storyKey": "15-4-epic-15-documentation",
+      "epic": 15
+    },
+    {
+      "storyKey": "15-5-td-031-spike",
+      "epic": 15
+    },
+    {
+      "storyKey": "16-1-alert-retry-exponential-backoff",
+      "epic": 16
+    },
+    {
+      "storyKey": "16-2-batch-processing-backfills",
+      "epic": 16
+    },
+    {
+      "storyKey": "16-3-epic-16-documentation",
+      "epic": 16
+    },
+    {
+      "storyKey": "17-1-extract-date-helpers-to-shared",
+      "epic": 17
+    },
+    {
+      "storyKey": "17-2-define-service-interfaces-sync-core",
+      "epic": 17
+    },
+    {
+      "storyKey": "17-3-cleanup-sync-core-dead-code",
+      "epic": 17
+    },
+    {
+      "storyKey": "17-4-move-pull-logic-to-pos-sync",
+      "epic": 17
+    },
+    {
+      "storyKey": "17-5-move-push-logic-to-pos-sync",
+      "epic": 17
+    },
+    {
+      "storyKey": "17-6-refactor-api-routes-thin-adapters",
+      "epic": 17
+    },
+    {
+      "storyKey": "17-7-delete-lib-sync-and-tests",
+      "epic": 17
+    },
+    {
+      "storyKey": "17-8-apply-backoffice-sync-pattern",
+      "epic": 17
+    },
+    {
+      "storyKey": "18-1-verify-db-exports",
+      "epic": 18
+    },
+    {
+      "storyKey": "18-2-verify-auth-kysely-pattern",
+      "epic": 18
+    },
+    {
+      "storyKey": "18-3-a-migrate-sync-core-data-queries-part1",
+      "epic": 18
+    },
+    {
+      "storyKey": "18-3-b-migrate-sync-core-data-queries-part2",
+      "epic": 18
+    },
+    {
+      "storyKey": "18-4-migrate-pos-sync",
+      "epic": 18
+    },
+    {
+      "storyKey": "18-5-migrate-backoffice-sync",
+      "epic": 18
+    },
+    {
+      "storyKey": "18-6-migrate-modules-accounting",
+      "epic": 18
+    },
+    {
+      "storyKey": "18-7-migrate-modules-platform",
+      "epic": 18
+    },
+    {
+      "storyKey": "19-1-migrate-api-lib-shared",
+      "epic": 19
+    },
+    {
+      "storyKey": "19-2-migrate-api-lib-foundation",
+      "epic": 19
+    },
+    {
+      "storyKey": "19-3-migrate-api-lib-items",
+      "epic": 19
+    },
+    {
+      "storyKey": "19-4-migrate-api-lib-business",
+      "epic": 19
+    },
+    {
+      "storyKey": "19-5-migrate-api-lib-accounting",
+      "epic": 19
+    },
+    {
+      "storyKey": "19-6-migrate-api-lib-operations",
+      "epic": 19
+    },
+    {
+      "storyKey": "19-7-migrate-api-lib-settings",
+      "epic": 19
+    },
+    {
+      "storyKey": "19-8-migrate-api-lib-email",
+      "epic": 19
+    },
+    {
+      "storyKey": "19-9-migrate-api-lib-fiscal",
+      "epic": 19
+    },
+    {
+      "storyKey": "19-10-migrate-api-lib-cost-recipe",
+      "epic": 19
+    },
+    {
+      "storyKey": "19-11-migrate-api-lib-reports",
+      "epic": 19
+    },
+    {
+      "storyKey": "19-12-migrate-api-routes",
+      "epic": 19
+    },
+    {
+      "storyKey": "20-1-settings-system-migration",
+      "epic": 20
+    },
+    {
+      "storyKey": "20-2-module-config-normalization",
+      "epic": 20
+    },
+    {
+      "storyKey": "20-3-feature-flags-normalization",
+      "epic": 20
+    },
+    {
+      "storyKey": "20-4-mappings-consolidation",
+      "epic": 20
+    },
+    {
+      "storyKey": "20-5-auth-throttle-merge",
+      "epic": 20
+    },
+    {
+      "storyKey": "20-6-item-variant-eav-cleanup",
+      "epic": 20
+    },
+    {
+      "storyKey": "20-7-sync-versions-merge",
+      "epic": 20
+    },
+    {
+      "storyKey": "20-8-data-import-count-columns",
+      "epic": 20
+    },
+    {
+      "storyKey": "20-9-legacy-table-drops",
+      "epic": 20
+    },
+    {
+      "storyKey": "20-10-final-verification",
+      "epic": 20
+    },
+    {
+      "storyKey": "21-1-centralize-pos-sync-module-lifecycle",
+      "epic": 21
+    },
+    {
+      "storyKey": "21-2-extract-sync-push-adapters-from-route",
+      "epic": 21
+    },
+    {
+      "storyKey": "21-3-retire-legacy-api-pull-builder-runtime-path",
+      "epic": 21
+    },
+    {
+      "storyKey": "21-4-keep-and-bound-sync-check-duplicate-semantics",
+      "epic": 21
+    },
+    {
+      "storyKey": "22-1-rehome-core-posting-contract-to-modules-accounting",
+      "epic": 22
+    },
+    {
+      "storyKey": "22-2-migrate-core-imports-to-modules-accounting",
+      "epic": 22
+    },
+    {
+      "storyKey": "22-3-remove-core-package-and-clean-lockfile",
+      "epic": 22
+    },
+    {
+      "storyKey": "22-4-run-exit-gates-and-closeout",
+      "epic": 22
+    },
+    {
+      "storyKey": "23-0-1-author-package-dependency-policy-adr",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-0-2-add-import-boundary-lint-constraints",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-0-3-scaffold-new-domain-package-workspaces",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-0-4-create-extraction-checklist-template",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-1-1-move-correlation-primitives-to-telemetry",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-1-2-extract-email-templates-to-notifications",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-1-3-move-feature-flags-settings-to-modules-platform",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-1-4-consolidate-audit-utilities-into-modules-platform",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-2-1-move-posting-engines-to-modules-accounting",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-2-2-move-reconciliation-service-to-accounting-package",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-2-3-thin-api-accounting-adapters-to-composition-only",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-3-1-modules-sales-bootstrap-acl-interface-seam",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-3-4-modules-inventory-bootstrap-scoping-guards",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-3-7-modules-reservations-bootstrap-with-time-model",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-3-10-modules-reporting-bootstrap",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-3-2-extract-orders-invoices-to-modules-sales",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-3-3-extract-payments-credit-notes-to-modules-sales",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-3-5-extract-item-catalog-services",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-3-6-extract-stock-recipe-supplies",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-3-8-extract-reservations-table-services",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-3-9-extract-service-session-table-sync",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-3-11-extract-report-query-services",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-4-1-extract-sync-push-business-logic",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-4-2-extract-sync-pull-business-logic",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-4-3-add-route-thinness-enforcement",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-5-1-remove-deprecated-api-lib-implementations",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-5-2-freeze-package-public-apis",
+      "epic": 23
+    },
+    {
+      "storyKey": "23-5-3-run-full-workspace-validation-gate",
+      "epic": 23
+    },
+    {
+      "storyKey": "24-1-create-inventory-costing-package-scaffold",
+      "epic": 24
+    },
+    {
+      "storyKey": "24-2-extract-cost-tracking-to-costing-package",
+      "epic": 24
+    },
+    {
+      "storyKey": "24-3-update-lib-stock-to-use-costing-package",
+      "epic": 24
+    },
+    {
+      "storyKey": "24-4-update-cogs-posting-to-use-costing-contract",
+      "epic": 24
+    },
+    {
+      "storyKey": "24-5-update-sync-push-stock-handlers",
+      "epic": 24
+    },
+    {
+      "storyKey": "25-3-cashbank-service-ports-adapters",
+      "epic": 25
+    },
+    {
+      "storyKey": "25-4-add-tests-update-adapter-validate-gate",
+      "epic": 25
+    },
+    {
+      "storyKey": "26-4-update-api-stock-delegation-remove-cost-tracking",
+      "epic": 26
+    },
+    {
+      "storyKey": "27-1-contract-alignment-type-source-of-truth",
+      "epic": 27
+    },
+    {
+      "storyKey": "27-2-replace-api-pos-sale-posting-modules-accounting",
+      "epic": 27
+    },
+    {
+      "storyKey": "27-3-cogs-parity-modules-accounting",
+      "epic": 27
+    },
+    {
+      "storyKey": "27-4-move-stock-transaction-resolution-modules-inventory",
+      "epic": 27
+    },
+    {
+      "storyKey": "27-5-implement-phase2-pos-sync-replace-stubs",
+      "epic": 27
+    },
+    {
+      "storyKey": "27-6-api-simplification-full-validation-gate",
+      "epic": 27
+    },
+    {
+      "storyKey": "28-1-contract-permission-alignment",
+      "epic": 28
+    },
+    {
+      "storyKey": "28-4-api-route-flip-library-cleanup",
+      "epic": 28
+    },
+    {
+      "storyKey": "28-5-full-validation-gate",
+      "epic": 28
+    },
+    {
+      "storyKey": "29-2-scaffold-fixed-assets-subdomain",
+      "epic": 29
+    },
+    {
+      "storyKey": "29-3-extract-category-asset-crud",
+      "epic": 29
+    },
+    {
+      "storyKey": "29-4-extract-depreciation-plan-run",
+      "epic": 29
+    },
+    {
+      "storyKey": "29-5-extract-lifecycle-service",
+      "epic": 29
+    },
+    {
+      "storyKey": "29-6-flip-routes-delete-libs",
+      "epic": 29
+    },
+    {
+      "storyKey": "29-7-integration-tests-gate",
+      "epic": 29
+    },
+    {
+      "storyKey": "30-1-define-sync-slos-metrics-schema",
+      "epic": 30
+    },
+    {
+      "storyKey": "30-2-implement-outbox-health-metrics",
+      "epic": 30
+    },
+    {
+      "storyKey": "30-3-financial-posting-monitoring",
+      "epic": 30
+    },
+    {
+      "storyKey": "30-4-alerting-infrastructure",
+      "epic": 30
+    },
+    {
+      "storyKey": "30-5-dashboards-runbook",
+      "epic": 30
+    },
+    {
+      "storyKey": "30-6-fix-metric-contracts-alert-semantics",
+      "epic": 30
+    },
+    {
+      "storyKey": "30-7-wire-gl-imbalance-tenant-safety",
+      "epic": 30
+    },
+    {
+      "storyKey": "31-1-extract-users-rbac",
+      "epic": 31
+    },
+    {
+      "storyKey": "31-2-extract-companies-provisioning",
+      "epic": 31
+    },
+    {
+      "storyKey": "31-4-thin-routes-users-companies",
+      "epic": 31
+    },
+    {
+      "storyKey": "31-6-notifications-consolidation",
+      "epic": 31
+    },
+    {
+      "storyKey": "31-7-a-inventory-route-thinning",
+      "epic": 31
+    },
+    {
+      "storyKey": "31-7-b-reports-route-thinning",
+      "epic": 31
+    },
+    {
+      "storyKey": "31-7-c-accounts-route-thinning",
+      "epic": 31
+    },
+    {
+      "storyKey": "31-8-a-adapter-migration-prep",
+      "epic": 31
+    },
+    {
+      "storyKey": "31-8-b-deletion-verification",
+      "epic": 31
+    },
+    {
+      "storyKey": "32-0-preparation",
+      "epic": 32
+    },
+    {
+      "storyKey": "32-3-trial-balance-validation",
+      "epic": 32
+    },
+    {
+      "storyKey": "32-6-fixes",
+      "epic": 32
+    },
+    {
+      "storyKey": "32-7-post-review-fixes",
+      "epic": 32
+    },
+    {
+      "storyKey": "32-8-adr-0014-extraction",
+      "epic": 32
+    },
+    {
+      "storyKey": "33-1-shared-rbac-contracts",
+      "epic": 33
+    },
+    {
+      "storyKey": "33-2-migrate-auth-to-shared",
+      "epic": 33
+    },
+    {
+      "storyKey": "33-3-migrate-platform-to-shared",
+      "epic": 33
+    },
+    {
+      "storyKey": "33-4-fix-superadmin-login-bypass",
+      "epic": 33
+    },
+    {
+      "storyKey": "33-5-permission-bit-test-fix",
+      "epic": 33
+    },
+    {
+      "storyKey": "34-1-audit-all-test-files",
+      "epic": 34
+    },
+    {
+      "storyKey": "34-2-define-canonical-structure",
+      "epic": 34
+    },
+    {
+      "storyKey": "34-3-api-test-classification-reorganization",
+      "epic": 34
+    },
+    {
+      "storyKey": "35-1-accounts-extraction",
+      "epic": 35
+    },
+    {
+      "storyKey": "35-2-platform-routes",
+      "epic": 35
+    },
+    {
+      "storyKey": "35-3-reporting-routes",
+      "epic": 35
+    },
+    {
+      "storyKey": "35-4-treasury-route",
+      "epic": 35
+    },
+    {
+      "storyKey": "35-5-sales-routes",
+      "epic": 35
+    },
+    {
+      "storyKey": "35-6-final-validation",
+      "epic": 35
+    },
+    {
+      "storyKey": "36-1-infrastructure-config",
+      "epic": 36
+    },
+    {
+      "storyKey": "36-2-auth-health-routes",
+      "epic": 36
+    },
+    {
+      "storyKey": "36-3-sync-pos-routes",
+      "epic": 36
+    },
+    {
+      "storyKey": "36-4-sales-accounting-routes",
+      "epic": 36
+    },
+    {
+      "storyKey": "36-5-inventory-settings-routes",
+      "epic": 36
+    },
+    {
+      "storyKey": "36-6-remaining-routes",
+      "epic": 36
+    },
+    {
+      "storyKey": "36-7-openapi-regenerator",
+      "epic": 36
+    },
+    {
+      "storyKey": "36-8-extract-spec-to-json",
+      "epic": 36
+    },
+    {
+      "storyKey": "36-9-openapi-auto-gen-poc",
+      "epic": 36
+    },
+    {
+      "storyKey": "36-10-expand-auto-gen-all",
+      "epic": 36
+    },
+    {
+      "storyKey": "37-1-generic-uploader-core",
+      "epic": 37
+    },
+    {
+      "storyKey": "37-2-item-image-adapter",
+      "epic": 37
+    },
+    {
+      "storyKey": "37-3-refactor-item-images",
+      "epic": 37
+    },
+    {
+      "storyKey": "37-4-delete-image-storage",
+      "epic": 37
+    },
+    {
+      "storyKey": "38-1-lock-wait-timeout-retry",
+      "epic": 38
+    },
+    {
+      "storyKey": "38-2-import-batch-correctness",
+      "epic": 38
+    },
+    {
+      "storyKey": "38-3-company-service-audit-boundary",
+      "epic": 38
+    },
+    {
+      "storyKey": "38-4-accounting-atomicity",
+      "epic": 38
+    },
+    {
+      "storyKey": "39-1-shared-package-foundation",
+      "epic": 39
+    },
+    {
+      "storyKey": "39-2-auth-package-updates",
+      "epic": 39
+    },
+    {
+      "storyKey": "39-3-database-schema-migration",
+      "epic": 39
+    },
+    {
+      "storyKey": "39-3-5-data-migration",
+      "epic": 39
+    },
+    {
+      "storyKey": "39-4-platform-module",
+      "epic": 39
+    },
+    {
+      "storyKey": "39-5-accounting-module",
+      "epic": 39
+    },
+    {
+      "storyKey": "39-6-inventory-module",
+      "epic": 39
+    },
+    {
+      "storyKey": "39-7-treasury-module",
+      "epic": 39
+    },
+    {
+      "storyKey": "39-8-sales-module",
+      "epic": 39
+    },
+    {
+      "storyKey": "39-9-pos-module",
+      "epic": 39
+    },
+    {
+      "storyKey": "39-10-reservations-module",
+      "epic": 39
+    },
+    {
+      "storyKey": "39-11-verification-cleanup",
+      "epic": 39
+    },
+    {
+      "storyKey": "42-1-token-seed-context-caching",
+      "epic": 42
+    },
+    {
+      "storyKey": "42-2-db-transaction-safety",
+      "epic": 42
+    },
+    {
+      "storyKey": "42-3-test-assertion-quality",
+      "epic": 42
+    },
+    {
+      "storyKey": "42-4-login-reuse-across-suites",
+      "epic": 42
+    },
+    {
+      "storyKey": "42-5-beforeall-seedctx-caching",
+      "epic": 42
+    },
+    {
+      "storyKey": "42-6-final-verification",
+      "epic": 42
+    },
+    {
+      "storyKey": "43-1-fix-intermittent-test-failures",
+      "epic": 43
+    },
+    {
+      "storyKey": "43-2-stock-outlet-validation",
+      "epic": 43
+    },
+    {
+      "storyKey": "43-3-telemetry-package-json",
+      "epic": 43
+    },
+    {
+      "storyKey": "43-4-document-seedctx-pattern",
+      "epic": 43
+    },
+    {
+      "storyKey": "43-5-final-verification",
+      "epic": 43
+    },
+    {
+      "storyKey": "48-1-architecture-truth-map-risk-register-freeze",
+      "epic": 48
+    },
+    {
+      "storyKey": "48-2-financial-correctness-hardening-pack",
+      "epic": 48
+    },
+    {
+      "storyKey": "48-3-migration-reliability-gate-hardening",
+      "epic": 48
+    },
+    {
+      "storyKey": "48-4-integration-test-determinism-hardening",
+      "epic": 48
+    },
+    {
+      "storyKey": "48-5-ci-quality-gate-enforcement",
+      "epic": 48
+    },
+    {
+      "storyKey": "48-6-type-lint-debt-containment-touched-hotspots",
+      "epic": 48
+    },
+    {
+      "storyKey": "48-7-canonical-file-structure-rules-v1",
+      "epic": 48
+    },
+    {
+      "storyKey": "48-8-file-structure-baseline-gap-register",
+      "epic": 48
+    },
+    {
+      "storyKey": "48-9-ci-ratchet-gate-structure-conformance",
+      "epic": 48
+    },
+    {
+      "storyKey": "49-1-kickoff-gate-test-reliability-audit",
+      "epic": 49
+    },
+    {
+      "storyKey": "49-2-accounting-suite-determinism-hardening",
+      "epic": 49
+    },
+    {
+      "storyKey": "52-1-datetime-utility-surface-consolidation",
+      "epic": 52
+    },
+    {
+      "storyKey": "52-2-reservation-legacy-fallback-removal",
+      "epic": 52
+    },
+    {
+      "storyKey": "52-3-pos-timestamp-alignment",
+      "epic": 52
+    },
+    {
+      "storyKey": "52-4-fiscal-close-idempotency-hardening",
+      "epic": 52
+    },
+    {
+      "storyKey": "52-5-ap-idempotency-key-standardization",
+      "epic": 52
+    },
+    {
+      "storyKey": "52-6-sync-contract-standardization",
+      "epic": 52
+    },
+    {
+      "storyKey": "52-7-sync-idempotency-duplicate-vs-error",
+      "epic": 52
+    },
+    {
+      "storyKey": "52-8-ap-payment-journal-atomicity",
+      "epic": 52
+    },
+    {
+      "storyKey": "52-9-observability-idempotency-metrics",
+      "epic": 52
+    },
+    {
+      "storyKey": "52-10-integration-test-gate",
+      "epic": 52
+    },
+    {
+      "storyKey": "53-1-core-api-surface-and-route-validation",
+      "epic": 53
+    },
+    {
+      "storyKey": "53-2-accounting-and-inventory-package-migration",
+      "epic": 53
+    },
+    {
+      "storyKey": "53-3-platform-purchasing-and-other-module-migration",
+      "epic": 53
+    },
+    {
+      "storyKey": "53-4-api-lib-sync-and-cross-cutting-touchups",
+      "epic": 53
+    },
+    {
+      "storyKey": "53-5-test-updates-and-z-dollar-assertions",
+      "epic": 53
+    },
+    {
+      "storyKey": "53-6-cleanup-remove-deprecated-wrappers",
+      "epic": 53
+    }
+  ]
+}
