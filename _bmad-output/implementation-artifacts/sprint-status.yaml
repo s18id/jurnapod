@@ -595,7 +595,7 @@ development_status:
   51-5-follow-up-closure-bucket: backlog
 
   # Epic 52: Datetime Standardization + Idempotency Hardening
-  epic-52: in-progress
+  epic-52: done
   52-1-datetime-utility-surface-consolidation: done
   52-2-reservation-legacy-fallback-removal: done
   52-3-pos-timestamp-alignment: done
@@ -603,7 +603,7 @@ development_status:
   52-5-ap-idempotency-key-standardization: done
   52-6-sync-contract-standardization: done
   52-7-sync-idempotency-duplicate-vs-error: done
-  52-8-ap-payment-journal-atomicity: review
+  52-8-ap-payment-journal-atomicity: done
   52-9-observability-idempotency-metrics: done
   52-10-integration-test-gate: done
 
