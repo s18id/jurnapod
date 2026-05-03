@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveBusinessTimezone,
-  epochMsToPeriodBoundaries,
   isValidTimeZone,
   toUtcIso,
   fromUtcIso,
@@ -196,59 +195,6 @@ describe('datetime helpers — shared/schemas/datetime.ts', () => {
       // Verify the business date corresponds to the expected date
       expect(businessDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(businessDate).toBe('2026-04-15');
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // epochMsToPeriodBoundaries (deprecated — kept for backward compat)
-  // -------------------------------------------------------------------------
-
-  describe('epochMsToPeriodBoundaries', () => {
-    it('returns periodStartUTC < periodNextUTC (monthly half-open ordering)', () => {
-      const epoch = new Date('2026-04-15T12:30:00.000Z').getTime();
-      const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(epoch, 'UTC');
-      expect(periodStartUTC < periodNextUTC).toBe(true);
-    });
-
-    it('computes correct first-of-month to first-of-next-month boundaries in UTC', () => {
-      const epoch = new Date('2026-04-15T00:00:00.000Z').getTime();
-      const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(epoch, 'UTC');
-
-      expect(periodStartUTC).toBe('2026-04-01T00:00:00.000Z');
-      expect(periodNextUTC).toBe('2026-05-01T00:00:00.000Z');
-    });
-
-    it('handles month boundary crossing correctly (December → January)', () => {
-      const epoch = new Date('2026-12-15T00:00:00.000Z').getTime();
-      const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(epoch, 'UTC');
-
-      expect(periodStartUTC).toBe('2026-12-01T00:00:00.000Z');
-      expect(periodNextUTC).toBe('2027-01-01T00:00:00.000Z');
-    });
-
-    it('uses business timezone to determine month boundaries (Asia/Jakarta UTC+7)', () => {
-      const epoch = new Date('2026-04-01T00:00:00.000Z').getTime();
-      const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(epoch, 'Asia/Jakarta');
-
-      expect(periodStartUTC).toBe('2026-03-31T17:00:00.000Z');
-      expect(periodNextUTC).toBe('2026-04-30T17:00:00.000Z');
-    });
-
-    it('throws for non-finite epoch ms', () => {
-      expect(() => epochMsToPeriodBoundaries(Infinity, 'UTC')).toThrow(/invalid epoch ms/i);
-    });
-
-    it('throws for invalid timezone', () => {
-      const epoch = new Date('2026-04-15T00:00:00.000Z').getTime();
-      expect(() => epochMsToPeriodBoundaries(epoch, 'Not/A/Zone')).toThrow(/invalid timezone/i);
-    });
-
-    it('covers DST-observing timezone case (America/New_York)', () => {
-      const epoch = new Date('2026-03-10T00:00:00.000Z').getTime();
-      const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(epoch, 'America/New_York');
-
-      expect(periodStartUTC).toBe('2026-03-01T05:00:00.000Z');
-      expect(periodNextUTC).toBe('2026-04-01T04:00:00.000Z');
     });
   });
 

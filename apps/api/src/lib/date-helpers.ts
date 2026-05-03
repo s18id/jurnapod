@@ -19,7 +19,7 @@
  * @jurnapod/shared/src/schemas/datetime.ts
  */
 
-// Re-export everything from shared datetime utilities
+// Re-export canonical datetime utilities from shared package
 export {
   // Canonical schemas
   UtcIsoSchema,
@@ -30,30 +30,8 @@ export {
   isValidTimeZone,
   // Event time
   resolveEventTime,
-  resolveEventTimeDetails,
   // Business timezone
   resolveBusinessTimezone,
   // General
   nowUTC,
-  // Deprecated — use toUtcIso/fromUtcIso equivalents
-  toRfc3339,
-  toRfc3339Required,
-  toUtcInstant,
-  toMysqlDateTime,
-  toMysqlDateTimeFromDateLike,
-  fromUtcInstant,
-  toEpochMs,
-  fromEpochMs,
-  toBusinessDate,
-  normalizeDate,
-  toDateTimeRangeWithTimezone,
-  formatForDisplay,
-  toDateOnly,
-  isInFiscalYear,
-  addDays,
-  compareDates,
-  asOfDateToUtcRange,
-  businessDateFromEpochMs,
-  epochMsToPeriodBoundaries,
-  RfcDateTimeSchema,
 } from "@jurnapod/shared";

@@ -16,7 +16,7 @@ import {
   ReservationStatusV2,
   type ReservationStatus,
 } from "@jurnapod/shared";
-import { toEpochMs, fromEpochMs, toUtcInstant, toUtcIso } from "../date-helpers";
+import { toUtcIso, fromUtcIso } from "../date-helpers";
 import { getSetting } from "../settings";
 
 // Import types from local types module
@@ -58,7 +58,7 @@ export function toIso(value: Date | string | null): string | null {
 export function toUnixMs(value: Date | string): number {
   try {
     const iso = toUtcIso.dateLike(value) as string;
-    return toEpochMs(iso);
+    return fromUtcIso.epochMs(iso);
   } catch {
     const valueType = value instanceof Date ? "Date" : typeof value;
     throw new ReservationValidationError(`Invalid reservation datetime value (type=${valueType})`);
@@ -91,7 +91,7 @@ export function mapRow(row: ReservationDbRow) {
   if (reservationStartTs === null) {
     throw new ReservationValidationError("reservation_start_ts is required for reservation mapping");
   }
-  const reservationAt = fromEpochMs(reservationStartTs);
+  const reservationAt = toUtcIso.epochMs(reservationStartTs);
   const createdAt = toIso(row.created_at);
   const updatedAt = toIso(row.updated_at);
   if (!reservationAt || !createdAt || !updatedAt) {

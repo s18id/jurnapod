@@ -14,7 +14,8 @@ import {
   ACCOUNT_MAPPING_TYPE_ID_BY_CODE,
   accountMappingIdToCode,
   type AccountMappingCode,
-  toRfc3339Required,
+  toUtcIso,
+  fromUtcIso,
 } from "@jurnapod/shared";
 import type { PostingResult } from "@jurnapod/shared";
 import {
@@ -337,11 +338,10 @@ export async function postSalesPaymentToJournal(
   payment: SalesPayment,
   invoiceNo: string
 ): Promise<PostingResult> {
-  const { toDateOnly } = await import("./date-helpers");
   await ensureDateWithinOpenFiscalYearWithExecutor(
     dbExecutor,
     payment.company_id,
-    toDateOnly(toRfc3339Required(payment.payment_at))
+    fromUtcIso.dateOnly(toUtcIso.dateLike(payment.payment_at) as string)
   );
 
   const executor = new ApiSalesPostingExecutor(dbExecutor as KyselySchema);
