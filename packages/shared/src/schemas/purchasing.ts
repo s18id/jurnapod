@@ -727,6 +727,22 @@ export const APReconciliationSummaryResponseSchema = z.object({
 });
 
 // =============================================================================
+// Accounting Module AP Reconciliation Drilldown Schema (Story 51.3)
+// =============================================================================
+
+/**
+ * Drilldown query schema for GET /accounting/reports/ap-reconciliation/drilldown
+ */
+export const AccountingAPReconciliationDrilldownQuerySchema = z.object({
+  as_of_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format"),
+  document_type: z.enum(["purchase_invoice", "ap_payment", "purchase_credit"]).optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(1000).optional(),
+});
+
+export type AccountingAPReconciliationDrilldownQuery = z.infer<typeof AccountingAPReconciliationDrilldownQuerySchema>;
+
+// =============================================================================
 // AP Reconciliation Drilldown Schemas (Story 47.2 B2A)
 // =============================================================================
 
