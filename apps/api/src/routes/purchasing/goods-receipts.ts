@@ -14,6 +14,7 @@ import {
   GoodsReceiptCreateSchema,
   NumericIdSchema,
   toPurchaseOrderStatusLabel,
+  UtcIsoSchema,
 } from "@jurnapod/shared";
 import { requireAccess, authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../../lib/response.js";
@@ -56,8 +57,8 @@ receiptRoutes.get("/", async (c) => {
 
     const url = new URL(c.req.raw.url);
     const supplierId = url.searchParams.get("supplier_id") ? Number(url.searchParams.get("supplier_id")) : undefined;
-    const dateFrom = url.searchParams.get("date_from") ?? undefined;
-    const dateTo = url.searchParams.get("date_to") ?? undefined;
+    const dateFrom = UtcIsoSchema.optional().parse(url.searchParams.get("date_from") ?? undefined);
+    const dateTo = UtcIsoSchema.optional().parse(url.searchParams.get("date_to") ?? undefined);
     const limit = url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : 20;
     const offset = url.searchParams.get("offset") ? Number(url.searchParams.get("offset")) : 0;
 

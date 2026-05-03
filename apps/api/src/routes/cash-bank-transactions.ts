@@ -15,7 +15,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { NumericIdSchema } from "@jurnapod/shared";
+import { NumericIdSchema, DateOnlySchema } from "@jurnapod/shared";
 import {
   authenticateRequest,
   requireAccess,
@@ -44,7 +44,7 @@ declare module "hono" {
 
 const CreateCashBankTransactionSchema = z.object({
   transaction_type: z.enum(["MUTATION", "TOP_UP", "WITHDRAWAL", "FOREX"]),
-  transaction_date: z.string().optional(),
+  transaction_date: DateOnlySchema.optional(),
   description: z.string().trim().min(1).max(500),
   source_account_id: z.number().int().positive(),
   destination_account_id: z.number().int().positive(),

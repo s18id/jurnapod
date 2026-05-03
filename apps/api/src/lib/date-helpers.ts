@@ -21,33 +21,39 @@
 
 // Re-export everything from shared datetime utilities
 export {
+  // Canonical schemas
+  UtcIsoSchema,
+  // Namespaced API
+  toUtcIso,
+  fromUtcIso,
   // Validation
   isValidTimeZone,
-  isValidDateTime,
-  isValidDate,
-  // RFC 3339 / conversion
+  // Event time
+  resolveEventTime,
+  resolveEventTimeDetails,
+  // Business timezone
+  resolveBusinessTimezone,
+  // General
+  nowUTC,
+  // Deprecated — use toUtcIso/fromUtcIso equivalents
   toRfc3339,
   toRfc3339Required,
   toUtcInstant,
   toMysqlDateTime,
   toMysqlDateTimeFromDateLike,
   fromUtcInstant,
-  // Epoch ms
   toEpochMs,
   fromEpochMs,
-  // Business date
   toBusinessDate,
   normalizeDate,
   toDateTimeRangeWithTimezone,
   formatForDisplay,
   toDateOnly,
-  // Event time
-  resolveEventTime,
-  resolveEventTimeDetails,
-  // Fiscal year
   isInFiscalYear,
-  // General
-  nowUTC,
   addDays,
   compareDates,
+  asOfDateToUtcRange,
+  businessDateFromEpochMs,
+  epochMsToPeriodBoundaries,
+  RfcDateTimeSchema,
 } from "@jurnapod/shared";

@@ -3,6 +3,7 @@
 
 import { z } from "zod";
 import { NumericIdSchema } from "./common.js";
+import { UtcIsoSchema } from "./datetime.js";
 
 /**
  * ReservationGroup entity (database row)
@@ -13,8 +14,8 @@ export const ReservationGroupRowSchema = z.object({
   outlet_id: NumericIdSchema,
   group_name: z.string().nullable(),
   total_guest_count: z.number().int().positive(),
-  created_at: z.string().datetime({ offset: true }),
-  updated_at: z.string().datetime({ offset: true })
+  created_at: UtcIsoSchema,
+  updated_at: UtcIsoSchema
 });
 
 /**
@@ -27,7 +28,7 @@ export const ReservationGroupCreateRequestSchema = z.object({
   customer_phone: z.string().trim().max(64).nullable().optional(),
   guest_count: z.coerce.number().int().min(2).max(100), // Multi-table = 2+ guests
   table_ids: z.array(NumericIdSchema).min(2).max(10), // 2-10 tables per group
-  reservation_at: z.string().datetime({ offset: true }), // ISO 8601 with timezone
+  reservation_at: UtcIsoSchema, // ISO 8601 with timezone
   duration_minutes: z.coerce.number().int().min(15).max(480).nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional()
 });
@@ -38,7 +39,7 @@ export const ReservationGroupCreateRequestSchema = z.object({
 export const TableSuggestionQuerySchema = z.object({
   outlet_id: NumericIdSchema,
   guest_count: z.coerce.number().int().min(2).max(100),
-  reservation_at: z.string().datetime({ offset: true }),
+  reservation_at: UtcIsoSchema,
   duration_minutes: z.coerce.number().int().min(15).max(480).default(120)
 });
 
@@ -74,7 +75,7 @@ export const ReservationGroupReservationSchema = z.object({
   table_code: z.string(),
   table_name: z.string(),
   status: z.string(),
-  reservation_at: z.string().datetime({ offset: true })
+  reservation_at: UtcIsoSchema
   // reservation_start_ts and reservation_end_ts are internal canonical
   // timestamps (Unix ms) used for overlap/range queries only - not for display.
 });
@@ -88,8 +89,8 @@ export const ReservationGroupDetailSchema = z.object({
   outlet_id: NumericIdSchema,
   group_name: z.string().nullable(),
   total_guest_count: z.number().int().positive(),
-  created_at: z.string().datetime({ offset: true }),
-  updated_at: z.string().datetime({ offset: true }),
+  created_at: UtcIsoSchema,
+  updated_at: UtcIsoSchema,
   reservations: z.array(ReservationGroupReservationSchema)
 });
 
@@ -116,7 +117,7 @@ export const ReservationGroupUpdateRequestSchema = z.object({
   customer_name: z.string().trim().min(1).max(191).optional(),
   customer_phone: z.string().trim().max(64).nullable().optional(),
   guest_count: z.coerce.number().int().min(2).max(100).optional(),
-  reservation_at: z.string().datetime({ offset: true }).optional(), // ISO 8601
+  reservation_at: UtcIsoSchema.optional(), // ISO 8601
   duration_minutes: z.coerce.number().int().min(15).max(480).optional(),
   notes: z.string().trim().max(500).nullable().optional(),
   table_ids: z.array(NumericIdSchema).min(2).max(10).optional() // If provided, replaces all tables

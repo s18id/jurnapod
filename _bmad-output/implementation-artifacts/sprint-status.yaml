@@ -608,8 +608,8 @@ development_status:
   52-10-integration-test-gate: done
 
   # Epic 53: Datetime API Consolidation Execution
-  epic-53: backlog
-  53-1-core-api-surface-and-route-validation: backlog
+  epic-53: in-progress
+  53-1-core-api-surface-and-route-validation: done
   53-2-accounting-and-inventory-package-migration: backlog
   53-3-platform-purchasing-and-other-module-migration: backlog
   53-4-api-lib-sync-and-cross-cutting-touchups: backlog

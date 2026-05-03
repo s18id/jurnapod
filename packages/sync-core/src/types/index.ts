@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
+import { UtcIsoSchema } from "@jurnapod/shared";
 
 // Client types
 export const SyncClientTypeSchema = z.enum([
@@ -42,7 +43,7 @@ export const SyncContextSchema = z.object({
   user_id: z.number().int().positive().optional(),
   client_type: SyncClientTypeSchema,
   request_id: z.string().uuid(),
-  timestamp: z.string().datetime()
+  timestamp: UtcIsoSchema
 });
 
 // Base sync request
@@ -57,7 +58,7 @@ export const SyncRequestSchema = z.object({
 export const SyncResponseSchema = z.object({
   success: z.boolean(),
   data_version: z.number().int().nonnegative().optional(),
-  timestamp: z.string().datetime(),
+  timestamp: UtcIsoSchema,
   next_cursor: z.string().optional(),
   has_more: z.boolean().default(false),
   error_message: z.string().optional()

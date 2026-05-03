@@ -19,6 +19,7 @@ import { z } from "zod";
 import {
   PurchaseInvoiceCreateSchema,
   NumericIdSchema,
+  UtcIsoSchema,
 } from "@jurnapod/shared";
 import { requireAccess, authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";
 import { errorResponse, successResponse } from "../../lib/response.js";
@@ -77,11 +78,13 @@ invoiceRoutes.get("/", async (c) => {
     }
 
     const url = new URL(c.req.raw.url);
+    const rawDateFrom = UtcIsoSchema.optional().parse(url.searchParams.get("date_from") ?? undefined);
+    const rawDateTo = UtcIsoSchema.optional().parse(url.searchParams.get("date_to") ?? undefined);
     const queryParams = {
       supplierId: url.searchParams.get("supplier_id") ? Number(url.searchParams.get("supplier_id")) : undefined,
       status: url.searchParams.get("status") ? Number(url.searchParams.get("status")) : undefined,
-      dateFrom: url.searchParams.get("date_from") ? new Date(url.searchParams.get("date_from")!) : undefined,
-      dateTo: url.searchParams.get("date_to") ? new Date(url.searchParams.get("date_to")!) : undefined,
+      dateFrom: rawDateFrom ? new Date(rawDateFrom) : undefined,
+      dateTo: rawDateTo ? new Date(rawDateTo) : undefined,
       limit: url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : 20,
       offset: url.searchParams.get("offset") ? Number(url.searchParams.get("offset")) : 0
     };

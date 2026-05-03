@@ -4,37 +4,21 @@
 import { Temporal } from "@js-temporal/polyfill";
 import { z } from "zod";
 
-/**
- * Datetime and Date validation schemas
- *
- * Standards:
- * - RFC 3339 datetime with timezone offset: 2026-03-16T17:30:00+07:00
- * - Date-only format for boundaries: YYYY-MM-DD (interpreted in company timezone)
- *
- * Quick selection guide:
- * - Use `DateOnlySchema` for business dates without time (invoice_date, posting period boundaries).
- * - Use `RfcDateTimeSchema` for exact instants with offset (`*_at` API fields).
- * - Use `toUtcInstant()` when converting external RFC3339 datetime input to canonical UTC ISO.
- * - Use `toMysqlDateTime()` when persisting strict RFC3339 input into MySQL DATETIME text.
- * - Use `toMysqlDateTimeFromDateLike()` only for internal/legacy Date-like values.
- * - Use `resolveEventTime()` for flexible inputs (`at`, `ts`, or `date+timezone`) in domain logic.
- *
- * Date-only vs datetime:
- * - Date-only means "calendar day in business timezone", not an instant.
- * - Datetime means "exact instant in time", usually normalized to UTC for storage/transport.
- * - Never treat a date-only string as UTC midnight unless that is explicitly your business rule.
- */
+// ---------------------------------------------------------------------------
+// Canonical schemas
+// ---------------------------------------------------------------------------
 
 /**
- * RFC 3339 datetime with timezone offset
- * Use for: precise timestamps, transaction times, audit logs, API `*_at` fields
- * Format: 2026-03-16T17:30:00+07:00
- *
- * Example accepted values:
- * - 2026-03-16T17:30:00Z
- * - 2026-03-16T17:30:00+07:00
+ * UTC ISO Z string — the canonical datetime format.
+ * Accepts only Z-suffix instants (no offset). Use for all `*_at` API fields.
+ * Format: 2026-03-16T10:30:00.000Z
  */
-export const RfcDateTimeSchema = z.string().datetime({ offset: true });
+export const UtcIsoSchema = z.string().datetime();
+
+/**
+ * @deprecated Use `UtcIsoSchema` instead. Will be removed in Epic 53 cleanup.
+ */
+export const RfcDateTimeSchema = UtcIsoSchema;
 
 /**
  * Date-only format YYYY-MM-DD
@@ -73,42 +57,12 @@ export const DateRangeWithTimezoneSchema = DateRangeQuerySchema.extend({
 });
 
 // Type exports
-export type RfcDateTime = z.infer<typeof RfcDateTimeSchema>;
+export type RfcDateTime = z.infer<typeof UtcIsoSchema>;
+export type UtcIso = z.infer<typeof UtcIsoSchema>;
 export type DateOnly = z.infer<typeof DateOnlySchema>;
 export type Timezone = z.infer<typeof TimezoneSchema>;
 export type DateRangeQuery = z.infer<typeof DateRangeQuerySchema>;
 export type DateRangeWithTimezone = z.infer<typeof DateRangeWithTimezoneSchema>;
-
-/**
- * Normalize MySQL or any datetime to RFC 3339 UTC ISO string
- * Use this when returning datetime values in API responses.
- * Nullable-safe variant: returns `null` for `null`/`undefined` input.
- * @param value - MySQL datetime ("2026-03-16 17:16:16"), Date object, or ISO string
- * @returns UTC ISO string (e.g., "2026-03-16T10:16:16.000Z") or null if input is null/undefined
- */
-export function toRfc3339(value: string | Date | null | undefined): string | null {
-  if (value === null || value === undefined) return null;
-  const date = typeof value === 'string' ? new Date(value) : value;
-  if (isNaN(date.getTime())) {
-    throw new Error(`Invalid datetime: ${value}`);
-  }
-  return date.toISOString();
-}
-
-/**
- * Normalize MySQL or any datetime to RFC 3339 UTC ISO string (non-null version)
- * Use this for required datetime fields that are guaranteed to have values
- * @param value - MySQL datetime ("2026-03-16 17:16:16"), Date object, or ISO string
- * @returns UTC ISO string (e.g., "2026-03-16T10:16:16.000Z")
- * @throws Error if value is null, undefined, or invalid
- */
-export function toRfc3339Required(value: string | Date): string {
-  const date = typeof value === 'string' ? new Date(value) : value;
-  if (isNaN(date.getTime())) {
-    throw new Error(`Invalid datetime: ${value}`);
-  }
-  return date.toISOString();
-}
 
 // ---------------------------------------------------------------------------
 // Timezone validation
@@ -157,34 +111,15 @@ export function isValidTimeZone(tz: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// UTC instant helpers  (*_at = UTC ISO string)
+// Private helpers (needed by exported functions)
 // ---------------------------------------------------------------------------
 
-/**
- * Validate RFC 3339 datetime format.
- *
- * Uses `Temporal.Instant.from` to catch all date-rollover cases that `new Date()`
- * silently accepts (e.g. `"2026-02-30T10:30:00Z"` becomes March 2 in JS `Date` but
- * is correctly rejected by Temporal as an invalid instant).
- *
- * The regex enforces valid time-component ranges (hour 0–23, minute 0–59, second 0–59,
- * no leap-second 60) so obviously-invalid strings like `"2026-01-01T25:61:61Z"` are
- * rejected fast without entering the Temporal path. Leap seconds (ss=60) are explicitly
- * rejected — Temporal would silently normalize them to ss=59, which could cause
- * subtle off-by-one-second audit discrepancies in financial systems.
- *
- * @param value - String to validate
- * @returns true if valid RFC 3339
- */
-export function isValidDateTime(value: string): boolean {
+function isValidDateTime(value: string): boolean {
   // Structural check: enforce valid time-component ranges.
-  // hour: 00-23, minute: 00-59, second: 00-59, optional fractional, Z or ±HH:MM offset.
-  // Offset hour is also restricted to 00-23 to catch invalid offsets like +25:00 early.
   const rfc3339Regex =
     /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(\.\d+)?(Z|[+-]([01]\d|2[0-3]):\d{2})$/;
   if (!rfc3339Regex.test(value)) return false;
 
-  // Semantic validation via Temporal — catches rolled dates (e.g. Feb 30 → Mar 2).
   try {
     Temporal.Instant.from(value);
     return true;
@@ -193,160 +128,23 @@ export function isValidDateTime(value: string): boolean {
   }
 }
 
-/**
- * Validate YYYY-MM-DD date format
- *
- * Use this to validate date-only user input before timezone-aware conversion.
- * This rejects overflow dates (e.g. 2026-02-30).
- *
- * @param value - String to validate
- * @returns true if valid date
- */
-export function isValidDate(value: string): boolean {
+function isValidDate(value: string): boolean {
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
   if (!dateRegex.test(value)) return false;
-  
+
   const date = new Date(value);
   if (isNaN(date.getTime())) return false;
-  
-  // Ensure it's actually that date (not an overflow)
+
   const parts = value.split('-');
   const year = parseInt(parts[0], 10);
   const month = parseInt(parts[1], 10);
   const day = parseInt(parts[2], 10);
-  
+
   return date.getUTCFullYear() === year &&
          date.getUTCMonth() + 1 === month &&
          date.getUTCDate() === day;
 }
 
-/**
- * Convert any value that can be parsed by the `Date` constructor into a
- * UTC ISO instant string.
- *
- * Use this when you have a local-wall-clock input (RFC 3339 offset, or even
- * a bare ISO string) and you need the canonical UTC representation.
- *
- * @param input - Any value `new Date()` accepts.
- * @returns UTC ISO string ending in `"Z"`.
- * @throws {Error} when `input` cannot be parsed.
- *
- * @example
- * toUtcInstant("2026-03-16T17:30:00+07:00")  // "2026-03-16T10:30:00.000Z"
- */
-export function toUtcInstant(input: string): string {
-  // isValidDateTime validates format (regex) and semantics (Temporal) before we convert.
-  // After passing isValidDateTime, the Date path is guaranteed safe — no redundant check needed.
-  if (!isValidDateTime(input)) {
-    throw new Error(`Cannot convert to UTC instant: ${input}`);
-  }
-  return new Date(input).toISOString();
-}
-
-/**
- * Convert an RFC 3339 instant into canonical MySQL DATETIME text in UTC.
- *
- * Output format is always `YYYY-MM-DD HH:mm:ss` with millisecond precision truncated,
- * which matches the repository's current DATETIME persistence contract.
- *
- * This helper is intentionally strict: it accepts only valid RFC 3339/ISO instants that
- * pass {@link toUtcInstant}. Offsetless/local datetime strings are rejected to avoid
- * accidental dependence on server-local timezone parsing.
- *
- * @param input - RFC 3339 datetime with `Z` or explicit numeric offset.
- * @returns Canonical UTC MySQL DATETIME string.
- * @throws {Error} when `input` is malformed or not a valid instant.
- *
- * @example
- * toMysqlDateTime("2026-03-16T17:30:00+07:00")  // "2026-03-16 10:30:00"
- */
-export function toMysqlDateTime(input: string): string {
-  try {
-    return toUtcInstant(input).slice(0, 19).replace("T", " ");
-  } catch {
-    throw new Error(`Cannot convert to MySQL datetime: ${input}`);
-  }
-}
-
-/**
- * Convert a Date-like value into canonical MySQL DATETIME text in UTC.
- *
- * This helper exists for legacy/internal paths that already operate on database-returned
- * values or JavaScript `Date` instances, where strict RFC 3339 validation is not the
- * correct contract. It intentionally preserves the repository's existing `new Date(...)`
- * interpretation semantics for those internal compatibility paths.
- *
- * Do not use this for new API/client timestamp inputs. Prefer {@link toMysqlDateTime}
- * for strict RFC 3339/offset-aware input validation.
- *
- * @param input - JavaScript `Date` or date-like string accepted by `new Date(...)`.
- * @returns Canonical UTC MySQL DATETIME string.
- * @throws {Error} when `input` cannot be parsed into a valid date.
- */
-export function toMysqlDateTimeFromDateLike(input: Date | string): string {
-  const date = new Date(input);
-  if (isNaN(date.getTime())) {
-    throw new Error(`Cannot convert date-like value to MySQL datetime: ${String(input)}`);
-  }
-
-  return date.toISOString().slice(0, 19).replace("T", " ");
-}
-
-/**
- * The inverse of {@link toUtcInstant}: take a UTC ISO string and format it
- * in a target IANA timezone.
- *
- * @param utcAt - UTC ISO string (must end in Z or have an offset).
- * @param timezone - Target IANA timezone.
- * @remarks Output is truncated to millisecond precision per Jurnapod timestamp semantics.
- * @returns ISO datetime with timezone offset appended, e.g. `"2026-03-16T17:30:00.000+07:00"`.
- * @throws {Error} when `utcAt` is not a valid date string.
- *
- * @example
- * fromUtcInstant("2026-03-16T10:30:00.000Z", "Asia/Jakarta")  // "2026-03-16T17:30:00.000+07:00"
- */
-export function fromUtcInstant(utcAt: string, timezone: string): string {
-  let instant: Temporal.Instant;
-  try {
-    instant = Temporal.Instant.from(utcAt);
-  } catch {
-    throw new Error(`Invalid UTC instant: ${utcAt}`);
-  }
-
-  if (!isValidTimeZone(timezone)) {
-    throw new Error(`Invalid timezone: ${timezone}`);
-  }
-
-  // Convert to the target timezone to get wall-clock components and offset.
-  const zdt = instant.toZonedDateTimeISO(timezone);
-
-  const year = String(zdt.year).padStart(4, "0");
-  const month = String(zdt.month).padStart(2, "0");
-  const day = String(zdt.day).padStart(2, "0");
-  const hour = String(zdt.hour).padStart(2, "0");
-  const minute = String(zdt.minute).padStart(2, "0");
-  const second = String(zdt.second).padStart(2, "0");
-  const frac = String(zdt.millisecond).padStart(3, "0");
-
-  // zdt.offset is the UTC offset string for this instant in the target timezone,
-  // e.g. "+07:00" or "-05:00". Use it directly — no manual arithmetic needed.
-  return `${year}-${month}-${day}T${hour}:${minute}:${second}.${frac}${zdt.offset}`;
-}
-
-// ---------------------------------------------------------------------------
-// Private helpers (needed by exported functions)
-// ---------------------------------------------------------------------------
-
-/**
- * Convert a business-local YYYY-MM-DD date in a given timezone to a UTC ISO
- * string at a specified hour and minute (business-local time).
- *
- * @param dateStr - Business-local date in YYYY-MM-DD format.
- * @param timezone - IANA timezone for the business.
- * @param hour - Hour in business-local time (0–23), default 0.
- * @param minute - Minute in business-local time (0–59), default 0.
- * @returns UTC ISO string.
- */
 function normalizeDateWithTime(
   dateStr: string,
   timezone: string,
@@ -355,46 +153,23 @@ function normalizeDateWithTime(
   second: number = 0,
   millisecond: number = 0
 ): string {
-  // Validate format
   if (!isValidDate(dateStr)) {
     throw new Error(`Invalid date format: ${dateStr}. Expected: YYYY-MM-DD`);
   }
 
-  // Pre-validate timezone for a consistent error message before Temporal throws.
   if (!isValidTimeZone(timezone)) {
     throw new Error(`Invalid timezone: ${timezone}`);
   }
 
-  // Validate local time component ranges
-  if (!Number.isInteger(hour)) {
-    throw new Error(`Invalid hour: ${hour}. Must be an integer.`);
-  }
-  if (!Number.isInteger(minute)) {
-    throw new Error(`Invalid minute: ${minute}. Must be an integer.`);
-  }
-  if (!Number.isInteger(second)) {
-    throw new Error(`Invalid second: ${second}. Must be an integer.`);
-  }
-  if (!Number.isInteger(millisecond)) {
-    throw new Error(`Invalid millisecond: ${millisecond}. Must be an integer.`);
-  }
-  if (hour < 0 || hour > 23) {
-    throw new Error(`Invalid hour: ${hour}. Expected: 0-23`);
-  }
-  if (minute < 0 || minute > 59) {
-    throw new Error(`Invalid minute: ${minute}. Expected: 0-59`);
-  }
-  if (second < 0 || second > 59) {
-    throw new Error(`Invalid second: ${second}. Expected: 0-59`);
-  }
-  if (millisecond < 0 || millisecond > 999) {
-    throw new Error(`Invalid millisecond: ${millisecond}. Expected: 0-999`);
-  }
+  if (!Number.isInteger(hour)) throw new Error(`Invalid hour: ${hour}. Must be an integer.`);
+  if (!Number.isInteger(minute)) throw new Error(`Invalid minute: ${minute}. Must be an integer.`);
+  if (!Number.isInteger(second)) throw new Error(`Invalid second: ${second}. Must be an integer.`);
+  if (!Number.isInteger(millisecond)) throw new Error(`Invalid millisecond: ${millisecond}. Must be an integer.`);
+  if (hour < 0 || hour > 23) throw new Error(`Invalid hour: ${hour}. Expected: 0-23`);
+  if (minute < 0 || minute > 59) throw new Error(`Invalid minute: ${minute}. Expected: 0-59`);
+  if (second < 0 || second > 59) throw new Error(`Invalid second: ${second}. Expected: 0-59`);
+  if (millisecond < 0 || millisecond > 999) throw new Error(`Invalid millisecond: ${millisecond}. Expected: 0-999`);
 
-  // Use Temporal to handle DST transitions correctly — no binary search needed.
-  // ZonedDateTime.from() accepts a plain-date-time+timezone annotation.
-  // disambiguation: 'reject' ensures invalid local times (e.g. 02:30 in a spring-forward gap)
-  // throw instead of silently shifting, so callers are forced to handle DST boundaries explicitly.
   const plainDateTime = `${dateStr}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}.${String(millisecond).padStart(3, "0")}`;
 
   let zdt: Temporal.ZonedDateTime;
@@ -404,7 +179,6 @@ function normalizeDateWithTime(
       disambiguation: "reject"
     });
   } catch (err) {
-    // Re-throw DST gap/ambiguity errors with a clear, consistent message.
     if (err instanceof RangeError) {
       throw new Error(
         `Invalid date-time: the local time ${dateStr} ${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")} does not exist or is ambiguous in ${timezone} (DST transition)`
@@ -413,45 +187,200 @@ function normalizeDateWithTime(
     throw err;
   }
 
-  // Format via Date to always produce the canonical YYYY-MM-DDTHH:MM:SS.sssZ string.
   return new Date(zdt.epochMilliseconds).toISOString();
 }
 
+function addCalendarDaysToDateStr(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const plainDate = Temporal.PlainDate.from({ year: y, month: m, day: d });
+  const result = plainDate.add({ days });
+  return `${result.year}-${String(result.month).padStart(2, '0')}-${String(result.day).padStart(2, '0')}`;
+}
+
 // ---------------------------------------------------------------------------
-// Event time resolution
+// Namespaced API: toUtcIso (produce Z string)
 // ---------------------------------------------------------------------------
+
+export const toUtcIso = {
+  /**
+   * Convert any Date-like value (Date object, MySQL datetime string, ISO string) to a UTC Z string.
+   * With `{ nullable: true }`, returns null for null/undefined input instead of throwing.
+   *
+   * Replaces: `toRfc3339`, `toRfc3339Required`, `toUtcInstant`
+   */
+  dateLike(value: string | Date | null | undefined, opts?: { nullable?: boolean }): string {
+    if (value === null || value === undefined) {
+      if (opts?.nullable) return null as unknown as string;
+      throw new Error('Invalid datetime: null/undefined');
+    }
+    const date = typeof value === 'string' ? new Date(value) : value;
+    if (isNaN(date.getTime())) {
+      throw new Error(`Invalid datetime: ${value}`);
+    }
+    return date.toISOString();
+  },
+
+  /**
+   * Convert epoch milliseconds to a UTC Z string.
+   * Replaces: `fromEpochMs`
+   */
+  epochMs(ms: number): string {
+    if (!Number.isFinite(ms)) {
+      throw new Error(`Invalid epoch ms: ${ms}`);
+    }
+    const date = new Date(ms);
+    if (isNaN(date.getTime())) {
+      throw new Error(`Invalid epoch ms: ${ms}`);
+    }
+    return date.toISOString();
+  },
+
+  /**
+   * Convert a YYYY-MM-DD business-local date + timezone to a UTC Z string at a day boundary.
+   * Replaces: `normalizeDate`
+   */
+  businessDate(dateStr: string, timezone: string, boundary: 'start' | 'end'): string {
+    const hour = boundary === 'start' ? 0 : 23;
+    const minute = boundary === 'start' ? 0 : 59;
+    const second = boundary === 'start' ? 0 : 59;
+    const millisecond = boundary === 'start' ? 0 : 999;
+    return normalizeDateWithTime(dateStr, timezone, hour, minute, second, millisecond);
+  },
+
+  /**
+   * Convert a YYYY-MM-DD business date + timezone to a half-open UTC range.
+   * Replaces: `asOfDateToUtcRange`
+   */
+  asOfDateRange(dateStr: string, timezone: string): { startUTC: string; nextDayUTC: string } {
+    if (!isValidTimeZone(timezone)) {
+      throw new Error(`Invalid timezone: ${timezone}`);
+    }
+    if (!isValidDate(dateStr)) {
+      throw new Error(`Invalid date: ${dateStr}. Expected: YYYY-MM-DD format with a real calendar date.`);
+    }
+    const startUTC = normalizeDateWithTime(dateStr, timezone, 0, 0);
+    const nextDateStr = addCalendarDaysToDateStr(dateStr, 1);
+    const nextDayUTC = normalizeDateWithTime(nextDateStr, timezone, 0, 0);
+    return { startUTC, nextDayUTC };
+  },
+
+  /**
+   * Convert a YYYY-MM-DD date range + timezone to UTC boundaries.
+   * Replaces: `toDateTimeRangeWithTimezone`
+   */
+  dateRange(dateFrom: string, dateTo: string, timezone: string): { fromStartUTC: string; toEndUTC: string } {
+    return {
+      fromStartUTC: toUtcIso.businessDate(dateFrom, timezone, 'start'),
+      toEndUTC: toUtcIso.businessDate(dateTo, timezone, 'end')
+    };
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Namespaced API: fromUtcIso (consume Z string)
+// ---------------------------------------------------------------------------
+
+export const fromUtcIso = {
+  /**
+   * Convert a UTC Z string to epoch milliseconds.
+   * Replaces: `toEpochMs`
+   */
+  epochMs(iso: string): number {
+    const date = new Date(iso);
+    if (isNaN(date.getTime())) {
+      throw new Error(`Invalid UTC instant: ${iso}`);
+    }
+    return date.getTime();
+  },
+
+  /**
+   * Convert a UTC Z string to MySQL DATETIME format (YYYY-MM-DD HH:mm:ss).
+   * Replaces: `toMysqlDateTime`
+   */
+  mysql(iso: string): string {
+    const date = new Date(iso);
+    if (isNaN(date.getTime())) {
+      throw new Error(`Cannot convert to MySQL datetime: ${iso}`);
+    }
+    return date.toISOString().slice(0, 19).replace("T", " ");
+  },
+
+  /**
+   * Derive the business-local date (YYYY-MM-DD) for a UTC instant in a given timezone.
+   * Replaces: `toBusinessDate`
+   */
+  businessDate(iso: string, timezone: string): string {
+    let instant: Temporal.Instant;
+    try {
+      instant = Temporal.Instant.from(iso);
+    } catch {
+      throw new Error(`Invalid UTC instant: ${iso}`);
+    }
+    if (!isValidTimeZone(timezone)) {
+      throw new Error(`Invalid timezone: ${timezone}`);
+    }
+    const zdt = instant.toZonedDateTimeISO(timezone);
+    return `${String(zdt.year).padStart(4, "0")}-${String(zdt.month).padStart(2, "0")}-${String(zdt.day).padStart(2, "0")}`;
+  },
+
+  /**
+   * Format a UTC Z string for display in a local timezone.
+   * Replaces: `fromUtcInstant`, `formatForDisplay`
+   */
+  localDisplay(iso: string, timezone: string, opts?: { includeTime?: boolean }): string {
+    let instant: Temporal.Instant;
+    try {
+      instant = Temporal.Instant.from(iso);
+    } catch {
+      throw new Error(`Invalid UTC instant: ${iso}`);
+    }
+    if (!isValidTimeZone(timezone)) {
+      throw new Error(`Invalid timezone: ${timezone}`);
+    }
+    const zdt = instant.toZonedDateTimeISO(timezone);
+    const year = String(zdt.year).padStart(4, '0');
+    const month = String(zdt.month).padStart(2, '0');
+    const day = String(zdt.day).padStart(2, '0');
+
+    const includeTime = opts?.includeTime !== false;
+    if (!includeTime) return `${year}-${month}-${day}`;
+
+    const hour = String(zdt.hour).padStart(2, '0');
+    const minute = String(zdt.minute).padStart(2, '0');
+    const second = String(zdt.second).padStart(2, '0');
+    const frac = String(zdt.millisecond).padStart(3, '0');
+    return `${year}-${month}-${day}T${hour}:${minute}:${second}.${frac}${zdt.offset}`;
+  },
+
+  /**
+   * Extract the YYYY-MM-DD date portion from a UTC Z string.
+   * Replaces: `toDateOnly`
+   */
+  dateOnly(iso: string): string {
+    const date = new Date(iso);
+    if (isNaN(date.getTime())) {
+      throw new Error(`Invalid UTC instant: ${iso}`);
+    }
+    return date.toISOString().slice(0, 10);
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Standalone utilities (unchanged)
+// ---------------------------------------------------------------------------
+
+/**
+ * Get current UTC timestamp as ISO string
+ */
+export function nowUTC(): string {
+  return new Date().toISOString();
+}
 
 /**
  * Resolve the canonical UTC instant for an event.
  *
- * This is the primary entry-point for business logic that receives an event
- * time in any format. It accepts:
- * - A UTC ISO instant (`*_at` field) — returned as-is.
- * - A `reservation_start_ts` / `reservation_end_ts` epoch value — converted to UTC ISO.
- * - A business-local date (`*_date`) + company timezone + optional hour/minute — converted to UTC ISO.
- *
- * **DST Ambiguity Policy**: When resolving from `date` + `timezone`, nonexistent local times
- * (spring-forward gaps) and ambiguous local times (fall-back overlaps) are **rejected by default**
- * via `disambiguation: 'reject'`. This prevents silent coercion to the wrong instant, which
- * could misplace reservations or billing events by ±1 hour. See module-level DST policy docs.
- *
  * @param event - Event time descriptor.
- * @param event.timezone - Company IANA timezone; required when deriving from `*_date`.
- *
- * Recommended usage:
- * - If your input is `*_at` (exact timestamp), pass `at`.
- * - If your input is epoch milliseconds, pass `ts`.
- * - If your input is a date-only business field, pass `date + timezone` (+ optional hour/minute).
- *
  * @returns UTC ISO string.
- *
- * @example
- * // From UTC instant
- * resolveEventTime({ at: "2026-03-16T10:30:00.000Z" })
- * // From epoch ms
- * resolveEventTime({ ts: 1710587400000 })
- * // From business-local date
- * resolveEventTime({ date: "2026-03-16", timezone: "Asia/Jakarta", hour: 9, minute: 0 })
  */
 export function resolveEventTime(event: {
   at?: string;
@@ -462,13 +391,16 @@ export function resolveEventTime(event: {
   minute?: number;
 }): string {
   if (event.at !== undefined) {
-    return toUtcInstant(event.at);
+    if (!isValidDateTime(event.at)) {
+      throw new Error(`Cannot convert to UTC instant: ${event.at}`);
+    }
+    return new Date(event.at).toISOString();
   }
   if (event.ts !== undefined) {
     if (!Number.isFinite(event.ts)) {
       throw new Error(`Invalid epoch ms: ${event.ts} is not a finite number`);
     }
-    return fromEpochMs(event.ts);
+    return toUtcIso.epochMs(event.ts);
   }
   if (event.date !== undefined && event.timezone !== undefined) {
     if (!isValidTimeZone(event.timezone)) {
@@ -484,28 +416,195 @@ export function resolveEventTime(event: {
 }
 
 /**
- * Resolve the full event-time details: UTC instant, epoch ms, business date, and timezone.
+ * Resolve the canonical business timezone using dual-mode resolution.
  *
- * Returns an aligned object from a single input form. This is useful for business logic
- * that needs all four values simultaneously (e.g. logging, event emission, or
- * cross-system timestamp propagation).
- *
- * - From `at`: `businessDate` is derived from the given `timezone`.
- * - From `ts`: `businessDate` is derived from the given `timezone`.
- * - From `date` + `timezone`: `atUtc` is computed via {@link normalizeDateWithTime},
- *   then `businessDate` is derived from it.
- *
- * DST Ambiguity Policy: same as {@link resolveEventTime} — nonexistent and ambiguous
- * local times are rejected by default via `disambiguation: 'reject'`.
- *
- * @param event - Event time descriptor.
- * @param event.timezone - Company IANA timezone; required for all input forms.
- * @returns Aligned event-time object with `atUtc`, `ts`, `businessDate`, and `timezone`.
- *
- * @example
- * resolveEventTimeDetails({ at: "2026-03-16T10:30:00.000Z" }, "Asia/Jakarta")
- * // { atUtc: "2026-03-16T10:30:00.000Z", ts: 1710587400000, businessDate: "2026-03-16", timezone: "Asia/Jakarta" }
+ * @param outletTz - IANA timezone of the outlet (may be null/undefined).
+ * @param companyTz - IANA timezone of the company (may be null/undefined).
+ * @returns The resolved IANA timezone string.
+ * @throws {Error} when neither outlet nor company timezone is valid.
  */
+export function resolveBusinessTimezone(
+  outletTz?: string | null,
+  companyTz?: string | null
+): string {
+  const outlet = outletTz == null || outletTz === "" ? undefined : String(outletTz).trim();
+  const company = companyTz == null || companyTz === "" ? undefined : String(companyTz).trim();
+
+  if (outlet !== undefined && isValidTimeZone(outlet)) return outlet;
+  if (company !== undefined && isValidTimeZone(company)) return company;
+
+  const provided = [outlet, company].filter(Boolean).join(", ") || "none";
+  throw new Error(
+    `Unresolved business timezone: outlet="${outlet ?? "null"}", company="${company ?? "null"}". ` +
+    `At least one must be a valid IANA timezone. Provided: ${provided}`
+  );
+}
+
+/**
+ * Convert a YYYY-MM-DD business date in a given timezone to a half-open UTC range.
+ * @deprecated Use `toUtcIso.asOfDateRange(d, tz)` instead.
+ */
+export function asOfDateToUtcRange(
+  dateStr: string,
+  timezone: string
+): { startUTC: string; nextDayUTC: string } {
+  return toUtcIso.asOfDateRange(dateStr, timezone);
+}
+
+/**
+ * Derive the business-local date (YYYY-MM-DD) from epoch ms in a given timezone.
+ * @deprecated Compose: `fromUtcIso.businessDate(toUtcIso.epochMs(epochMs), tz)`
+ */
+export function businessDateFromEpochMs(epochMs: number, timezone: string): string {
+  if (!Number.isFinite(epochMs)) {
+    throw new Error(`Invalid epoch ms: ${epochMs} is not a finite number`);
+  }
+  if (!isValidTimeZone(timezone)) {
+    throw new Error(`Invalid timezone: ${timezone}`);
+  }
+  return fromUtcIso.businessDate(toUtcIso.epochMs(epochMs), timezone);
+}
+
+/**
+ * Derive the monthly period boundaries from epoch ms in a given timezone.
+ * @deprecated Move to `@jurnapod/modules-accounting` — this is domain logic.
+ */
+export function epochMsToPeriodBoundaries(
+  epochMs: number,
+  timezone: string
+): { periodStartUTC: string; periodNextUTC: string } {
+  if (!Number.isFinite(epochMs)) {
+    throw new Error(`Invalid epoch ms: ${epochMs} is not a finite number`);
+  }
+  if (!isValidTimeZone(timezone)) {
+    throw new Error(`Invalid timezone: ${timezone}`);
+  }
+
+  const businessDate = businessDateFromEpochMs(epochMs, timezone);
+  const year = parseInt(businessDate.slice(0, 4), 10);
+  const month = parseInt(businessDate.slice(5, 7), 10);
+
+  const periodStartDate = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextMonthYear = month === 12 ? year + 1 : year;
+  const periodNextDate = `${String(nextMonthYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-01`;
+
+  return {
+    periodStartUTC: toUtcIso.businessDate(periodStartDate, timezone, 'start'),
+    periodNextUTC: toUtcIso.businessDate(periodNextDate, timezone, 'start')
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Deprecated wrappers — kept for transition period (removed in Epic 53 cleanup)
+// ---------------------------------------------------------------------------
+
+/** @deprecated Use `toUtcIso.dateLike(value, { nullable: true })` */
+export function toRfc3339(value: string | Date | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  return toUtcIso.dateLike(value);
+}
+
+/** @deprecated Use `toUtcIso.dateLike(value)` */
+export function toRfc3339Required(value: string | Date): string {
+  return toUtcIso.dateLike(value);
+}
+
+/** @deprecated Use `toUtcIso.dateLike(input)` */
+export function toUtcInstant(input: string): string {
+  if (!isValidDateTime(input)) {
+    throw new Error(`Cannot convert to UTC instant: ${input}`);
+  }
+  return new Date(input).toISOString();
+}
+
+/** @deprecated Use `fromUtcIso.mysql(input)` */
+export function toMysqlDateTime(input: string): string {
+  return fromUtcIso.mysql(input);
+}
+
+/** @deprecated Use `fromUtcIso.mysql(toUtcIso.dateLike(input))` */
+export function toMysqlDateTimeFromDateLike(input: Date | string): string {
+  const date = new Date(input);
+  if (isNaN(date.getTime())) {
+    throw new Error(`Cannot convert date-like value to MySQL datetime: ${String(input)}`);
+  }
+  return date.toISOString().slice(0, 19).replace("T", " ");
+}
+
+/** @deprecated Use `fromUtcIso.localDisplay(utcAt, timezone)` */
+export function fromUtcInstant(utcAt: string, timezone: string): string {
+  return fromUtcIso.localDisplay(utcAt, timezone);
+}
+
+/** @deprecated Use `fromUtcIso.epochMs(utcAt)` */
+export function toEpochMs(utcAt: string): number {
+  return fromUtcIso.epochMs(utcAt);
+}
+
+/** @deprecated Use `toUtcIso.epochMs(ts)` */
+export function fromEpochMs(ts: number): string {
+  return toUtcIso.epochMs(ts);
+}
+
+/** @deprecated Use `fromUtcIso.businessDate(utcAt, timezone)` */
+export function toBusinessDate(utcAt: string, timezone: string): string {
+  return fromUtcIso.businessDate(utcAt, timezone);
+}
+
+/** @deprecated Use `toUtcIso.businessDate(dateStr, timezone, boundary)` */
+export function normalizeDate(dateStr: string, timezone: string, boundary: 'start' | 'end'): string {
+  return toUtcIso.businessDate(dateStr, timezone, boundary);
+}
+
+/** @deprecated Use `toUtcIso.dateRange(dateFrom, dateTo, timezone)` */
+export function toDateTimeRangeWithTimezone(
+  dateFrom: string,
+  dateTo: string,
+  timezone: string
+): { fromStartUTC: string; toEndUTC: string } {
+  return toUtcIso.dateRange(dateFrom, dateTo, timezone);
+}
+
+/** @deprecated Use `fromUtcIso.localDisplay(utcISO, timezone, { includeTime })` */
+export function formatForDisplay(utcISO: string, timezone: string, includeTime: boolean = true): string {
+  return fromUtcIso.localDisplay(utcISO, timezone, { includeTime });
+}
+
+/** @deprecated Use `fromUtcIso.dateOnly(utcISO)` */
+export function toDateOnly(utcISO: string): string {
+  return fromUtcIso.dateOnly(utcISO);
+}
+
+/** @deprecated No real consumers. Use `fromUtcIso.epochMs(a) - fromUtcIso.epochMs(b)` */
+export function compareDates(a: string, b: string): number {
+  const aMs = fromUtcIso.epochMs(a);
+  const bMs = fromUtcIso.epochMs(b);
+  if (aMs < bMs) return -1;
+  if (aMs > bMs) return 1;
+  return 0;
+}
+
+/** @deprecated No real consumers. Inline `new Date(s).setUTCDate(...)` */
+export function addDays(utcISO: string, days: number): string {
+  const date = new Date(utcISO);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString();
+}
+
+/** @deprecated No real consumers. Compose epoch ms. */
+export function isInFiscalYear(
+  transactionUTC: string,
+  fyStartUTC: string,
+  fyEndUTC: string
+): boolean {
+  const txMs = fromUtcIso.epochMs(transactionUTC);
+  const startMs = fromUtcIso.epochMs(fyStartUTC);
+  const endMs = fromUtcIso.epochMs(fyEndUTC);
+  return txMs >= startMs && txMs <= endMs;
+}
+
+/** @deprecated No real consumers. Use `resolveEventTime` + `fromUtcIso.businessDate`. */
 export function resolveEventTimeDetails(
   event: {
     at?: string;
@@ -528,12 +627,15 @@ export function resolveEventTimeDetails(
   let atUtc: string;
 
   if (event.at !== undefined) {
-    atUtc = toUtcInstant(event.at);
+    if (!isValidDateTime(event.at)) {
+      throw new Error(`Cannot convert to UTC instant: ${event.at}`);
+    }
+    atUtc = new Date(event.at).toISOString();
   } else if (event.ts !== undefined) {
     if (!Number.isFinite(event.ts)) {
       throw new Error(`Invalid epoch ms: ${event.ts} is not a finite number`);
     }
-    atUtc = fromEpochMs(event.ts);
+    atUtc = toUtcIso.epochMs(event.ts);
   } else if (event.date !== undefined) {
     const hour = event.hour ?? 0;
     const minute = event.minute ?? 0;
@@ -546,446 +648,8 @@ export function resolveEventTimeDetails(
 
   return {
     atUtc,
-    ts: toEpochMs(atUtc),
-    businessDate: toBusinessDate(atUtc, timezone),
+    ts: fromUtcIso.epochMs(atUtc),
+    businessDate: fromUtcIso.businessDate(atUtc, timezone),
     timezone
   };
-}
-
-// ---------------------------------------------------------------------------
-// Epoch ms helpers  (*_ts = UTC unix epoch milliseconds)
-// ---------------------------------------------------------------------------
-
-/**
- * Convert a UTC ISO string to a unix epoch in milliseconds.
- *
- * @param utcAt - UTC ISO string (e.g. `"2026-03-16T10:30:00.000Z"`).
- * @returns Unix epoch milliseconds.
- * @throws {Error} when `utcAt` cannot be parsed.
- *
- * @example
- * toEpochMs("2026-03-16T10:30:00.000Z")  // 1710587400000
- */
-export function toEpochMs(utcAt: string): number {
-  const date = new Date(utcAt);
-  if (isNaN(date.getTime())) {
-    throw new Error(`Invalid UTC instant: ${utcAt}`);
-  }
-  return date.getTime();
-}
-
-/**
- * Convert a unix epoch in milliseconds to a UTC ISO string.
- *
- * @param ts - Unix epoch milliseconds.
- * @returns UTC ISO string.
- *
- * @example
- * fromEpochMs(1710587400000)  // "2026-03-16T10:30:00.000Z"
- */
-export function fromEpochMs(ts: number): string {
-  if (!Number.isFinite(ts)) {
-    throw new Error(`Invalid epoch ms: ${ts}`);
-  }
-
-  const date = new Date(ts);
-  if (isNaN(date.getTime())) {
-    throw new Error(`Invalid epoch ms: ${ts}`);
-  }
-
-  return date.toISOString();
-}
-
-// ---------------------------------------------------------------------------
-// Business-local date helpers  (*_date = YYYY-MM-DD)
-// ---------------------------------------------------------------------------
-
-/**
- * Derive the business-local date (YYYY-MM-DD) for a UTC instant in a given timezone.
- *
- * @param utcAt - UTC ISO string.
- * @param timezone - IANA timezone for the business.
- * @returns Business-local date string in YYYY-MM-DD format.
- *
- * @example
- * // March 16 2026 00:00 in Jakarta (UTC+7) is March 15 2026 in UTC
- * toBusinessDate("2026-03-15T17:00:00.000Z", "Asia/Jakarta")  // "2026-03-16"
- */
-export function toBusinessDate(utcAt: string, timezone: string): string {
-  let instant: Temporal.Instant;
-  try {
-    instant = Temporal.Instant.from(utcAt);
-  } catch {
-    throw new Error(`Invalid UTC instant: ${utcAt}`);
-  }
-
-  if (!isValidTimeZone(timezone)) {
-    throw new Error(`Invalid timezone: ${timezone}`);
-  }
-
-  const zdt = instant.toZonedDateTimeISO(timezone);
-  const year = String(zdt.year).padStart(4, "0");
-  const month = String(zdt.month).padStart(2, "0");
-  const day = String(zdt.day).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-}
-
-/**
- * Parse YYYY-MM-DD business-local date with company timezone and convert to UTC.
- *
- * This is a convenience wrapper around {@link normalizeDateWithTime} for the common
- * `start` (00:00:00) and `end` (23:59:59.999) boundary cases.
- *
- * @param dateStr - Business-local date in YYYY-MM-DD format.
- * @param timezone - IANA timezone (e.g., "Asia/Jakarta").
- * @param boundary - `"start"` → 00:00:00.000 local; `"end"` → 23:59:59.999 local.
- * @returns UTC ISO string.
- */
-export function normalizeDate(
-  dateStr: string,
-  timezone: string,
-  boundary: "start" | "end"
-): string {
-  const hour = boundary === "start" ? 0 : 23;
-  const minute = boundary === "start" ? 0 : 59;
-  const second = boundary === "start" ? 0 : 59;
-  const millisecond = boundary === "start" ? 0 : 999;
-  return normalizeDateWithTime(dateStr, timezone, hour, minute, second, millisecond);
-}
-
-/**
- * Convert date range to UTC boundaries using company timezone
- * @param dateFrom - Start date in YYYY-MM-DD format
- * @param dateTo - End date in YYYY-MM-DD format
- * @param timezone - Company timezone (e.g., "Asia/Jakarta")
- * @returns Object with UTC start and end datetimes
- */
-export function toDateTimeRangeWithTimezone(
-  dateFrom: string,
-  dateTo: string,
-  timezone: string
-): { fromStartUTC: string; toEndUTC: string } {
-  return {
-    fromStartUTC: normalizeDate(dateFrom, timezone, 'start'),
-    toEndUTC: normalizeDate(dateTo, timezone, 'end')
-  };
-}
-
-/**
- * Format UTC ISO string for display in company timezone.
- *
- * Uses Jurnapod's canonical display shape:
- * - with time: YYYY-MM-DD HH:mm:ss
- * - date only: YYYY-MM-DD
- *
- * @param utcISO - UTC ISO string
- * @param timezone - Target timezone
- * @param includeTime - Include time in output
- * @returns Formatted string for display
- */
-export function formatForDisplay(
-  utcISO: string,
-  timezone: string,
-  includeTime: boolean = true
-): string {
-  let instant: Temporal.Instant;
-  try {
-    instant = Temporal.Instant.from(utcISO);
-  } catch {
-    throw new Error(`Invalid UTC instant: ${utcISO}`);
-  }
-
-  if (!isValidTimeZone(timezone)) {
-    throw new Error(`Invalid timezone: ${timezone}`);
-  }
-
-  const zdt = instant.toZonedDateTimeISO(timezone);
-  const year = String(zdt.year).padStart(4, '0');
-  const month = String(zdt.month).padStart(2, '0');
-  const day = String(zdt.day).padStart(2, '0');
-
-  if (!includeTime) {
-    return `${year}-${month}-${day}`;
-  }
-
-  const hour = String(zdt.hour).padStart(2, '0');
-  const minute = String(zdt.minute).padStart(2, '0');
-  const second = String(zdt.second).padStart(2, '0');
-
-  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
-}
-
-/**
- * Extract the UTC date portion (YYYY-MM-DD) from a UTC instant.
- * @param utcISO - UTC ISO string
- * @returns Date string
- */
-export function toDateOnly(utcISO: string): string {
-  return toUtcInstant(utcISO).slice(0, 10);
-}
-
-/**
- * Check if a UTC transaction date falls within fiscal year boundaries.
- *
- * Uses epoch-millisecond comparison to avoid lexicographic string comparison
- * pitfalls (e.g. `"2024-01-01T00:00:00Z"` vs `"2024-01-01T00:00:00.000Z"`).
- *
- * @param transactionUTC - Transaction timestamp in UTC
- * @param fyStartUTC - Fiscal year start in UTC
- * @param fyEndUTC - Fiscal year end in UTC
- * @returns true if within fiscal year
- */
-export function isInFiscalYear(
-  transactionUTC: string,
-  fyStartUTC: string,
-  fyEndUTC: string
-): boolean {
-  const txMs = toEpochMs(toUtcInstant(transactionUTC));
-  const startMs = toEpochMs(toUtcInstant(fyStartUTC));
-  const endMs = toEpochMs(toUtcInstant(fyEndUTC));
-  return txMs >= startMs && txMs <= endMs;
-}
-
-/**
- * Get current UTC timestamp as ISO string
- */
-export function nowUTC(): string {
-  return new Date().toISOString();
-}
-
-/**
- * Add days to a YYYY-MM-DD calendar date string, returning the resulting date string.
- *
- * Uses Temporal.PlainDate for correct calendar arithmetic (handles month-end overflow,
- * leap years, year-end rollover), unlike `addDays` which operates on UTC instants.
- *
- * @param dateStr - YYYY-MM-DD date string.
- * @param days - Number of calendar days to add (can be negative).
- * @returns New YYYY-MM-DD date string.
- */
-function addCalendarDaysToDateStr(dateStr: string, days: number): string {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const plainDate = Temporal.PlainDate.from({ year: y, month: m, day: d });
-  const result = plainDate.add({ days });
-  return `${result.year}-${String(result.month).padStart(2, '0')}-${String(result.day).padStart(2, '0')}`;
-}
-
-/**
- * Add days to a UTC date
- * @param utcISO - UTC ISO string
- * @param days - Number of days to add (can be negative)
- * @returns New UTC ISO string
- */
-export function addDays(utcISO: string, days: number): string {
-  const date = new Date(utcISO);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString();
-}
-
-/**
- * Compare two UTC dates.
- *
- * Uses epoch-millisecond comparison to avoid lexicographic string comparison
- * pitfalls (e.g. `"2024-01-01T00:00:00Z"` vs `"2024-01-01T00:00:00.000Z"`).
- *
- * @param a - First UTC ISO string
- * @param b - Second UTC ISO string
- * @returns -1 if a < b, 0 if equal, 1 if a > b
- */
-export function compareDates(a: string, b: string): number {
-  const aMs = toEpochMs(toUtcInstant(a));
-  const bMs = toEpochMs(toUtcInstant(b));
-  if (aMs < bMs) return -1;
-  if (aMs > bMs) return 1;
-  return 0;
-}
-
-// ---------------------------------------------------------------------------
-// Business timezone resolution (dual-mode)
-// ---------------------------------------------------------------------------
-
-/**
- * Resolve the canonical business timezone using dual-mode resolution.
- *
- * With outlet context (outlet-scoped operation):
- *   outletTz → companyTz → error
- *
- * Without outlet context (company-level operation):
- *   companyTz → error
- *
- * UTC MUST NOT be used as a fallback for business date operations.
- *
- * @param outletTz - IANA timezone of the outlet (may be null/undefined).
- * @param companyTz - IANA timezone of the company (may be null/undefined).
- * @returns The resolved IANA timezone string.
- * @throws {Error} when neither outlet nor company timezone is valid.
- *
- * @example
- * // Outlet has priority
- * resolveBusinessTimezone("Asia/Jakarta", "Asia/Singapore")  // "Asia/Jakarta"
- * // Outlet invalid, falls back to company
- * resolveBusinessTimezone(null, "Asia/Singapore")  // "Asia/Singapore"
- * // Both invalid → throws
- * resolveBusinessTimezone(null, null)  // throws
- */
-export function resolveBusinessTimezone(
-  outletTz?: string | null,
-  companyTz?: string | null
-): string {
-  // Normalize: treat empty-string as null/undefined; trim whitespace before validation
-  const outlet = outletTz == null || outletTz === "" ? undefined : String(outletTz).trim();
-  const company = companyTz == null || companyTz === "" ? undefined : String(companyTz).trim();
-
-  // Outlet has priority if valid IANA
-  if (outlet !== undefined && isValidTimeZone(outlet)) {
-    return outlet;
-  }
-
-  // Company fallback if valid IANA
-  if (company !== undefined && isValidTimeZone(company)) {
-    return company;
-  }
-
-  // Neither resolved → explicit error, NO UTC fallback
-  const provided = [outlet, company].filter(Boolean).join(", ") || "none";
-  throw new Error(
-    `Unresolved business timezone: outlet="${outlet ?? "null"}", company="${company ?? "null"}". ` +
-    `At least one must be a valid IANA timezone. Provided: ${provided}`
-  );
-}
-
-// ---------------------------------------------------------------------------
-// As-of date to UTC range (half-open interval)
-// ---------------------------------------------------------------------------
-
-/**
- * Convert a YYYY-MM-DD business date in a given timezone to a half-open UTC range.
- *
- * Returns `{ startUTC, nextDayUTC }` where the range is:
- *   `col >= startUTC AND col < nextDayUTC`
- *
- * This is the canonical query model for datetime column filtering per
- * date-time standardization policy (docs/policies/date-time-standardization.md).
- *
- * @param dateStr - Business date in YYYY-MM-DD format.
- * @param timezone - IANA timezone for the business.
- * @returns Half-open UTC range: `{ startUTC, nextDayUTC }`.
- * @throws {Error} when `dateStr` is not a valid calendar date or `timezone` is not a valid IANA timezone.
- *
- * @example
- * asOfDateToUtcRange("2026-04-15", "Asia/Jakarta")
- * // { startUTC: "2026-04-14T17:00:00.000Z", nextDayUTC: "2026-04-15T17:00:00.000Z" }
- */
-export function asOfDateToUtcRange(
-  dateStr: string,
-  timezone: string
-): { startUTC: string; nextDayUTC: string } {
-  // Validate timezone first for consistent error messages
-  if (!isValidTimeZone(timezone)) {
-    throw new Error(`Invalid timezone: ${timezone}`);
-  }
-
-  // Validate date format and real calendar date
-  if (!isValidDate(dateStr)) {
-    throw new Error(
-      `Invalid date: ${dateStr}. Expected: YYYY-MM-DD format with a real calendar date.`
-    );
-  }
-
-  // startUTC = normalize start-of-day in business timezone
-  const startUTC = normalizeDate(dateStr, timezone, "start");
-
-  // nextDayUTC = start-of-day for (dateStr + 1 calendar day) in business timezone.
-  // Compute next calendar day in business-date terms first (safe date math), then
-  // normalize to UTC. This is correct even on DST transition days because we
-  // operate in business-local date space, not fixed 24h UTC offsets.
-  const nextDateStr = addCalendarDaysToDateStr(dateStr, 1);
-  const nextDayUTC = normalizeDate(nextDateStr, timezone, "start");
-
-  return { startUTC, nextDayUTC };
-}
-
-// ---------------------------------------------------------------------------
-// Epoch ms to business date
-// ---------------------------------------------------------------------------
-
-/**
- * Derive the business-local date (YYYY-MM-DD) from an epoch milliseconds value
- * in a given timezone.
- *
- * Composition: `toBusinessDate(fromEpochMs(epochMs), timezone)`
- *
- * @param epochMs - Unix epoch in milliseconds.
- * @param timezone - IANA timezone for the business.
- * @returns Business-local date string in YYYY-MM-DD format.
- * @throws {Error} when `epochMs` is not a finite number.
- *
- * @example
- * // 2026-04-15 00:00 in Jakarta (UTC+7) → epoch ms representing that instant
- * businessDateFromEpochMs(1710587400000, "Asia/Jakarta")  // "2026-04-15"
- */
-export function businessDateFromEpochMs(epochMs: number, timezone: string): string {
-  if (!Number.isFinite(epochMs)) {
-    throw new Error(`Invalid epoch ms: ${epochMs} is not a finite number`);
-  }
-
-  // Validate timezone before doing conversion work
-  if (!isValidTimeZone(timezone)) {
-    throw new Error(`Invalid timezone: ${timezone}`);
-  }
-
-  const utcAt = fromEpochMs(epochMs);
-  return toBusinessDate(utcAt, timezone);
-}
-
-// ---------------------------------------------------------------------------
-// Epoch ms to monthly period boundaries
-// ---------------------------------------------------------------------------
-
-/**
- * Derive the monthly period boundaries (first day of month → first day of next month)
- * in UTC from an epoch milliseconds value in a given timezone.
- *
- * @param epochMs - Unix epoch in milliseconds.
- * @param timezone - IANA timezone for the business.
- * @returns Half-open monthly range: `{ periodStartUTC, periodNextUTC }`.
- * @throws {Error} when `epochMs` is not a finite number or `timezone` is not a valid IANA timezone.
- *
- * @example
- * epochMsToPeriodBoundaries(1710587400000, "Asia/Jakarta")
- * // If the epoch falls in April 2026 → returns start of April 2026 and start of May 2026 in UTC
- */
-export function epochMsToPeriodBoundaries(
-  epochMs: number,
-  timezone: string
-): { periodStartUTC: string; periodNextUTC: string } {
-  if (!Number.isFinite(epochMs)) {
-    throw new Error(`Invalid epoch ms: ${epochMs} is not a finite number`);
-  }
-
-  if (!isValidTimeZone(timezone)) {
-    throw new Error(`Invalid timezone: ${timezone}`);
-  }
-
-  // Derive business-local date from epoch ms
-  const businessDate = businessDateFromEpochMs(epochMs, timezone);
-
-  // Extract year-month from business date
-  const year = parseInt(businessDate.slice(0, 4), 10);
-  const month = parseInt(businessDate.slice(5, 7), 10);
-
-  // Compute first day of this month: YYYY-MM-01
-  const periodStartDate = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
-
-  // Compute first day of next month
-  const nextMonth = month === 12 ? 1 : month + 1;
-  const nextMonthYear = month === 12 ? year + 1 : year;
-  const periodNextDate = `${String(nextMonthYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-01`;
-
-  // Convert both to UTC start boundaries via normalizeDate
-  const periodStartUTC = normalizeDate(periodStartDate, timezone, "start");
-  const periodNextUTC = normalizeDate(periodNextDate, timezone, "start");
-
-  return { periodStartUTC, periodNextUTC };
 }

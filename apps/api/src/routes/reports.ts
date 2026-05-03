@@ -54,6 +54,7 @@ import {
 import { getCompanyService } from "@/lib/companies";
 import type { AuthContext } from "@/lib/auth-guard";
 import type { ReportType } from "@/lib/report-telemetry";
+import { UtcIsoSchema } from "@/lib/date-helpers";
 
 const reportRoutes = new Hono();
 
@@ -82,7 +83,7 @@ reportRoutes.get("/trial-balance", async (c) => {
   try {
     const url = new URL(c.req.raw.url);
     const parsed = reportQuerySchema.extend({
-      as_of: z.string().datetime({ offset: true }).optional()
+      as_of: UtcIsoSchema.optional()
     }).parse({
       outlet_id: url.searchParams.get("outlet_id") ?? undefined,
       date_from: url.searchParams.get("date_from") ?? undefined,
@@ -266,7 +267,7 @@ reportRoutes.get("/journals", async (c) => {
   try {
     const url = new URL(c.req.raw.url);
     const parsed = reportPaginationSchema.extend({
-      as_of: z.string().datetime({ offset: true }).optional(),
+      as_of: UtcIsoSchema.optional(),
       as_of_id: z.coerce.number().int().positive().optional(),
     }).parse({
       outlet_id: url.searchParams.get("outlet_id") ?? undefined,
@@ -775,7 +776,7 @@ export function registerReportRoutes(app: OpenAPIHono): void {
       try {
         const url = new URL(c.req.raw.url);
         const parsed = reportQuerySchema.extend({
-          as_of: z.string().datetime({ offset: true }).optional()
+          as_of: UtcIsoSchema.optional()
         }).parse({
           outlet_id: url.searchParams.get("outlet_id") ?? undefined,
           date_from: url.searchParams.get("date_from") ?? undefined,

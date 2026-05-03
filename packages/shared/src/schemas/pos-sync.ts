@@ -3,6 +3,7 @@
 
 import { z } from "zod";
 import { NumericIdSchema, PosStatusSchema, UUID } from "./common.js";
+import { UtcIsoSchema } from "./datetime.js";
 
 export const PosOrderServiceTypeSchema = z.enum(["TAKEAWAY", "DINE_IN"]);
 
@@ -39,7 +40,7 @@ export const VariantSaleSchema = z.object({
   qty: z.number().positive(),
   unit_price: z.number().nonnegative(),
   total_amount: z.number().nonnegative(),
-  trx_at: z.string().datetime({ offset: true })
+  trx_at: UtcIsoSchema
 });
 
 export const VariantStockAdjustmentSchema = z.object({
@@ -51,7 +52,7 @@ export const VariantStockAdjustmentSchema = z.object({
   quantity: z.number().int().nonnegative(),
   reason: z.string().trim().min(1).max(500),
   reference: z.string().nullable().optional(),
-  adjusted_at: z.string().datetime({ offset: true })
+  adjusted_at: UtcIsoSchema
 });
 
 export const VariantSaleResultSchema = z.object({
@@ -101,10 +102,10 @@ export const PosTransactionSchema = z.object({
   reservation_id: NumericIdSchema.nullable().optional(),
   guest_count: z.coerce.number().int().positive().nullable().optional(),
   order_status: PosOrderStatusSchema.default("COMPLETED"),
-  opened_at: z.string().datetime({ offset: true }).optional(),
-  closed_at: z.string().datetime({ offset: true }).nullable().optional(),
+  opened_at: UtcIsoSchema.optional(),
+  closed_at: UtcIsoSchema.nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional(),
-  trx_at: z.string().datetime({ offset: true }),
+  trx_at: UtcIsoSchema,
   items: z.array(PosItemSchema).min(1),
   payments: z.array(PosPaymentSchema).min(1),
   taxes: z.array(PosTaxLineSchema).optional()
@@ -129,10 +130,10 @@ export const SyncPushRequestSchema = z.object({
         order_status: PosOrderStatusSchema,
         order_state: z.enum(["OPEN", "CLOSED"]),
         paid_amount: z.number().finite().nonnegative(),
-        opened_at: z.string().datetime({ offset: true }),
-        closed_at: z.string().datetime({ offset: true }).nullable(),
+        opened_at: UtcIsoSchema,
+        closed_at: UtcIsoSchema.nullable(),
         notes: z.string().trim().max(500).nullable(),
-        updated_at: z.string().datetime({ offset: true }),
+        updated_at: UtcIsoSchema,
         lines: z.array(
           z.object({
             item_id: NumericIdSchema,
@@ -144,7 +145,7 @@ export const SyncPushRequestSchema = z.object({
             unit_price_snapshot: z.number().finite().nonnegative(),
             qty: z.number().positive(),
             discount_amount: z.number().finite().min(0),
-            updated_at: z.string().datetime({ offset: true })
+            updated_at: UtcIsoSchema
           })
         )
       })
@@ -157,12 +158,12 @@ export const SyncPushRequestSchema = z.object({
         order_id: UUID,
         company_id: NumericIdSchema,
         outlet_id: NumericIdSchema,
-        base_order_updated_at: z.string().datetime({ offset: true }).nullable(),
+        base_order_updated_at: UtcIsoSchema.nullable(),
         event_type: OrderUpdateEventTypeSchema,
         delta_json: z.string().min(2),
         actor_user_id: NumericIdSchema.nullable(),
         device_id: z.string().min(1),
-        event_at: z.string().datetime({ offset: true }),
+        event_at: UtcIsoSchema,
         // created_at is SERVER-authoritative ingest metadata, not client truth.
         // It is optional because the server generates it at ingest time.
         // Clients SHOULD NOT send this field; if sent, it is IGNORED.
@@ -184,7 +185,7 @@ export const SyncPushRequestSchema = z.object({
         cancelled_quantity: z.number().positive(),
         reason: z.string().trim().min(1).max(500),
         cancelled_by_user_id: NumericIdSchema.nullable(),
-        cancelled_at: z.string().datetime({ offset: true })
+        cancelled_at: UtcIsoSchema
       })
     )
     .optional(),

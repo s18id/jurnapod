@@ -3,6 +3,7 @@
 
 import { z } from "zod";
 import { NumericIdSchema } from "./common.js";
+import { UtcIsoSchema } from "./datetime.js";
 
 export const ReservationStatusSchema = z.enum([
   "BOOKED",
@@ -20,7 +21,7 @@ export const ReservationCreateRequestSchema = z.object({
   customer_name: z.string().trim().min(1).max(191),
   customer_phone: z.string().trim().max(64).nullable().optional(),
   guest_count: z.coerce.number().int().positive(),
-  reservation_at: z.string().datetime({ offset: true }),
+  reservation_at: UtcIsoSchema,
   duration_minutes: z.coerce.number().int().positive().nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional()
 });
@@ -31,7 +32,7 @@ export const ReservationUpdateRequestSchema = z
     customer_name: z.string().trim().min(1).max(191).optional(),
     customer_phone: z.string().trim().max(64).nullable().optional(),
     guest_count: z.coerce.number().int().positive().optional(),
-    reservation_at: z.string().datetime({ offset: true }).optional(),
+    reservation_at: UtcIsoSchema.optional(),
     duration_minutes: z.coerce.number().int().positive().nullable().optional(),
     notes: z.string().trim().max(500).nullable().optional(),
     status: ReservationStatusSchema.optional()
@@ -49,16 +50,16 @@ export const ReservationRowSchema = z.object({
   customer_name: z.string().min(1),
   customer_phone: z.string().nullable(),
   guest_count: z.number().int().positive(),
-  reservation_at: z.string().datetime({ offset: true }),
+  reservation_at: UtcIsoSchema,
   duration_minutes: z.number().int().positive().nullable(),
   status: ReservationStatusSchema,
   notes: z.string().nullable(),
   linked_order_id: z.string().uuid().nullable(),
-  created_at: z.string().datetime({ offset: true }),
-  updated_at: z.string().datetime({ offset: true }),
-  arrived_at: z.string().datetime({ offset: true }).nullable(),
-  seated_at: z.string().datetime({ offset: true }).nullable(),
-  cancelled_at: z.string().datetime({ offset: true }).nullable(),
+  created_at: UtcIsoSchema,
+  updated_at: UtcIsoSchema,
+  arrived_at: UtcIsoSchema.nullable(),
+  seated_at: UtcIsoSchema.nullable(),
+  cancelled_at: UtcIsoSchema.nullable(),
   // Group display fields (populated via JOIN)
   group_name: z.string().nullable().optional(),
   group_table_count: z.number().int().nullable().optional()
@@ -70,8 +71,8 @@ export const ReservationListQuerySchema = z.object({
   date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   overlap_filter: z.coerce.boolean().optional(),
-  from: z.string().datetime({ offset: true }).optional(),
-  to: z.string().datetime({ offset: true }).optional(),
+  from: UtcIsoSchema.optional(),
+  to: UtcIsoSchema.optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0)
 });
