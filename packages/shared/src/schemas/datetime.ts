@@ -4,6 +4,39 @@
 import { Temporal } from "@js-temporal/polyfill";
 import { z } from "zod";
 
+/**
+ * Jurnapod Datetime Canonical API
+ *
+ * Two namespaces representing the conversion trunk:
+ *   toUtcIso   — "I want our canonical Z string. Here's what I have:"
+ *   fromUtcIso — "I have our canonical Z string. Here's what I want:"
+ *
+ * Canonical internal + API format: UTC ISO Z string (e.g. "2026-03-16T10:30:00.000Z")
+ * Rejects offset datetime at validation boundary. No {offset: true} anywhere.
+ *
+ * Standalone utilities (unchanged):
+ *   nowUTC()                                  — current time as Z string
+ *   isValidTimeZone(tz)                        — IANA validation
+ *   resolveBusinessTimezone(outlet?, company?)  — outlet→company→error
+ *   resolveEventTime({at?, ts?, date?, ...})   — flexible router
+ *
+ * ToUtcIso namespace (produce Z string):
+ *   .dateLike(value, opts?)     — Date|string → Z string (replaces toRfc3339/toRfc3339Required/toUtcInstant)
+ *   .epochMs(ms)                — number → Z string (replaces fromEpochMs)
+ *   .businessDate(date, tz, b)  — YYYY-MM-DD + boundary → Z string (replaces normalizeDate)
+ *   .asOfDateRange(date, tz)    — YYYY-MM-DD → {startUTC, nextDayUTC} (replaces asOfDateToUtcRange)
+ *   .dateRange(from, to, tz)    — date range → {fromStartUTC, toEndUTC} (replaces toDateTimeRangeWithTimezone)
+ *
+ * FromUtcIso namespace (consume Z string):
+ *   .epochMs(iso)               — Z string → number (replaces toEpochMs)
+ *   .mysql(iso)                 — Z string → YYYY-MM-DD HH:mm:ss (replaces toMysqlDateTime)
+ *   .businessDate(iso, tz)      — Z string → YYYY-MM-DD (replaces toBusinessDate)
+ *   .localDisplay(iso, tz, op?) — Z string → local display (replaces fromUtcInstant/formatForDisplay)
+ *   .dateOnly(iso)              — Z string → YYYY-MM-DD (replaces toDateOnly)
+ *
+ * @see _bmad-output/planning-artifacts/datetime-api-consolidation-plan.md
+ */
+
 // ---------------------------------------------------------------------------
 // Canonical schemas
 // ---------------------------------------------------------------------------

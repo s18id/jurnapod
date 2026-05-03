@@ -171,6 +171,72 @@ All sync operations must use these field names:
 
 ---
 
+## Canonical Datetime API (Epic 53)
+
+All datetime conversions MUST use the namespaced API from `packages/shared/src/schemas/datetime.ts`.
+Re-exported for apps via `apps/api/src/lib/date-helpers.ts`.
+
+### Conversion Flow
+
+```
+API INPUT (Z only — strict z.string().datetime(), no {offset: true})
+  ↓ validation
+Always Z string                              ← business logic layer
+  ↓ fromUtcIso.mysql() / fromUtcIso.epochMs()
+DB (DATETIME or BIGINT)
+  ↑ toUtcIso.dateLike() / toUtcIso.epochMs()
+Always Z string                              ← business logic layer
+  ↓ response serialization
+API OUTPUT (Z only)
+```
+
+### Namespaced API
+
+| Namespace | Method | Input | Output | Replaces |
+|-----------|--------|-------|--------|----------|
+| `toUtcIso` | `.dateLike(value, opts?)` | `Date\|string` | Z string | `toRfc3339`, `toRfc3339Required`, `toUtcInstant` |
+| `toUtcIso` | `.epochMs(ms)` | number | Z string | `fromEpochMs` |
+| `toUtcIso` | `.businessDate(date, tz, boundary)` | YYYY-MM-DD | Z string | `normalizeDate` |
+| `toUtcIso` | `.asOfDateRange(date, tz)` | YYYY-MM-DD | `{startUTC, nextDayUTC}` | `asOfDateToUtcRange` |
+| `toUtcIso` | `.dateRange(from, to, tz)` | dates + tz | `{fromStartUTC, toEndUTC}` | `toDateTimeRangeWithTimezone` |
+| `fromUtcIso` | `.epochMs(iso)` | Z string | number | `toEpochMs` |
+| `fromUtcIso` | `.mysql(iso)` | Z string | YYYY-MM-DD HH:mm:ss | `toMysqlDateTime` |
+| `fromUtcIso` | `.businessDate(iso, tz)` | Z string | YYYY-MM-DD | `toBusinessDate` |
+| `fromUtcIso` | `.localDisplay(iso, tz, opts?)` | Z string | local display | `fromUtcInstant`, `formatForDisplay` |
+| `fromUtcIso` | `.dateOnly(iso)` | Z string | YYYY-MM-DD | `toDateOnly` |
+
+### Standalone (unchanged)
+
+| Export | Signature | Purpose |
+|--------|-----------|---------|
+| `nowUTC()` | `() => string` | Current time as Z string |
+| `isValidTimeZone(tz)` | `(string) => boolean` | IANA validation |
+| `resolveBusinessTimezone(outlet?, company?)` | `(string?, string?) => string` | outlet→company→error |
+| `resolveEventTime({at?, ts?, date?, ...})` | `(object) => string` | Flexible router |
+| `UtcIsoSchema` | `z.string().datetime()` | Strict Z-only, no offset |
+
+### Rules
+
+- **API input: Z only** — `z.string().datetime()` with NO `{offset: true}`. Reject offset at validation.
+- **Business logic: Z only** — all internal values are Z strings. Conversions happen only at two DB boundary points.
+- **DB write (DATETIME `*_at`)**: `fromUtcIso.mysql(zStr)` — Z → `YYYY-MM-DD HH:mm:ss`
+- **DB write (BIGINT `*_ts`)**: `fromUtcIso.epochMs(zStr)` — Z → epoch ms
+- **DB read (DATETIME)**: `toUtcIso.dateLike(dbVal)` — Date/MySQL → Z
+- **DB read (BIGINT)**: `toUtcIso.epochMs(ms)` — epoch ms → Z
+- **YYYY-MM-DD (business date)**: Use `DateOnlySchema` — separate domain, not a UTC instant
+- **`toUtcIso.dateLike(x)` returns `string | null`**: Use `as string` when the value is known non-null, or `{ nullable: true }` for nullable inputs
+
+### Removed Functions (Epic 53 cleanup)
+
+The following functions were removed. Use their replacements above:
+`toRfc3339`, `toRfc3339Required`, `toUtcInstant`, `toMysqlDateTime`, `toMysqlDateTimeFromDateLike`,
+`toEpochMs`, `fromEpochMs`, `toBusinessDate`, `normalizeDate`, `fromUtcInstant`, `formatForDisplay`,
+`toDateOnly`, `asOfDateToUtcRange`, `toDateTimeRangeWithTimezone`, `businessDateFromEpochMs`,
+`epochMsToPeriodBoundaries`, `compareDates`, `addDays`, `isInFiscalYear`, `resolveEventTimeDetails`,
+`RfcDateTimeSchema`
+
+---
+
 ## Canonical Reservation Time Schema
 
 - **Storage**: Unix milliseconds in `BIGINT` columns
