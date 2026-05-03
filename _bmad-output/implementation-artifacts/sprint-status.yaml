@@ -589,9 +589,9 @@ development_status:
   # Epic 51: Fiscal Correctness Hardening
   epic-51: done
   51-1-fiscal-year-close-correctness-hardening: done
-  51-2-receivables-subledger-reconciliation: backlog
-  51-3-payables-subledger-reconciliation: backlog
-  51-4-inventory-subledger-reconciliation: backlog
+  51-2-receivables-subledger-reconciliation: done
+  51-3-payables-subledger-reconciliation: done
+  51-4-inventory-subledger-reconciliation: done
   51-5-follow-up-closure-bucket: backlog
 
   # Epic 52: Datetime Standardization + Idempotency Hardening
