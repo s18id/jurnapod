@@ -19,7 +19,8 @@ import type { KyselySchema } from "@jurnapod/db";
 import { Temporal } from "@js-temporal/polyfill";
 import {
   resolveBusinessTimezone,
-  epochMsToPeriodBoundaries,
+  toUtcIso,
+  fromUtcIso,
 } from "@jurnapod/shared";
 import { CashSubledgerProvider, type CashSubledgerDbClient } from "../reconciliation/subledger/cash-provider.js";
 import { fromSignedAmount } from "../reconciliation/subledger/provider.js";
@@ -698,28 +699,46 @@ export class TrialBalanceService {
         periodEnd = fyResult.end_date instanceof Date ? fyResult.end_date : new Date(fyResult.end_date);
       } else {
         // Fallback to asOfEpochMs using canonical period boundaries
-        const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(
-          asOfEpochMs ?? Temporal.Now.instant().epochMilliseconds,
-          timezone
-        );
+        const asOfMs = asOfEpochMs ?? Temporal.Now.instant().epochMilliseconds;
+        const bizDate = fromUtcIso.businessDate(toUtcIso.epochMs(asOfMs), timezone);
+        const year = parseInt(bizDate.slice(0, 4), 10);
+        const month = parseInt(bizDate.slice(5, 7), 10);
+        const periodStartStr = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+        const nextMonth = month === 12 ? 1 : month + 1;
+        const nextMonthYear = month === 12 ? year + 1 : year;
+        const periodNextStr = `${String(nextMonthYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-01`;
+        const periodStartUTC = toUtcIso.businessDate(periodStartStr, timezone, 'start');
+        const periodNextUTC = toUtcIso.businessDate(periodNextStr, timezone, 'start');
         periodStart = new Date(periodStartUTC);
         periodEnd = new Date(periodNextUTC);
       }
     } else if (periodId !== undefined) {
       // TODO: Once periods table exists, query it here
       // For now, fall back to asOfEpochMs or default to current month using canonical helpers
-      const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(
-        asOfEpochMs ?? Temporal.Now.instant().epochMilliseconds,
-        timezone
-      );
+      const asOfMs = asOfEpochMs ?? Temporal.Now.instant().epochMilliseconds;
+      const bizDate = fromUtcIso.businessDate(toUtcIso.epochMs(asOfMs), timezone);
+      const year = parseInt(bizDate.slice(0, 4), 10);
+      const month = parseInt(bizDate.slice(5, 7), 10);
+      const periodStartStr = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+      const nextMonth = month === 12 ? 1 : month + 1;
+      const nextMonthYear = month === 12 ? year + 1 : year;
+      const periodNextStr = `${String(nextMonthYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-01`;
+      const periodStartUTC = toUtcIso.businessDate(periodStartStr, timezone, 'start');
+      const periodNextUTC = toUtcIso.businessDate(periodNextStr, timezone, 'start');
       periodStart = new Date(periodStartUTC);
       periodEnd = new Date(periodNextUTC);
     } else {
       // Default to current month using canonical period boundaries
-      const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(
-        asOfEpochMs ?? Temporal.Now.instant().epochMilliseconds,
-        timezone
-      );
+      const asOfMs = asOfEpochMs ?? Temporal.Now.instant().epochMilliseconds;
+      const bizDate = fromUtcIso.businessDate(toUtcIso.epochMs(asOfMs), timezone);
+      const year = parseInt(bizDate.slice(0, 4), 10);
+      const month = parseInt(bizDate.slice(5, 7), 10);
+      const periodStartStr = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+      const nextMonth = month === 12 ? 1 : month + 1;
+      const nextMonthYear = month === 12 ? year + 1 : year;
+      const periodNextStr = `${String(nextMonthYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-01`;
+      const periodStartUTC = toUtcIso.businessDate(periodStartStr, timezone, 'start');
+      const periodNextUTC = toUtcIso.businessDate(periodNextStr, timezone, 'start');
       periodStart = new Date(periodStartUTC);
       periodEnd = new Date(periodNextUTC);
     }
@@ -727,7 +746,15 @@ export class TrialBalanceService {
     // Calculate prior period using canonical half-open boundaries
     // Prior period is the month before the current period start
     const priorAsOfEpochMs = periodStart.getTime() - 1; // Last millisecond of prior period
-    const { periodStartUTC: priorStartUTC, periodNextUTC: priorNextUTC } = epochMsToPeriodBoundaries(priorAsOfEpochMs, timezone);
+    const priorBizDate = fromUtcIso.businessDate(toUtcIso.epochMs(priorAsOfEpochMs), timezone);
+    const priorYear = parseInt(priorBizDate.slice(0, 4), 10);
+    const priorMonth = parseInt(priorBizDate.slice(5, 7), 10);
+    const priorPeriodStartStr = `${String(priorYear).padStart(4, "0")}-${String(priorMonth).padStart(2, "0")}-01`;
+    const priorNextMonth = priorMonth === 12 ? 1 : priorMonth + 1;
+    const priorNextMonthYear = priorMonth === 12 ? priorYear + 1 : priorYear;
+    const priorPeriodNextStr = `${String(priorNextMonthYear).padStart(4, "0")}-${String(priorNextMonth).padStart(2, "0")}-01`;
+    const priorStartUTC = toUtcIso.businessDate(priorPeriodStartStr, timezone, 'start');
+    const priorNextUTC = toUtcIso.businessDate(priorPeriodNextStr, timezone, 'start');
     const priorPeriodStart = new Date(priorStartUTC);
     const priorPeriodEnd = new Date(priorNextUTC);
 

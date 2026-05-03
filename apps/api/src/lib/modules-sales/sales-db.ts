@@ -15,7 +15,7 @@
 import { sql } from "kysely";
 import { getDb, type KyselySchema } from "@/lib/db";
 import { withTransactionRetry } from "@jurnapod/db";
-import { toDateTimeRangeWithTimezone, toUtcIso, fromUtcIso } from "@/lib/date-helpers";
+import { toUtcIso, fromUtcIso } from "@/lib/date-helpers";
 import { DOCUMENT_TYPES } from "@/lib/numbering";
 import type { SalesDb, SalesDbExecutor } from "@jurnapod/modules-sales";
 import { type Transaction } from "@jurnapod/db";
@@ -1661,7 +1661,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     let dateTo = filters.dateTo;
 
     if (dateFrom && dateTo && filters.timezone && filters.timezone !== 'UTC') {
-      const range = toDateTimeRangeWithTimezone(dateFrom, dateTo, filters.timezone);
+      const range = toUtcIso.dateRange(dateFrom, dateTo, filters.timezone);
       dateFrom = range.fromStartUTC.slice(0, 10);
       dateTo = range.toEndUTC.slice(0, 10);
     }
@@ -1768,7 +1768,7 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
     let dateTo = f.dateTo;
 
     if (dateFrom && dateTo && f.timezone && f.timezone !== 'UTC') {
-      const range = toDateTimeRangeWithTimezone(dateFrom, dateTo, f.timezone);
+      const range = toUtcIso.dateRange(dateFrom, dateTo, f.timezone);
       dateFrom = range.fromStartUTC.slice(0, 10);
       dateTo = range.toEndUTC.slice(0, 10);
     }

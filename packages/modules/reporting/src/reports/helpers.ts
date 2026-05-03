@@ -60,7 +60,7 @@ export function mysqlDateTimeToUtcDate(value: string): Date {
 /**
  * Get MySQL DATETIME or current time if conversion fails
  */
-export function toMysqlDateTimeOrNow(value: string): string {
+export function mysqlDateTimeOrNow(value: string): string {
   try {
     return fromUtcIso.mysql(value);
   } catch {

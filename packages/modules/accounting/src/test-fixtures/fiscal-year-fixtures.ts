@@ -4,6 +4,7 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import type { FiscalYearFixture } from "./types.js";
+import { toUtcIso, fromUtcIso } from "@jurnapod/shared";
 
 // Deterministic run ID for fixture code/name generation (matches API fixture behavior)
 // Uses process identity + pool ID to reduce cross-worker collisions
@@ -62,8 +63,8 @@ export async function createTestFiscalYear(
       company_id: companyId,
       code: row.code,
       year,
-      startDate: row.start_date instanceof Date ? row.start_date.toISOString().split("T")[0] : String(row.start_date),
-      endDate: row.end_date instanceof Date ? row.end_date.toISOString().split("T")[0] : String(row.end_date),
+      startDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.start_date) as string),
+      endDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.end_date) as string),
       status: row.status as "OPEN" | "CLOSED",
     };
     return fixture;
@@ -78,8 +79,8 @@ export async function createTestFiscalYear(
           company_id: companyId,
           code: row.code,
           year,
-          startDate: row.start_date instanceof Date ? row.start_date.toISOString().split("T")[0] : String(row.start_date),
-          endDate: row.end_date instanceof Date ? row.end_date.toISOString().split("T")[0] : String(row.end_date),
+          startDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.start_date) as string),
+          endDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.end_date) as string),
           status: row.status as "OPEN" | "CLOSED",
         };
       }

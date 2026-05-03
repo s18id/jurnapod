@@ -4,6 +4,7 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import type { FiscalPeriodFixture } from "./types.js";
+import { toUtcIso, fromUtcIso } from "@jurnapod/shared";
 
 // Status tinyint mapping (matches migration 0180 schema)
 const STATUS_OPEN_INT = 1;
@@ -57,10 +58,10 @@ export async function createTestFiscalPeriod(
   if (fyResult.rows.length > 0) {
     const fyRow = fyResult.rows[0] as { start_date: Date; end_date: Date };
     if (!options?.startDate) {
-      startDate = fyRow.start_date instanceof Date ? fyRow.start_date.toISOString().split("T")[0] : String(fyRow.start_date);
+      startDate = fromUtcIso.dateOnly(toUtcIso.dateLike(fyRow.start_date) as string);
     }
     if (!options?.endDate) {
-      endDate = fyRow.end_date instanceof Date ? fyRow.end_date.toISOString().split("T")[0] : String(fyRow.end_date);
+      endDate = fromUtcIso.dateOnly(toUtcIso.dateLike(fyRow.end_date) as string);
     }
   }
 
@@ -92,8 +93,8 @@ export async function createTestFiscalPeriod(
       id: Number(row.id),
       fiscalYearId: Number(row.fiscal_year_id),
       periodNumber: Number(row.period_no),
-      startDate: row.start_date instanceof Date ? row.start_date.toISOString().split("T")[0] : String(row.start_date),
-      endDate: row.end_date instanceof Date ? row.end_date.toISOString().split("T")[0] : String(row.end_date),
+      startDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.start_date) as string),
+      endDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.end_date) as string),
       status: row.status === STATUS_OPEN_INT ? "OPEN" : "CLOSED",
     };
     return fixture;
@@ -107,8 +108,8 @@ export async function createTestFiscalPeriod(
           id: Number(row.id),
           fiscalYearId: Number(row.fiscal_year_id),
           periodNumber: Number(row.period_no),
-          startDate: row.start_date instanceof Date ? row.start_date.toISOString().split("T")[0] : String(row.start_date),
-          endDate: row.end_date instanceof Date ? row.end_date.toISOString().split("T")[0] : String(row.end_date),
+          startDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.start_date) as string),
+          endDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.end_date) as string),
           status: row.status === STATUS_OPEN_INT ? "OPEN" : "CLOSED",
         };
       }

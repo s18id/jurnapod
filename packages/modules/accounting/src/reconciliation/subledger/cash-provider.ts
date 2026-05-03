@@ -16,7 +16,8 @@ import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import {
   resolveBusinessTimezone,
-  epochMsToPeriodBoundaries,
+  toUtcIso,
+  fromUtcIso,
 } from "@jurnapod/shared";
 
 import {
@@ -284,7 +285,15 @@ export class CashSubledgerProvider implements SubledgerBalanceProvider {
 
     // Fall back to asOfEpochMs or epoch 0, using canonical period boundaries
     if (asOfEpochMs !== undefined) {
-      const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(asOfEpochMs, timezone);
+      const bizDate = fromUtcIso.businessDate(toUtcIso.epochMs(asOfEpochMs), timezone);
+      const year = parseInt(bizDate.slice(0, 4), 10);
+      const month = parseInt(bizDate.slice(5, 7), 10);
+      const periodStartStr = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+      const nextMonth = month === 12 ? 1 : month + 1;
+      const nextMonthYear = month === 12 ? year + 1 : year;
+      const periodNextStr = `${String(nextMonthYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-01`;
+      const periodStartUTC = toUtcIso.businessDate(periodStartStr, timezone, 'start');
+      const periodNextUTC = toUtcIso.businessDate(periodNextStr, timezone, 'start');
       return {
         periodStart: new Date(periodStartUTC),
         periodEnd: new Date(periodNextUTC),

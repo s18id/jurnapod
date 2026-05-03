@@ -18,8 +18,8 @@ import type { KyselySchema } from "@jurnapod/db";
 import { Temporal } from "@js-temporal/polyfill";
 import {
   resolveBusinessTimezone,
-  epochMsToPeriodBoundaries,
-  businessDateFromEpochMs,
+  toUtcIso,
+  fromUtcIso,
 } from "@jurnapod/shared";
 
 // =============================================================================
@@ -604,7 +604,15 @@ export class ReconciliationDashboardService {
 
     // Fall back to asOfEpochMs or default to current month using canonical period boundaries
     if (asOfEpochMs !== undefined) {
-      const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(asOfEpochMs, timezone);
+      const bizDate = fromUtcIso.businessDate(toUtcIso.epochMs(asOfEpochMs), timezone);
+      const year = parseInt(bizDate.slice(0, 4), 10);
+      const month = parseInt(bizDate.slice(5, 7), 10);
+      const periodStart = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+      const nextMonth = month === 12 ? 1 : month + 1;
+      const nextMonthYear = month === 12 ? year + 1 : year;
+      const periodNext = `${String(nextMonthYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-01`;
+      const periodStartUTC = toUtcIso.businessDate(periodStart, timezone, 'start');
+      const periodNextUTC = toUtcIso.businessDate(periodNext, timezone, 'start');
       return {
         periodStart: new Date(periodStartUTC),
         periodEnd: new Date(periodNextUTC),
@@ -612,13 +620,18 @@ export class ReconciliationDashboardService {
     }
 
     // Default: current month using canonical period boundaries
-    const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(
-      Temporal.Now.instant().epochMilliseconds,
-      timezone
-    );
+    const bizDateDefault = fromUtcIso.businessDate(toUtcIso.epochMs(Temporal.Now.instant().epochMilliseconds), timezone);
+    const yearDefault = parseInt(bizDateDefault.slice(0, 4), 10);
+    const monthDefault = parseInt(bizDateDefault.slice(5, 7), 10);
+    const periodStartDefault = `${String(yearDefault).padStart(4, "0")}-${String(monthDefault).padStart(2, "0")}-01`;
+    const nextMonthDefault = monthDefault === 12 ? 1 : monthDefault + 1;
+    const nextMonthYearDefault = monthDefault === 12 ? yearDefault + 1 : yearDefault;
+    const periodNextDefault = `${String(nextMonthYearDefault).padStart(4, "0")}-${String(nextMonthDefault).padStart(2, "0")}-01`;
+    const periodStartUTCDefault = toUtcIso.businessDate(periodStartDefault, timezone, 'start');
+    const periodNextUTCDefault = toUtcIso.businessDate(periodNextDefault, timezone, 'start');
     return {
-      periodStart: new Date(periodStartUTC),
-      periodEnd: new Date(periodNextUTC),
+      periodStart: new Date(periodStartUTCDefault),
+      periodEnd: new Date(periodNextUTCDefault),
     };
   }
 
@@ -936,9 +949,10 @@ export class ReconciliationDashboardService {
     const timezone = await this.resolveBusinessTimezone(companyId);
 
     // Build a Temporal.PlainDate from the current period anchor (first day of current month in business TZ)
+    const bizDateForPeriod = fromUtcIso.businessDate(toUtcIso.epochMs(currentPeriodStart.getTime()), timezone);
     const currentPlainDate = Temporal.PlainDate.from({
-      year: parseInt(businessDateFromEpochMs(currentPeriodStart.getTime(), timezone).slice(0, 4), 10),
-      month: parseInt(businessDateFromEpochMs(currentPeriodStart.getTime(), timezone).slice(5, 7), 10),
+      year: parseInt(bizDateForPeriod.slice(0, 4), 10),
+      month: parseInt(bizDateForPeriod.slice(5, 7), 10),
       day: 1,
     });
 
@@ -953,7 +967,15 @@ export class ReconciliationDashboardService {
       const targetEpochMs = targetPlainDate.toZonedDateTime(timezone).epochMilliseconds;
 
       // Get canonical month boundaries for target month
-      const { periodStartUTC: pStartUTC, periodNextUTC: pNextUTC } = epochMsToPeriodBoundaries(targetEpochMs, timezone);
+      const bizDateTarget = fromUtcIso.businessDate(toUtcIso.epochMs(targetEpochMs), timezone);
+      const yearTarget = parseInt(bizDateTarget.slice(0, 4), 10);
+      const monthTarget = parseInt(bizDateTarget.slice(5, 7), 10);
+      const periodStartTarget = `${String(yearTarget).padStart(4, "0")}-${String(monthTarget).padStart(2, "0")}-01`;
+      const nextMonthTarget = monthTarget === 12 ? 1 : monthTarget + 1;
+      const nextMonthYearTarget = monthTarget === 12 ? yearTarget + 1 : yearTarget;
+      const periodNextTarget = `${String(nextMonthYearTarget).padStart(4, "0")}-${String(nextMonthTarget).padStart(2, "0")}-01`;
+      const pStartUTC = toUtcIso.businessDate(periodStartTarget, timezone, 'start');
+      const pNextUTC = toUtcIso.businessDate(periodNextTarget, timezone, 'start');
       const periodStart = new Date(pStartUTC);
       const periodEnd = new Date(pNextUTC);
 

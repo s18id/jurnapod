@@ -11,7 +11,7 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import {
-  normalizeDate,
+  toUtcIso,
   isValidTimeZone,
 } from "@jurnapod/shared";
 import type {
@@ -291,7 +291,7 @@ export class ARReconciliationService {
    * Uses normalizeDate from @jurnapod/shared (no native Date in business logic).
    */
   private normalizeDate(dateStr: string, timezone: string, endOfDay: boolean): string {
-    return normalizeDate(dateStr, timezone, endOfDay ? "end" : "start");
+    return toUtcIso.businessDate(dateStr, timezone, endOfDay ? "end" : "start");
   }
 
   /**

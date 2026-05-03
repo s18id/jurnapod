@@ -50,7 +50,7 @@ import {
   toIsoDateTime,
   toIsoDate,
   mysqlDateTimeToUtcDate,
-  toMysqlDateTimeOrNow,
+  mysqlDateTimeOrNow,
   toDateTimeRange,
   shouldFallbackDailySalesView,
 } from "./helpers.js";
@@ -63,7 +63,7 @@ export async function listPosTransactions(filter: PosTransactionFilter): Promise
   const outletClause = buildOutletInClause(filter.outletIds);
   const range = toDateTimeRange(filter.dateFrom, filter.dateTo, filter.timezone);
   const asOf = filter.asOf ?? nowUTC();
-  const asOfSql = toMysqlDateTimeOrNow(asOf);
+  const asOfSql = mysqlDateTimeOrNow(asOf);
 
   const scopeValues: Array<number | string> = [...outletClause.values];
   let statusClause = "";
@@ -349,7 +349,7 @@ export async function listJournalBatches(filter: JournalFilter): Promise<Journal
   const outletClause = buildOutletInClauseForJournals(filter.outletIds, filter.includeUnassignedOutlet ?? true);
   const range = toDateTimeRange(filter.dateFrom, filter.dateTo, filter.timezone);
   const asOf = filter.asOf ?? nowUTC();
-  const asOfSql = toMysqlDateTimeOrNow(asOf);
+  const asOfSql = mysqlDateTimeOrNow(asOf);
   const scopeValues: Array<number | string> = [...outletClause.values];
 
   return await withTransaction(db, async (trx) => {
