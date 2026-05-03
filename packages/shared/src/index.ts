@@ -13,6 +13,7 @@ export * from "./schemas/fiscal-years.js";
 export * from "./schemas/fixed-assets.js";
 export * from "./schemas/feature-flags.js";
 export * from "./schemas/inventory-cost.js";
+export * from "./schemas/inventory-reconciliation.js";
 export * from "./schemas/journals.js";
 export * from "./schemas/master-data.js";
 export * from "./schemas/modules.js";
