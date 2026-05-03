@@ -3,6 +3,7 @@
 
 import { getDb, type KyselySchema } from "./db";
 import { withTransactionRetry } from "@jurnapod/db";
+import { toUtcIso } from "./date-helpers";
 
 // =============================================================================
 // Types
@@ -111,8 +112,8 @@ function normalizeTaxRate(row: TaxRateRowFull): TaxRate {
     is_active: Boolean(row.is_active),
     created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : null,
     updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : null,
-    created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
-    updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at)
+    created_at: toUtcIso.dateLike(row.created_at) as string,
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   };
 }
 

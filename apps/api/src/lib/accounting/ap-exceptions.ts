@@ -17,6 +17,7 @@
  * - FIX(47.4-WP-C): marker on each non-trivial implementation decision
  */
 
+import { toUtcIso, fromUtcIso, nowUTC } from "@/lib/date-helpers";
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import {
@@ -205,24 +206,24 @@ function mapRowToException(row: Record<string, unknown>): APException {
     currencyCode: row.currency_code != null ? String(row.currency_code) : null,
     detectedAt:
       row.detected_at instanceof Date
-        ? row.detected_at.toISOString()
+        ? toUtcIso.dateLike(row.detected_at) as string
         : row.detected_at
           ? String(row.detected_at)
-          : new Date().toISOString(),
+          : nowUTC(),
     dueDate: row.due_date instanceof Date
-      ? row.due_date.toISOString().split("T")[0]
+      ? fromUtcIso.dateOnly(toUtcIso.dateLike(row.due_date) as string)
       : row.due_date
         ? String(row.due_date)
         : null,
     assignedToUserId: row.assigned_to_user_id != null ? Number(row.assigned_to_user_id) : null,
     assignedAt: row.assigned_at instanceof Date
-      ? row.assigned_at.toISOString()
+      ? toUtcIso.dateLike(row.assigned_at) as string
       : row.assigned_at
         ? String(row.assigned_at)
         : null,
     status: Number(row.status) as APExceptionStatusValue,
     resolvedAt: row.resolved_at instanceof Date
-      ? row.resolved_at.toISOString()
+      ? toUtcIso.dateLike(row.resolved_at) as string
       : row.resolved_at
         ? String(row.resolved_at)
         : null,
@@ -230,16 +231,16 @@ function mapRowToException(row: Record<string, unknown>): APException {
     resolutionNote: row.resolution_note != null ? String(row.resolution_note) : null,
     createdAt:
       row.created_at instanceof Date
-        ? row.created_at.toISOString()
+        ? toUtcIso.dateLike(row.created_at) as string
         : row.created_at
           ? String(row.created_at)
-          : new Date().toISOString(),
+          : nowUTC(),
     updatedAt:
       row.updated_at instanceof Date
-        ? row.updated_at.toISOString()
+        ? toUtcIso.dateLike(row.updated_at) as string
         : row.updated_at
           ? String(row.updated_at)
-          : new Date().toISOString(),
+          : nowUTC(),
   };
 }
 
@@ -499,7 +500,7 @@ async function detectOverdueInvoices(
         varianceAmount: fromScaled4(openBase),
         currencyCode: String(r.currency_code),
         dueDate: r.due_date instanceof Date
-          ? r.due_date.toISOString().split("T")[0]
+          ? fromUtcIso.dateOnly(toUtcIso.dateLike(r.due_date) as string)
           : String(r.due_date),
         exceptionKey,
       });
@@ -543,7 +544,7 @@ export async function upsertException(
   // Use INSERT ... ON DUPLICATE KEY UPDATE for atomic upsert
   // Only inserts when key doesn't exist; updates nothing if exists (idempotent)
   const now = new Date();
-  const detectedAt = now.toISOString().slice(0, 19).replace("T", " ");  // MySQL DATETIME format
+  const detectedAt = fromUtcIso.mysql(toUtcIso.dateLike(now) as string);  // MySQL DATETIME format
 
   // FIX(47.4-P1): ON DUPLICATE KEY refreshes dynamic fields when status is OPEN or ASSIGNED.
   // RESOLVED/DISMISSED rows remain immutable. This prevents stale variance/due_date/detected_at.
@@ -817,7 +818,7 @@ export async function assignException(
 
   // Update with expected status in WHERE clause for concurrency safety
   const now = new Date();
-  const assignedAt = now.toISOString().slice(0, 19).replace("T", " ");  // MySQL DATETIME format
+  const assignedAt = fromUtcIso.mysql(toUtcIso.dateLike(now) as string);  // MySQL DATETIME format
   const expectedStatus = current.status;
 
   // FIX(47.4-P1): Include expected status in WHERE; check affected rows to detect race.
@@ -887,7 +888,7 @@ export async function resolveException(
 
   // Update with expected status in WHERE clause for concurrency safety
   const now = new Date();
-  const resolvedAt = now.toISOString().slice(0, 19).replace("T", " ");  // MySQL DATETIME format
+  const resolvedAt = fromUtcIso.mysql(toUtcIso.dateLike(now) as string);  // MySQL DATETIME format
   const expectedStatus = current.status;
 
   // FIX(47.4-P1): Include expected status in WHERE; check affected rows to detect race.

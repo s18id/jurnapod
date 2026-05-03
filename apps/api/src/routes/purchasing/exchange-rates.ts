@@ -22,6 +22,7 @@ import {
   NumericIdSchema
 } from "@jurnapod/shared";
 import { requireAccess, authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";
+import { toUtcIso } from "@/lib/date-helpers";
 import { errorResponse, successResponse } from "../../lib/response.js";
 import {
   createExchangeRate,
@@ -139,7 +140,7 @@ exchangeRateRoutes.get("/lookup", async (c) => {
     return successResponse({
       currency_code: rate.currency_code,
       rate: String(rate.rate),
-      effective_date: new Date(rate.effective_date).toISOString(),
+      effective_date: toUtcIso.dateLike(rate.effective_date) as string,
       source: "exchange_rates"
     });
   } catch (error) {

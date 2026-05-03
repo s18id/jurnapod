@@ -9,6 +9,7 @@
  */
 
 import { getDb } from "../db.js";
+import { toUtcIso } from "@/lib/date-helpers";
 import { SupplierService } from "@jurnapod/modules-purchasing";
 import type {
   SupplierListParams,
@@ -28,9 +29,7 @@ function formatDecimal(value: unknown): string {
 
 function toIso(value: Date | string | null): string | null {
   if (value == null) return null;
-  if (value instanceof Date) return value.toISOString();
-  const parsed = new Date(String(value));
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
+  return toUtcIso.dateLike(value) as string;
 }
 
 // Transform package response to API contract (adds contacts array if missing)

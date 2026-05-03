@@ -33,6 +33,7 @@ export {
   APPaymentMissingAPAccountError,
   APPaymentInvalidAPAccountTypeError,
 } from "@jurnapod/modules-purchasing";
+import { toUtcIso, fromUtcIso } from "@/lib/date-helpers";
 import type { AuthContext } from "@/lib/auth-guard.js";
 import {
   checkPeriodCloseGuardrail,
@@ -62,7 +63,7 @@ export async function createDraftAPPayment(
   const db = getDb();
   const service = new APPaymentService(db);
 
-  const paymentDateStr = input.paymentDate.toISOString().split("T")[0];
+  const paymentDateStr = fromUtcIso.dateOnly(toUtcIso.dateLike(input.paymentDate) as string);
   const decision = await checkPeriodCloseGuardrail(companyId, paymentDateStr);
 
   let isOverrideEligible = false;
@@ -148,7 +149,7 @@ export async function postAPPayment(
   let cachedDecision: { periodId: number | null } | null = null;
 
   if (paymentDateResult) {
-    const paymentDateStr = new Date(paymentDateResult.payment_date).toISOString().split("T")[0];
+    const paymentDateStr = fromUtcIso.dateOnly(toUtcIso.dateLike(paymentDateResult.payment_date) as string);
     const decision = await checkPeriodCloseGuardrail(companyId, paymentDateStr);
     cachedDecision = { periodId: decision.periodId };
 
@@ -211,7 +212,7 @@ export async function voidAPPayment(
   let cachedDecision: { periodId: number | null } | null = null;
 
   if (paymentDateResult) {
-    const paymentDateStr = new Date(paymentDateResult.payment_date).toISOString().split("T")[0];
+    const paymentDateStr = fromUtcIso.dateOnly(toUtcIso.dateLike(paymentDateResult.payment_date) as string);
     const decision = await checkPeriodCloseGuardrail(companyId, paymentDateStr);
     cachedDecision = { periodId: decision.periodId };
 

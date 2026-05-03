@@ -41,6 +41,7 @@ import {
   toApExceptionStatusLabel,
 } from "@jurnapod/shared";
 import type { APException, APExceptionWorklistFilters } from "@/lib/accounting/ap-exceptions.js";
+import { fromUtcIso, nowUTC } from "@/lib/date-helpers";
 
 const apExceptionRoutes = new Hono();
 
@@ -182,7 +183,7 @@ apExceptionRoutes.get("/worklist", async (c) => {
 
     // FIX(47.4-WP-D): as_of_date defaults to today for on-demand variance detection.
     // Route layer computes the date string for service call.
-    const asOfDate = new Date().toISOString().split("T")[0];
+    const asOfDate = fromUtcIso.dateOnly(nowUTC());
 
     // Execute AC8 flow: detect then list
     const result = await detectThenList(

@@ -59,6 +59,7 @@ import {
   SESSION_TTL_MS,
 } from "../lib/import/session-store.js";
 import { randomUUID } from "node:crypto";
+import { nowUTC } from "@/lib/date-helpers";
 
 // Clean up expired sessions at startup (non-fatal if DB not yet ready)
 cleanupExpiredSessions().catch(() => {/* non-fatal at startup */});
@@ -1095,7 +1096,7 @@ importRoutes.post("/:entityType/apply", async (c) => {
         const checkpoint: CheckpointData = {
           lastSuccessfulBatchNumber: batchIndex,
           rowsCommitted,
-          timestamp: new Date().toISOString(),
+          timestamp: nowUTC(),
         };
         await updateCheckpoint(uploadId, auth.companyId, checkpoint);
         console.info(`[import] Checkpoint saved: batch ${batchIndex}, rows ${rowsCommitted}`);

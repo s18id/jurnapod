@@ -4,7 +4,7 @@
 import { marked } from "marked";
 import sanitizeHtml, { type IOptions } from "sanitize-html";
 import { getDb } from "./db";
-import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@/lib/date-helpers";
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const SLUG_PATTERN = /^[a-z0-9-]+$/;
@@ -117,8 +117,8 @@ export async function getPublishedStaticPage(slug: string): Promise<PublicStatic
     slug: row.slug,
     title: row.title,
     content_html: contentHtml,
-    updated_at: toRfc3339Required(row.updated_at),
-    published_at: toRfc3339(row.published_at)
+    updated_at: toUtcIso.dateLike(row.updated_at) as string,
+    published_at: toUtcIso.dateLike(row.published_at, { nullable: true })
   };
 
   setCachedPage(slug, page);

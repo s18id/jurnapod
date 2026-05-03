@@ -36,6 +36,7 @@ import { ensureDateWithinOpenFiscalYearWithExecutor } from "./fiscal-years.js";
 import { normalizeMoney } from "@jurnapod/modules-treasury";
 import { CashBankService } from "@jurnapod/modules-treasury";
 import { PostingService } from "@jurnapod/modules-accounting";
+import { toUtcIso, fromUtcIso } from "@/lib/date-helpers";
 import { sql } from "kysely";
 
 // Internal row type for DB mapping
@@ -66,17 +67,11 @@ type CashBankRow = {
 };
 
 function toIsoDateOnly(value: string | Date): string {
-  if (typeof value === "string") {
-    return value.slice(0, 10);
-  }
-  return value.toISOString().slice(0, 10);
+  return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
 }
 
 function toIsoDateTime(value: string | Date): string {
-  if (typeof value === "string") {
-    return new Date(value).toISOString();
-  }
-  return value.toISOString();
+  return toUtcIso.dateLike(value) as string;
 }
 
 function toCashBankTransaction(row: CashBankRow): CashBankTransaction {

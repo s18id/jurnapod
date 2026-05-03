@@ -26,6 +26,7 @@ import {
   toPurchaseOrderStatusLabel,
 } from "@jurnapod/shared";
 import { requireAccess, authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";
+import { toUtcIso } from "@/lib/date-helpers";
 import { errorResponse, successResponse } from "../../lib/response.js";
 import {
   listPurchaseOrders,
@@ -53,7 +54,7 @@ function safeDate(value: string | null | undefined): string | null {
     const d = new Date(value);
     const ts = d.getTime();
     if (Number.isNaN(ts)) return null;
-    return d.toISOString();
+    return toUtcIso.dateLike(d) as string;
   } catch {
     return null;
   }
@@ -110,8 +111,8 @@ orderRoutes.get("/", async (c) => {
       filters: {
         supplierId: parsed.supplier_id,
         status: parsed.status ? toPurchaseOrderStatusCode(parsed.status) : undefined,
-        dateFrom: parsed.date_from?.toISOString() ?? undefined,
-        dateTo: parsed.date_to?.toISOString() ?? undefined,
+        dateFrom: toUtcIso.dateLike(parsed.date_from, { nullable: true }) as string,
+        dateTo: toUtcIso.dateLike(parsed.date_to, { nullable: true }) as string,
       },
       limit: parsed.limit,
       offset: parsed.offset,

@@ -10,6 +10,7 @@ import type {
 } from "../types/pos-data.js";
 import type { SyncContext } from "@jurnapod/sync-core";
 import type { KyselySchema } from "@jurnapod/db";
+import { toUtcIso } from "@jurnapod/shared";
 
 // Row type interfaces for query results
 interface ActiveOrderRow {
@@ -271,7 +272,7 @@ export class PosDataService {
         guest_count: reservation.guest_count,
         reservation_at:
           reservation.reservation_start_ts != null
-            ? new Date(Number(reservation.reservation_start_ts)).toISOString()
+            ? toUtcIso.epochMs(Number(reservation.reservation_start_ts))
             : reservation.reservation_at,
         duration_minutes: reservation.duration_minutes,
         status: reservation.status as "BOOKED" | "CONFIRMED" | "ARRIVED" | "SEATED",

@@ -79,7 +79,7 @@ import {
   isCashierInCompany,
 } from "@jurnapod/sync-core";
 
-import { toMysqlDateTime, toUtcInstant, toEpochMs } from "@jurnapod/shared";
+import { toUtcIso, fromUtcIso } from "@jurnapod/shared";
 
 // Modules for Phase2 business logic
 import { getStockService } from "@jurnapod/modules-inventory";
@@ -97,14 +97,14 @@ const PAYLOAD_HASH_VERSION_CANONICAL_TRX_AT = 2;
 
 function toMysqlDateTimeStrict(value: string, fieldName: string = "datetime"): string {
   try {
-    return toMysqlDateTime(value);
+    return fromUtcIso.mysql(value);
   } catch {
     throw new Error(`Invalid ${fieldName}`);
   }
 }
 
 function toTimestampMs(value: string, fieldName: string = "datetime"): number {
-  return toEpochMs(toUtcInstant(value));
+  return fromUtcIso.epochMs(toUtcIso.dateLike(value) as string);
 }
 
 function normalizeTrxAtForHash(trxAt: string | number): number {
@@ -112,7 +112,7 @@ function normalizeTrxAtForHash(trxAt: string | number): number {
     return trxAt > 1e12 ? trxAt : trxAt * 1000;
   }
   try {
-    return toEpochMs(toUtcInstant(trxAt));
+    return fromUtcIso.epochMs(toUtcIso.dateLike(trxAt) as string);
   } catch {
     throw new Error(`Invalid trx_at: ${trxAt}`);
   }

@@ -17,6 +17,7 @@ import {
   UtcIsoSchema,
 } from "@jurnapod/shared";
 import { requireAccess, authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";
+import { toUtcIso } from "@/lib/date-helpers";
 import { errorResponse, successResponse } from "../../lib/response.js";
 import {
   listGoodsReceipts,
@@ -111,13 +112,13 @@ receiptRoutes.get("/:id", async (c) => {
       supplier_id: receipt.supplier_id,
       supplier_name: receipt.supplier_name,
       reference_number: receipt.reference_number,
-      receipt_date: receipt.receipt_date.toISOString(),
+      receipt_date: toUtcIso.dateLike(receipt.receipt_date) as string,
       status: toPurchaseOrderStatusLabel(receipt.status),
       notes: receipt.notes,
       created_by_user_id: receipt.created_by_user_id,
       updated_by_user_id: receipt.updated_by_user_id,
-      created_at: receipt.created_at.toISOString(),
-      updated_at: receipt.updated_at.toISOString(),
+      created_at: toUtcIso.dateLike(receipt.created_at) as string,
+      updated_at: toUtcIso.dateLike(receipt.updated_at) as string,
       po_reference: receipt.po_reference,
       lines: receipt.lines.map((l) => ({
         id: l.id,
@@ -170,13 +171,13 @@ receiptRoutes.post("/", async (c) => {
       supplier_id: result.receipt.supplier_id,
       supplier_name: result.receipt.supplier_name,
       reference_number: result.receipt.reference_number,
-      receipt_date: result.receipt.receipt_date.toISOString(),
+      receipt_date: toUtcIso.dateLike(result.receipt.receipt_date) as string,
       status: toPurchaseOrderStatusLabel(result.receipt.status),
       notes: result.receipt.notes,
       created_by_user_id: result.receipt.created_by_user_id,
       updated_by_user_id: result.receipt.updated_by_user_id,
-      created_at: result.receipt.created_at.toISOString(),
-      updated_at: result.receipt.updated_at.toISOString(),
+      created_at: toUtcIso.dateLike(result.receipt.created_at) as string,
+      updated_at: toUtcIso.dateLike(result.receipt.updated_at) as string,
       po_reference: result.receipt.po_reference,
       lines: result.receipt.lines.map((l) => ({
         id: l.id,

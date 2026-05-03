@@ -18,6 +18,7 @@ import type { Handler } from "hono";
 import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { checkDatabaseHealth, getSyncMetricsSnapshot, getImportMetricsSnapshot, getExportMetricsSnapshot } from "../lib/metrics/health.js";
+import { nowUTC } from "@/lib/date-helpers";
 
 const healthRoutes = new Hono();
 
@@ -131,7 +132,7 @@ interface HealthCheckResponse {
 healthRoutes.get("/", async (c) => {
   const response: HealthCheckResponse = {
     status: "ok",
-    timestamp: new Date().toISOString(),
+    timestamp: nowUTC(),
   };
 
   const isDetailed = c.req.query("detailed") === "true";
@@ -184,7 +185,7 @@ healthRoutes.get("/", async (c) => {
  * Liveness probe - simple check that server is running
  */
 healthRoutes.get("/live", async (c) => {
-  return c.json({ success: true, data: { status: "alive", timestamp: new Date().toISOString() } });
+  return c.json({ success: true, data: { status: "alive", timestamp: nowUTC() } });
 });
 
 /**
@@ -198,7 +199,7 @@ healthRoutes.get("/ready", async (c) => {
       success: false,
       data: {
         status: "not_ready",
-        timestamp: new Date().toISOString(),
+        timestamp: nowUTC(),
         reason: "Database unavailable",
       }
     }, 503);
@@ -208,7 +209,7 @@ healthRoutes.get("/ready", async (c) => {
     success: true,
     data: {
       status: "ready",
-      timestamp: new Date().toISOString(),
+      timestamp: nowUTC(),
     }
   });
 });
@@ -244,7 +245,7 @@ export function registerHealthRoutes(app: { openapi: OpenAPIHonoType["openapi"] 
   app.openapi(healthRoute, async (c) => {
     const response: HealthCheckResponse = {
       status: "ok",
-      timestamp: new Date().toISOString(),
+      timestamp: nowUTC(),
     };
 
     const isDetailed = c.req.query("detailed") === "true";
@@ -293,7 +294,7 @@ export function registerHealthRoutes(app: { openapi: OpenAPIHonoType["openapi"] 
   });
 
   app.openapi(livenessRoute, async (c) => {
-    return c.json({ success: true, data: { status: "alive", timestamp: new Date().toISOString() } });
+    return c.json({ success: true, data: { status: "alive", timestamp: nowUTC() } });
   });
 
   // GET /health/ready - Readiness probe
@@ -325,7 +326,7 @@ export function registerHealthRoutes(app: { openapi: OpenAPIHonoType["openapi"] 
           success: false,
           data: {
             status: "not_ready",
-            timestamp: new Date().toISOString(),
+            timestamp: nowUTC(),
             reason: "Database unavailable",
           },
         },
@@ -337,7 +338,7 @@ export function registerHealthRoutes(app: { openapi: OpenAPIHonoType["openapi"] 
       success: true,
       data: {
         status: "ready",
-        timestamp: new Date().toISOString(),
+        timestamp: nowUTC(),
       },
     });
   }) as unknown as Handler);

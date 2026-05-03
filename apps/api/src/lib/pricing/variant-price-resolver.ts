@@ -17,6 +17,7 @@
 
 import type { SelectQueryBuilder } from "kysely";
 import { getDb, type KyselySchema } from "../db.js";
+import { toUtcIso, fromUtcIso } from "@/lib/date-helpers";
 
 export interface ResolvedPrice {
   price: number;
@@ -81,7 +82,7 @@ function getCacheKey(
   outletId: number | null,
   date?: Date
 ): string {
-  const dateKey = date ? date.toISOString().split("T")[0] : "any";
+  const dateKey = date ? fromUtcIso.dateOnly(toUtcIso.dateLike(date) as string) : "any";
   return `${companyId}:${itemId}:${variantId ?? "null"}:${outletId ?? "null"}:${dateKey}`;
 }
 

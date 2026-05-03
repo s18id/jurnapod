@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
 import type { KyselySchema } from "@jurnapod/db";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 
 export type OutletTableQueryResult = {
   table_id: number;
@@ -36,7 +36,7 @@ export async function getOutletTablesForSync(
     zone: row.zone,
     capacity: row.capacity == null ? null : Number(row.capacity),
     status: row.status as OutletTableQueryResult['status'],
-    updated_at: toRfc3339Required(row.updated_at as Date)
+    updated_at: toUtcIso.dateLike(row.updated_at as Date) as string
   }));
 }
 
@@ -65,6 +65,6 @@ export async function getOutletTablesChangedSince(
     zone: row.zone,
     capacity: row.capacity == null ? null : Number(row.capacity),
     status: row.status as OutletTableQueryResult['status'],
-    updated_at: toRfc3339Required(row.updated_at as Date)
+    updated_at: toUtcIso.dateLike(row.updated_at as Date) as string
   }));
 }

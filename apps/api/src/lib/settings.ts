@@ -3,7 +3,7 @@
 
 import { getDb } from "./db";
 import { sql } from "kysely";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@/lib/date-helpers";
 
 export type SettingValueType = "string" | "number" | "boolean";
 
@@ -143,8 +143,8 @@ export async function listSettings(params: ListSettingsParams): Promise<CompanyS
       key: row.setting_key,
       value_type: "string",
       value: row.setting_value,
-      created_at: toRfc3339Required(row.created_at),
-      updated_at: toRfc3339Required(row.updated_at)
+      created_at: toUtcIso.dateLike(row.created_at) as string,
+      updated_at: toUtcIso.dateLike(row.updated_at) as string
     });
   }
 
@@ -177,8 +177,8 @@ export async function listSettings(params: ListSettingsParams): Promise<CompanyS
       key: row.setting_key,
       value_type: "number",
       value: row.setting_value !== null ? parseFloat(row.setting_value) : null,
-      created_at: toRfc3339Required(row.created_at),
-      updated_at: toRfc3339Required(row.updated_at)
+      created_at: toUtcIso.dateLike(row.created_at) as string,
+      updated_at: toUtcIso.dateLike(row.updated_at) as string
     });
   }
 
@@ -211,8 +211,8 @@ export async function listSettings(params: ListSettingsParams): Promise<CompanyS
       key: row.setting_key,
       value_type: "boolean",
       value: row.setting_value === 1,
-      created_at: toRfc3339Required(row.created_at),
-      updated_at: toRfc3339Required(row.updated_at)
+      created_at: toUtcIso.dateLike(row.created_at) as string,
+      updated_at: toUtcIso.dateLike(row.updated_at) as string
     });
   }
 
@@ -237,8 +237,8 @@ export async function getSetting(params: GetSettingParams): Promise<CompanySetti
     key: row.setting_key,
     value_type: "string",
     value: row.setting_value,
-    created_at: toRfc3339Required(row.created_at),
-    updated_at: toRfc3339Required(row.updated_at)
+    created_at: toUtcIso.dateLike(row.created_at) as string,
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   });
 
   const transformNumberRow = (row: { id: number; company_id: number; outlet_id: number | null; setting_key: string; setting_value: string | null; created_at: Date; updated_at: Date }): CompanySettingWithValue => ({
@@ -248,8 +248,8 @@ export async function getSetting(params: GetSettingParams): Promise<CompanySetti
     key: row.setting_key,
     value_type: "number",
     value: row.setting_value !== null ? parseFloat(row.setting_value) : null,
-    created_at: toRfc3339Required(row.created_at),
-    updated_at: toRfc3339Required(row.updated_at)
+    created_at: toUtcIso.dateLike(row.created_at) as string,
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   });
 
   const transformBooleanRow = (row: { id: number; company_id: number; outlet_id: number | null; setting_key: string; setting_value: number; created_at: Date; updated_at: Date }): CompanySettingWithValue => ({
@@ -259,8 +259,8 @@ export async function getSetting(params: GetSettingParams): Promise<CompanySetti
     key: row.setting_key,
     value_type: "boolean",
     value: row.setting_value === 1,
-    created_at: toRfc3339Required(row.created_at),
-    updated_at: toRfc3339Required(row.updated_at)
+    created_at: toUtcIso.dateLike(row.created_at) as string,
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   });
 
   // Try strings first
@@ -436,8 +436,8 @@ async function getSettingExact(params: GetSettingParams): Promise<CompanySetting
       key: row.setting_key,
       value_type: "string",
       value: row.setting_value,
-      created_at: toRfc3339Required(row.created_at),
-      updated_at: toRfc3339Required(row.updated_at)
+      created_at: toUtcIso.dateLike(row.created_at) as string,
+      updated_at: toUtcIso.dateLike(row.updated_at) as string
     };
   }
 
@@ -459,8 +459,8 @@ async function getSettingExact(params: GetSettingParams): Promise<CompanySetting
       key: row.setting_key,
       value_type: "number",
       value: row.setting_value !== null ? parseFloat(row.setting_value) : null,
-      created_at: toRfc3339Required(row.created_at),
-      updated_at: toRfc3339Required(row.updated_at)
+      created_at: toUtcIso.dateLike(row.created_at) as string,
+      updated_at: toUtcIso.dateLike(row.updated_at) as string
     };
   }
 
@@ -482,8 +482,8 @@ async function getSettingExact(params: GetSettingParams): Promise<CompanySetting
       key: row.setting_key,
       value_type: "boolean",
       value: row.setting_value === 1,
-      created_at: toRfc3339Required(row.created_at),
-      updated_at: toRfc3339Required(row.updated_at)
+      created_at: toUtcIso.dateLike(row.created_at) as string,
+      updated_at: toUtcIso.dateLike(row.updated_at) as string
     };
   }
 

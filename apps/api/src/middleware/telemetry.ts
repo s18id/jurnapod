@@ -14,6 +14,7 @@
 
 import { generateRequestId } from "@jurnapod/telemetry/correlation";
 import type { Context, Next } from "hono";
+import { nowUTC } from "@/lib/date-helpers";
 
 // OpenTelemetry imports - lazy loaded to allow optional dependency
 let trace: typeof import("@opentelemetry/api").trace | null = null;
@@ -162,7 +163,7 @@ export function createStructuredLog(
   extra?: Partial<StructuredLogEntry>
 ): StructuredLogEntry {
   const entry: StructuredLogEntry = {
-    timestamp: new Date().toISOString(),
+    timestamp: nowUTC(),
     level,
     message,
     request_id: context.correlationIds.requestId,
@@ -298,7 +299,7 @@ export function logWithTelemetry(
   } else {
     // Fallback without telemetry context
     logStructured({
-      timestamp: new Date().toISOString(),
+      timestamp: nowUTC(),
       level,
       message,
       ...extra,

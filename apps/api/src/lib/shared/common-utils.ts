@@ -12,6 +12,7 @@
 import type { KyselySchema } from "@/lib/db";
 import { getDb } from "@/lib/db";
 import { withTransactionRetry } from "@jurnapod/db";
+import { toUtcIso, fromUtcIso } from "@/lib/date-helpers";
 import {
   getNextDocumentNumber,
   NumberingConflictError,
@@ -199,14 +200,14 @@ export function formatDateOnlyFromUnknown(value: unknown): string {
     return "";
   }
   if (value instanceof Date) {
-    return value.toISOString().split('T')[0];
+    return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
   }
   if (typeof value === "string") {
     return value.slice(0, 10);
   }
   if (typeof value === "number") {
     // Assume Unix timestamp in milliseconds
-    return new Date(value).toISOString().split('T')[0];
+    return fromUtcIso.dateOnly(toUtcIso.epochMs(value));
   }
   // Fallback: convert to string and slice
   return String(value).slice(0, 10);

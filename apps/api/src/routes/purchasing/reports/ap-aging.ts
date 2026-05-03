@@ -15,6 +15,7 @@ import { z } from "zod";
 import { authenticateRequest, requireAccess, type AuthContext } from "@/lib/auth-guard";
 import { errorResponse, successResponse } from "@/lib/response";
 import { getAPAgingSummary, getAPAgingSupplierDetail } from "@/lib/purchasing/ap-aging-report";
+import { nowUTC, fromUtcIso } from "@/lib/date-helpers";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -57,7 +58,7 @@ apAgingRoutes.get("/", async (c) => {
       as_of_date: url.searchParams.get("as_of_date") ?? undefined,
     });
 
-    const asOfDate = parsed.as_of_date ?? new Date().toISOString().slice(0, 10);
+    const asOfDate = parsed.as_of_date ?? fromUtcIso.dateOnly(nowUTC());
     const result = await getAPAgingSummary(auth.companyId, asOfDate);
     return successResponse(result);
   } catch (error) {
@@ -90,7 +91,7 @@ apAgingRoutes.get("/:supplierId/detail", async (c) => {
       as_of_date: url.searchParams.get("as_of_date") ?? undefined,
     });
 
-    const asOfDate = parsed.as_of_date ?? new Date().toISOString().slice(0, 10);
+    const asOfDate = parsed.as_of_date ?? fromUtcIso.dateOnly(nowUTC());
     const result = await getAPAgingSupplierDetail(auth.companyId, supplierId, asOfDate);
 
     if (!result) {

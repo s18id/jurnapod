@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
 import type { KyselySchema } from "@jurnapod/db";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 
 export type ItemQueryResult = {
   id: number;
@@ -39,7 +39,7 @@ export async function getItemsForSync(db: KyselySchema, companyId: number): Prom
     cogs_account_id: row.cogs_account_id == null ? null : Number(row.cogs_account_id),
     inventory_asset_account_id: row.inventory_asset_account_id == null ? null : Number(row.inventory_asset_account_id),
     is_active: row.is_active === 1,
-    updated_at: toRfc3339Required(row.updated_at)
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   }));
 }
 
@@ -69,6 +69,6 @@ export async function getItemsChangedSince(
     cogs_account_id: row.cogs_account_id == null ? null : Number(row.cogs_account_id),
     inventory_asset_account_id: row.inventory_asset_account_id == null ? null : Number(row.inventory_asset_account_id),
     is_active: row.is_active === 1,
-    updated_at: toRfc3339Required(row.updated_at)
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   }));
 }

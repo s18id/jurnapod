@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { sql } from "kysely";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@/lib/date-helpers";
 import { getDb, type KyselySchema } from "../db.js";
 import { DatabaseConflictError, DatabaseReferenceError } from "../master-data-errors.js";
 import {
@@ -57,7 +57,7 @@ function normalizeItemGroup(row: {
     code: row.code,
     name: row.name,
     is_active: row.is_active === 1,
-    updated_at: toRfc3339Required(row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at)
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   };
 }
 

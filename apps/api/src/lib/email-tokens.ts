@@ -4,6 +4,7 @@
 import { createHash, randomBytes } from "crypto";
 import { getDb } from "./db";
 import { getAppEnv } from "./env";
+import { toUtcIso } from "./date-helpers";
 import type { Transaction } from "@jurnapod/db";
 
 export type EmailTokenType = "PASSWORD_RESET" | "INVITE" | "VERIFY_EMAIL";
@@ -61,7 +62,7 @@ export async function createEmailToken(params: {
     })
     .execute();
 
-  return { token, expiresAt: expiresAt.toISOString() };
+  return { token, expiresAt: toUtcIso.dateLike(expiresAt) as string };
 }
 
 export async function validateEmailToken(

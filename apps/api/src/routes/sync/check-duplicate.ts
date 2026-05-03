@@ -32,6 +32,7 @@ import { authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";
 import { errorResponse } from "../../lib/response.js";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
 import { checkDuplicateClientTx } from "../../lib/sync/check-duplicate.js";
+import { toUtcIso } from "@/lib/date-helpers";
 
 // Extend Hono context with auth
 declare module "hono" {
@@ -82,7 +83,7 @@ checkDuplicateRoutes.post("/", async (c) => {
       return c.json({
         is_duplicate: true,
         existing_id: result.existingId,
-        created_at: result.createdAt?.toISOString()
+        created_at: toUtcIso.dateLike(result.createdAt, { nullable: true }) as string
       });
     }
 
@@ -200,7 +201,7 @@ export function registerCheckDuplicateRoutes(app: { openapi: OpenAPIHonoType["op
         return c.json({
           is_duplicate: true,
           existing_id: result.existingId,
-          created_at: result.createdAt?.toISOString()
+created_at: toUtcIso.dateLike(result.createdAt, { nullable: true }) as string
         });
       }
 

@@ -54,7 +54,7 @@ import {
 import { getCompanyService } from "@/lib/companies";
 import type { AuthContext } from "@/lib/auth-guard";
 import type { ReportType } from "@/lib/report-telemetry";
-import { UtcIsoSchema } from "@/lib/date-helpers";
+import { UtcIsoSchema, nowUTC, fromUtcIso } from "@/lib/date-helpers";
 
 const reportRoutes = new Hono();
 
@@ -596,7 +596,7 @@ reportRoutes.get("/receivables-ageing", async (c) => {
     const company = await companyService.getCompany({ companyId: auth.companyId });
     const timezone = company.timezone ?? 'UTC';
 
-    const asOfDate = parsed.as_of_date ?? new Date().toISOString().slice(0, 10);
+    const asOfDate = parsed.as_of_date ?? fromUtcIso.dateOnly(nowUTC());
 
     const result = await executeReport(
       REPORT_TYPE as ReportType,
@@ -682,7 +682,7 @@ reportRoutes.get("/receivables-ageing/customer/:customerId", async (c) => {
     const company = await companyService.getCompany({ companyId: auth.companyId });
     const timezone = company.timezone ?? "UTC";
 
-    const asOfDate = parsed.as_of_date ?? new Date().toISOString().slice(0, 10);
+    const asOfDate = parsed.as_of_date ?? fromUtcIso.dateOnly(nowUTC());
 
     const result = await executeReport(
       REPORT_TYPE as ReportType,

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
 import type { KyselySchema } from "@jurnapod/db";
+import { toUtcIso } from "@jurnapod/shared";
 
 export type TaxRateQueryResult = {
   id: number;
@@ -38,7 +39,7 @@ export async function getTaxRatesForSync(db: KyselySchema, companyId: number): P
     updated_at:
       typeof row.updated_at === "string"
         ? row.updated_at
-        : row.updated_at.toISOString()
+        : toUtcIso.dateLike(row.updated_at) as string
   }));
 }
 
@@ -70,7 +71,7 @@ export async function getTaxRatesChangedSince(
     updated_at:
       typeof row.updated_at === "string"
         ? row.updated_at
-        : row.updated_at.toISOString()
+        : toUtcIso.dateLike(row.updated_at) as string
   }));
 }
 

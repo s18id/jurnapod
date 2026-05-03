@@ -24,6 +24,7 @@ import type {
 } from './types.js';
 import { buildColumnMap, extractColumnValue } from './formatter.js';
 import { generateCSVStream, generateExcel, generateExcelChunked } from './generators.js';
+import { toUtcIso, fromUtcIso } from "@/lib/date-helpers";
 
 // ============================================================================
 // Constants
@@ -773,7 +774,7 @@ function formatValueForCSV(value: unknown): string {
   }
 
   if (value instanceof Date) {
-    return value.toISOString().replace('T', ' ').split('.')[0];
+    return fromUtcIso.mysql(toUtcIso.dateLike(value) as string);
   }
 
   if (typeof value === 'object') {

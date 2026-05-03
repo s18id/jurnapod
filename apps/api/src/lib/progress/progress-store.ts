@@ -19,6 +19,7 @@
 
 import { getDb } from "@/lib/db";
 import { sql } from "kysely";
+import { nowUTC } from "@/lib/date-helpers";
 
 // ============================================================================
 // Types
@@ -320,7 +321,7 @@ export async function failProgress(input: FailProgressInput): Promise<void> {
 
   if (error) {
     errorDetails.error = error;
-    errorDetails.failedAt = new Date().toISOString();
+    errorDetails.failedAt = nowUTC();
   }
 
   await sql`

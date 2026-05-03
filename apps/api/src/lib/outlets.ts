@@ -5,7 +5,7 @@ import type { KyselySchema } from "@jurnapod/db";
 import { withTransactionRetry } from "@jurnapod/db";
 import { AuditService } from "@jurnapod/modules-platform";
 import { getDb } from "./db";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@/lib/date-helpers";
 
 export class OutletNotFoundError extends Error {}
 export class OutletCodeExistsError extends Error {}
@@ -84,8 +84,8 @@ function mapRowToOutlet(row: OutletRow): OutletFullResponse {
     email: row.email,
     timezone: row.timezone,
     is_active: Boolean(row.is_active),
-    created_at: toRfc3339Required(row.created_at),
-    updated_at: toRfc3339Required(row.updated_at)
+    created_at: toUtcIso.dateLike(row.created_at) as string,
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   };
 }
 

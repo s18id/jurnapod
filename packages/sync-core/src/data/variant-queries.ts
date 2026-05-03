@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
 import type { KyselySchema } from "@jurnapod/db";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 
 export type ItemVariantQueryResult = {
   id: number;
@@ -39,7 +39,7 @@ export async function getVariantsForSync(db: KyselySchema, companyId: number): P
     price_override: row.price_override == null ? null : Number(row.price_override),
     stock_quantity: row.stock_quantity == null ? null : Number(row.stock_quantity),
     is_active: row.is_active === 1,
-    updated_at: toRfc3339Required(row.updated_at as Date)
+    updated_at: toUtcIso.dateLike(row.updated_at as Date) as string
   }));
 }
 
@@ -72,7 +72,7 @@ export async function getVariantsChangedSince(
     price_override: row.price_override == null ? null : Number(row.price_override),
     stock_quantity: row.stock_quantity == null ? null : Number(row.stock_quantity),
     is_active: row.is_active === 1,
-    updated_at: toRfc3339Required(row.updated_at as Date)
+    updated_at: toUtcIso.dateLike(row.updated_at as Date) as string
   }));
 }
 
@@ -118,6 +118,6 @@ export async function getVariantPricesForOutlet(
     outlet_id: row.outlet_id == null ? null : Number(row.outlet_id),
     price: Number(row.price),
     is_active: row.is_active === 1,
-    updated_at: toRfc3339Required(row.updated_at as Date)
+    updated_at: toUtcIso.dateLike(row.updated_at as Date) as string
   }));
 }

@@ -15,6 +15,7 @@ import { checkSyncModuleHealth } from "../../lib/sync-modules.js";
 import { readClientIp } from "../../lib/request-meta.js";
 import { authenticateRequest } from "../../lib/auth-guard.js";
 import type { AuthContext } from "../../lib/auth-guard.js";
+import { nowUTC } from "@/lib/date-helpers";
 
 // Extend Hono context with auth
 declare module "hono" {
@@ -113,7 +114,7 @@ healthRoutes.get("/", async (c) => {
     return Response.json(
       {
         success: true,
-        data: { status: "healthy", modules: healthStatus.modules, timestamp: new Date().toISOString() }
+        data: { status: "healthy", modules: healthStatus.modules, timestamp: nowUTC() }
       },
       {
         headers: {
@@ -230,13 +231,13 @@ export function registerSyncHealthRoutes(app: { openapi: OpenAPIHonoType["openap
 
       return c.json({
         success: true,
-        data: { status: "healthy", modules: healthStatus.modules, timestamp: new Date().toISOString() }
+        data: { status: "healthy", modules: healthStatus.modules, timestamp: nowUTC() }
       });
     } catch (error) {
       console.error("Sync health check error:", error);
       return c.json(
         { success: false, error: { code: "HEALTH_CHECK_ERROR", message: "Failed to check sync module health" } },
-        500
+        { status: 500 }
       );
     }
   }) as unknown as Handler);

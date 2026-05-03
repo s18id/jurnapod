@@ -34,6 +34,7 @@ export {
   PurchaseCreditNoApplicableInvoiceError,
   PurchaseCreditJournalNotBalancedError,
 } from "@jurnapod/modules-purchasing";
+import { toUtcIso, fromUtcIso } from "@/lib/date-helpers";
 import type { AuthContext } from "@/lib/auth-guard.js";
 import {
   checkPeriodCloseGuardrail,
@@ -67,7 +68,7 @@ export async function createDraftPurchaseCredit(
   const db = getDb();
   const service = new PurchaseCreditService(db);
 
-  const creditDateStr = input.creditDate.toISOString().split("T")[0];
+  const creditDateStr = fromUtcIso.dateOnly(toUtcIso.dateLike(input.creditDate) as string);
   const decision = await checkPeriodCloseGuardrail(companyId, creditDateStr);
 
   let isOverrideEligible = false;
@@ -153,7 +154,7 @@ export async function applyPurchaseCredit(
   let cachedDecision: { periodId: number | null } | null = null;
 
   if (creditForDate) {
-    const creditDateStr = new Date(creditForDate.credit_date).toISOString().split("T")[0];
+    const creditDateStr = fromUtcIso.dateOnly(toUtcIso.dateLike(creditForDate.credit_date) as string);
     const decision = await checkPeriodCloseGuardrail(companyId, creditDateStr);
     cachedDecision = { periodId: decision.periodId };
 
@@ -216,7 +217,7 @@ export async function voidPurchaseCredit(
   let cachedDecision: { periodId: number | null } | null = null;
 
   if (creditForDate) {
-    const creditDateStr = new Date(creditForDate.credit_date).toISOString().split("T")[0];
+    const creditDateStr = fromUtcIso.dateOnly(toUtcIso.dateLike(creditForDate.credit_date) as string);
     const decision = await checkPeriodCloseGuardrail(companyId, creditDateStr);
     cachedDecision = { periodId: decision.periodId };
 

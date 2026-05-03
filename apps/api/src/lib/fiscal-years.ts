@@ -21,6 +21,7 @@ import type {
 import { withTransactionRetry } from "@jurnapod/db";
 import { getDb } from "./db.js";
 import { KyselySettingsAdapter } from "@jurnapod/modules-platform/settings";
+import { toUtcIso, fromUtcIso } from "@/lib/date-helpers";
 
 
 import {
@@ -149,7 +150,7 @@ async function triggerAutoSnapshotForFiscalYearClose(input: {
     }
 
     const asOfDate = fiscalYear.end_date instanceof Date
-      ? fiscalYear.end_date.toISOString().slice(0, 10)
+      ? fromUtcIso.dateOnly(toUtcIso.dateLike(fiscalYear.end_date) as string)
       : String(fiscalYear.end_date).slice(0, 10);
 
     await createAPReconciliationSnapshot({
@@ -207,7 +208,7 @@ async function hasAutoSnapshotForFiscalYearEnd(input: {
   }
 
   const asOfDate = fiscalYear.end_date instanceof Date
-    ? fiscalYear.end_date.toISOString().slice(0, 10)
+    ? fromUtcIso.dateOnly(toUtcIso.dateLike(fiscalYear.end_date) as string)
     : String(fiscalYear.end_date).slice(0, 10);
   const asOfDateValue = fiscalYear.end_date instanceof Date
     ? fiscalYear.end_date

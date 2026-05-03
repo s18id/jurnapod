@@ -17,6 +17,7 @@ import {
   authenticateRequest,
   type AuthContext
 } from "../lib/auth-guard.js";
+import { toUtcIso } from "@/lib/date-helpers";
 import { errorResponse, successResponse } from "../lib/response.js";
 import {
   getProgress,
@@ -205,9 +206,9 @@ progressRoutes.get("/:operationId/progress", async (c) => {
       percentage,
       status: progress.status,
       etaSeconds,
-      startedAt: progress.startedAt.toISOString(),
-      updatedAt: progress.updatedAt.toISOString(),
-      completedAt: progress.completedAt?.toISOString() ?? null,
+      startedAt: toUtcIso.dateLike(progress.startedAt) as string,
+      updatedAt: toUtcIso.dateLike(progress.updatedAt) as string,
+      completedAt: toUtcIso.dateLike(progress.completedAt, { nullable: true }) as string,
       details: progress.details ?? undefined,
     };
 
@@ -270,9 +271,9 @@ progressRoutes.get("/", async (c) => {
       percentage: calculatePercentage(op),
       status: op.status,
       etaSeconds: op.status === "running" ? calculateEta(op) : null,
-      startedAt: op.startedAt.toISOString(),
-      updatedAt: op.updatedAt.toISOString(),
-      completedAt: op.completedAt?.toISOString() ?? null,
+      startedAt: toUtcIso.dateLike(op.startedAt) as string,
+      updatedAt: toUtcIso.dateLike(op.updatedAt) as string,
+      completedAt: toUtcIso.dateLike(op.completedAt, { nullable: true }) as string,
     }));
 
     return successResponse({
@@ -376,9 +377,9 @@ async function handleSseRequest(
             percentage,
             status: progress.status,
             etaSeconds,
-            startedAt: progress.startedAt.toISOString(),
-            updatedAt: progress.updatedAt.toISOString(),
-            completedAt: progress.completedAt?.toISOString() ?? null,
+            startedAt: toUtcIso.dateLike(progress.startedAt) as string,
+            updatedAt: toUtcIso.dateLike(progress.updatedAt) as string,
+            completedAt: toUtcIso.dateLike(progress.completedAt, { nullable: true }) as string,
             details: progress.details ?? undefined,
           };
 
@@ -491,9 +492,9 @@ export function registerProgressRoutes(app: OpenAPIHono): void {
           percentage,
           status: progress.status,
           etaSeconds,
-          startedAt: progress.startedAt.toISOString(),
-          updatedAt: progress.updatedAt.toISOString(),
-          completedAt: progress.completedAt?.toISOString() ?? null,
+          startedAt: toUtcIso.dateLike(progress.startedAt) as string,
+          updatedAt: toUtcIso.dateLike(progress.updatedAt) as string,
+          completedAt: toUtcIso.dateLike(progress.completedAt, { nullable: true }) as string,
           details: progress.details ?? undefined,
         });
       } catch (error) {
@@ -575,9 +576,9 @@ export function registerProgressRoutes(app: OpenAPIHono): void {
           percentage: calculatePercentage(op),
           status: op.status,
           etaSeconds: op.status === "running" ? calculateEta(op) : null,
-          startedAt: op.startedAt.toISOString(),
-          updatedAt: op.updatedAt.toISOString(),
-          completedAt: op.completedAt?.toISOString() ?? null,
+          startedAt: toUtcIso.dateLike(op.startedAt) as string,
+          updatedAt: toUtcIso.dateLike(op.updatedAt) as string,
+          completedAt: toUtcIso.dateLike(op.completedAt, { nullable: true }) as string,
         }));
 
         return successResponse({ operations, total: result.total, limit, offset });

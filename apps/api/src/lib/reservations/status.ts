@@ -21,6 +21,7 @@ import {
   TableOccupancyConflictError,
   TableNotAvailableError,
 } from "@/lib/table-occupancy";
+import { toUtcIso } from "@/lib/date-helpers";
 
 // Import types from local types module
 import type {
@@ -406,7 +407,7 @@ export async function updateReservationStatus(
 
       if (now < gracePeriodEnd) {
         throw new ReservationValidationError(
-          `Grace period not yet passed. Cannot mark as NO_SHOW before ${gracePeriodEnd.toISOString()}`
+          `Grace period not yet passed. Cannot mark as NO_SHOW before ${toUtcIso.dateLike(gracePeriodEnd) as string}`
         );
       }
 

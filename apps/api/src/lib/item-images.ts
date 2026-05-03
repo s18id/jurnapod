@@ -9,6 +9,7 @@
 
 import type { UploadImageResponse, ItemImagesResponse } from "@jurnapod/shared";
 import { getDb } from "./db.js";
+import { toUtcIso } from "./date-helpers.js";
 import {
   uploadItemImageAdapter,
   deleteItemImageAdapter,
@@ -210,7 +211,7 @@ export async function getItemImages(
       file_size_bytes: row.file_size_bytes,
       is_primary: row.is_primary === 1,
       sort_order: row.sort_order!,
-      created_at: (row.created_at as Date).toISOString(),
+created_at: toUtcIso.dateLike(row.created_at) as string,
     })),
   };
 }
@@ -276,6 +277,6 @@ export async function getImageById(
     file_size_bytes: row.file_size_bytes,
     is_primary: row.is_primary === 1,
     sort_order: row.sort_order!,
-    created_at: (row.created_at as Date).toISOString(),
+    created_at: toUtcIso.dateLike(row.created_at) as string,
   };
 }

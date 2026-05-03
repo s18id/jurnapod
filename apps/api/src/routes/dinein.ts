@@ -16,6 +16,7 @@ import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { NumericIdSchema, ServiceSessionStatusIdSchema } from "@jurnapod/shared";
 import { authenticateRequest, requireAccess } from "@/lib/auth-guard";
+import { toUtcIso } from "@/lib/date-helpers";
 import { errorResponse, successResponse } from "@/lib/response";
 import { listSessions } from "@/lib/service-sessions";
 import { userHasOutletAccess } from "@/lib/auth";
@@ -114,17 +115,17 @@ dineinRoutes.get("/sessions", async (c) => {
         tableName: session.tableName,
         statusId: session.statusId,
         statusLabel: session.statusLabel,
-        startedAt: session.startedAt.toISOString(),
-        lockedAt: session.lockedAt?.toISOString() ?? null,
-        closedAt: session.closedAt?.toISOString() ?? null,
+        startedAt: toUtcIso.dateLike(session.startedAt) as string,
+        lockedAt: toUtcIso.dateLike(session.lockedAt, { nullable: true }) as string,
+        closedAt: toUtcIso.dateLike(session.closedAt, { nullable: true }) as string,
         guestCount: session.guestCount,
         guestName: session.guestName,
         notes: session.notes,
         lineCount: session.lines.length,
         totalAmount: session.lines.reduce((sum, line) => sum + line.lineTotal, 0),
         createdBy: session.createdBy,
-        createdAt: session.createdAt.toISOString(),
-        updatedAt: session.updatedAt.toISOString(),
+        createdAt: toUtcIso.dateLike(session.createdAt) as string,
+        updatedAt: toUtcIso.dateLike(session.updatedAt) as string,
       })),
       pagination: {
         total,
@@ -194,10 +195,10 @@ dineinRoutes.get("/tables", async (c) => {
         availableNow: table.availableNow,
         currentSessionId: table.currentSessionId?.toString() ?? null,
         currentReservationId: table.currentReservationId?.toString() ?? null,
-        nextReservationStartAt: table.nextReservationStartAt?.toISOString() ?? null,
+        nextReservationStartAt: toUtcIso.dateLike(table.nextReservationStartAt, { nullable: true }) as string,
         guestCount: table.guestCount,
         version: table.version,
-        updatedAt: table.updatedAt.toISOString()
+        updatedAt: toUtcIso.dateLike(table.updatedAt) as string
       }))
     };
 
@@ -340,7 +341,7 @@ export function registerDineInRoutes(app: OpenAPIHono): void {
             tableName: session.tableName,
             statusId: session.statusId,
             statusLabel: session.statusLabel,
-            startedAt: session.startedAt.toISOString(),
+            startedAt: toUtcIso.dateLike(session.startedAt) as string,
             guestCount: session.guestCount,
             guestName: session.guestName,
             lineCount: session.lines.length,

@@ -13,6 +13,7 @@
 
 import { getDb } from "./db";
 import { sql } from "kysely";
+import { toUtcIso } from "./date-helpers";
 
 export interface FeatureFlag {
   id: number;
@@ -83,10 +84,10 @@ function rowToFeatureFlag(row: FeatureFlagRow): FeatureFlag {
     config_json: row.config_json,
     rollout_percentage: row.rollout_percentage,
     target_segments: targetSegments,
-    start_at: row.start_at ? row.start_at.toISOString() : null,
-    end_at: row.end_at ? row.end_at.toISOString() : null,
-    created_at: row.created_at.toISOString(),
-    updated_at: row.updated_at.toISOString()
+    start_at: toUtcIso.dateLike(row.start_at, { nullable: true }) as string,
+    end_at: toUtcIso.dateLike(row.end_at, { nullable: true }) as string,
+    created_at: toUtcIso.dateLike(row.created_at) as string,
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   };
 }
 

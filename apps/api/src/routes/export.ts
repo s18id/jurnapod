@@ -32,6 +32,7 @@ import {
   type ExportColumn,
   type ExportFormat
 } from "../lib/export/index.js";
+import { nowUTC } from "@/lib/date-helpers";
 
 // Constants for streaming thresholds
 const STREAMING_THRESHOLD = 10000; // Use streaming for CSV >10K rows
@@ -172,7 +173,7 @@ export function getColumnsForEntity(
 }
 
 export function generateFilename(entityType: EntityType, format: ExportFormat): string {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const timestamp = nowUTC().replace(/[:.]/g, "-").slice(0, 19);
   return `jurnapod-${entityType}-${timestamp}${getFileExtension(format)}`;
 }
 

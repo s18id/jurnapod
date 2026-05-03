@@ -28,6 +28,7 @@ export {
   PICreditLimitExceededError,
   PITaxAccountMissingError,
 } from "@jurnapod/modules-purchasing";
+import { toUtcIso, fromUtcIso } from "@/lib/date-helpers";
 import type { AuthContext } from "@/lib/auth-guard.js";
 import {
   checkPeriodCloseGuardrail,
@@ -65,7 +66,7 @@ export async function createDraftPI(
   const service = new PurchaseInvoiceService(db);
 
   // Period-close guardrail evaluation (API layer)
-  const invoiceDateStr = input.invoiceDate.toISOString().split("T")[0];
+  const invoiceDateStr = fromUtcIso.dateOnly(toUtcIso.dateLike(input.invoiceDate) as string);
   const decision = await checkPeriodCloseGuardrail(companyId, invoiceDateStr);
 
   let isOverrideEligible = false;
@@ -153,7 +154,7 @@ export async function postPI(
     throw new Error(`Purchase invoice ${piId} not found`);
   }
 
-  const invoiceDateStr = new Date(pi.invoice_date).toISOString().split("T")[0];
+  const invoiceDateStr = fromUtcIso.dateOnly(toUtcIso.dateLike(pi.invoice_date) as string);
   const decision = await checkPeriodCloseGuardrail(companyId, invoiceDateStr);
 
   let isOverrideEligible = false;
@@ -215,7 +216,7 @@ export async function voidPI(
     throw new Error(`Purchase invoice ${piId} not found`);
   }
 
-  const invoiceDateStr = new Date(pi.invoice_date).toISOString().split("T")[0];
+  const invoiceDateStr = fromUtcIso.dateOnly(toUtcIso.dateLike(pi.invoice_date) as string);
   const decision = await checkPeriodCloseGuardrail(companyId, invoiceDateStr);
 
   let isOverrideEligible = false;

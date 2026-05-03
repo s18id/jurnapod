@@ -4,6 +4,7 @@
 import { getDb } from "./db";
 import { sql } from "kysely";
 import { withTransactionRetry } from "@jurnapod/db";
+import { nowUTC } from "@/lib/date-helpers";
 
 export const DOCUMENT_TYPES = {
   SALES_INVOICE: "SALES_INVOICE",
@@ -213,7 +214,7 @@ export async function generateDocumentNumber(
 
         if (shouldReset) {
           newValue = 1;
-          newLastReset = now.toISOString();
+          newLastReset = nowUTC();
         } else {
           newValue = template.current_value + 1;
         }

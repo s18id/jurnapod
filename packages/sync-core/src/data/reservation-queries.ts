@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
 import type { KyselySchema } from "@jurnapod/db";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 
 export type ReservationQueryResult = {
   reservation_id: number;
@@ -77,10 +77,10 @@ export async function getActiveReservationsForSync(
     status: row.status,
     notes: row.notes,
     linked_order_id: row.linked_order_id == null ? null : Number(row.linked_order_id),
-    arrived_at: row.arrived_at ? toRfc3339Required(row.arrived_at) : null,
-    seated_at: row.seated_at ? toRfc3339Required(row.seated_at) : null,
-    cancelled_at: row.cancelled_at ? toRfc3339Required(row.cancelled_at) : null,
-    updated_at: toRfc3339Required(row.updated_at)
+    arrived_at: row.arrived_at ? toUtcIso.dateLike(row.arrived_at) as string : null,
+    seated_at: row.seated_at ? toUtcIso.dateLike(row.seated_at) as string : null,
+    cancelled_at: row.cancelled_at ? toUtcIso.dateLike(row.cancelled_at) as string : null,
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   }));
 }
 
@@ -122,9 +122,9 @@ export async function getReservationsChangedSince(
     status: row.status,
     notes: row.notes,
     linked_order_id: row.linked_order_id == null ? null : Number(row.linked_order_id),
-    arrived_at: row.arrived_at ? toRfc3339Required(row.arrived_at) : null,
-    seated_at: row.seated_at ? toRfc3339Required(row.seated_at) : null,
-    cancelled_at: row.cancelled_at ? toRfc3339Required(row.cancelled_at) : null,
-    updated_at: toRfc3339Required(row.updated_at)
+    arrived_at: row.arrived_at ? toUtcIso.dateLike(row.arrived_at) as string : null,
+    seated_at: row.seated_at ? toUtcIso.dateLike(row.seated_at) as string : null,
+    cancelled_at: row.cancelled_at ? toUtcIso.dateLike(row.cancelled_at) as string : null,
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   }));
 }

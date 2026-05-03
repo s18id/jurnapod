@@ -8,7 +8,7 @@ import { AuditService } from "@jurnapod/modules-platform";
 import { NumericIdSchema, RoleSchema } from "@jurnapod/shared";
 import { hashPassword, type PasswordHashPolicy } from "./password-hash";
 import { getAppEnv } from "./env";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@/lib/date-helpers";
 
 export class UserNotFoundError extends Error {}
 export class UserEmailExistsError extends Error {}
@@ -320,8 +320,8 @@ function normalizeUserRow(row: UserRow): Omit<UserProfile, "global_roles" | "out
     name: row.name,
     email: row.email,
     is_active: row.is_active === 1,
-    created_at: toRfc3339Required(row.created_at),
-    updated_at: toRfc3339Required(row.updated_at)
+    created_at: toUtcIso.dateLike(row.created_at) as string,
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   };
 }
 
@@ -1357,8 +1357,8 @@ export async function listModuleRoles(params: {
     module: row.module,
     resource: row.resource ?? '',
     permission_mask: Number(row.permission_mask ?? 0),
-    created_at: toRfc3339Required(row.created_at),
-    updated_at: toRfc3339Required(row.updated_at)
+    created_at: toUtcIso.dateLike(row.created_at) as string,
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   }));
 }
 
@@ -1475,9 +1475,9 @@ export async function setModuleRolePermission(params: {
       role_code: row.role_code,
       module: row.module,
       resource: row.resource ?? '',
-      permission_mask: Number(row.permission_mask ?? 0),
-      created_at: toRfc3339Required(row.created_at),
-      updated_at: toRfc3339Required(row.updated_at)
+permission_mask: Number(row.permission_mask ?? 0),
+      created_at: toUtcIso.dateLike(row.created_at) as string,
+      updated_at: toUtcIso.dateLike(row.updated_at) as string
     };
   });
 }

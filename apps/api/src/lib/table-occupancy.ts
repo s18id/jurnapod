@@ -4,6 +4,7 @@
 import { randomUUID } from "node:crypto";
 import { getDb, type KyselySchema } from "./db";
 import { sql } from "kysely";
+import { toUtcIso } from "@/lib/date-helpers";
 import {
   TableOccupancyStatus,
   TableEventType,
@@ -367,7 +368,7 @@ export async function holdTableWithKysely(
     clientTxId: randomUUID(),
     occupancyVersionBefore: currentState.version,
     occupancyVersionAfter: currentState.version + 1,
-    eventData: { reason: "Table held for reservation", heldUntil: input.heldUntil.toISOString() },
+    eventData: { reason: "Table held for reservation", heldUntil: toUtcIso.dateLike(input.heldUntil) as string },
     statusIdBefore: currentState.statusId,
     statusIdAfter: TableOccupancyStatus.RESERVED,
     serviceSessionId: null,

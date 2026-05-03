@@ -15,7 +15,7 @@
 import { sql } from "kysely";
 import { getDb, type KyselySchema } from "@/lib/db";
 import { withTransactionRetry } from "@jurnapod/db";
-import { toDateTimeRangeWithTimezone } from "@/lib/date-helpers";
+import { toDateTimeRangeWithTimezone, toUtcIso, fromUtcIso } from "@/lib/date-helpers";
 import { DOCUMENT_TYPES } from "@/lib/numbering";
 import type { SalesDb, SalesDbExecutor } from "@jurnapod/modules-sales";
 import { type Transaction } from "@jurnapod/db";
@@ -116,7 +116,7 @@ function formatDateOnly(value: string): string {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toISOString().slice(0, 10);
+  return fromUtcIso.dateOnly(toUtcIso.dateLike(date) as string);
 }
 
 function normalizeInvoice(row: SalesInvoiceRow): SalesInvoice {

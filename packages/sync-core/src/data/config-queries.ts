@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 
 import type { KyselySchema } from "@jurnapod/db";
+import { toUtcIso } from "@jurnapod/shared";
 
 export type CompanyConfigQueryResult = {
   company_id: number;
@@ -47,7 +48,7 @@ export async function getCompanyConfig(
     legal_name: row.legal_name,
     currency_code: row.currency_code,
     timezone: row.timezone,
-    created_at: row.created_at.toISOString()
+    created_at: toUtcIso.dateLike(row.created_at) as string
   };
 }
 

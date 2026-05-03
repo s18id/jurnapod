@@ -5,7 +5,7 @@ import { AuditService, type AuditDbClient } from "@jurnapod/modules-platform";
 import { getDb } from "./db";
 import { sql } from "kysely";
 import { invalidateStaticPageCache } from "./static-pages";
-import { toRfc3339, toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@/lib/date-helpers";
 
 const SLUG_PATTERN = /^[a-z0-9-]+$/;
 
@@ -110,8 +110,8 @@ function mapStaticPage(row: StaticPageRow): StaticPageDetail {
     title: row.title,
     content_md: row.content_md,
     status: row.status,
-    updated_at: toRfc3339Required(row.updated_at),
-    published_at: toRfc3339(row.published_at),
+    updated_at: toUtcIso.dateLike(row.updated_at) as string,
+    published_at: toUtcIso.dateLike(row.published_at, { nullable: true }),
     meta_json: parseMetaJson(row.meta_json)
   };
 }
@@ -170,8 +170,8 @@ export async function listStaticPages(search?: string): Promise<StaticPageSummar
     slug: row.slug,
     title: row.title,
     status: row.status,
-    updated_at: toRfc3339Required(row.updated_at),
-    published_at: toRfc3339(row.published_at)
+    updated_at: toUtcIso.dateLike(row.updated_at) as string,
+    published_at: toUtcIso.dateLike(row.published_at, { nullable: true })
   }));
 }
 

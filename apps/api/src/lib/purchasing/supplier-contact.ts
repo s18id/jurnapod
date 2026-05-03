@@ -9,6 +9,7 @@
  */
 
 import { getDb } from "../../lib/db.js";
+import { toUtcIso } from "@/lib/date-helpers";
 import { SupplierContactService } from "@jurnapod/modules-purchasing";
 import type {
   ListSupplierContactsParams,
@@ -21,9 +22,7 @@ import type {
 
 function toIso(value: Date | string | null): string | null {
   if (value == null) return null;
-  if (value instanceof Date) return value.toISOString();
-  const parsed = new Date(String(value));
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
+  return toUtcIso.dateLike(value) as string;
 }
 
 function toApiContact(contact: SupplierContact): unknown {

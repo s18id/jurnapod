@@ -21,6 +21,7 @@ import { requireAccess } from "@/lib/auth-guard";
 import { CompanyService } from "@jurnapod/modules-platform";
 import { getDb } from "@/lib/db";
 import { resolveDefaultFiscalYearDateRange } from "@/lib/fiscal-years";
+import { nowUTC, toUtcIso, fromUtcIso } from "@/lib/date-helpers";
 import type { AuthContext } from "@/lib/auth-guard";
 
 // Company service singleton for timezone resolution
@@ -83,11 +84,11 @@ export async function isCashierOnly(auth: { userId: number; companyId: number })
 // ============================================================================
 
 function getDefaultDateRange(): { dateFrom: string; dateTo: string } {
-  const now = new Date();
-  const to = now.toISOString().slice(0, 10);
+  const now = nowUTC();
+  const to = fromUtcIso.dateOnly(now);
   const fromDate = new Date(now);
-  fromDate.setDate(now.getDate() - 30);
-  const from = fromDate.toISOString().slice(0, 10);
+  fromDate.setDate(fromDate.getDate() - 30);
+  const from = fromUtcIso.dateOnly(toUtcIso.dateLike(fromDate) as string);
   return { dateFrom: from, dateTo: to };
 }
 
