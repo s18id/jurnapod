@@ -97,6 +97,7 @@ describe('reservations canonical timestamp hard cutover (Story 52-2)', { timeout
     const found = listed.find((r) => Number(r.reservation_id) === Number(created.id));
     expect(found).toBeDefined();
     expect(found?.reservation_at).toBe(reservationTime.toISOString());
+    expect(found?.reservation_at).toMatch(/Z$/);
   });
 
   it('enforces non-overlap when end equals next start (a_end == b_start)', async () => {

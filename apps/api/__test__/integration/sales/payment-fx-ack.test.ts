@@ -289,6 +289,7 @@ describe('sales.payments.fx-ack', { timeout: 60000 }, () => {
     expect(posted.data.status).toBe('POSTED');
     // Verify fx_acknowledged_at was set
     expect(posted.data.fx_acknowledged_at).toBeDefined();
+    expect(posted.data.fx_acknowledged_at).toMatch(/Z$/);
   });
 
   it('rejects future-dated fx_ack in POST body (422)', async () => {
@@ -337,6 +338,8 @@ describe('sales.payments.fx-ack', { timeout: 60000 }, () => {
     const posted = JSON.parse(postText4);
     expect(posted.success).toBe(true);
     expect(posted.data.status).toBe('POSTED');
+    expect(posted.data.fx_acknowledged_at).toBeDefined();
+    expect(posted.data.fx_acknowledged_at).toMatch(/Z$/);
   });
 });
 
@@ -573,5 +576,6 @@ describe('sales.payments.fx-ack.cashier-blocked', { timeout: 30000 }, () => {
     expect(posted.success).toBe(true);
     expect(posted.data.status).toBe('POSTED');
     expect(posted.data.fx_acknowledged_at).toBeDefined();
+    expect(posted.data.fx_acknowledged_at).toMatch(/Z$/);
   });
 });

@@ -122,6 +122,7 @@ describe('cash-bank.post', { timeout: 30000 }, () => {
     expect(postBody.success).toBe(true);
     expect(postBody.data.status).toBe('POSTED');
     expect(postBody.data.posted_at).toBeDefined();
+    expect(postBody.data.posted_at).toMatch(/Z$/);
 
     // Verify journal batch was created
     const journalBatch = await sql`

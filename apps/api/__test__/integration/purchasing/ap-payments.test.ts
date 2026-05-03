@@ -731,6 +731,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
     expect(getBody.data.status).toBe('POSTED');
     expect(getBody.data.journal_batch_id).toBe(postBody.data.journal_batch_id);
     expect(getBody.data.posted_at).toBeDefined();
+    expect(getBody.data.posted_at).toMatch(/Z$/);
 
     // Verify journal batch exists and has balanced lines
     const db = getTestDb();
@@ -1671,6 +1672,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
     const paymentAfter = await paymentAfterRes.json();
     expect(paymentAfter.data.status).toBe('VOID');
     expect(paymentAfter.data.voided_at).toBeDefined();
+    expect(paymentAfter.data.voided_at).toMatch(/Z$/);
   });
 
   // -------------------------------------------------------------------------
