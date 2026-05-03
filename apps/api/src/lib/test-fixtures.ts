@@ -64,6 +64,7 @@
  */
 
 import { getDb } from "./db";
+import { toUtcIso, fromUtcIso, nowUTC } from "@/lib/date-helpers";
 import { sql } from "kysely";
 import { withTransactionRetry } from "@jurnapod/db";
 import { getAppEnv } from "./env";
@@ -1644,7 +1645,7 @@ export async function createTestSupplierStatement(
     );
   }
 
-  const statementDate = options?.statementDate ?? new Date().toISOString().split("T")[0];
+  const statementDate = options?.statementDate ?? fromUtcIso.dateOnly(nowUTC());
   const closingBalance = options?.closingBalance ?? "0.00";
   const currencyCode = options?.currencyCode ?? "IDR";
 
@@ -1663,7 +1664,7 @@ export async function createTestSupplierStatement(
       id: Number(row.id),
       companyId: Number(row.company_id),
       supplierId: Number(row.supplier_id),
-      statementDate: row.statement_date instanceof Date ? row.statement_date.toISOString().split("T")[0] : String(row.statement_date),
+          statementDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.statement_date) as string),
       closingBalance: String(row.closing_balance),
       currencyCode: String(row.currency_code),
     };
@@ -1678,7 +1679,7 @@ export async function createTestSupplierStatement(
           id: Number(row.id),
           companyId: Number(row.company_id),
           supplierId: Number(row.supplier_id),
-          statementDate: row.statement_date instanceof Date ? row.statement_date.toISOString().split("T")[0] : String(row.statement_date),
+      statementDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.statement_date) as string),
           closingBalance: String(row.closing_balance),
           currencyCode: String(row.currency_code),
         };
@@ -1844,17 +1845,17 @@ export async function createTestAPException(
       supplierId: row.supplier_id !== null ? Number(row.supplier_id) : null,
       varianceAmount: String(row.variance_amount),
       currencyCode: String(row.currency_code),
-      detectedAt: row.detected_at instanceof Date ? row.detected_at.toISOString() : String(row.detected_at),
+      detectedAt: toUtcIso.dateLike(row.detected_at) as string,
       dueDate: row.due_date
-        ? (row.due_date instanceof Date ? row.due_date.toISOString().split("T")[0] : String(row.due_date))
+        ? fromUtcIso.dateOnly(toUtcIso.dateLike(row.due_date) as string)
         : null,
       assignedToUserId: row.assigned_to_user_id !== null ? Number(row.assigned_to_user_id) : null,
       assignedAt: row.assigned_at
-        ? (row.assigned_at instanceof Date ? row.assigned_at.toISOString() : String(row.assigned_at))
+        ? (toUtcIso.dateLike(row.assigned_at) as string)
         : null,
       status: row.status as APExceptionStatusValue,
       resolvedAt: row.resolved_at
-        ? (row.resolved_at instanceof Date ? row.resolved_at.toISOString() : String(row.resolved_at))
+        ? (toUtcIso.dateLike(row.resolved_at) as string)
         : null,
       resolvedByUserId: row.resolved_by_user_id !== null ? Number(row.resolved_by_user_id) : null,
       resolutionNote: row.resolution_note ?? null,
@@ -1893,17 +1894,17 @@ export async function createTestAPException(
           supplierId: row.supplier_id !== null ? Number(row.supplier_id) : null,
           varianceAmount: String(row.variance_amount),
           currencyCode: String(row.currency_code),
-          detectedAt: row.detected_at instanceof Date ? row.detected_at.toISOString() : String(row.detected_at),
+          detectedAt: toUtcIso.dateLike(row.detected_at) as string,
           dueDate: row.due_date
-            ? (row.due_date instanceof Date ? row.due_date.toISOString().split("T")[0] : String(row.due_date))
+            ? fromUtcIso.dateOnly(toUtcIso.dateLike(row.due_date) as string)
             : null,
           assignedToUserId: row.assigned_to_user_id !== null ? Number(row.assigned_to_user_id) : null,
           assignedAt: row.assigned_at
-            ? (row.assigned_at instanceof Date ? row.assigned_at.toISOString() : String(row.assigned_at))
+            ? (toUtcIso.dateLike(row.assigned_at) as string)
             : null,
           status: row.status as APExceptionStatusValue,
           resolvedAt: row.resolved_at
-            ? (row.resolved_at instanceof Date ? row.resolved_at.toISOString() : String(row.resolved_at))
+            ? (toUtcIso.dateLike(row.resolved_at) as string)
             : null,
           resolvedByUserId: row.resolved_by_user_id !== null ? Number(row.resolved_by_user_id) : null,
           resolutionNote: row.resolution_note ?? null,

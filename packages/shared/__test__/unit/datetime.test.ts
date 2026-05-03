@@ -1,12 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveBusinessTimezone,
-  asOfDateToUtcRange,
-  businessDateFromEpochMs,
   epochMsToPeriodBoundaries,
   isValidTimeZone,
-  normalizeDate,
-  fromEpochMs,
+  toUtcIso,
+  fromUtcIso,
+  nowUTC,
 } from '../../src/schemas/datetime.js';
 
 describe('datetime helpers — shared/schemas/datetime.ts', () => {
@@ -69,18 +68,18 @@ describe('datetime helpers — shared/schemas/datetime.ts', () => {
   });
 
   // -------------------------------------------------------------------------
-  // asOfDateToUtcRange
+  // toUtcIso.asOfDateRange (replaces asOfDateToUtcRange)
   // -------------------------------------------------------------------------
 
-  describe('asOfDateToUtcRange', () => {
+  describe('toUtcIso.asOfDateRange', () => {
     it('returns startUTC and nextDayUTC for a valid date and timezone', () => {
-      const result = asOfDateToUtcRange('2026-04-15', 'Asia/Jakarta');
+      const result = toUtcIso.asOfDateRange('2026-04-15', 'Asia/Jakarta');
       expect(result).toHaveProperty('startUTC');
       expect(result).toHaveProperty('nextDayUTC');
     });
 
     it('ensures startUTC < nextDayUTC (half-open ordering)', () => {
-      const { startUTC, nextDayUTC } = asOfDateToUtcRange('2026-04-15', 'Asia/Jakarta');
+      const { startUTC, nextDayUTC } = toUtcIso.asOfDateRange('2026-04-15', 'Asia/Jakarta');
       expect(startUTC < nextDayUTC).toBe(true);
     });
 
@@ -88,21 +87,21 @@ describe('datetime helpers — shared/schemas/datetime.ts', () => {
       // Asia/Jakarta is UTC+7 with no DST — each business day is exactly 24h apart.
       // April 15 00:00 Jakarta = April 14 17:00 UTC.
       // April 16 00:00 Jakarta = April 15 17:00 UTC.
-      const { startUTC, nextDayUTC } = asOfDateToUtcRange('2026-04-15', 'Asia/Jakarta');
+      const { startUTC, nextDayUTC } = toUtcIso.asOfDateRange('2026-04-15', 'Asia/Jakarta');
       expect(startUTC).toBe('2026-04-14T17:00:00.000Z');
       expect(nextDayUTC).toBe('2026-04-15T17:00:00.000Z');
     });
 
     it('throws for an invalid date string', () => {
-      expect(() => asOfDateToUtcRange('not-a-date', 'Asia/Jakarta')).toThrow(/invalid date/i);
+      expect(() => toUtcIso.asOfDateRange('not-a-date', 'Asia/Jakarta')).toThrow(/invalid date/i);
     });
 
     it('throws for an overflow date (2026-02-30)', () => {
-      expect(() => asOfDateToUtcRange('2026-02-30', 'Asia/Jakarta')).toThrow(/invalid date/i);
+      expect(() => toUtcIso.asOfDateRange('2026-02-30', 'Asia/Jakarta')).toThrow(/invalid date/i);
     });
 
     it('throws for an invalid timezone', () => {
-      expect(() => asOfDateToUtcRange('2026-04-15', 'Not/A/Zone')).toThrow(/invalid timezone/i);
+      expect(() => toUtcIso.asOfDateRange('2026-04-15', 'Not/A/Zone')).toThrow(/invalid timezone/i);
     });
 
     it('handles spring-forward DST correctly (America/New_York, 2026-03-08)', () => {
@@ -110,7 +109,7 @@ describe('datetime helpers — shared/schemas/datetime.ts', () => {
       // March 8 00:00 local New York = 2026-03-08T05:00:00.000Z UTC (UTC-4, DST in effect).
       // March 9 00:00 local New York = 2026-03-09T04:00:00.000Z UTC (UTC-4, still DST).
       // The interval is exactly 23h in UTC because we count calendar days, not fixed 24h UTC.
-      const { startUTC, nextDayUTC } = asOfDateToUtcRange('2026-03-08', 'America/New_York');
+      const { startUTC, nextDayUTC } = toUtcIso.asOfDateRange('2026-03-08', 'America/New_York');
       expect(startUTC).toBe('2026-03-08T05:00:00.000Z');
       expect(nextDayUTC).toBe('2026-03-09T04:00:00.000Z');
       expect(startUTC < nextDayUTC).toBe(true);
@@ -121,7 +120,7 @@ describe('datetime helpers — shared/schemas/datetime.ts', () => {
       // Nov 1 00:00 local New York = 2026-11-01T04:00:00.000Z UTC (UTC-4, DST in effect).
       // Nov 2 00:00 local New York = 2026-11-02T05:00:00.000Z UTC (UTC-5, standard time).
       // The interval is exactly 25h in UTC because we count calendar days, not fixed 24h UTC.
-      const { startUTC, nextDayUTC } = asOfDateToUtcRange('2026-11-01', 'America/New_York');
+      const { startUTC, nextDayUTC } = toUtcIso.asOfDateRange('2026-11-01', 'America/New_York');
       expect(startUTC).toBe('2026-11-01T04:00:00.000Z');
       expect(nextDayUTC).toBe('2026-11-02T05:00:00.000Z');
       expect(startUTC < nextDayUTC).toBe(true);
@@ -132,7 +131,7 @@ describe('datetime helpers — shared/schemas/datetime.ts', () => {
       // March 1 2026 is still in standard time (UTC-5).
       // March 1 00:00 local New York = 2026-03-01T05:00:00.000Z UTC.
       // March 2 00:00 local New York = 2026-03-02T05:00:00.000Z UTC.
-      const { startUTC, nextDayUTC } = asOfDateToUtcRange('2026-03-01', 'America/New_York');
+      const { startUTC, nextDayUTC } = toUtcIso.asOfDateRange('2026-03-01', 'America/New_York');
       expect(startUTC).toBe('2026-03-01T05:00:00.000Z');
       expect(nextDayUTC).toBe('2026-03-02T05:00:00.000Z');
       expect(startUTC < nextDayUTC).toBe(true);
@@ -143,7 +142,7 @@ describe('datetime helpers — shared/schemas/datetime.ts', () => {
       // March 25 2026 is still in standard time (UTC+1).
       // March 25 00:00 local Berlin = 2026-03-24T23:00:00.000Z UTC.
       // March 26 00:00 local Berlin = 2026-03-25T23:00:00.000Z UTC.
-      const { startUTC, nextDayUTC } = asOfDateToUtcRange('2026-03-25', 'Europe/Berlin');
+      const { startUTC, nextDayUTC } = toUtcIso.asOfDateRange('2026-03-25', 'Europe/Berlin');
       expect(startUTC).toBe('2026-03-24T23:00:00.000Z');
       expect(nextDayUTC).toBe('2026-03-25T23:00:00.000Z');
       expect(startUTC < nextDayUTC).toBe(true);
@@ -151,49 +150,49 @@ describe('datetime helpers — shared/schemas/datetime.ts', () => {
   });
 
   // -------------------------------------------------------------------------
-  // businessDateFromEpochMs
+  // fromUtcIso.businessDate(toUtcIso.epochMs(ms), tz) — replaces businessDateFromEpochMs
   // -------------------------------------------------------------------------
 
-  describe('businessDateFromEpochMs', () => {
+  describe('fromUtcIso.businessDate(toUtcIso.epochMs(ms), tz)', () => {
     it('returns the correct business date for a UTC epoch', () => {
       // 2026-04-15T00:00:00.000Z — this is 2026-04-15 in UTC
       const epoch = new Date('2026-04-15T00:00:00.000Z').getTime();
-      expect(businessDateFromEpochMs(epoch, 'UTC')).toBe('2026-04-15');
+      expect(fromUtcIso.businessDate(toUtcIso.epochMs(epoch), 'UTC')).toBe('2026-04-15');
     });
 
     it('handles a positive-offset timezone (Asia/Jakarta, UTC+7)', () => {
       // 2026-04-15T00:00:00.000Z = 2026-04-15T07:00:00 in Jakarta
       // Business date in Jakarta is 2026-04-15
       const epoch = new Date('2026-04-15T00:00:00.000Z').getTime();
-      expect(businessDateFromEpochMs(epoch, 'Asia/Jakarta')).toBe('2026-04-15');
+      expect(fromUtcIso.businessDate(toUtcIso.epochMs(epoch), 'Asia/Jakarta')).toBe('2026-04-15');
     });
 
     it('handles a negative-offset timezone (America/New_York, UTC-5)', () => {
       // 2026-04-15T00:00:00.000Z = 2026-04-14T19:00:00 in New York (day before)
       const epoch = new Date('2026-04-15T00:00:00.000Z').getTime();
-      expect(businessDateFromEpochMs(epoch, 'America/New_York')).toBe('2026-04-14');
+      expect(fromUtcIso.businessDate(toUtcIso.epochMs(epoch), 'America/New_York')).toBe('2026-04-14');
     });
 
     it('throws for non-finite epoch ms (Infinity)', () => {
-      expect(() => businessDateFromEpochMs(Infinity, 'UTC')).toThrow(/invalid epoch ms/i);
+      expect(() => fromUtcIso.businessDate(toUtcIso.epochMs(Infinity), 'UTC')).toThrow(/invalid epoch ms/i);
     });
 
     it('throws for non-finite epoch ms (-Infinity)', () => {
-      expect(() => businessDateFromEpochMs(-Infinity, 'UTC')).toThrow(/invalid epoch ms/i);
+      expect(() => fromUtcIso.businessDate(toUtcIso.epochMs(-Infinity), 'UTC')).toThrow(/invalid epoch ms/i);
     });
 
     it('throws for NaN', () => {
-      expect(() => businessDateFromEpochMs(NaN, 'UTC')).toThrow(/invalid epoch ms/i);
+      expect(() => fromUtcIso.businessDate(toUtcIso.epochMs(NaN), 'UTC')).toThrow(/invalid epoch ms/i);
     });
 
     it('throws for invalid timezone', () => {
       const epoch = new Date('2026-04-15T00:00:00.000Z').getTime();
-      expect(() => businessDateFromEpochMs(epoch, 'Not/A/Zone')).toThrow(/invalid timezone/i);
+      expect(() => fromUtcIso.businessDate(toUtcIso.epochMs(epoch), 'Not/A/Zone')).toThrow(/invalid timezone/i);
     });
 
     it('derives the correct business date from a UTC epoch (Asia/Jakarta)', () => {
       const originalEpoch = new Date('2026-04-15T12:30:00.000Z').getTime();
-      const businessDate = businessDateFromEpochMs(originalEpoch, 'Asia/Jakarta');
+      const businessDate = fromUtcIso.businessDate(toUtcIso.epochMs(originalEpoch), 'Asia/Jakarta');
       // Verify the business date corresponds to the expected date
       expect(businessDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(businessDate).toBe('2026-04-15');
@@ -201,7 +200,7 @@ describe('datetime helpers — shared/schemas/datetime.ts', () => {
   });
 
   // -------------------------------------------------------------------------
-  // epochMsToPeriodBoundaries
+  // epochMsToPeriodBoundaries (deprecated — kept for backward compat)
   // -------------------------------------------------------------------------
 
   describe('epochMsToPeriodBoundaries', () => {
@@ -212,13 +211,10 @@ describe('datetime helpers — shared/schemas/datetime.ts', () => {
     });
 
     it('computes correct first-of-month to first-of-next-month boundaries in UTC', () => {
-      // April 15 2026 in UTC → April 2026 period
       const epoch = new Date('2026-04-15T00:00:00.000Z').getTime();
       const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(epoch, 'UTC');
 
-      // periodStartUTC should be start of April 2026 in UTC
       expect(periodStartUTC).toBe('2026-04-01T00:00:00.000Z');
-      // periodNextUTC should be start of May 2026 in UTC
       expect(periodNextUTC).toBe('2026-05-01T00:00:00.000Z');
     });
 
@@ -231,16 +227,9 @@ describe('datetime helpers — shared/schemas/datetime.ts', () => {
     });
 
     it('uses business timezone to determine month boundaries (Asia/Jakarta UTC+7)', () => {
-      // If epoch falls on 2026-04-15 07:00:00 local Jakarta time,
-      // the UTC time is 2026-04-15T00:00:00.000Z which is still April 15.
-      // If it's 2026-04-15 08:00:00 Jakarta, UTC is 2026-04-15T01:00:00.000Z, still April.
-      // Let's use a clear case: 2026-04-01 00:00 Jakarta = 2026-03-31T17:00:00.000Z UTC.
-      // The business date is still April 1 in Jakarta, so period should be April.
       const epoch = new Date('2026-04-01T00:00:00.000Z').getTime();
       const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(epoch, 'Asia/Jakarta');
 
-      // April in Jakarta starts at UTC 2026-03-31T17:00:00.000Z
-      // Period should be April
       expect(periodStartUTC).toBe('2026-03-31T17:00:00.000Z');
       expect(periodNextUTC).toBe('2026-04-30T17:00:00.000Z');
     });
@@ -255,17 +244,169 @@ describe('datetime helpers — shared/schemas/datetime.ts', () => {
     });
 
     it('covers DST-observing timezone case (America/New_York)', () => {
-      // March 2026 — US is in DST after March 8.
-      // March 10 2026 in New York falls within DST (UTC-4).
       const epoch = new Date('2026-03-10T00:00:00.000Z').getTime();
       const { periodStartUTC, periodNextUTC } = epochMsToPeriodBoundaries(epoch, 'America/New_York');
 
-      // March in New York: DST starts March 8, so March begins at UTC-5 (standard)
-      // Start of March 2026 in New York is 2026-03-01T05:00:00.000Z (UTC-5).
-      // Start of April 2026 in New York is 2026-04-01T04:00:00.000Z (UTC-4, DST).
       expect(periodStartUTC).toBe('2026-03-01T05:00:00.000Z');
       expect(periodNextUTC).toBe('2026-04-01T04:00:00.000Z');
     });
   });
 
+  // -------------------------------------------------------------------------
+  // New namespaced API tests
+  // -------------------------------------------------------------------------
+
+  describe('toUtcIso.dateLike', () => {
+    it('converts Date to Z string', () => {
+      const date = new Date('2024-03-15T00:00:00.000Z');
+      expect(toUtcIso.dateLike(date)).toBe('2024-03-15T00:00:00.000Z');
+    });
+
+    it('converts ISO string to Z string', () => {
+      const result = toUtcIso.dateLike('2024-03-15T00:00:00.000Z');
+      expect(result).toBe('2024-03-15T00:00:00.000Z');
+    });
+
+    it('converts MySQL datetime string to a valid Z string (interpreted as local time)', () => {
+      const result = toUtcIso.dateLike('2024-03-15 00:00:00');
+      expect(result).toMatch(/Z$/);
+    });
+
+    it('returns null for null input with nullable option', () => {
+      expect(toUtcIso.dateLike(null, { nullable: true })).toBeNull();
+    });
+
+    it('returns null for undefined input with nullable option', () => {
+      expect(toUtcIso.dateLike(undefined, { nullable: true })).toBeNull();
+    });
+
+    it('throws for null input without nullable option', () => {
+      expect(() => toUtcIso.dateLike(null)).toThrow();
+    });
+
+    it('throws for undefined input without nullable option', () => {
+      expect(() => toUtcIso.dateLike(undefined)).toThrow();
+    });
+
+    it('throws for invalid date string', () => {
+      expect(() => toUtcIso.dateLike('not-a-date')).toThrow();
+    });
+  });
+
+  describe('fromUtcIso.epochMs', () => {
+    it('converts Z string to epoch ms', () => {
+      expect(fromUtcIso.epochMs('2024-03-15T00:00:00.000Z')).toBe(new Date('2024-03-15T00:00:00.000Z').getTime());
+    });
+
+    it('throws for invalid input', () => {
+      expect(() => fromUtcIso.epochMs('not-a-date')).toThrow();
+    });
+  });
+
+  describe('fromUtcIso.mysql', () => {
+    it('converts Z string to MySQL DATETIME format', () => {
+      expect(fromUtcIso.mysql('2024-03-15T00:00:00.000Z')).toBe('2024-03-15 00:00:00');
+    });
+
+    it('throws for invalid input', () => {
+      expect(() => fromUtcIso.mysql('not-a-date')).toThrow();
+    });
+  });
+
+  describe('fromUtcIso.dateOnly', () => {
+    it('extracts YYYY-MM-DD from Z string', () => {
+      expect(fromUtcIso.dateOnly('2024-03-15T00:00:00.000Z')).toBe('2024-03-15');
+    });
+
+    it('throws for invalid input', () => {
+      expect(() => fromUtcIso.dateOnly('not-a-date')).toThrow();
+    });
+  });
+
+  describe('toUtcIso.businessDate', () => {
+    it('returns start-of-day boundary for a given business date and timezone', () => {
+      const result = toUtcIso.businessDate('2026-04-15', 'Asia/Jakarta', 'start');
+      expect(result).toBe('2026-04-14T17:00:00.000Z');
+    });
+
+    it('returns end-of-day boundary for a given business date and timezone', () => {
+      const result = toUtcIso.businessDate('2026-04-15', 'Asia/Jakarta', 'end');
+      expect(result).toBe('2026-04-15T16:59:59.999Z');
+    });
+
+    it('throws for invalid date', () => {
+      expect(() => toUtcIso.businessDate('not-a-date', 'UTC', 'start')).toThrow(/invalid date/i);
+    });
+
+    it('throws for invalid timezone', () => {
+      expect(() => toUtcIso.businessDate('2026-04-15', 'Not/A/Zone', 'start')).toThrow(/invalid timezone/i);
+    });
+  });
+
+  describe('fromUtcIso.businessDate', () => {
+    it('derives business-local date from a Z string in a given timezone', () => {
+      // 2026-04-15T00:00:00.000Z = April 15 in UTC
+      expect(fromUtcIso.businessDate('2026-04-15T00:00:00.000Z', 'UTC')).toBe('2026-04-15');
+    });
+
+    it('handles positive offset (Asia/Jakarta UTC+7)', () => {
+      // 2026-04-14T17:00:00.000Z = April 15 00:00 in Jakarta
+      expect(fromUtcIso.businessDate('2026-04-14T17:00:00.000Z', 'Asia/Jakarta')).toBe('2026-04-15');
+    });
+
+    it('throws for invalid Z string', () => {
+      expect(() => fromUtcIso.businessDate('not-a-date', 'UTC')).toThrow(/invalid utc instant/i);
+    });
+
+    it('throws for invalid timezone', () => {
+      expect(() => fromUtcIso.businessDate('2026-04-15T00:00:00.000Z', 'Not/A/Zone')).toThrow(/invalid timezone/i);
+    });
+  });
+
+  describe('toUtcIso.epochMs', () => {
+    it('converts epoch ms to Z string', () => {
+      const epoch = new Date('2024-03-15T00:00:00.000Z').getTime();
+      expect(toUtcIso.epochMs(epoch)).toBe('2024-03-15T00:00:00.000Z');
+    });
+
+    it('throws for NaN', () => {
+      expect(() => toUtcIso.epochMs(NaN)).toThrow(/invalid epoch ms/i);
+    });
+
+    it('throws for Infinity', () => {
+      expect(() => toUtcIso.epochMs(Infinity)).toThrow(/invalid epoch ms/i);
+    });
+  });
+
+  describe('fromUtcIso.localDisplay', () => {
+    it('formats Z string for local display with time', () => {
+      const result = fromUtcIso.localDisplay('2026-04-14T17:00:00.000Z', 'Asia/Jakarta');
+      expect(result).toMatch(/2026-04-15T00:00:00/);
+    });
+
+    it('formats Z string for local display without time', () => {
+      const result = fromUtcIso.localDisplay('2026-04-14T17:00:00.000Z', 'Asia/Jakarta', { includeTime: false });
+      expect(result).toBe('2026-04-15');
+    });
+
+    it('throws for invalid Z string', () => {
+      expect(() => fromUtcIso.localDisplay('not-a-date', 'UTC')).toThrow();
+    });
+  });
+
+  describe('toUtcIso.dateRange', () => {
+    it('converts date range with timezone to UTC boundaries', () => {
+      const result = toUtcIso.dateRange('2026-04-15', '2026-04-16', 'Asia/Jakarta');
+      expect(result.fromStartUTC).toBe('2026-04-14T17:00:00.000Z');
+      expect(result.toEndUTC).toBe('2026-04-16T16:59:59.999Z');
+    });
+  });
+
+  describe('nowUTC', () => {
+    it('returns a valid Z string', () => {
+      const result = nowUTC();
+      expect(result).toMatch(/Z$/);
+      expect(() => toUtcIso.dateLike(result)).not.toThrow();
+    });
+  });
 });
