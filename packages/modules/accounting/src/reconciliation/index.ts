@@ -11,6 +11,7 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
+import { nowUTC } from "@jurnapod/shared";
 
 // Re-export dashboard service
 export {
@@ -127,9 +128,6 @@ export function journalBatchStatusPredicate(_status: string): boolean {
   return true;
 }
 
-function toIsoString(date: Date): string {
-  return date.toISOString();
-}
 
 interface ReconciliationRow {
   id: number;
@@ -382,7 +380,7 @@ export class ReconciliationService {
     const baseContext = this.buildContext(options);
     const ctx: ReconciliationContext = { ...baseContext, ...context };
     const { companyId, outletId } = ctx;
-    const ranAt = toIsoString(new Date());
+    const ranAt = nowUTC();
 
     // Run all detection queries in parallel for efficiency
     const [missingJournals, unbalanced, orphans] = await Promise.all([

@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto";
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
+import { toRfc3339Required } from "@jurnapod/shared";
 import { fromScaled4, toScaled } from "./ap-reconciliation-service.js";
 import { ApReconciliationService } from "./ap-reconciliation-service.js";
 import type {
@@ -53,12 +54,6 @@ type SnapshotRow = {
 // Helper Functions
 // =============================================================================
 
-function toDateOnly(value: Date | string): string {
-  if (value instanceof Date) {
-    return value.toISOString().slice(0, 10);
-  }
-  return String(value).slice(0, 10);
-}
 
 function toIsoDateTime(value: Date | string | null): string | null {
   if (!value) {
@@ -94,7 +89,7 @@ function mapSnapshotRow(row: SnapshotRow): APReconciliationSnapshotRecord {
   return {
     id: Number(row.id),
     companyId: Number(row.company_id),
-    asOfDate: toDateOnly(row.as_of_date),
+    asOfDate: toRfc3339Required(row.as_of_date).slice(0, 10),
     timezone: String(row.timezone),
     snapshotVersion: Number(row.snapshot_version),
     apSubledgerBalance: String(row.ap_subledger_balance),

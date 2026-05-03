@@ -12,7 +12,7 @@
 
 import { sql } from "kysely";
 import { withTransaction, type Transaction } from "@jurnapod/db";
-import { normalizeDate, toMysqlDateTime } from "@jurnapod/shared";
+import { normalizeDate, toMysqlDateTime, nowUTC, toDateOnly } from "@jurnapod/shared";
 import type {
   PosTransactionFilter,
   JournalFilter,
@@ -62,7 +62,7 @@ export async function listPosTransactions(filter: PosTransactionFilter): Promise
   const db = getReportingDb();
   const outletClause = buildOutletInClause(filter.outletIds);
   const range = toDateTimeRange(filter.dateFrom, filter.dateTo, filter.timezone);
-  const asOf = filter.asOf ?? new Date().toISOString();
+  const asOf = filter.asOf ?? nowUTC();
   const asOfSql = toMysqlDateTimeOrNow(asOf);
 
   const scopeValues: Array<number | string> = [...outletClause.values];
@@ -348,7 +348,7 @@ export async function listJournalBatches(filter: JournalFilter): Promise<Journal
   const db = getReportingDb();
   const outletClause = buildOutletInClauseForJournals(filter.outletIds, filter.includeUnassignedOutlet ?? true);
   const range = toDateTimeRange(filter.dateFrom, filter.dateTo, filter.timezone);
-  const asOf = filter.asOf ?? new Date().toISOString();
+  const asOf = filter.asOf ?? nowUTC();
   const asOfSql = toMysqlDateTimeOrNow(asOf);
   const scopeValues: Array<number | string> = [...outletClause.values];
 
@@ -759,7 +759,7 @@ export async function getReceivablesAgeingReport(filter: ReceivablesAgeingFilter
       asOfDate = filter.asOfDate + "T23:59:59.999Z";
     }
   } else {
-    asOfDate = new Date().toISOString().slice(0, 10);
+    asOfDate = toDateOnly(nowUTC());
   }
 
   const outletInClause = sql.join(outletIds.map(id => sql`${id}`));

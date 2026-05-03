@@ -18,6 +18,7 @@ import type {
   VariantAttribute,
   SyncPullVariant
 } from "@jurnapod/shared";
+import { toRfc3339Required } from "@jurnapod/shared";
 import type { ItemVariantService } from "../interfaces/item-variant-service.js";
 import { VariantNotFoundError, AttributeNotFoundError, ItemNotFoundError, DuplicateSkuError } from "../errors.js";
 import { getInventoryDb } from "../db.js";
@@ -92,18 +93,6 @@ function parseJsonAttributes(attributesJson: string | null): Array<{ attribute_n
   }
 }
 
-function toIsoString(value: Date | string | number): string {
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new Error("Invalid datetime value");
-  }
-
-  return parsed.toISOString();
-}
 
 /**
  * Item variant service implementation.
@@ -621,8 +610,8 @@ export class ItemVariantServiceImpl implements ItemVariantService {
         barcode: (v as { barcode: string | null }).barcode,
         is_active: Boolean((v as { is_active: number }).is_active),
         attributes: parseJsonAttributes(attributesJson),
-        created_at: toIsoString((v as { created_at: Date | string }).created_at),
-        updated_at: toIsoString((v as { updated_at: Date | string }).updated_at)
+        created_at: toRfc3339Required((v as { created_at: Date | string }).created_at),
+        updated_at: toRfc3339Required((v as { updated_at: Date | string }).updated_at)
       });
     }
 
@@ -655,8 +644,8 @@ export class ItemVariantServiceImpl implements ItemVariantService {
       barcode: (v as { barcode: string | null }).barcode,
       is_active: Boolean((v as { is_active: number }).is_active),
       attributes: parseJsonAttributes(attributesJson),
-      created_at: toIsoString((v as { created_at: Date | string }).created_at),
-      updated_at: toIsoString((v as { updated_at: Date | string }).updated_at)
+      created_at: toRfc3339Required((v as { created_at: Date | string }).created_at),
+      updated_at: toRfc3339Required((v as { updated_at: Date | string }).updated_at)
     };
   }
 
@@ -768,8 +757,8 @@ export class ItemVariantServiceImpl implements ItemVariantService {
         barcode: (v as { barcode: string | null }).barcode,
         is_active: Boolean((v as { is_active: number }).is_active),
         attributes: parseJsonAttributes(attributesJson),
-        created_at: toIsoString((v as { created_at: Date | string }).created_at),
-        updated_at: toIsoString((v as { updated_at: Date | string }).updated_at)
+        created_at: toRfc3339Required((v as { created_at: Date | string }).created_at),
+        updated_at: toRfc3339Required((v as { updated_at: Date | string }).updated_at)
       };
     });
   }

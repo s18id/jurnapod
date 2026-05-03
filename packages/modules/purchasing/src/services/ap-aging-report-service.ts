@@ -9,7 +9,7 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
-import { AP_PAYMENT_STATUS, PURCHASE_CREDIT_STATUS, PURCHASE_INVOICE_STATUS } from "@jurnapod/shared";
+import { AP_PAYMENT_STATUS, PURCHASE_CREDIT_STATUS, PURCHASE_INVOICE_STATUS, toRfc3339Required } from "@jurnapod/shared";
 import type {
   APAgingSummary,
   APAgingSupplierDetail,
@@ -59,9 +59,6 @@ function divScaled4(numeratorScaled4: bigint, denominatorScaled8: bigint): bigin
 // Date Helpers
 // =============================================================================
 
-function toDateOnly(value: Date): string {
-  return new Date(value).toISOString().slice(0, 10);
-}
 
 function dateWithOffset(baseDate: string, offsetDays: number): string {
   const date = new Date(`${baseDate}T00:00:00.000Z`);
@@ -204,9 +201,9 @@ function resolvePaymentTermsDays(row: RawInvoiceBalanceRow): number {
 
 function resolveDueDate(row: RawInvoiceBalanceRow): string {
   if (row.due_date) {
-    return toDateOnly(row.due_date);
+    return toRfc3339Required(row.due_date).slice(0, 10);
   }
-  return dateWithOffset(toDateOnly(row.invoice_date), resolvePaymentTermsDays(row));
+  return dateWithOffset(toRfc3339Required(row.invoice_date).slice(0, 10), resolvePaymentTermsDays(row));
 }
 
 function resolveSupplierCurrency(row: RawInvoiceBalanceRow): string {
@@ -373,7 +370,7 @@ export class ApAgingReportService {
       invoices.push({
         purchase_invoice_id: row.purchase_invoice_id,
         pi_number: row.invoice_no,
-        pi_date: toDateOnly(row.invoice_date),
+        pi_date: toRfc3339Required(row.invoice_date).slice(0, 10),
         due_date: dueDate,
         payment_terms_days: termsDays,
         currency: row.invoice_currency,

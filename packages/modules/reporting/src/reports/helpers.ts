@@ -8,7 +8,7 @@
  */
 
 import { sql } from "kysely";
-import { toDateTimeRangeWithTimezone, normalizeDate, toMysqlDateTime } from "@jurnapod/shared";
+import { toDateTimeRangeWithTimezone, normalizeDate, toMysqlDateTime, toUtcInstant, nowUTC } from "@jurnapod/shared";
 
 /**
  * Convert value to number, handling string representations from SQL
@@ -54,7 +54,7 @@ export function toIsoDate(value: Date | string): string {
  * Convert MySQL datetime string to UTC Date
  */
 export function mysqlDateTimeToUtcDate(value: string): Date {
-  return new Date(`${value.replace(" ", "T")}Z`);
+  return new Date(toUtcInstant(value.replace(" ", "T") + "Z"));
 }
 
 /**
@@ -64,7 +64,7 @@ export function toMysqlDateTimeOrNow(value: string): string {
   try {
     return toMysqlDateTime(value);
   } catch {
-    return toMysqlDateTime(new Date().toISOString());
+    return toMysqlDateTime(nowUTC());
   }
 }
 

@@ -37,11 +37,11 @@ import {
 // Order No Generation
 // =============================================================================
 
-function generatePurchaseOrderNo(now = new Date()): string {
+function generatePurchaseOrderNo(nowEpochMs = Date.now()): string {
   // purchase_orders.order_no is VARCHAR(32) (migration 0172)
   // Keep format short while maintaining very low collision probability.
   // Example: PO-MO6QTHYL-8A1F4D92C3 (24 chars)
-  const ts = now.getTime().toString(36).toUpperCase();
+  const ts = nowEpochMs.toString(36).toUpperCase();
   const rand = randomBytes(5).toString("hex").toUpperCase(); // 40 bits entropy
   return `PO-${ts}-${rand}`;
 }

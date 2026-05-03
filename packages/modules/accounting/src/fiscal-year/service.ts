@@ -18,7 +18,9 @@ import {
   type FiscalYearListQuery,
   type FiscalYearStatus,
   type FiscalYearUpdateRequest,
-  toRfc3339Required
+  toRfc3339Required,
+  nowUTC,
+  toDateOnly,
 } from "@jurnapod/shared";
 
 import type {
@@ -369,7 +371,7 @@ export class FiscalYearService {
     companyId: number,
     referenceDate?: string
   ): Promise<{ dateFrom: string; dateTo: string }> {
-    const today = referenceDate ?? new Date().toISOString().slice(0, 10);
+    const today = referenceDate ?? toDateOnly(nowUTC());
     const matches = await this.listOpenFiscalYearsForDate(companyId, today);
     if (matches.length === 1) {
       return {

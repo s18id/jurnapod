@@ -11,6 +11,7 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import { withTransactionRetry } from "@jurnapod/db";
+import { nowUTC, toDateOnly } from "@jurnapod/shared";
 import type {
   LifecycleEvent,
   AssetBook,
@@ -844,7 +845,7 @@ export class LifecycleService {
       // Validate fiscal year
       await this.ports.fiscalYearGuard.ensureDateWithinOpenFiscalYear(
         companyId,
-        formatDateOnly(new Date())
+        toDateOnly(nowUTC())
       );
 
       // Reserve void event
@@ -853,7 +854,7 @@ export class LifecycleService {
         companyId,
         event.asset_id,
         FA_VOID,
-        formatDateOnly(new Date()),
+        toDateOnly(nowUTC()),
         event.outlet_id as number | null,
         null,
         "POSTED",
@@ -874,7 +875,7 @@ export class LifecycleService {
           event.journal_batch_id,  // Use actual journal_batch_id, not event ID
           event.asset_id,
           event.outlet_id as number | null,
-          formatDateOnly(new Date())
+          toDateOnly(nowUTC())
         );
       }
 
@@ -912,7 +913,7 @@ export class LifecycleService {
         recomputed.accum_depreciation,
         recomputed.accum_impairment,
         recomputed.carrying_amount,
-        formatDateOnly(new Date()),
+        toDateOnly(nowUTC()),
         voidEventId
       );
 

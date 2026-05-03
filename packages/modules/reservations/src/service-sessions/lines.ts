@@ -13,6 +13,7 @@ import type { KyselySchema } from "@jurnapod/db";
 import {
   ServiceSessionStatus,
   TableEventType,
+  nowUTC,
 } from "@jurnapod/shared";
 
 import type {
@@ -326,7 +327,7 @@ export async function updateSessionLine(
       await sql`UPDATE table_service_session_lines SET notes = ${input.notes} WHERE id = ${input.lineId}`.execute(trx);
     }
     if (input.isVoided !== undefined) {
-      const voidAt = input.isVoided ? new Date().toISOString() : null;
+      const voidAt = input.isVoided ? nowUTC() : null;
       await sql`UPDATE table_service_session_lines SET is_voided = ${input.isVoided ? 1 : 0}, voided_at = ${voidAt} WHERE id = ${input.lineId}`.execute(trx);
     }
     if (input.voidReason !== undefined) {
