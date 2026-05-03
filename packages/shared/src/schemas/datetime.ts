@@ -16,11 +16,6 @@ import { z } from "zod";
 export const UtcIsoSchema = z.string().datetime();
 
 /**
- * @deprecated Use `UtcIsoSchema` instead. Will be removed in Epic 53 cleanup.
- */
-export const RfcDateTimeSchema = UtcIsoSchema;
-
-/**
  * Date-only format YYYY-MM-DD
  * Use for: date boundaries, fiscal periods, due-date rules, reporting ranges
  * Interpretation: calendar date in company/business timezone context
