@@ -8,7 +8,7 @@
  */
 
 import { sql } from "kysely";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 import { withTransactionRetry, type Transaction } from "@jurnapod/db";
 import type { KyselySchema } from "@jurnapod/db";
 import type { ItemService } from "../interfaces/item-service.js";
@@ -96,7 +96,7 @@ function normalizeItem(row: {
     cogs_account_id: row.cogs_account_id == null ? null : Number(row.cogs_account_id),
     inventory_asset_account_id: row.inventory_asset_account_id == null ? null : Number(row.inventory_asset_account_id),
     is_active: row.is_active === 1,
-    updated_at: toRfc3339Required(row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at)
+    updated_at: toUtcIso.dateLike(row.updated_at) as string,
   };
 }
 

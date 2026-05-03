@@ -7,7 +7,7 @@ import type {
   JournalListQuery,
   JournalLineResponse
 } from "@jurnapod/shared";
-import { normalizeJournalDocType, toRfc3339Required } from "@jurnapod/shared";
+import { normalizeJournalDocType, toUtcIso, fromUtcIso } from "@jurnapod/shared";
 import { sql } from "kysely";
 import { withTransactionRetry, type KyselySchema } from "@jurnapod/db";
 
@@ -326,14 +326,12 @@ export class JournalsService {
         company_id: row.jl_company_id as number,
         outlet_id: row.jl_outlet_id as number | null,
         account_id: row.account_id as number,
-        line_date: row.line_date instanceof Date 
-          ? row.line_date.toISOString().split('T')[0]
-          : String(row.line_date).split('T')[0],
+        line_date: fromUtcIso.dateOnly(toUtcIso.dateLike(row.line_date) as string),
         debit: Number(row.debit),
         credit: Number(row.credit),
         description: row.jl_description as string,
-        created_at: toRfc3339Required(row.jl_created_at as Date),
-        updated_at: toRfc3339Required(row.jl_updated_at as Date)
+        created_at: toUtcIso.dateLike(row.jl_created_at as Date) as string,
+        updated_at: toUtcIso.dateLike(row.jl_updated_at as Date) as string
       }));
 
     return {
@@ -343,9 +341,9 @@ export class JournalsService {
       doc_type: batch.doc_type,
       doc_id: batch.doc_id,
       client_ref: batch.client_ref ?? null,
-      posted_at: toRfc3339Required(batch.posted_at),
-      created_at: toRfc3339Required(batch.created_at),
-      updated_at: toRfc3339Required(batch.updated_at),
+      posted_at: toUtcIso.dateLike(batch.posted_at) as string,
+      created_at: toUtcIso.dateLike(batch.created_at) as string,
+      updated_at: toUtcIso.dateLike(batch.updated_at) as string,
       lines
     };
   }
@@ -451,23 +449,21 @@ export class JournalsService {
         doc_type: batch.doc_type,
         doc_id: batch.doc_id,
         client_ref: batch.client_ref ?? null,
-        posted_at: toRfc3339Required(batch.posted_at),
-        created_at: toRfc3339Required(batch.created_at),
-        updated_at: toRfc3339Required(batch.updated_at),
+        posted_at: toUtcIso.dateLike(batch.posted_at) as string,
+        created_at: toUtcIso.dateLike(batch.created_at) as string,
+        updated_at: toUtcIso.dateLike(batch.updated_at) as string,
         lines: batchLines.map(line => ({
           id: line.id,
           journal_batch_id: line.journal_batch_id,
           company_id: line.company_id,
           outlet_id: line.outlet_id,
           account_id: line.account_id,
-          line_date: line.line_date instanceof Date
-            ? line.line_date.toISOString().split('T')[0]
-            : String(line.line_date).split('T')[0],
+          line_date: fromUtcIso.dateOnly(toUtcIso.dateLike(line.line_date) as string),
           debit: Number(line.debit),
           credit: Number(line.credit),
           description: line.description,
-          created_at: toRfc3339Required(line.created_at),
-          updated_at: toRfc3339Required(line.updated_at)
+          created_at: toUtcIso.dateLike(line.created_at) as string,
+          updated_at: toUtcIso.dateLike(line.updated_at) as string
         }))
       };
     });

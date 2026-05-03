@@ -38,6 +38,7 @@
 
 import { sql } from "kysely"; // Still used for cost layer queries
 import type { KyselySchema } from "@jurnapod/db";
+import { nowUTC, toUtcIso } from "@jurnapod/shared";
 
 import {
   CostingMethod,
@@ -588,7 +589,7 @@ export async function getItemCostLayersWithConsumption(
     list.push({
       transactionId: c.transaction_id,
       quantity: Number(c.consumed_qty),
-      consumedAt: c.consumed_at instanceof Date ? c.consumed_at.toISOString() : String(c.consumed_at),
+      consumedAt: toUtcIso.dateLike(c.consumed_at)!,
     });
     consumptionMap.set(c.layer_id, list);
   });
@@ -676,7 +677,7 @@ export async function getItemCostSummaryExtended(
 
   return {
     ...summary,
-    lastUpdated: new Date().toISOString(),
+    lastUpdated: nowUTC(),
     methodSpecific,
   };
 }

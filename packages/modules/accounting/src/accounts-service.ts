@@ -11,6 +11,7 @@ import type {
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import { withTransactionRetry } from "@jurnapod/db";
+import { toUtcIso } from "@jurnapod/shared";
 
 /**
  * Database client interface for dependency injection
@@ -912,8 +913,8 @@ export class AccountsService {
       is_group: Boolean(row.is_group),
       is_payable: Boolean(row.is_payable),
       is_active: Boolean(row.is_active),
-      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
-      updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at
+      created_at: toUtcIso.dateLike(row.created_at as Date) as string,
+      updated_at: toUtcIso.dateLike(row.updated_at as Date) as string
     };
   }
 

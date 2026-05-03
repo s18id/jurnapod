@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
-import { toMysqlDateTimeFromDateLike } from "@jurnapod/shared";
+import { toUtcIso, fromUtcIso } from "@jurnapod/shared";
 import { PostingService, type PostingMapper, type PostingRepository } from "../index.js";
 import { normalizeMoney, resolveMappingCode } from "./common.js";
 import type { KyselySchema } from "@jurnapod/db";
@@ -383,19 +383,6 @@ export const SALES_TAX_ACCOUNT_MISSING_MESSAGE = "TAX_ACCOUNT_MISSING";
 export const PAYMENT_VARIANCE_GAIN_MISSING_MESSAGE = "PAYMENT_VARIANCE_GAIN_MISSING";
 export const PAYMENT_VARIANCE_LOSS_MISSING_MESSAGE = "PAYMENT_VARIANCE_LOSS_MISSING";
 
-function toDateOnly(value: string): string {
-  if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
-    return value.slice(0, 10);
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid datetime");
-  }
-
-  return date.toISOString().slice(0, 10);
-}
-
 export interface SalesPostingOptions {
   transactionOwner?: "service" | "external";
 }
@@ -414,7 +401,7 @@ export async function postSalesInvoice(
   };
 
   const postingService = new PostingService(
-    new SalesPostingRepository(db, toMysqlDateTimeFromDateLike(invoice.updated_at)),
+    new SalesPostingRepository(db, fromUtcIso.mysql(toUtcIso.dateLike(invoice.updated_at) as string)),
     {
       [SALES_INVOICE_DOC_TYPE]: new SalesInvoicePostingMapper(executor, invoice)
     }
@@ -440,7 +427,7 @@ export async function postSalesPayment(
   };
 
   const postingService = new PostingService(
-    new SalesPostingRepository(db, toMysqlDateTimeFromDateLike(payment.updated_at)),
+    new SalesPostingRepository(db, fromUtcIso.mysql(toUtcIso.dateLike(payment.updated_at) as string)),
     {
       [SALES_PAYMENT_IN_DOC_TYPE]: new SalesPaymentPostingMapper(executor, payment, invoiceNo)
     }
@@ -465,7 +452,7 @@ export async function postCreditNote(
   };
 
   const postingService = new PostingService(
-    new SalesPostingRepository(db, toMysqlDateTimeFromDateLike(creditNote.updated_at)),
+    new SalesPostingRepository(db, fromUtcIso.mysql(toUtcIso.dateLike(creditNote.updated_at) as string)),
     {
       [SALES_CREDIT_NOTE_DOC_TYPE]: new SalesCreditNotePostingMapper(executor, creditNote)
     }
@@ -490,7 +477,7 @@ export async function voidCreditNote(
   };
 
   const postingService = new PostingService(
-    new SalesPostingRepository(db, toMysqlDateTimeFromDateLike(creditNote.updated_at)),
+    new SalesPostingRepository(db, fromUtcIso.mysql(toUtcIso.dateLike(creditNote.updated_at) as string)),
     {
       [`${SALES_CREDIT_NOTE_DOC_TYPE}_VOID`]: new VoidCreditNotePostingMapper(executor, creditNote)
     }

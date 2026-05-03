@@ -3,7 +3,7 @@
 
 import { sql } from "kysely";
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
-import { toMysqlDateTimeFromDateLike } from "@jurnapod/shared";
+import { toUtcIso, fromUtcIso } from "@jurnapod/shared";
 import { PostingService, type PostingMapper, type PostingRepository } from "../index.js";
 import { normalizeMoney } from "./common.js";
 import type { KyselySchema } from "@jurnapod/db";
@@ -158,7 +158,7 @@ export async function postDepreciationRun(
   };
 
   const postingService = new PostingService(
-    new DepreciationPostingRepository(db, toMysqlDateTimeFromDateLike(run.updated_at)),
+    new DepreciationPostingRepository(db, fromUtcIso.mysql(toUtcIso.dateLike(run.updated_at) as string)),
     {
       [DEPRECIATION_DOC_TYPE]: new DepreciationPostingMapper(db, plan, run)
     }

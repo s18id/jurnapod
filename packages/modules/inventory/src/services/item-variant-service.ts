@@ -18,7 +18,7 @@ import type {
   VariantAttribute,
   SyncPullVariant
 } from "@jurnapod/shared";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 import type { ItemVariantService } from "../interfaces/item-variant-service.js";
 import { VariantNotFoundError, AttributeNotFoundError, ItemNotFoundError, DuplicateSkuError } from "../errors.js";
 import { getInventoryDb } from "../db.js";
@@ -610,8 +610,8 @@ export class ItemVariantServiceImpl implements ItemVariantService {
         barcode: (v as { barcode: string | null }).barcode,
         is_active: Boolean((v as { is_active: number }).is_active),
         attributes: parseJsonAttributes(attributesJson),
-        created_at: toRfc3339Required((v as { created_at: Date | string }).created_at),
-        updated_at: toRfc3339Required((v as { updated_at: Date | string }).updated_at)
+        created_at: toUtcIso.dateLike((v as { created_at: Date | string }).created_at)!,
+        updated_at: toUtcIso.dateLike((v as { updated_at: Date | string }).updated_at)!
       });
     }
 
@@ -644,8 +644,8 @@ export class ItemVariantServiceImpl implements ItemVariantService {
       barcode: (v as { barcode: string | null }).barcode,
       is_active: Boolean((v as { is_active: number }).is_active),
       attributes: parseJsonAttributes(attributesJson),
-      created_at: toRfc3339Required((v as { created_at: Date | string }).created_at),
-      updated_at: toRfc3339Required((v as { updated_at: Date | string }).updated_at)
+      created_at: toUtcIso.dateLike((v as { created_at: Date | string }).created_at)!,
+      updated_at: toUtcIso.dateLike((v as { updated_at: Date | string }).updated_at)!
     };
   }
 
@@ -757,8 +757,8 @@ export class ItemVariantServiceImpl implements ItemVariantService {
         barcode: (v as { barcode: string | null }).barcode,
         is_active: Boolean((v as { is_active: number }).is_active),
         attributes: parseJsonAttributes(attributesJson),
-        created_at: toRfc3339Required((v as { created_at: Date | string }).created_at),
-        updated_at: toRfc3339Required((v as { updated_at: Date | string }).updated_at)
+        created_at: toUtcIso.dateLike((v as { created_at: Date | string }).created_at)!,
+        updated_at: toUtcIso.dateLike((v as { updated_at: Date | string }).updated_at)!
       };
     });
   }

@@ -8,7 +8,7 @@
  */
 
 import { sql } from "kysely";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 import { withTransactionRetry } from "@jurnapod/db";
 import type { KyselySchema } from "@jurnapod/db";
 import type { ItemPriceService } from "../interfaces/item-price-service.js";
@@ -81,7 +81,7 @@ function normalizeItemPrice(row: {
     is_active: row.is_active === 1,
     item_group_id: row.item_group_id == null ? null : Number(row.item_group_id),
     item_group_name: row.item_group_name ?? null,
-    updated_at: toRfc3339Required(row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at)
+    updated_at: toUtcIso.dateLike(row.updated_at) as string,
   };
 }
 
@@ -634,7 +634,7 @@ export class ItemPriceServiceImpl implements ItemPriceService {
         variant_id: row.variant_id,
         price: Number(row.price),
         is_active: row.is_active === 1,
-        updated_at: new Date(row.updated_at).toISOString(),
+        updated_at: toUtcIso.dateLike(row.updated_at)!,
       }));
     });
   }

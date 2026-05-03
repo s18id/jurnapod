@@ -42,7 +42,7 @@
 
 import { sql } from "kysely";
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
-import { toMysqlDateTimeFromDateLike } from "@jurnapod/shared";
+import { toUtcIso, fromUtcIso } from "@jurnapod/shared";
 import { PostingService, type PostingMapper, type PostingRepository } from "../index.js";
 import { ACCOUNT_MAPPING_TYPE_ID_BY_CODE, accountMappingIdToCode } from "@jurnapod/shared";
 import { normalizeMoney, resolveMappingCode } from "./common.js";
@@ -439,7 +439,7 @@ async function runActivePostingHook(
     };
   }
 
-  await executor.ensureDateWithinOpenFiscalYear(db, context.companyId, toDateOnly(context.trxAt));
+  await executor.ensureDateWithinOpenFiscalYear(db, context.companyId, fromUtcIso.dateOnly(context.trxAt));
 
   const postingRequest: PostingRequest = {
     doc_type: POS_SALE_DOC_TYPE,
@@ -449,7 +449,7 @@ async function runActivePostingHook(
   };
 
   const postingService = new PostingService(
-    new PosSyncPushPostingRepository(db, toMysqlDateTimeFromDateLike(context.trxAt)),
+    new PosSyncPushPostingRepository(db, fromUtcIso.mysql(toUtcIso.dateLike(context.trxAt) as string)),
     {
       [POS_SALE_DOC_TYPE]: new PosSyncPushPostingMapper(executor, context)
     }
@@ -493,17 +493,5 @@ export async function runSyncPushPostingHook(
   }
 }
 
-function toDateOnly(value: string): string {
-  if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
-    return value.slice(0, 10);
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid datetime");
-  }
-
-  return date.toISOString().slice(0, 10);
-}
 
 

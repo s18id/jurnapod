@@ -8,7 +8,7 @@
  */
 
 import { sql } from "kysely";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 import { withTransactionRetry, type Transaction } from "@jurnapod/db";
 import type { KyselySchema } from "@jurnapod/db";
 import { ItemGroupBulkConflictError, type ItemGroupService } from "../interfaces/item-group-service.js";
@@ -74,7 +74,7 @@ function normalizeItemGroup(row: {
     code: row.code,
     name: row.name,
     is_active: row.is_active === 1,
-    updated_at: toRfc3339Required(row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at)
+    updated_at: toUtcIso.dateLike(row.updated_at) as string,
   };
 }
 

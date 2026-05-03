@@ -11,7 +11,7 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import { withTransactionRetry } from "@jurnapod/db";
-import { nowUTC, toDateOnly } from "@jurnapod/shared";
+import { nowUTC, fromUtcIso, toUtcIso } from "@jurnapod/shared";
 import type {
   LifecycleEvent,
   AssetBook,
@@ -97,7 +97,7 @@ function formatDateOnly(value: Date | string): string {
   if (typeof value === "string") {
     return value.slice(0, 10);
   }
-  return value.toISOString().slice(0, 10);
+  return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
 }
 
 function isMysqlError(error: unknown): error is { errno?: number } {
@@ -845,7 +845,7 @@ export class LifecycleService {
       // Validate fiscal year
       await this.ports.fiscalYearGuard.ensureDateWithinOpenFiscalYear(
         companyId,
-        toDateOnly(nowUTC())
+        fromUtcIso.dateOnly(nowUTC())
       );
 
       // Reserve void event
@@ -854,7 +854,7 @@ export class LifecycleService {
         companyId,
         event.asset_id,
         FA_VOID,
-        toDateOnly(nowUTC()),
+        fromUtcIso.dateOnly(nowUTC()),
         event.outlet_id as number | null,
         null,
         "POSTED",
@@ -875,7 +875,7 @@ export class LifecycleService {
           event.journal_batch_id,  // Use actual journal_batch_id, not event ID
           event.asset_id,
           event.outlet_id as number | null,
-          toDateOnly(nowUTC())
+          fromUtcIso.dateOnly(nowUTC())
         );
       }
 
@@ -913,7 +913,7 @@ export class LifecycleService {
         recomputed.accum_depreciation,
         recomputed.accum_impairment,
         recomputed.carrying_amount,
-        toDateOnly(nowUTC()),
+        fromUtcIso.dateOnly(nowUTC()),
         voidEventId
       );
 
@@ -1337,7 +1337,7 @@ export class LifecycleService {
         accum_depreciation: 0,
         accum_impairment: 0,
         carrying_amount: 0,
-        disposed_at: disposedAt.toISOString(),
+        disposed_at: toUtcIso.dateLike(disposedAt) as string,
       };
     }
 

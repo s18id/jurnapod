@@ -14,6 +14,7 @@
 
 import { sql } from "kysely";
 import { withTransactionRetry, type KyselySchema } from "@jurnapod/db";
+import { toUtcIso } from "@jurnapod/shared";
 import { getInventoryDb } from "../db.js";
 import { createCostLayer, deductWithCost } from "@jurnapod/modules-inventory-costing";
 import type { DeductionResult, ItemCostResult } from "@jurnapod/modules-inventory-costing";
@@ -435,7 +436,7 @@ export class StockServiceImpl implements StockService {
       quantity: Number(row.quantity),
       reserved_quantity: Number(row.reserved_quantity),
       available_quantity: Number(row.available_quantity),
-      updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at)
+      updated_at: toUtcIso.dateLike(row.updated_at) as string
     }));
   }
 
@@ -504,7 +505,7 @@ export class StockServiceImpl implements StockService {
       reference_id: row.reference_id,
       product_id: row.product_id ?? 0,
       quantity_delta: Number(row.quantity_delta),
-      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at)
+      created_at: toUtcIso.dateLike(row.created_at) as string
     }));
 
     return { transactions, total };

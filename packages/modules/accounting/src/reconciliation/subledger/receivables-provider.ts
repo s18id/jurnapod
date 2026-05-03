@@ -18,7 +18,7 @@ import type { KyselySchema } from "@jurnapod/db";
 import {
   resolveBusinessTimezone,
   businessDateFromEpochMs,
-  asOfDateToUtcRange,
+  toUtcIso,
 } from "@jurnapod/shared";
 import {
   type SubledgerBalanceProvider,
@@ -141,7 +141,7 @@ export class ReceivablesSubledgerProvider implements SubledgerBalanceProvider {
     const effectiveAccountIds = accountId !== undefined ? [accountId] : (settings.accountIds.length > 0 ? settings.accountIds : arAccountIds);
 
     // Compute half-open UTC range for the as-of date
-    const { startUTC, nextDayUTC } = asOfDateToUtcRange(asOfDate, timezone);
+    const { startUTC, nextDayUTC } = toUtcIso.asOfDateRange(asOfDate, timezone);
 
     // Get AR subledger balance from sales module data
     const arSubledgerBalance = await this.getARSubledgerBalance(companyId, asOfDate);

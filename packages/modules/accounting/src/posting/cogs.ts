@@ -7,6 +7,7 @@ import { PostingService, type PostingMapper, type PostingRepository } from "../i
 import { ACCOUNT_MAPPING_TYPE_ID_BY_CODE, accountMappingIdToCode } from "@jurnapod/shared";
 import { normalizeMoney, resolveMappingCode } from "./common.js";
 import { withTransactionRetry, type KyselySchema, type Transaction } from "@jurnapod/db";
+import { toUtcIso, fromUtcIso } from "@jurnapod/shared";
 
 // =============================================================================
 // Types
@@ -650,7 +651,8 @@ async function postCogsForSaleInternal(
     }
 
     const totalCogs = cogsItems.reduce((sum, item) => sum + item.totalCost, 0);
-    const lineDate = toBusinessDate(input.saleDate);
+    const saleDateInput = typeof input.saleDate === "number" ? new Date(input.saleDate) : input.saleDate;
+    const lineDate = fromUtcIso.dateOnly(toUtcIso.dateLike(saleDateInput) as string);
 
     // Build sale detail for mapper
     // Extract inventory transaction IDs from stockTxId-aware costs for journal linking
@@ -716,19 +718,4 @@ async function postCogsForSaleInternal(
       errors
     };
   }
-}
-
-function toBusinessDate(value: Date | number): string {
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) {
-      throw new CogsPostingError("Invalid saleDate for COGS posting");
-    }
-    return new Date(value).toISOString().slice(0, 10);
-  }
-
-  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
-    throw new CogsPostingError("Invalid saleDate for COGS posting");
-  }
-
-  return value.toISOString().slice(0, 10);
 }

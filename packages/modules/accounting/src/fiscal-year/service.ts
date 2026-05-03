@@ -18,9 +18,9 @@ import {
   type FiscalYearListQuery,
   type FiscalYearStatus,
   type FiscalYearUpdateRequest,
-  toRfc3339Required,
+  toUtcIso,
+  fromUtcIso,
   nowUTC,
-  toDateOnly,
 } from "@jurnapod/shared";
 
 import type {
@@ -114,8 +114,8 @@ function normalizeFiscalYear(row: {
     start_date: formatDateOnly(row.start_date),
     end_date: formatDateOnly(row.end_date),
     status: row.status as FiscalYearStatus,
-    created_at: toRfc3339Required(row.created_at),
-    updated_at: toRfc3339Required(row.updated_at)
+    created_at: toUtcIso.dateLike(row.created_at) as string,
+    updated_at: toUtcIso.dateLike(row.updated_at) as string
   };
 }
 
@@ -132,14 +132,14 @@ function formatDateOnlyFromUnknown(value: unknown): string {
     return "";
   }
   if (value instanceof Date) {
-    return value.toISOString().split("T")[0];
+    return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
   }
   if (typeof value === "string") {
     return value.slice(0, 10);
   }
   if (typeof value === "number") {
     // Assume Unix timestamp in milliseconds
-    return new Date(value).toISOString().split("T")[0];
+    return fromUtcIso.dateOnly(toUtcIso.dateLike(new Date(value)) as string);
   }
   // Fallback: convert to string and slice
   return String(value).slice(0, 10);
@@ -371,7 +371,7 @@ export class FiscalYearService {
     companyId: number,
     referenceDate?: string
   ): Promise<{ dateFrom: string; dateTo: string }> {
-    const today = referenceDate ?? toDateOnly(nowUTC());
+    const today = referenceDate ?? fromUtcIso.dateOnly(nowUTC());
     const matches = await this.listOpenFiscalYearsForDate(companyId, today);
     if (matches.length === 1) {
       return {

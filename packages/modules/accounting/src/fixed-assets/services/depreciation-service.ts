@@ -10,6 +10,7 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
+import { toUtcIso, fromUtcIso } from "@jurnapod/shared";
 import type {
   DepreciationPlan,
   DepreciationPlanCreateInput,
@@ -70,7 +71,7 @@ function formatDateOnly(value: Date | string): string {
   if (typeof value === "string") {
     return value.slice(0, 10);
   }
-  return value.toISOString().slice(0, 10);
+  return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
 }
 
 function parseDateOnly(value: string): Date {
@@ -80,7 +81,7 @@ function parseDateOnly(value: string): Date {
 
 function getLastDayOfMonth(year: number, month: number): string {
   const date = new Date(Date.UTC(year, month, 0));
-  return date.toISOString().slice(0, 10);
+  return fromUtcIso.dateOnly(toUtcIso.dateLike(date) as string);
 }
 
 function comparePeriodToStart(startDate: string, periodYear: number, periodMonth: number): number {
@@ -488,7 +489,7 @@ export class DepreciationService {
         period_year: run.period_year,
         period_month: run.period_month,
         amount: run.amount,
-        updated_at: run.updated_at.toISOString(),
+        updated_at: toUtcIso.dateLike(run.updated_at) as string,
       };
 
       // Execute the posting with fiscal year guard

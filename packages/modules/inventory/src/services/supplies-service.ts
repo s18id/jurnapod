@@ -8,7 +8,7 @@
  * All methods enforce company_id scoping.
  */
 
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 import { withTransactionRetry } from "@jurnapod/db";
 import type { KyselySchema } from "@jurnapod/db";
 import { getInventoryDb } from "../db.js";
@@ -46,7 +46,7 @@ function normalizeSupply(row: SupplyRow): Supply {
     name: row.name,
     unit: row.unit,
     is_active: row.is_active === 1,
-    updated_at: toRfc3339Required(row.updated_at)
+    updated_at: toUtcIso.dateLike(row.updated_at)!,
   };
 }
 

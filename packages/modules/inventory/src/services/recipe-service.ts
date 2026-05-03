@@ -9,7 +9,7 @@
  */
 
 import { sql } from "kysely";
-import { toRfc3339Required } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 import { withTransactionRetry } from "@jurnapod/db";
 import type { KyselySchema } from "@jurnapod/db";
 import { getInventoryDb } from "../db.js";
@@ -75,8 +75,8 @@ function normalizeRecipeIngredient(row: RecipeIngredientRow): RecipeIngredient {
     quantity: Number(row.quantity),
     unit_of_measure: row.unit_of_measure,
     is_active: row.is_active === 1,
-    created_at: toRfc3339Required(row.created_at),
-    updated_at: toRfc3339Required(row.updated_at)
+    created_at: toUtcIso.dateLike(row.created_at)!,
+    updated_at: toUtcIso.dateLike(row.updated_at)!
   };
 }
 
