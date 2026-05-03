@@ -43,6 +43,7 @@ import {
 } from "../types/ap-payment.js";
 import { fromScaled4, toScaled4 } from "./decimal-scale4.js";
 import { computePurchaseInvoiceOpenAmount } from "./purchase-invoice-open-amount.js";
+import { ensurePaymentVarianceMappings } from "@jurnapod/modules-accounting";
 
 // =============================================================================
 // Validate Bank Account Ownership
@@ -218,12 +219,19 @@ export class APPaymentService {
             `.execute(trx);
           }
 
+          const company = await trx
+            .selectFrom("companies")
+            .where("id", "=", input.companyId)
+            .select(["currency_code"])
+            .executeTakeFirst();
+          const companyCurrency = company?.currency_code ?? "IDR";
+
           for (const [invoiceId, allocatedAmount] of allocationByInvoiceId.entries()) {
             const pi = await trx
               .selectFrom("purchase_invoices")
               .where("id", "=", invoiceId)
               .where("company_id", "=", input.companyId)
-              .select(["id", "status", "supplier_id"])
+              .select(["id", "status", "supplier_id", "currency_code"])
               .executeTakeFirst();
 
             if (!pi) {
@@ -241,7 +249,11 @@ export class APPaymentService {
               input.companyId,
               invoiceId
             );
-            if (allocatedAmount > openAmount) {
+            // Foreign-currency invoices may have FX variance — skip strict overpayment check
+            // ONLY when there is still an open amount to settle (openAmount > 0).
+            // If the invoice is already paid or overpaid, reject as overpayment.
+            const isSameCurrency = pi.currency_code === companyCurrency;
+            if (allocatedAmount > openAmount && (isSameCurrency || openAmount <= 0n)) {
               throw new APPaymentOverpaymentError(
                 fromScaled4(allocatedAmount),
                 fromScaled4(openAmount)
@@ -358,6 +370,7 @@ export class APPaymentService {
                 purchase_invoice_id: line.purchaseInvoiceId,
                 allocation_amount: line.allocationAmount,
                 description: line.description ?? null,
+                full_settlement: line.fullSettlement ? 1 : 0,
               })
               .executeTakeFirst();
           }
@@ -651,7 +664,7 @@ export class APPaymentService {
         .selectFrom("ap_payment_lines")
         .where("ap_payment_id", "=", paymentId)
         .select([
-          "id", "purchase_invoice_id", "allocation_amount", "description",
+          "id", "purchase_invoice_id", "allocation_amount", "description", "full_settlement",
         ])
         .orderBy("line_no", "asc")
         .execute();
@@ -668,12 +681,15 @@ export class APPaymentService {
       }
 
       const allocationByInvoiceId = new Map<number, bigint>();
+      const invoiceCurrencyById = new Map<number, string>();
+      const fullSettlementByLineId = new Map<number, boolean>();
       for (const line of lines) {
+        fullSettlementByLineId.set(line.id, line.full_settlement === 1);
         const pi = await trx
           .selectFrom("purchase_invoices")
           .where("id", "=", line.purchase_invoice_id)
           .where("company_id", "=", companyId)
-          .select(["id", "status", "supplier_id"])
+          .select(["id", "status", "supplier_id", "currency_code"])
           .executeTakeFirst();
 
         if (!pi) {
@@ -690,15 +706,30 @@ export class APPaymentService {
         const paymentAmount = toScaled4(String(line.allocation_amount));
         const current = allocationByInvoiceId.get(line.purchase_invoice_id) ?? 0n;
         allocationByInvoiceId.set(line.purchase_invoice_id, current + paymentAmount);
+        invoiceCurrencyById.set(line.purchase_invoice_id, pi.currency_code ?? "IDR");
       }
 
+      const company = await trx
+        .selectFrom("companies")
+        .where("id", "=", companyId)
+        .select(["currency_code"])
+        .executeTakeFirst();
+      const companyCurrency = company?.currency_code ?? "IDR";
+
+      const openAmountByInvoiceId = new Map<number, bigint>();
       for (const [invoiceId, allocatedAmount] of allocationByInvoiceId.entries()) {
         const openAmount = await computePurchaseInvoiceOpenAmount(
           trx as KyselySchema,
           companyId,
           invoiceId
         );
-        if (allocatedAmount > openAmount) {
+        openAmountByInvoiceId.set(invoiceId, openAmount);
+        const invoiceCurrency = invoiceCurrencyById.get(invoiceId) ?? companyCurrency;
+        // Foreign-currency invoices may have FX variance — skip strict overpayment check
+        // ONLY when there is still an open amount to settle (openAmount > 0).
+        // If the invoice is already paid or overpaid, reject as overpayment.
+        const isSameCurrency = invoiceCurrency === companyCurrency;
+        if (allocatedAmount > openAmount && (isSameCurrency || openAmount <= 0n)) {
           throw new APPaymentOverpaymentError(
             fromScaled4(allocatedAmount),
             fromScaled4(openAmount)
@@ -759,24 +790,83 @@ export class APPaymentService {
         description: string;
       }> = [];
 
+      // Resolve FX gain/loss accounts for foreign-currency payments
+      const fxAccounts = await ensurePaymentVarianceMappings(trx as KyselySchema, { companyId });
+
       for (let idx = 0; idx < lines.length; idx++) {
         const line = lines[idx];
-        const amount = fromScaled4(toScaled4(String(line.allocation_amount)));
+        const allocationAmount = toScaled4(String(line.allocation_amount));
         const lineDesc = `${paymentDesc} (line ${idx + 1}, PI ${line.purchase_invoice_id})`;
+        const invoiceCurrency = invoiceCurrencyById.get(line.purchase_invoice_id) ?? companyCurrency;
 
-        journalLines.push({
-          account_id: apAccountId,
-          debit: amount,
-          credit: "0.0000",
-          description: lineDesc,
-        });
+        if (invoiceCurrency !== companyCurrency) {
+          // Foreign-currency invoice: may include FX gain/loss
+          const openAmount = openAmountByInvoiceId.get(line.purchase_invoice_id) ?? allocationAmount;
+          const isFullSettlement = fullSettlementByLineId.get(line.id) ?? false;
 
-        journalLines.push({
-          account_id: payment.bank_account_id,
-          debit: "0.0000",
-          credit: amount,
-          description: lineDesc,
-        });
+          if (isFullSettlement) {
+            // Full or over-settlement: include FX gain/loss
+            const fxDiff = allocationAmount - openAmount; // positive = loss, negative = gain
+
+            // DR AP Account for open amount (settle liability)
+            journalLines.push({
+              account_id: apAccountId,
+              debit: fromScaled4(openAmount),
+              credit: "0.0000",
+              description: lineDesc,
+            });
+
+            if (fxDiff > 0n) {
+              // FX Loss: debit FX loss account
+              journalLines.push({
+                account_id: fxAccounts.lossAccountId,
+                debit: fromScaled4(fxDiff),
+                credit: "0.0000",
+                description: `${lineDesc} FX loss`,
+              });
+            } else if (fxDiff < 0n) {
+              // FX Gain: credit FX gain account
+              journalLines.push({
+                account_id: fxAccounts.gainAccountId,
+                debit: "0.0000",
+                credit: fromScaled4(-fxDiff),
+                description: `${lineDesc} FX gain`,
+              });
+            }
+          } else {
+            // Partial settlement: no FX line, settle only the paid portion
+            journalLines.push({
+              account_id: apAccountId,
+              debit: fromScaled4(allocationAmount),
+              credit: "0.0000",
+              description: lineDesc,
+            });
+          }
+
+          // CR Bank Account for full allocation amount (always)
+          journalLines.push({
+            account_id: payment.bank_account_id,
+            debit: "0.0000",
+            credit: fromScaled4(allocationAmount),
+            description: lineDesc,
+          });
+        } else {
+          // Same-currency invoice: simple 2-line journal
+          const amount = fromScaled4(allocationAmount);
+          journalLines.push({
+            account_id: apAccountId,
+            debit: amount,
+            credit: "0.0000",
+            description: lineDesc,
+          });
+
+          journalLines.push({
+            account_id: payment.bank_account_id,
+            debit: "0.0000",
+            credit: amount,
+            description: lineDesc,
+          });
+        }
       }
 
       let totalDebits = 0n;

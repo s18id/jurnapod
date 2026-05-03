@@ -1233,7 +1233,8 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
     });
     expect(piPostRes.status).toBe(200);
 
-    // 10 USD * 15,000 = 150,000 base; 150,001 should be overpayment.
+    // 10 USD * 15,000 = 150,000 base.
+    // Foreign-currency invoices allow allocation > open amount (FX variance).
     const overpayRes = await fetch(`${baseUrl}/api/purchasing/payments`, {
       method: 'POST',
       headers: {
@@ -1245,14 +1246,70 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
         bank_account_id: bankAccountId,
         supplier_id: testSupplierId,
         lines: [
-          { purchase_invoice_id: fxPiId, allocation_amount: '150001.0000' }
+          { purchase_invoice_id: fxPiId, allocation_amount: '150001.0000', full_settlement: true }
         ]
       })
     });
-    expect(overpayRes.status).toBe(400);
-    const overpayBody = await overpayRes.json();
-    expect(overpayBody.success).toBe(false);
-    expect(overpayBody.error.code).toBe('OVERPAYMENT');
+    expect(overpayRes.status).toBe(201);
+    const overpayPayment = await overpayRes.json();
+    const overpayPaymentId = overpayPayment.data.id;
+
+    // Post the payment — FX loss of 1 should be posted
+    const overpayPostRes = await fetch(`${baseUrl}/api/purchasing/payments/${overpayPaymentId}/post`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    expect(overpayPostRes.status).toBe(200);
+    const overpayPostBody = await overpayPostRes.json();
+    const overpayBatchId = overpayPostBody.data.journal_batch_id;
+
+    // Verify FX loss journal: 3 lines (DR AP 150k, DR FX Loss 1, CR Bank 150001)
+    const db = getTestDb();
+    const overpayJournal = await sql<{ debit: string; credit: string }>`
+      SELECT debit, credit FROM journal_lines WHERE journal_batch_id = ${overpayBatchId}
+    `.execute(db);
+    expect(overpayJournal.rows.length).toBe(3);
+    let totalDr = 0n;
+    let totalCr = 0n;
+    for (const row of overpayJournal.rows) {
+      totalDr += BigInt(Math.round(Number(row.debit) * 10000));
+      totalCr += BigInt(Math.round(Number(row.credit) * 10000));
+    }
+    expect(totalDr).toBe(totalCr);
+
+    // Create a second invoice for the exact-payment test (first invoice is already paid)
+    const pi2Res = await fetch(`${baseUrl}/api/purchasing/invoices`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        supplier_id: testSupplierId,
+        invoice_no: makeTag('APIFX2', ++apTagCounter),
+        invoice_date: '2026-04-26',
+        currency_code: 'USD',
+        exchange_rate: '15000.00000000',
+        lines: [
+          { description: 'Foreign currency PI 2', qty: '1', unit_price: '10.0000', line_type: 'SERVICE' }
+        ]
+      })
+    });
+    expect(pi2Res.status).toBe(201);
+    const pi2 = await pi2Res.json();
+    const fxPi2Id = pi2.data.id;
+
+    const pi2PostRes = await fetch(`${baseUrl}/api/purchasing/invoices/${fxPi2Id}/post`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    expect(pi2PostRes.status).toBe(200);
 
     const exactRes = await fetch(`${baseUrl}/api/purchasing/payments`, {
       method: 'POST',
@@ -1265,7 +1322,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
         bank_account_id: bankAccountId,
         supplier_id: testSupplierId,
         lines: [
-          { purchase_invoice_id: fxPiId, allocation_amount: '150000.0000' }
+          { purchase_invoice_id: fxPi2Id, allocation_amount: '150000.0000' }
         ]
       })
     });

@@ -514,7 +514,8 @@ export const ApPaymentLineCreateSchema = z.object({
       const scaled = BigInt(integer) * 10000n + BigInt((fraction + "0000").slice(0, 4));
       return scaled > 0n;
     }, "Allocation amount must be greater than zero"),
-  description: z.string().trim().max(1000).nullable().optional()
+  description: z.string().trim().max(1000).nullable().optional(),
+  full_settlement: z.boolean().optional().default(false)
 });
 
 /**

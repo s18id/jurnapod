@@ -110,6 +110,7 @@ export interface ApPaymentLines {
   purchase_invoice_id: number;
   allocation_amount: Decimal;
   description: Generated<string | null>;
+  full_settlement: Generated<number>;
   updated_at: Generated<Date>;
 }
 

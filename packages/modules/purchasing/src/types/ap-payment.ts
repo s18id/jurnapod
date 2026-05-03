@@ -138,6 +138,7 @@ export interface APPaymentCreateInput {
     purchaseInvoiceId: number;
     allocationAmount: string;
     description?: string | null;
+    fullSettlement?: boolean;
   }>;
 }
 

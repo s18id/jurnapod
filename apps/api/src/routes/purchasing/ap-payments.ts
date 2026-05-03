@@ -207,6 +207,7 @@ paymentRoutes.post("/", async (c) => {
         purchaseInvoiceId: line.purchase_invoice_id,
         allocationAmount: line.allocation_amount,
         description: line.description ?? null,
+        fullSettlement: line.full_settlement ?? false,
       })),
       overrideReason: input.override_reason ?? null,
     }, auth);
