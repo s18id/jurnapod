@@ -201,22 +201,24 @@ No story may be marked DONE based solely on self-attestation of the implementing
 
 ## 6) Full Sprint Map (48–61)
 
-| Sprint | Primary Focus | Target Modules | Required Output | Exit Gate |
-|--------|----------------|----------------|-----------------|-----------|
-| 48 | Baseline architecture truth map | all | module charters + risk register | architecture baseline approved |
-| 49 | Test determinism + CI reliability | all | stable critical test baseline | 3 consecutive green reruns |
-| 50 | Ledger correctness hardening | accounting-ledger | posting/immutability proof set | no unresolved P0/P1 in ledger scope |
-| 51 | Fiscal correctness hardening | fiscal-control | close/override concurrency proof | deterministic close behavior under race tests |
-| 52 | AP lifecycle correctness | purchasing-ap | AP write-path correctness evidence | no unresolved P0/P1 in AP write flows |
-| 53 | AP reconciliation/snapshot correctness | purchasing-ap | recon + snapshot audit consistency | recon/snapshot critical suites green |
-| 54 | AR + treasury correctness | sales-ar, treasury | handoff and posting consistency | no unresolved P0/P1 in AR/treasury |
-| 55 | Inventory/costing correctness | inventory, inventory-costing | valuation consistency report | no material mismatch in costing tests |
-| 56 | POS core correctness consolidation | pos-core | offline/idempotency replay proofs | zero duplicate financial effect on replay tests |
-| 57 | Tenant + ACL correctness hardening | platform, identity-access | ACL matrix verification evidence | false-allow/false-deny P1 = 0 |
-| 58 | Sync contract correctness hardening | sync-core + adapters | canonical cursor/version proof | no contract drift, no duplicate sync effect |
-| 59 | Projection correctness hardening | reporting/projections | report-to-source reconciliation proof | projection trustworthiness gate pass |
-| 60 | Boundary enforcement in CI | all | dependency rule + CI enforcement | boundary violations blocked by CI |
-| 61 | DRY/KISS consolidation + final audit | all | consolidation report + final gate results | program-level no unresolved P0/P1 |
+> **Revision note (2026-05-28):** Sprints 52–53 were consumed by emergency drift-prevention epics (Epic 52: Datetime Standardization + Idempotency Hardening; Epic 53: Datetime API Consolidation Execution). The original S52–S61 content shifts to S54–S61. Items originally at S60–S61 (boundary enforcement, final consolidation) are pushed beyond the program window.
+
+| Sprint | Epic | Primary Focus | Target Modules | Required Output | Exit Gate |
+|--------|------|----------------|----------------|-----------------|-----------|
+| 48 | — | Baseline architecture truth map | all | module charters + risk register | architecture baseline approved |
+| 49 | — | Test determinism + CI reliability | all | stable critical test baseline | 3 consecutive green reruns |
+| 50 | — | Ledger correctness hardening | accounting-ledger | posting/immutability proof set | no unresolved P0/P1 in ledger scope |
+| 51 | — | Fiscal correctness hardening | fiscal-control | close/override concurrency proof | deterministic close behavior under race tests |
+| 52 | 52 | **Drift prevention:** datetime standardization + idempotency hardening | all (primarily shared + api) | canonical datetime API + idempotency contract | all legacy date patterns removed, sync idempotency verified |
+| 53 | 53 | **Drift prevention:** datetime API consolidation execution | all (primarily shared + modules) | namespaced toUtcIso/fromUtcIso API + deprecated wrapper removal | no deprecated datetime wrappers in use, Z$ assertions everywhere |
+| 54 | 54 | AP lifecycle correctness | purchasing-ap | AP write-path correctness evidence | no unresolved P0/P1 in AP write flows |
+| 55 | 55 | AP reconciliation/snapshot correctness | purchasing-ap | recon + snapshot audit consistency | recon/snapshot critical suites green |
+| 56 | 56 | AR + treasury correctness | sales-ar, treasury | handoff and posting consistency | no unresolved P0/P1 in AR/treasury |
+| 57 | 57 | Inventory/costing correctness | inventory, inventory-costing | valuation consistency report | no material mismatch in costing tests |
+| 58 | 58 | POS core correctness consolidation | pos-core | offline/idempotency replay proofs | zero duplicate financial effect on replay tests |
+| 59 | 59 | Tenant + ACL correctness hardening | platform, identity-access | ACL matrix verification evidence | false-allow/false-deny P1 = 0 |
+| 60 | 60 | Sync contract correctness hardening | sync-core + adapters | canonical cursor/version proof | no contract drift, no duplicate sync effect |
+| 61 | 61 | Projection correctness hardening | reporting/projections | report-to-source reconciliation proof | projection trustworthiness gate pass |
 
 ---
 
@@ -272,3 +274,9 @@ Program is considered complete only when all are true:
 
 This document is the fixed sprint map for S48–S61.
 Changes must be made through explicit re-baseline approval (scope, risk, and schedule impact recorded).
+
+### Re-Baseline Record
+
+| Date | Change | Reason | Approval |
+|------|--------|--------|----------|
+| 2026-05-28 | Sprints 52–53 reassigned to drift-prevention epics (Datetime Standardization + Idempotency Hardening). Original S52–S61 content shifted to S54–S61. Original S60–S61 (boundary enforcement, final DRY/KISS consolidation) deferred beyond program window. | Emergency drift prevention required 2 sprints to stabilize datetime API and idempotency contracts before continuing the AP/AR correctness pipeline. | Architecture Program baseline re-approval |

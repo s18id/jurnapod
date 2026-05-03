@@ -10,10 +10,10 @@
 | Priority | Open | Done | Won't Fix | Total |
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
-| P1 | 0 | 5 | 0 | 5 |
+| P1 | 1 | 5 | 0 | 6 |
 | P2 | 2 | 3 | 0 | 5 |
 | P3 | 0 | 4 | 3 | 7 |
-| **Total** | **2** | **16** | **3** | **21** |
+| **Total** | **3** | **16** | **3** | **22** |
 
 > **Note:** The Historical section (Pre-Epic 8) is tracked separately (32 items) and excluded from summary totals above.
 
@@ -27,7 +27,9 @@
 
 ## P1 - High (Do Next Sprint)
 
-*(empty — no open P1 items)*
+| ID | Action | From | Owner | Status |
+|----|--------|------|-------|--------|
+| **E51-A1** | Fix auto-snapshot race in fiscal year close: move `hasAutoSnapshotForFiscalYearEnd` check inside the close transaction with `FOR UPDATE` lock or `INSERT ... ON DUPLICATE KEY` idempotency | Epic 51 (deferred) | TBD | Planned for Epic 54 |
 
 ---
 

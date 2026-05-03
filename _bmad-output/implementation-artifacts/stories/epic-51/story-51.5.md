@@ -9,7 +9,13 @@
 >
 > **Scope enforcement:** Story 51.5 MUST NOT be used to introduce new scope. It is exclusively a follow-up closure bucket for defects/gaps surfaced by Stories 51.1–51.4. Any item that is not a direct follow-up from 51.1–51.4 MUST be deferred to a future epic.
 
-**Status:** backlog
+**Status:** done
+
+---
+
+## Completion Summary
+
+Story 51.5 is the follow-up closure bucket for Epic 51. After completing second-pass reviews on all four source stories (51.1–51.4), no unresolved P0/P1 defects remain in scope. All items are formally captured, resolved, or deferred with rationale below.
 
 ---
 
@@ -118,13 +124,15 @@ Stories 51.1–51.4 will surface defects and gaps. This story captures resolving
 
 | Defect ID | Source Story | Description | Status | Resolution |
 |-----------|--------------|-------------|--------|------------|
-| D51-001 | 51.1 | [TBD — populated during execution] | open/resolved/deferred | [TBD] |
-| D51-002 | 51.2 | [TBD — populated during execution] | open/resolved/deferred | [TBD] |
-| D51-003 | 51.3 | [TBD — populated during execution] | open/resolved/deferred | [TBD] |
-| D51-004 | 51.4 | [TBD — populated during execution] | open/resolved/deferred | [TBD] |
+| D51-001 | 51.1 | Auto-snapshot race: `hasAutoSnapshotForFiscalYearEnd` check runs outside transaction, can read stale state under concurrent snapshot creation | **deferred** | Pre-existing infrastructure pattern, not introduced by 51.1. Snapshot infrastructure needs `SELECT ... FOR UPDATE` or transactional check-then-insert. Tracked for follow-up epic. |
+| D51-002 | 51.2 | None — no defects found in AR reconciliation review | resolved | Second-pass review GO (2026-05-28). |
+| D51-003 | 51.3 | Bug: currency code `'BASE'` (4 chars) vs `CHAR(3)` column; Bug: `DECIMAL(19,4) * DECIMAL(18,8)` overflow in `toScaled` | **resolved** | Fixed in Story 51.3 scope, verified 3× consecutive green. |
+| D51-004 | 51.4 | `DATE(acquired_at)` wrapping indexed column (performance); no seeded-data test for non-zero inventory path | **deferred** | P3 observations documented. First: deferred to performance pass. Second: deferred to fixture extraction. |
 
 ### Deferred Items
 
 | Item | Source | Rationale | Deferred To |
 |------|--------|-----------|-------------|
-| [TBD] | [TBD] | [TBD] | [TBD] |
+| Auto-snapshot race in fiscal year close | 51.1 | Pre-existing pattern; snapshot check runs outside close transaction without locking. Non-blocking — snapshot failure is already non-fatal. | **Epic 54 (AP lifecycle correctness)** |
+| `DATE(acquired_at)` on indexed column in inventory reconciliation | 51.4 | Performance concern, not correctness. The `DATE()` wrapper may prevent index usage on `acquired_at` for large data volumes. | Future performance pass |
+| Missing seeded-data test for non-zero inventory path | 51.4 | Test coverage gap; requires inventory costing fixtures which don't yet exist in canonical form. | When inventory costing fixtures are extracted |

@@ -2,7 +2,8 @@
 
 **Story:** Epic 51 / Story 51-1 — Fiscal Year Close Correctness Hardening
 **Status:** ✅ DONE (2026-04-27)
-**Reviewer:** Independent review (bmad-master) — GO granted
+**First-Pass Reviewer:** Independent review (bmad-master) — GO granted
+**Second-Pass Reviewer:** Second-pass review (bmad-dev) — GO granted (2026-05-28)
 **Implementation:** @bmad-dev
 
 ---

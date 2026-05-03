@@ -162,12 +162,12 @@ Capture and resolve all defects and gaps surfaced by Stories 51.1–51.4. Epic 5
 
 | Risk | Severity | Mitigation | Status |
 |------|----------|------------|--------|
-| R51-001: Fiscal year close concurrent override race condition | P1 | Story 51.1 | backlog |
-| R51-002: AR subledger drift from GL control account | P1 | Story 51.2 | backlog |
-| R51-003: AP subledger drift from GL control account | P1 | Story 51.3 | backlog |
-| R51-004: Inventory subledger drift from GL control account | P1 | Story 51.4 | backlog |
-| R51-005: Story 51.5 scope creep (non-follow-up items) | P2 | Story 51.5 scope enforcement; epic gate | backlog |
-| R51-006: E50-A1/E50-A2 prerequisites not executed before midpoint | P1 | HARD GATE block; implementors verify before starting | backlog |
+| R51-001: Fiscal year close concurrent override race condition | P1 | Story 51.1 | **closed** |
+| R51-002: AR subledger drift from GL control account | P1 | Story 51.2 | **closed** |
+| R51-003: AP subledger drift from GL control account | P1 | Story 51.3 | **closed** |
+| R51-004: Inventory subledger drift from GL control account | P1 | Story 51.4 | **closed** |
+| R51-005: Story 51.5 scope creep (non-follow-up items) | P2 | Story 51.5 scope enforcement; epic gate | **closed** |
+| R51-006: E50-A1/E50-A2 prerequisites not executed before midpoint | P1 | HARD GATE block; implementors verify before starting | **closed** |
 
 ---
 

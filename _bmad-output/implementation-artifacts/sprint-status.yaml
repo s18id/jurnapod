@@ -592,7 +592,7 @@ development_status:
   51-2-receivables-subledger-reconciliation: done
   51-3-payables-subledger-reconciliation: done
   51-4-inventory-subledger-reconciliation: done
-  51-5-follow-up-closure-bucket: backlog
+  51-5-follow-up-closure-bucket: done
 
   # Epic 52: Datetime Standardization + Idempotency Hardening
   epic-52: done
