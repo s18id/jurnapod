@@ -46,6 +46,28 @@ So that **{benefit}**.
 
 ---
 
+## Cross-Module Decision Gate (MANDATORY — E54-A1 Follow-Up)
+
+> **Purpose:** When a story touches multiple modules, architectural decisions MUST be identified and signed off by Winston (Architect) before implementation begins — not discovered mid-story. This gate prevents the three-way-matching-granularity problem from recurring.
+
+### Pre-Implementation Checklist
+
+- [ ] **Modules touched:** List all modules this story reads/writes (e.g., `purchasing`, `accounting`, `treasury`)
+- [ ] **Cross-module decisions identified:** List each decision that spans module boundaries (schema, API contract, journal behavior, shared invariants)
+- [ ] **Winston sign-off obtained:** Each decision must have Winston's explicit written sign-off in the story file (not Slack/async)
+- [ ] **Decisions recorded:** Each decision is written in the `Decisions` table below with rationale and chosen alternative
+
+### Decision Record
+
+| # | Decision | Modules Affected | Rationale | Alternatives Considered | Winston Sign-Off |
+|---|----------|-----------------|-----------|------------------------|-----------------|
+| 1 | {description} | {module list} | {why this choice} | {alternatives rejected and why} | `{date} ✓` |
+| 2 | | | | | |
+
+**Hard gate:** Implementation MUST NOT begin until all rows in the table above have Winston's sign-off. Stories without this section completed will be returned to planning.
+
+---
+
 ## API Contract Verification (MANDATORY for UI Stories)
 
 > **Purpose:** Verify all API endpoints return expected contract shapes BEFORE starting UI implementation.
