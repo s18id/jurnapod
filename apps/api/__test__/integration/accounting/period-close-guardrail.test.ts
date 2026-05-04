@@ -33,6 +33,7 @@ import {
   getTestAccessToken,
 } from "../../fixtures";
 import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
+import { makeTag } from "../../helpers/tags";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -87,13 +88,13 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
     // ========================================================================
     // Company A — override_allowed mode (override path tests c, d, e)
     // ========================================================================
-    companyA = await createTestCompanyMinimal({ code: `PCG-A-${Date.now()}`.slice(0, 18) });
+    companyA = await createTestCompanyMinimal({ code: makeTag('PCG-A-', 18) });
 
     // ---- Owner user (custom role with MANAGE on accounting.fiscal_years) ----
     // Use a custom role rather than mutating the seeded OWNER role.
     const ownerCustomRole = await createTestRole(baseUrl, seedToken, "Owner Override Role");
 
-    const ownerEmailA = `pcg-owner-a-${Date.now()}@example.com`;
+    const ownerEmailA = `pcg-owner-a-${makeTag('OWN', 8)}@example.com`;
     const ownerUserA = await createTestUser(companyA.id, {
       email: ownerEmailA,
       name: "PCG Owner A",
@@ -110,7 +111,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
     // ---- Custom role: READ only on accounting.fiscal_years (no MANAGE → 403) ----
     const noManageRole = await createTestRole(baseUrl, seedToken, "No Fiscal Years Manage");
 
-    const noManageEmailA = `pcg-nomanage-a-${Date.now()}@example.com`;
+    const noManageEmailA = `pcg-nomanage-a-${makeTag('NMG', 8)}@example.com`;
     const noManageUserA = await createTestUser(companyA.id, {
       email: noManageEmailA,
       name: "PCG NoManage A",
@@ -127,7 +128,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
     // ---- Support entities for company A ----
     await createTestPurchasingAccounts(companyA.id);
     const supplierA = await createTestSupplier(companyA.id, {
-      code: `PCG-SUP-A-${Date.now()}`.slice(0, 20),
+      code: makeTag('PCG-SUP-A-', 20),
       name: "PCG Supplier A",
       currency: "IDR",
     });
@@ -178,12 +179,12 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
     // ========================================================================
     // Company B — strict mode (default): block path (a) + tenant isolation (f)
     // ========================================================================
-    companyB = await createTestCompanyMinimal({ code: `PCG-B-${Date.now()}`.slice(0, 18) });
+    companyB = await createTestCompanyMinimal({ code: makeTag('PCG-B-', 18) });
 
     // Custom role for company B (no MANAGE on fiscal_years — not needed in strict mode)
     const ownerCustomRoleB = await createTestRole(baseUrl, seedToken, "Owner Strict Role");
 
-    const ownerEmailB = `pcg-owner-b-${Date.now()}@example.com`;
+    const ownerEmailB = `pcg-owner-b-${makeTag('OWN', 8)}@example.com`;
     const ownerUserB = await createTestUser(companyB.id, {
       email: ownerEmailB,
       name: "PCG Owner B",
@@ -197,7 +198,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
 
     await createTestPurchasingAccounts(companyB.id);
     const supplierB = await createTestSupplier(companyB.id, {
-      code: `PCG-SUP-B-${Date.now()}`.slice(0, 20),
+      code: makeTag('PCG-SUP-B-', 20),
       name: "PCG Supplier B",
       currency: "IDR",
     });
@@ -293,7 +294,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
       // Company B: FY2025/P6 is CLOSED (Jun 1-30 2025)
       const res = await postJson("/api/purchasing/invoices", ownerTokenB, {
         supplier_id: supplierIdB,
-        invoice_no: `PCG-INV-BLK-${Date.now()}`,
+        invoice_no: makeTag('PCG-INV-BLK-', 20),
         invoice_date: "2025-06-15",
         currency_code: "IDR",
         lines: [{ description: "Test item", qty: "1", unit_price: "50000.0000", line_type: "SERVICE" }],
@@ -308,7 +309,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
       // Create + post invoice in open period first (Apr 2025 — open for B)
       const invRes = await postJson("/api/purchasing/invoices", ownerTokenB, {
         supplier_id: supplierIdB,
-        invoice_no: `PCG-PAY-BLK-INV-${Date.now()}`,
+        invoice_no: makeTag('PCG-PAY-BLK-INV-', 20),
         invoice_date: "2025-04-15",
         currency_code: "IDR",
         lines: [{ description: "Test item", qty: "1", unit_price: "25000.0000", line_type: "SERVICE" }],
@@ -336,7 +337,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
     it("blocks AP credit create with 409 when date falls in CLOSED period (Jun 2025)", async () => {
       const res = await postJson("/api/purchasing/credits", ownerTokenB, {
         supplier_id: supplierIdB,
-        credit_no: `PCG-CR-BLK-${Date.now()}`.slice(0, 20),
+        credit_no: makeTag('PCG-CR-BLK-', 20),
         credit_date: "2025-06-18",
         lines: [{ description: "Credit item", qty: "1", unit_price: "10000.0000", line_type: "SERVICE" }],
       });
@@ -354,7 +355,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
     it("creates AP invoice successfully in OPEN period", async () => {
       const res = await postJson("/api/purchasing/invoices", ownerTokenA, {
         supplier_id: supplierIdA,
-        invoice_no: `PCG-INV-OPEN-${Date.now()}`,
+        invoice_no: makeTag('PCG-INV-OPEN-', 20),
         invoice_date: "2026-04-15",
         currency_code: "IDR",
         lines: [{ description: "Test item", qty: "1", unit_price: "50000.0000", line_type: "SERVICE" }],
@@ -368,7 +369,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
     it("creates AP payment successfully in OPEN period", async () => {
       const invRes = await postJson("/api/purchasing/invoices", ownerTokenA, {
         supplier_id: supplierIdA,
-        invoice_no: `PCG-PAY-OPEN-INV-${Date.now()}`,
+        invoice_no: makeTag('PCG-PAY-OPEN-INV-', 20),
         invoice_date: "2026-04-12",
         currency_code: "IDR",
         lines: [{ description: "Test item", qty: "1", unit_price: "35000.0000", line_type: "SERVICE" }],
@@ -393,7 +394,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
     it("creates AP credit successfully in OPEN period", async () => {
       const res = await postJson("/api/purchasing/credits", ownerTokenA, {
         supplier_id: supplierIdA,
-        credit_no: `PCG-CR-OPEN-${Date.now()}`.slice(0, 20),
+        credit_no: makeTag('PCG-CR-OPEN-', 20),
         credit_date: "2026-04-18",
         lines: [{ description: "Credit item", qty: "1", unit_price: "10000.0000", line_type: "SERVICE" }],
       });
@@ -423,7 +424,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
 
       const res = await postJson("/api/purchasing/invoices", ownerTokenA, {
         supplier_id: supplierIdA,
-        invoice_no: `PCG-INV-OVR-${Date.now()}`,
+        invoice_no: makeTag('PCG-INV-OVR-', 20),
         invoice_date: "2099-01-15",
         currency_code: "IDR",
         override_reason: "Testing override for year-end adjustment correction",
@@ -459,7 +460,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
     it("rejects override_reason shorter than 10 characters with 400", async () => {
       const res = await postJson("/api/purchasing/invoices", ownerTokenA, {
         supplier_id: supplierIdA,
-        invoice_no: `PCG-INV-SHORT-OVR-${Date.now()}`,
+        invoice_no: makeTag('PCG-INV-SHORT-OVR-', 20),
         invoice_date: "2025-04-15",
         currency_code: "IDR",
         override_reason: "short",
@@ -477,7 +478,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
     it("returns 403 when user lacks MANAGE on accounting.fiscal_years and provides override_reason (invoice)", async () => {
       const res = await postJson("/api/purchasing/invoices", noManageTokenA, {
         supplier_id: supplierIdA,
-        invoice_no: `PCG-INV-NO-MANAGE-${Date.now()}`,
+        invoice_no: makeTag('PCG-INV-NO-MANAGE-', 20),
         invoice_date: "2025-04-15",
         currency_code: "IDR",
         override_reason: "Test override reason that is long enough",
@@ -493,7 +494,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
       // Create + post invoice in open period first
       const invRes = await postJson("/api/purchasing/invoices", ownerTokenA, {
         supplier_id: supplierIdA,
-        invoice_no: `PCG-PAY-NOMNG-INV-${Date.now()}`,
+        invoice_no: makeTag('PCG-PAY-NOMNG-INV-', 20),
         invoice_date: "2026-04-10",
         currency_code: "IDR",
         lines: [{ description: "Test item", qty: "1", unit_price: "20000.0000", line_type: "SERVICE" }],
@@ -522,7 +523,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
     it("returns 403 when user lacks MANAGE on accounting.fiscal_years and provides override_reason (credit)", async () => {
       const res = await postJson("/api/purchasing/credits", noManageTokenA, {
         supplier_id: supplierIdA,
-        credit_no: `PCG-CR-NOMNG-${Date.now()}`.slice(0, 20),
+        credit_no: makeTag('PCG-CR-NOMNG-', 20),
         credit_date: "2025-04-18",
         override_reason: "Test override for credit",
         lines: [{ description: "Test credit", qty: "1", unit_price: "5000.0000", line_type: "SERVICE" }],
@@ -556,7 +557,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
       // Create + post invoice in closed period via override
       const invRes = await postJson("/api/purchasing/invoices", ownerTokenA, {
         supplier_id: supplierIdA,
-        invoice_no: `PCG-VOID-OVR-${Date.now()}`,
+        invoice_no: makeTag('PCG-VOID-OVR-', 20),
         invoice_date: "2099-01-10",
         currency_code: "IDR",
         override_reason: "Creating invoice for void override test",
@@ -596,7 +597,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
       // Create + post invoice in open period
       const invRes = await postJson("/api/purchasing/invoices", ownerTokenA, {
         supplier_id: supplierIdA,
-        invoice_no: `PCG-VOID-BLK-${Date.now()}`,
+        invoice_no: makeTag('PCG-VOID-BLK-', 20),
         invoice_date: "2026-04-11",
         currency_code: "IDR",
         lines: [{ description: "Invoice for void block test", qty: "1", unit_price: "60000.0000", line_type: "SERVICE" }],
@@ -625,7 +626,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
       // Company A: create + post invoice
       const invRes = await postJson("/api/purchasing/invoices", ownerTokenA, {
         supplier_id: supplierIdA,
-        invoice_no: `PCG-TN-INV-${Date.now()}`,
+        invoice_no: makeTag('PCG-TN-INV-', 20),
         invoice_date: "2026-04-10",
         currency_code: "IDR",
         lines: [{ description: "Company A invoice", qty: "1", unit_price: "80000.0000", line_type: "SERVICE" }],
@@ -648,7 +649,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
       // But B has no closed period covering Apr 2025, so transaction succeeds
       const res = await postJson("/api/purchasing/invoices", ownerTokenB, {
         supplier_id: supplierIdB,
-        invoice_no: `PCG-B-INV-${Date.now()}`,
+        invoice_no: makeTag('PCG-B-INV-', 20),
         invoice_date: "2025-04-15",
         currency_code: "IDR",
         lines: [{ description: "Company B invoice same date", qty: "1", unit_price: "50000.0000", line_type: "SERVICE" }],
@@ -663,7 +664,7 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
       // Create an invoice for company A
       const invRes = await postJson("/api/purchasing/invoices", ownerTokenA, {
         supplier_id: supplierIdA,
-        invoice_no: `PCG-TN-AUDIT-${Date.now()}`,
+        invoice_no: makeTag('PCG-TN-AUDIT-', 20),
         invoice_date: "2026-04-16",
         currency_code: "IDR",
         lines: [{ description: "Audit test item", qty: "1", unit_price: "90000.0000", line_type: "SERVICE" }],

@@ -632,4 +632,4 @@ development_status:
   54-3-ap-state-machine-integrity: done
   54-4-multicurrency-ap-correctness: done
   54-5-ap-period-close-enforcement: done
-  54-6-follow-up-closure-bucket: backlog
+  54-6-follow-up-closure-bucket: done

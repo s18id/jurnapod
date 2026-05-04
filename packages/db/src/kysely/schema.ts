@@ -377,6 +377,7 @@ export interface Companies {
   phone: Generated<string | null>;
   postal_code: Generated<string | null>;
   tax_id: Generated<string | null>;
+  three_way_matching: Generated<number>;
   timezone: Generated<string | null>;
   updated_at: Generated<Date>;
 }
@@ -1688,6 +1689,7 @@ export interface PurchaseOrderLines {
   created_at: Generated<Date>;
   description: Generated<string | null>;
   id: Generated<number>;
+  invoiced_qty: Generated<Decimal>;
   item_id: Generated<number | null>;
   line_no: number;
   line_total: Decimal;

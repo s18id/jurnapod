@@ -2,6 +2,20 @@
 /// <reference types="node" />
 
 /**
+ * ⚠️ PROTECTED FILE — DO NOT MODIFY WITHOUT EXPLICIT INSTRUCTION
+ *
+ * This script manages sprint-status.yaml, the shared state file tracking all
+ * epic and story completion across the project. Unauthorized modifications:
+ * - Risk corrupting sprint tracking for ALL epics (P1 process failure)
+ * - Can introduce duplicate entries, silent overwrites, or broken key formats
+ * - Require coordination with documented constraints (AGENTS.md, DoD, policies)
+ *
+ * Any proposed change MUST be reviewed with the user first. The existing
+ * validation chain (normalizeStoryInput -> resolveStoryKeys -> uniqueness gate)
+ * is the canonical path and MUST NOT be bypassed.
+ */
+
+/**
  * Canonical Sprint Status Update Utility
  */
 
@@ -276,7 +290,54 @@ function updateSprintStatus(content: string, args: CliArgs): string {
 
     if (args.title) {
       const normalizedTitle = normalizeTitleInput(args.title);
-      targetKeys = [`${normalizeStoryInput(epic, args.story)}-${normalizedTitle}`];
+      const normalized = normalizeStoryInput(epic, args.story);
+      const fullKey = `${normalized}-${normalizedTitle}`;
+
+      // Check if exact key already exists -> update it
+      const existingMatch = storyKeys.find(k => k.toLowerCase() === fullKey.toLowerCase());
+      if (existingMatch) {
+        targetKeys = [existingMatch];
+      } else {
+        // Check if base story already has entries -> gate behind --multi
+        const basePrefix = `${normalized}-`;
+        const hasExistingEntries = storyKeys.some(k => {
+          const lower = k.toLowerCase();
+          return lower === normalized || lower.startsWith(basePrefix);
+        });
+
+        if (hasExistingEntries) {
+          const baseEntries = storyKeys.filter(k => {
+            const lower = k.toLowerCase();
+            return lower === normalized || lower.startsWith(basePrefix);
+          });
+          console.error(`\n❌ Error: '${normalized}' already has existing entr${baseEntries.length === 1 ? 'y' : 'ies'}:`);
+          baseEntries.forEach(k => console.error(`  - ${k}`));
+          // Suggest the correct --title from existing entries
+          if (baseEntries.length === 1) {
+            const existingKey = baseEntries[0];
+            const suggestedTitle = existingKey.replace(`${normalized}-`, '');
+            console.error(`\n  Did you mean: --title ${suggestedTitle} ?`);
+          } else {
+            console.error(`\n  Did you mean one of these --title values?`);
+            baseEntries.forEach(k => {
+              const suggestedTitle = k.replace(`${normalized}-`, '');
+              console.error(`    --title ${suggestedTitle}`);
+            });
+          }
+
+          // Hint that user can omit --title
+          if (baseEntries.length === 1) {
+            console.error(`  Or omit --title to update the entry above.`);
+          } else {
+            console.error(`  Or omit --title and use --multi to update all matching entries.`);
+          }
+
+          console.error(`\n  To update an existing entry, use --title matching the exact key.`);
+          process.exit(1);
+        }
+
+        targetKeys = [fullKey];
+      }
     } else {
       targetKeys = resolveStoryKeys(epic, args.story, storyKeys, Boolean(args.multi));
     }

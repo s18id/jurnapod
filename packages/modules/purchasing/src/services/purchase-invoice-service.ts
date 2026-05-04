@@ -10,6 +10,7 @@
 
 import type { KyselySchema } from "@jurnapod/db";
 import { sql } from "kysely";
+import { insertPeriodCloseOverride } from "./period-close-override-utils.js";
 import {
   PURCHASE_INVOICE_STATUS,
   toUtcIso,
@@ -103,56 +104,6 @@ async function computeCreditUtilization(
     newOutstanding,
     newUtilizationPercent,
   };
-}
-
-// =============================================================================
-// Insert Period Close Override (inline for package use)
-// =============================================================================
-
-async function insertPeriodCloseOverride(
-  db: KyselySchema,
-  params: {
-    companyId: number;
-    userId: number;
-    transactionType: string;
-    transactionId: number;
-    periodId: number;
-    reason: string;
-    overriddenAt: Date;
-  }
-): Promise<void> {
-  await db
-    .insertInto("period_close_overrides")
-    .values({
-      company_id: params.companyId,
-      user_id: params.userId,
-      transaction_type: params.transactionType,
-      transaction_id: params.transactionId,
-      period_id: params.periodId,
-      reason: params.reason,
-      overridden_at: params.overriddenAt,
-    })
-    .execute();
-
-  // FIX(54.5-AC3): Audit log entry for period-close override
-  await db
-    .insertInto("audit_logs")
-    .values({
-      company_id: params.companyId,
-      outlet_id: null,
-      user_id: params.userId,
-      action: "PERIOD_CLOSE_OVERRIDE",
-      result: "SUCCESS",
-      success: 1,
-      ip_address: null,
-      payload_json: JSON.stringify({
-        periodId: params.periodId,
-        reason: params.reason,
-        transactionType: params.transactionType,
-        transactionId: params.transactionId,
-      }),
-    })
-    .execute();
 }
 
 // =============================================================================
@@ -554,7 +505,7 @@ export class PurchaseInvoiceService {
     const company = await this.db
       .selectFrom("companies")
       .where("id", "=", companyId)
-      .select(["currency_code"])
+      .select(["currency_code", "three_way_matching"])
       .executeTakeFirst();
 
     if (!company) {
@@ -829,7 +780,9 @@ export class PurchaseInvoiceService {
           .where("purchase_order_lines.company_id", "=", companyId)
           .select([
             "purchase_order_lines.id",
+            "purchase_order_lines.qty",
             "purchase_order_lines.received_qty",
+            "purchase_order_lines.invoiced_qty",
             "purchase_orders.supplier_id",
           ])
           .forUpdate()
@@ -854,10 +807,19 @@ export class PurchaseInvoiceService {
             }
 
             const receivedQty = toScaled4(String(poLine.received_qty));
+            const invoicedQty = toScaled4(String(poLine.invoiced_qty ?? "0"));
+            const orderedQty = toScaled4(String(poLine.qty));
+            const availableQty = receivedQty - invoicedQty;
             const invoiceQty = toScaled4(String(line.qty));
 
-            if (invoiceQty > receivedQty) {
-              throw new PIGrnInsufficientQtyError(line.po_line_id, line.qty, String(poLine.received_qty));
+            // Three-way matching: cap by ordered_qty when enabled (D54-001)
+            const threeWayAvailable = orderedQty - invoicedQty;
+            const effectiveAvailable = company?.three_way_matching
+              ? (availableQty < threeWayAvailable ? availableQty : threeWayAvailable)
+              : availableQty;
+
+            if (invoiceQty > effectiveAvailable) {
+              throw new PIGrnInsufficientQtyError(line.po_line_id, line.qty, String(effectiveAvailable));
             }
           }
         }
@@ -890,6 +852,18 @@ export class PurchaseInvoiceService {
 
       if (Number(updateResult[0]?.numUpdatedRows ?? 0n) === 0) {
         throw new PIError("ALREADY_POSTED", "Invoice was already posted by another request");
+      }
+
+      // Update invoiced_qty accumulator on referenced PO lines (D54-002)
+      for (const line of lines) {
+        if (line.po_line_id) {
+          await sql`
+            UPDATE purchase_order_lines
+            SET invoiced_qty = invoiced_qty + ${toScaled4(String(line.qty))}
+            WHERE id = ${line.po_line_id}
+              AND company_id = ${companyId}
+          `.execute(trx);
+        }
       }
 
       if (guardrailDecision?.overrideRequired && validOverrideReason !== null && guardrailDecision.periodId) {
@@ -950,6 +924,14 @@ export class PurchaseInvoiceService {
       .select(["account_id", "debit", "credit", "description"])
       .execute();
 
+    // Read original PI lines for invoiced_qty decrement (D54-002)
+    const piLines = await this.db
+      .selectFrom("purchase_invoice_lines")
+      .where("invoice_id", "=", piId)
+      .where("company_id", "=", companyId)
+      .select(["po_line_id", "qty"])
+      .execute();
+
     const result = await this.db.transaction().execute(async (trx) => {
       let batchResult;
       try {
@@ -997,6 +979,18 @@ export class PurchaseInvoiceService {
 
       if (Number(updateResult[0]?.numUpdatedRows ?? 0n) === 0) {
         throw new PIError("ALREADY_VOIDED", "Invoice was already voided by another request");
+      }
+
+      // Decrement invoiced_qty accumulator on referenced PO lines (D54-002)
+      for (const line of piLines) {
+        if (line.po_line_id) {
+          await sql`
+            UPDATE purchase_order_lines
+            SET invoiced_qty = invoiced_qty - ${toScaled4(String(line.qty))}
+            WHERE id = ${line.po_line_id}
+              AND company_id = ${companyId}
+          `.execute(trx);
+        }
       }
 
       if (guardrailDecision?.overrideRequired && validOverrideReason !== null && guardrailDecision.periodId) {

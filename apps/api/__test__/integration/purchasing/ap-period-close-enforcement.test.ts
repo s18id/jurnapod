@@ -74,6 +74,8 @@ let bankAccountId: number;
 let fy2024Id: number;
 let fy2026Id: number;
 let period2024_1_Id: number;
+let ownerUserId: number;
+let noManageUserId: number;
 
 // ---------------------------------------------------------------------------
 // Suite
@@ -109,6 +111,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
       name: "PCE Owner",
       password: "TestPassword123!",
     });
+    ownerUserId = ownerUser.id;
     await assignUserGlobalRole(ownerUser.id, ownerCustomRole.id);
 
     await setModulePermission(company.id, ownerCustomRole.id, "purchasing", "invoices", CRUDAM);
@@ -126,6 +129,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
       name: "PCE NoManage",
       password: "TestPassword123!",
     });
+    noManageUserId = noManageUser.id;
     await assignUserGlobalRole(noManageUser.id, noManageRole.id);
 
     await setModulePermission(company.id, noManageRole.id, "purchasing", "invoices", CRUDAM);
@@ -217,6 +221,10 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
       await sql`DELETE FROM purchase_invoices WHERE company_id = ${company.id}`.execute(db);
       await sql`DELETE FROM journal_lines WHERE company_id = ${company.id}`.execute(db);
       await sql`DELETE FROM journal_batches WHERE company_id = ${company.id}`.execute(db);
+      await sql`DELETE FROM period_close_overrides WHERE company_id = ${company.id}`.execute(db);
+      await sql`DELETE FROM period_close_overrides WHERE user_id = ${ownerUserId}`.execute(db);
+      await sql`DELETE FROM period_close_overrides WHERE user_id = ${noManageUserId}`.execute(db);
+      await sql`DELETE FROM audit_logs WHERE company_id = ${company.id}`.execute(db);
       await sql`DELETE FROM fiscal_periods WHERE company_id = ${company.id}`.execute(db);
       await sql`DELETE FROM fiscal_years WHERE company_id = ${company.id}`.execute(db);
       await sql`DELETE FROM settings_strings WHERE company_id = ${company.id}`.execute(db);
@@ -384,6 +392,252 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
       WHERE company_id = ${company.id}
         AND transaction_type = 'PURCHASE_INVOICE'
         AND transaction_id = ${invoiceId}
+      LIMIT 1
+    `.execute(db);
+    expect(overrideRow.rows.length).toBe(1);
+
+    // Re-open
+    await sql`UPDATE fiscal_periods SET status = 1 WHERE id = ${period2099_1_Id}`.execute(db);
+  });
+
+  // ========================================================================
+  // AC3b: Void override is audited (D54-004)
+  // ========================================================================
+  it("AC3b: void invoice with override creates audit log entry", async () => {
+    const db = getTestDb();
+    const period2099_1 = await sql`
+      SELECT fp.id FROM fiscal_periods fp
+      JOIN fiscal_years fy ON fy.id = fp.fiscal_year_id
+      WHERE fp.company_id = ${company.id} AND fp.period_no = 1 AND fy.start_date = '2099-01-01'
+      LIMIT 1
+    `.execute(db);
+    const period2099_1_Id = (period2099_1.rows[0] as { id: number }).id;
+    await sql`UPDATE fiscal_periods SET status = 2 WHERE id = ${period2099_1_Id}`.execute(db);
+
+    // Create invoice in closed future period
+    const draftRes = await postJson("/api/purchasing/invoices", ownerToken, {
+      supplier_id: supplierId,
+      invoice_no: makeTag("PCEVOID"),
+      invoice_date: "2099-06-15",
+      currency_code: "IDR",
+      override_reason: "Create override for void audit test",
+      lines: [{ description: "Void audit item", qty: "1", unit_price: "10000.0000", line_type: "SERVICE" }],
+    });
+    expect(draftRes.status).toBe(201);
+    const draftBody = await draftRes.json();
+    const invoiceId = draftBody.data.id;
+
+    // Post with override
+    const postRes = await postJson(`/api/purchasing/invoices/${invoiceId}/post`, ownerToken, {
+      override_reason: "Post override for void audit test",
+    });
+    expect(postRes.status).toBe(200);
+
+    // Void with override
+    const voidRes = await postJson(`/api/purchasing/invoices/${invoiceId}/void`, ownerToken, {
+      override_reason: "Void override audit test reason",
+    });
+    expect(voidRes.status).toBe(200);
+
+    // Verify audit log entry for VOID
+    const auditRow = await sql`
+      SELECT id, action, payload_json FROM audit_logs
+      WHERE company_id = ${company.id}
+        AND action = 'PERIOD_CLOSE_OVERRIDE'
+        AND payload_json LIKE ${'%"transactionType":"PURCHASE_INVOICE_VOID"%'}
+      ORDER BY id DESC
+      LIMIT 1
+    `.execute(db);
+
+    expect(auditRow.rows.length).toBe(1);
+    const row = auditRow.rows[0] as { id: number; action: string; payload_json: string };
+    expect(row.action).toBe("PERIOD_CLOSE_OVERRIDE");
+    const payload = JSON.parse(row.payload_json);
+    expect(payload.transactionId).toBe(invoiceId);
+    expect(payload.transactionType).toBe("PURCHASE_INVOICE_VOID");
+    expect(payload.reason).toBe("Void override audit test reason");
+
+    // Verify period_close_overrides row for void
+    const overrideRow = await sql`
+      SELECT id, reason FROM period_close_overrides
+      WHERE company_id = ${company.id}
+        AND transaction_type = 'PURCHASE_INVOICE_VOID'
+        AND transaction_id = ${invoiceId}
+      LIMIT 1
+    `.execute(db);
+    expect(overrideRow.rows.length).toBe(1);
+
+    // Re-open
+    await sql`UPDATE fiscal_periods SET status = 1 WHERE id = ${period2099_1_Id}`.execute(db);
+  });
+
+  it("AC3b: void AP payment with override creates audit log entry", async () => {
+    const db = getTestDb();
+    const period2099_1 = await sql`
+      SELECT fp.id FROM fiscal_periods fp
+      JOIN fiscal_years fy ON fy.id = fp.fiscal_year_id
+      WHERE fp.company_id = ${company.id} AND fp.period_no = 1 AND fy.start_date = '2099-01-01'
+      LIMIT 1
+    `.execute(db);
+    const period2099_1_Id = (period2099_1.rows[0] as { id: number }).id;
+    await sql`UPDATE fiscal_periods SET status = 2 WHERE id = ${period2099_1_Id}`.execute(db);
+
+    // Create a draft invoice first (to pay against)
+    const invRes = await postJson("/api/purchasing/invoices", ownerToken, {
+      supplier_id: supplierId,
+      invoice_no: makeTag("PCEPYINV"),
+      invoice_date: "2099-06-15",
+      currency_code: "IDR",
+      override_reason: "Create override for payment void audit test",
+      lines: [{ description: "Payment void audit item", qty: "1", unit_price: "10000.0000", line_type: "SERVICE" }],
+    });
+    expect(invRes.status).toBe(201);
+    const invBody = await invRes.json();
+    const invoiceId = invBody.data.id;
+
+    // Post invoice
+    const postInvRes = await postJson(`/api/purchasing/invoices/${invoiceId}/post`, ownerToken, {
+      override_reason: "Post override for payment void audit test",
+    });
+    expect(postInvRes.status).toBe(200);
+
+    // Create payment in closed future period
+    const payRes = await postJson("/api/purchasing/payments", ownerToken, {
+      supplier_id: supplierId,
+      bank_account_id: bankAccountId,
+      payment_date: "2099-06-20",
+      override_reason: "Create override for payment void audit test",
+      lines: [{ purchase_invoice_id: invoiceId, allocation_amount: "10000.0000" }],
+    });
+    expect(payRes.status).toBe(201);
+    const payBody = await payRes.json();
+    const paymentId = payBody.data.id;
+
+    // Post payment with override
+    const postPayRes = await postJson(`/api/purchasing/payments/${paymentId}/post`, ownerToken, {
+      override_reason: "Post override for payment void audit test",
+    });
+    expect(postPayRes.status).toBe(200);
+
+    // Void payment with override
+    const voidRes = await postJson(`/api/purchasing/payments/${paymentId}/void`, ownerToken, {
+      override_reason: "Void payment override audit test reason",
+    });
+    expect(voidRes.status).toBe(200);
+
+    // Verify audit log entry for void
+    const auditRow = await sql`
+      SELECT id, action, payload_json FROM audit_logs
+      WHERE company_id = ${company.id}
+        AND action = 'PERIOD_CLOSE_OVERRIDE'
+        AND payload_json LIKE ${'%"transactionType":"AP_PAYMENT_VOID"%'}
+      ORDER BY id DESC
+      LIMIT 1
+    `.execute(db);
+
+    expect(auditRow.rows.length).toBe(1);
+    const row = auditRow.rows[0] as { id: number; action: string; payload_json: string };
+    expect(row.action).toBe("PERIOD_CLOSE_OVERRIDE");
+    const payload = JSON.parse(row.payload_json);
+    expect(payload.transactionId).toBe(paymentId);
+    expect(payload.transactionType).toBe("AP_PAYMENT_VOID");
+    expect(payload.reason).toBe("Void payment override audit test reason");
+
+    // Verify period_close_overrides row
+    const overrideRow = await sql`
+      SELECT id, reason FROM period_close_overrides
+      WHERE company_id = ${company.id}
+        AND transaction_type = 'AP_PAYMENT_VOID'
+        AND transaction_id = ${paymentId}
+      LIMIT 1
+    `.execute(db);
+    expect(overrideRow.rows.length).toBe(1);
+
+    // Re-open
+    await sql`UPDATE fiscal_periods SET status = 1 WHERE id = ${period2099_1_Id}`.execute(db);
+  });
+
+  it("AC3b: void purchase credit with override creates audit log entry", async () => {
+    const db = getTestDb();
+    const period2099_1 = await sql`
+      SELECT fp.id FROM fiscal_periods fp
+      JOIN fiscal_years fy ON fy.id = fp.fiscal_year_id
+      WHERE fp.company_id = ${company.id} AND fp.period_no = 1 AND fy.start_date = '2099-01-01'
+      LIMIT 1
+    `.execute(db);
+    const period2099_1_Id = (period2099_1.rows[0] as { id: number }).id;
+    await sql`UPDATE fiscal_periods SET status = 2 WHERE id = ${period2099_1_Id}`.execute(db);
+
+    // Create a draft invoice first (to credit against)
+    const invRes = await postJson("/api/purchasing/invoices", ownerToken, {
+      supplier_id: supplierId,
+      invoice_no: makeTag("PCECRINV"),
+      invoice_date: "2099-06-15",
+      currency_code: "IDR",
+      override_reason: "Create override for credit void audit test",
+      lines: [{ description: "Credit void audit item", qty: "1", unit_price: "10000.0000", line_type: "SERVICE" }],
+    });
+    expect(invRes.status).toBe(201);
+    const invBody = await invRes.json();
+    const invoiceId = invBody.data.id;
+
+    // Post invoice
+    const postInvRes = await postJson(`/api/purchasing/invoices/${invoiceId}/post`, ownerToken, {
+      override_reason: "Post override for credit void audit test",
+    });
+    expect(postInvRes.status).toBe(200);
+
+    // Create credit note in closed future period
+    const crRes = await postJson("/api/purchasing/credits", ownerToken, {
+      supplier_id: supplierId,
+      credit_no: makeTag("PCECRV"),
+      credit_date: "2099-06-20",
+      currency_code: "IDR",
+      override_reason: "Create override for credit void audit test",
+      lines: [{ description: "Credit void audit item", qty: "1", unit_price: "5000.0000", reason: "SERVICE" }],
+    });
+    expect(crRes.status).toBe(201);
+    const crBody = await crRes.json();
+    const creditId = crBody.data.id;
+
+    // Apply credit with override
+    const applyRes = await postJson(`/api/purchasing/credits/${creditId}/apply`, ownerToken, {
+      invoice_id: invoiceId,
+      amount: "5000.0000",
+      override_reason: "Apply override for credit void audit test",
+    });
+    expect(applyRes.status).toBe(200);
+
+    // Void credit with override
+    const voidRes = await postJson(`/api/purchasing/credits/${creditId}/void`, ownerToken, {
+      override_reason: "Void credit override audit test reason",
+    });
+    expect(voidRes.status).toBe(200);
+
+    // Verify audit log entry for void
+    const auditRow = await sql`
+      SELECT id, action, payload_json FROM audit_logs
+      WHERE company_id = ${company.id}
+        AND action = 'PERIOD_CLOSE_OVERRIDE'
+        AND payload_json LIKE ${'%"transactionType":"PURCHASE_CREDIT_VOID"%'}
+      ORDER BY id DESC
+      LIMIT 1
+    `.execute(db);
+
+    expect(auditRow.rows.length).toBe(1);
+    const row = auditRow.rows[0] as { id: number; action: string; payload_json: string };
+    expect(row.action).toBe("PERIOD_CLOSE_OVERRIDE");
+    const payload = JSON.parse(row.payload_json);
+    expect(payload.transactionId).toBe(creditId);
+    expect(payload.transactionType).toBe("PURCHASE_CREDIT_VOID");
+    expect(payload.reason).toBe("Void credit override audit test reason");
+
+    // Verify period_close_overrides row
+    const overrideRow = await sql`
+      SELECT id, reason FROM period_close_overrides
+      WHERE company_id = ${company.id}
+        AND transaction_type = 'PURCHASE_CREDIT_VOID'
+        AND transaction_id = ${creditId}
       LIMIT 1
     `.execute(db);
     expect(overrideRow.rows.length).toBe(1);

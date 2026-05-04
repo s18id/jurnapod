@@ -1968,6 +1968,26 @@ export async function cleanupTestFixtures(): Promise<void> {
     }
   }
   
+  // 2b. Period-close overrides and audit logs (FK on users)
+  // These must be cleaned before users to avoid FK constraint failures
+  for (const user of createdFixtures.users) {
+    try {
+      await sql`DELETE FROM period_close_overrides WHERE user_id = ${user.id}`.execute(db);
+      await sql`DELETE FROM audit_logs WHERE user_id = ${user.id}`.execute(db);
+    } catch (error) {
+      console.warn(`Failed to cleanup period_close_overrides/audit_logs for user ${user.id}:`, error);
+    }
+  }
+  // Also clean any orphaned period_close_overrides by company (in case user_id mismatch)
+  for (const company of createdFixtures.companies) {
+    try {
+      await sql`DELETE FROM period_close_overrides WHERE company_id = ${company.id}`.execute(db);
+      await sql`DELETE FROM audit_logs WHERE company_id = ${company.id}`.execute(db);
+    } catch (error) {
+      console.warn(`Failed to cleanup period_close_overrides/audit_logs for company ${company.id}:`, error);
+    }
+  }
+
   // 3. Users (and their role assignments - should cascade)
   for (const user of createdFixtures.users) {
     try {
