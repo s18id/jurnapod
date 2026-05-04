@@ -33,7 +33,8 @@ export {
   APPaymentMissingAPAccountError,
   APPaymentInvalidAPAccountTypeError,
 } from "@jurnapod/modules-purchasing";
-import { toUtcIso, fromUtcIso } from "@/lib/date-helpers";
+import { toUtcIso, fromUtcIso, resolveBusinessTimezone, nowUTC } from "@/lib/date-helpers";
+import { getCompany } from "../companies.js";
 import type { AuthContext } from "@/lib/auth-guard.js";
 import {
   checkPeriodCloseGuardrail,
@@ -137,12 +138,32 @@ export async function postAPPayment(
 
   let isOverrideEligible = false;
   let validOverrideReason: string | null = null;
-  let cachedDecision: { periodId: number | null } | null = null;
+  let decision: Awaited<ReturnType<typeof checkPeriodCloseGuardrail>> | null = null;
 
   if (paymentDateResult) {
     const paymentDateStr = fromUtcIso.dateOnly(toUtcIso.dateLike(paymentDateResult.payment_date) as string);
-    const decision = await checkPeriodCloseGuardrail(companyId, paymentDateStr);
-    cachedDecision = { periodId: decision.periodId };
+    decision = await checkPeriodCloseGuardrail(companyId, paymentDateStr);
+
+    // AC4: Backdate check — block entries in closed periods whose period has already ended
+    if (!decision.allowed && decision.periodId !== null && decision.periodId > 0) {
+      const periodRow = await db
+        .selectFrom("fiscal_periods")
+        .where("id", "=", decision.periodId)
+        .select("end_date")
+        .executeTakeFirst();
+      if (periodRow) {
+        const company = await getCompany(companyId);
+        const tz = resolveBusinessTimezone(undefined, company.timezone ?? null);
+        const periodEndLocal = fromUtcIso.businessDate(toUtcIso.dateLike(periodRow.end_date) as string, tz);
+        const todayLocal = fromUtcIso.businessDate(nowUTC(), tz);
+        if (periodEndLocal < todayLocal) {
+          const err = new Error("Backdated entries to closed periods are not allowed.") as Error & { code: string; blockCode: string };
+          err.code = "PERIOD_CLOSED";
+          err.blockCode = "BACKDATED_PERIOD_CLOSED";
+          throw err;
+        }
+      }
+    }
 
     if (!decision.allowed && decision.overrideRequired) {
       const access = await evaluateOverrideAccess(auth, overrideReason ?? null, decision);
@@ -168,8 +189,8 @@ export async function postAPPayment(
     }
   }
 
-  const guardrailDecision = isOverrideEligible && cachedDecision
-    ? { allowed: false, overrideRequired: true, periodId: cachedDecision.periodId, blockReason: null, blockCode: null }
+  const guardrailDecision = isOverrideEligible && decision
+    ? decision
     : null;
 
   return service.postAPPayment({
@@ -200,12 +221,32 @@ export async function voidAPPayment(
 
   let isOverrideEligible = false;
   let validOverrideReason: string | null = null;
-  let cachedDecision: { periodId: number | null } | null = null;
+  let decision: Awaited<ReturnType<typeof checkPeriodCloseGuardrail>> | null = null;
 
   if (paymentDateResult) {
     const paymentDateStr = fromUtcIso.dateOnly(toUtcIso.dateLike(paymentDateResult.payment_date) as string);
-    const decision = await checkPeriodCloseGuardrail(companyId, paymentDateStr);
-    cachedDecision = { periodId: decision.periodId };
+    decision = await checkPeriodCloseGuardrail(companyId, paymentDateStr);
+
+    // AC4: Backdate check — block entries in closed periods whose period has already ended
+    if (!decision.allowed && decision.periodId !== null && decision.periodId > 0) {
+      const periodRow = await db
+        .selectFrom("fiscal_periods")
+        .where("id", "=", decision.periodId)
+        .select("end_date")
+        .executeTakeFirst();
+      if (periodRow) {
+        const company = await getCompany(companyId);
+        const tz = resolveBusinessTimezone(undefined, company.timezone ?? null);
+        const periodEndLocal = fromUtcIso.businessDate(toUtcIso.dateLike(periodRow.end_date) as string, tz);
+        const todayLocal = fromUtcIso.businessDate(nowUTC(), tz);
+        if (periodEndLocal < todayLocal) {
+          const err = new Error("Backdated entries to closed periods are not allowed.") as Error & { code: string; blockCode: string };
+          err.code = "PERIOD_CLOSED";
+          err.blockCode = "BACKDATED_PERIOD_CLOSED";
+          throw err;
+        }
+      }
+    }
 
     if (!decision.allowed && decision.overrideRequired) {
       const access = await evaluateOverrideAccess(auth, overrideReason ?? null, decision);
@@ -231,8 +272,8 @@ export async function voidAPPayment(
     }
   }
 
-  const guardrailDecision = isOverrideEligible && cachedDecision
-    ? { allowed: false, overrideRequired: true, periodId: cachedDecision.periodId, blockReason: null, blockCode: null }
+  const guardrailDecision = isOverrideEligible && decision
+    ? decision
     : null;
 
   return service.voidAPPayment({

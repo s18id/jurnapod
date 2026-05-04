@@ -407,10 +407,24 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
   // =========================================================================
   describe("c) Override success + audit row persisted", () => {
     it("succeeds with 201 when MANAGE + valid override_reason for closed period invoice", async () => {
+      // Use a future closed period so AC4 backdate guard does not fire
+      const fyFuture = await createTestFiscalYear(companyA.id, {
+        year: 2099,
+        startDate: "2099-01-01",
+        endDate: "2099-12-31",
+        status: "OPEN",
+      });
+      await createTestFiscalPeriod(fyFuture.id, {
+        periodNumber: 1,
+        startDate: "2099-01-01",
+        endDate: "2099-01-31",
+        status: "CLOSED",
+      });
+
       const res = await postJson("/api/purchasing/invoices", ownerTokenA, {
         supplier_id: supplierIdA,
         invoice_no: `PCG-INV-OVR-${Date.now()}`,
-        invoice_date: "2025-04-15",
+        invoice_date: "2099-01-15",
         currency_code: "IDR",
         override_reason: "Testing override for year-end adjustment correction",
         lines: [{ description: "Override test item", qty: "1", unit_price: "75000.0000", line_type: "SERVICE" }],
@@ -420,6 +434,12 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
       const body = await res.json();
       expect(body.success).toBe(true);
       expect(body.data.id).toBeDefined();
+
+      // Post the invoice to trigger period-close override audit row
+      const postRes = await postJson(`/api/purchasing/invoices/${body.data.id}/post`, ownerTokenA, {
+        override_reason: "Testing override for year-end adjustment correction",
+      });
+      expect(postRes.status).toBe(200);
 
       // Verify audit row in period_close_overrides
       const db = getTestDb();
@@ -519,11 +539,25 @@ describe("accounting.period-close-guardrail (Story 47.5)", { timeout: 60000 }, (
   // =========================================================================
   describe("e) Correction flow — void in closed period", () => {
     it("void in closed period with MANAGE + override_reason succeeds (200)", async () => {
+      // Use a future closed period so AC4 backdate guard does not fire
+      const fyFuture = await createTestFiscalYear(companyA.id, {
+        year: 2099,
+        startDate: "2099-01-01",
+        endDate: "2099-12-31",
+        status: "OPEN",
+      });
+      await createTestFiscalPeriod(fyFuture.id, {
+        periodNumber: 1,
+        startDate: "2099-01-01",
+        endDate: "2099-01-31",
+        status: "CLOSED",
+      });
+
       // Create + post invoice in closed period via override
       const invRes = await postJson("/api/purchasing/invoices", ownerTokenA, {
         supplier_id: supplierIdA,
         invoice_no: `PCG-VOID-OVR-${Date.now()}`,
-        invoice_date: "2025-04-10",
+        invoice_date: "2099-01-10",
         currency_code: "IDR",
         override_reason: "Creating invoice for void override test",
         lines: [{ description: "Invoice for void override", qty: "1", unit_price: "55000.0000", line_type: "SERVICE" }],

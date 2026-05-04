@@ -631,5 +631,5 @@ development_status:
   54-2-ap-payment-write-path-correctness: done
   54-3-ap-state-machine-integrity: done
   54-4-multicurrency-ap-correctness: done
-  54-5-ap-period-close-enforcement: backlog
+  54-5-ap-period-close-enforcement: done
   54-6-follow-up-closure-bucket: backlog

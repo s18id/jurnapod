@@ -9,6 +9,7 @@
  */
 
 import { getDb } from "../db.js";
+import { getCompany } from "../companies.js";
 import { PurchaseInvoiceService } from "@jurnapod/modules-purchasing";
 import type {
   PICreateInput,
@@ -29,7 +30,8 @@ export {
   PITaxAccountMissingError,
   PIGrnInsufficientQtyError,
 } from "@jurnapod/modules-purchasing";
-import { toUtcIso, fromUtcIso } from "@/lib/date-helpers";
+import { PINotFoundError } from "@jurnapod/modules-purchasing";
+import { toUtcIso, fromUtcIso, resolveBusinessTimezone, nowUTC } from "@/lib/date-helpers";
 import type { AuthContext } from "@/lib/auth-guard.js";
 import {
   checkPeriodCloseGuardrail,
@@ -150,11 +152,32 @@ export async function postPI(
     .executeTakeFirst();
 
   if (!pi) {
-    throw new Error(`Purchase invoice ${piId} not found`);
+    throw new PINotFoundError(piId);
   }
 
   const invoiceDateStr = fromUtcIso.dateOnly(toUtcIso.dateLike(pi.invoice_date) as string);
   const decision = await checkPeriodCloseGuardrail(companyId, invoiceDateStr);
+
+  // AC4: Backdate check — block entries in closed periods whose period has already ended
+  if (!decision.allowed && decision.periodId !== null && decision.periodId > 0) {
+    const periodRow = await db
+      .selectFrom("fiscal_periods")
+      .where("id", "=", decision.periodId)
+      .select("end_date")
+      .executeTakeFirst();
+    if (periodRow) {
+      const company = await getCompany(companyId);
+      const tz = resolveBusinessTimezone(undefined, company.timezone ?? null);
+      const periodEndLocal = fromUtcIso.businessDate(toUtcIso.dateLike(periodRow.end_date) as string, tz);
+      const todayLocal = fromUtcIso.businessDate(nowUTC(), tz);
+      if (periodEndLocal < todayLocal) {
+        const err = new Error("Backdated entries to closed periods are not allowed.") as Error & { code: string; blockCode: string };
+        err.code = "PERIOD_CLOSED";
+        err.blockCode = "BACKDATED_PERIOD_CLOSED";
+        throw err;
+      }
+    }
+  }
 
   let isOverrideEligible = false;
   let validOverrideReason: string | null = null;
@@ -212,11 +235,32 @@ export async function voidPI(
     .executeTakeFirst();
 
   if (!pi) {
-    throw new Error(`Purchase invoice ${piId} not found`);
+    throw new PINotFoundError(piId);
   }
 
   const invoiceDateStr = fromUtcIso.dateOnly(toUtcIso.dateLike(pi.invoice_date) as string);
   const decision = await checkPeriodCloseGuardrail(companyId, invoiceDateStr);
+
+  // AC4: Backdate check — block entries in closed periods whose period has already ended
+  if (!decision.allowed && decision.periodId !== null && decision.periodId > 0) {
+    const periodRow = await db
+      .selectFrom("fiscal_periods")
+      .where("id", "=", decision.periodId)
+      .select("end_date")
+      .executeTakeFirst();
+    if (periodRow) {
+      const company = await getCompany(companyId);
+      const tz = resolveBusinessTimezone(undefined, company.timezone ?? null);
+      const periodEndLocal = fromUtcIso.businessDate(toUtcIso.dateLike(periodRow.end_date) as string, tz);
+      const todayLocal = fromUtcIso.businessDate(nowUTC(), tz);
+      if (periodEndLocal < todayLocal) {
+        const err = new Error("Backdated entries to closed periods are not allowed.") as Error & { code: string; blockCode: string };
+        err.code = "PERIOD_CLOSED";
+        err.blockCode = "BACKDATED_PERIOD_CLOSED";
+        throw err;
+      }
+    }
+  }
 
   let isOverrideEligible = false;
   let validOverrideReason: string | null = null;

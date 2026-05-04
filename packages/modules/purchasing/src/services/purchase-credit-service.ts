@@ -141,6 +141,26 @@ async function insertPeriodCloseOverride(
       overridden_at: params.overriddenAt,
     })
     .execute();
+
+  // FIX(54.5-AC3): Audit log entry for period-close override
+  await db
+    .insertInto("audit_logs")
+    .values({
+      company_id: params.companyId,
+      outlet_id: null,
+      user_id: params.userId,
+      action: "PERIOD_CLOSE_OVERRIDE",
+      result: "SUCCESS",
+      success: 1,
+      ip_address: null,
+      payload_json: JSON.stringify({
+        periodId: params.periodId,
+        reason: params.reason,
+        transactionType: params.transactionType,
+        transactionId: params.transactionId,
+      }),
+    })
+    .execute();
 }
 
 // =============================================================================
