@@ -644,6 +644,6 @@ development_status:
   epic-55-retrospective: done
 
   # Epic 56: Correctness Infrastructure
-  epic-56: in-progress
+  epic-56: done
   56-1-archive-flow-trigger-resolution: done
   56-2-ci-lint-gate-business-triggers: done

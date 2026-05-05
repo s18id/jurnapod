@@ -76,7 +76,7 @@ NFR3: Templates must follow existing project conventions (AGENTS.md, existing pa
 | Epic 53 | Datetime API Consolidation Execution | done | 53 |
 | **Epic 54** | **AP Lifecycle Correctness** | **done** | **54** |
 | **Epic 55** | **AP Reconciliation/Snapshot Correctness** | **done** | **55** |
-| **Epic 56** | **Correctness Infrastructure** | **backlog** | **56** |
+| **Epic 56** | **Correctness Infrastructure** | **done** | **56** |
 | Epic 57 | Inventory/Costing Correctness | backlog | 57 |
 | Epic 58 | POS Core Correctness Consolidation | backlog | 58 |
 | Epic 59 | Tenant + ACL Correctness Hardening | backlog | 59 |
