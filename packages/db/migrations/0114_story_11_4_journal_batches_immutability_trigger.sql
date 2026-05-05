@@ -12,6 +12,7 @@ SET FOREIGN_KEY_CHECKS=0;
 -- =====================================================
 
 DROP TRIGGER IF EXISTS trg_journal_batches_before_update;
+-- lint:allow-business-trigger
 CREATE TRIGGER trg_journal_batches_before_update
 BEFORE UPDATE ON journal_batches
 FOR EACH ROW
@@ -19,6 +20,7 @@ SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'Cannot modify journal_batches: records are immutable. Use VOID or REFUND patterns to correct errors.';
 
 DROP TRIGGER IF EXISTS trg_journal_batches_before_delete;
+-- lint:allow-business-trigger
 CREATE TRIGGER trg_journal_batches_before_delete
 BEFORE DELETE ON journal_batches
 FOR EACH ROW
@@ -30,6 +32,7 @@ SET MESSAGE_TEXT = 'Cannot delete from journal_batches: records are immutable. U
 -- =====================================================
 
 DROP TRIGGER IF EXISTS trg_journal_lines_before_update;
+-- lint:allow-business-trigger
 CREATE TRIGGER trg_journal_lines_before_update
 BEFORE UPDATE ON journal_lines
 FOR EACH ROW
@@ -37,6 +40,7 @@ SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'Cannot modify journal_lines: records are immutable. Use VOID or REFUND patterns to correct errors.';
 
 DROP TRIGGER IF EXISTS trg_journal_lines_before_delete;
+-- lint:allow-business-trigger
 CREATE TRIGGER trg_journal_lines_before_delete
 BEFORE DELETE ON journal_lines
 FOR EACH ROW

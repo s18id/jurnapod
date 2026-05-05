@@ -78,6 +78,8 @@ Cleanup is not optional. Unchecked cleanup debt is a sprint-trackable P1/P2 item
 **C) No new business DB triggers.**
 Agents and contributors MUST NOT introduce new database triggers that enforce business logic. All business invariants MUST be enforced in application code where they are testable, reviewable, and version-controllable. Existing triggers MUST NOT be extended with new business logic.
 
+**Enforcement:** CI gate `npm run lint:migrations` scans all migration files for `CREATE TRIGGER` statements without explicit `-- lint:allow-business-trigger` annotation. Migrations introducing business-logic triggers MUST use this annotation, and the trigger MUST be reviewed by the Architecture team.
+
 **D) Reserved.**
 Section D is reserved for future global policy additions.
 

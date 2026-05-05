@@ -30,6 +30,7 @@
     "typecheck": "npm run typecheck -ws --if-present",
     "lint:status-columns": "node scripts/validate-status-columns.mjs",
     "lint:fixture-flow": "tsx scripts/validate-fixture-flow.ts",
+    "lint:migrations": "tsx scripts/lint-migrations.ts",
     "lint:completion-notes": "tsx scripts/validate-completion-notes.ts",
     "lint": "npm run lint:status-columns && npm run lint:completion-notes && npm run lint -ws --if-present",
     "lint:docs:responses": "node scripts/lint-docs-responses.mjs",

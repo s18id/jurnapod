@@ -5,6 +5,7 @@
 SET FOREIGN_KEY_CHECKS=0;
 
 DROP TRIGGER IF EXISTS trg_table_events_scope_bu;
+-- lint:allow-business-trigger
 CREATE TRIGGER trg_table_events_scope_bu
 BEFORE UPDATE ON table_events
 FOR EACH ROW
@@ -12,6 +13,7 @@ SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'table_events is append-only: UPDATE is not allowed';
 
 DROP TRIGGER IF EXISTS trg_table_events_scope_bd;
+-- lint:allow-business-trigger
 CREATE TRIGGER trg_table_events_scope_bd
 BEFORE DELETE ON table_events
 FOR EACH ROW

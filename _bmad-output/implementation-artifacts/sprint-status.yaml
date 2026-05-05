@@ -1,4 +1,4 @@
-last_updated: 2026-04-25T00:00:00Z
+last_updated: 2026-05-05T02:00:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -633,3 +633,17 @@ development_status:
   54-4-multicurrency-ap-correctness: done
   54-5-ap-period-close-enforcement: done
   54-6-follow-up-closure-bucket: done
+
+  # Epic 55: AP Reconciliation/Snapshot Correctness
+  epic-55: done
+  55-1-auto-snapshot-race-fix: done
+  55-2-recon-computation-correctness: done
+  55-3-snapshot-chain-integrity: done
+  55-4-audit-trail-completeness: done
+  55-5-test-suite-hardening: done
+  epic-55-retrospective: done
+
+  # Epic 56: Correctness Infrastructure
+  epic-56: in-progress
+  56-1-archive-flow-trigger-resolution: done
+  56-2-ci-lint-gate-business-triggers: done

@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS period_close_overrides (
 
 -- Marker: immutability triggers for period_close_overrides
 DROP TRIGGER IF EXISTS trg_period_close_overrides_update;
+-- lint:allow-business-trigger
 CREATE TRIGGER trg_period_close_overrides_update
 BEFORE UPDATE ON period_close_overrides
 FOR EACH ROW
@@ -50,6 +51,7 @@ BEGIN
 END;
 
 DROP TRIGGER IF EXISTS trg_period_close_overrides_delete;
+-- lint:allow-business-trigger
 CREATE TRIGGER trg_period_close_overrides_delete
 BEFORE DELETE ON period_close_overrides
 FOR EACH ROW
