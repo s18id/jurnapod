@@ -1,6 +1,6 @@
 # Action Items Tracker
 
-**Last Updated:** 2026-05-03T00:00:00Z
+**Last Updated:** 2026-05-05T10:45:00Z
 **Review Cadence:** Monthly at sprint retrospective
 
 ---
@@ -10,10 +10,10 @@
 | Priority | Open | Done | Won't Fix | Total |
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
-| P1 | 1 | 9 | 0 | 10 |
+| P1 | 0 | 12 | 0 | 12 |
 | P2 | 0 | 10 | 0 | 10 |
 | P3 | 1 | 5 | 3 | 9 |
-| **Total** | **2** | **28** | **3** | **33** |
+| **Total** | **1** | **31** | **3** | **35** |
 
 > **Note:** The Historical section (Pre-Epic 8) is tracked separately (32 items) and excluded from summary totals above.
 
@@ -27,11 +27,7 @@
 
 ## P1 - High (Do Next Sprint)
 
-| ID | Action | From | Owner | Status |
-|----|--------|------|-------|--------|
-| **E51-A1** | Fix auto-snapshot race in fiscal year close: move `hasAutoSnapshotForFiscalYearEnd` check inside the close transaction with `FOR UPDATE` lock or `INSERT ... ON DUPLICATE KEY` idempotency | Epic 51 (deferred) | TBD | Planned for Epic 55 |
-
----
+*(empty — no open P1 items)*
 
 ---
 
@@ -85,6 +81,9 @@
 | **E49-A2** | Tiered Audit Prioritization Template | Epic 49 | Epic 50 | Implemented via Story 50.1 tiered audit table with Critical→High→Medium and rationale |
 | **E54-A1** | Add test-scenario-review checkpoint to story kickoff template | Epic 15 retro | E54 batch | Added "Test Scenario Review Checkpoint (MANDATORY — E54-A1)" section to `docs/templates/story-spec-template.md` |
 | **E54-A2** | Add `requireAccess` guards to credit-notes route handlers | Epic 39 retro | E54 batch | Added READ/CREATE/UPDATE guards using existing `sales.invoices` resource (matches access-scope-checker mapping); typecheck passes |
+| **E51-A1** | Fix auto-snapshot race in fiscal year close | Epic 51 (deferred) | Epic 55 | Race window closed: removed `hasAutoSnapshotForFiscalYearEnd` from `fiscal-years.ts`; snapshot service `SELECT ... FOR UPDATE` + `inputsHash` guard handles idempotency atomically. Evidence: Story 55.1 AC6 concurrent test (2 parallel auto calls → 1 row, same ID), Story 55.5 AC1 race simulation test (manual→auto returns same snapshot). E51-A1 action item closed. |
+| **E55-A1** | Add CI lint gate blocking new business-logic DB triggers | Epic 55 retro | Epic 56 | Story 56.2: `scripts/lint-migrations.ts` created; `npm run lint:migrations` exits 0; CI job `lint-migrations` wired as required gate; all 16 existing business-logic triggers grandfathered with `-- lint:allow-business-trigger` |
+| **E55-A2** | Resolve archive flow trigger constraint before AR work begins | Epic 55 retro | Epic 56 | Story 56.1: Migration 0201 replaces `trg_ap_reconciliation_snapshots_before_update` to allow `status='ARCHIVED'` transitions while preserving supersession chain path (0193). 24/24 integration tests pass. |
 
 ### P2
 
@@ -187,4 +186,4 @@ Examples:
 - `E8-A1` = Epic 8, Action 1
 - `E15-A2` = Epic 15, Action 2
 
-_Last Updated: 2026-05-03T00:00:00Z_
+_Last Updated: 2026-05-05T10:45:00Z_

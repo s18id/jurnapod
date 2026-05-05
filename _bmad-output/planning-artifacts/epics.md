@@ -74,9 +74,9 @@ NFR3: Templates must follow existing project conventions (AGENTS.md, existing pa
 | Epic 48–51 | Correctness-First Architecture (Baseline, Determinism, Ledger, Fiscal) | done | 48–51 |
 | Epic 52 | Datetime Standardization + Idempotency Hardening | done | 52 |
 | Epic 53 | Datetime API Consolidation Execution | done | 53 |
-| **Epic 54** | **AP Lifecycle Correctness** | **backlog** | **54** |
-| Epic 55 | AP Reconciliation/Snapshot Correctness | backlog | 55 |
-| Epic 56 | AR + Treasury Correctness | backlog | 56 |
+| **Epic 54** | **AP Lifecycle Correctness** | **done** | **54** |
+| **Epic 55** | **AP Reconciliation/Snapshot Correctness** | **done** | **55** |
+| **Epic 56** | **Correctness Infrastructure** | **backlog** | **56** |
 | Epic 57 | Inventory/Costing Correctness | backlog | 57 |
 | Epic 58 | POS Core Correctness Consolidation | backlog | 58 |
 | Epic 59 | Tenant + ACL Correctness Hardening | backlog | 59 |
@@ -331,3 +331,28 @@ So that custom lint rules are validated before introduction and do not regress.
 
 **Exit Gate:** No unresolved P0/P1 in AP write flows; all critical suites 3× consecutive green; sprint status validation passes.
 - POS schema change deferred in deployment order: POS app update first, then server
+
+---
+
+## Epic 56: Correctness Infrastructure
+
+**Goal:** Resolve two structural debt items carried from Epic 55: (1) archive flow blocked by append-only trigger, (2) missing CI gate enforcing the "no new business DB triggers" rule. Unblocks downstream correctness work (AR, Treasury, etc.).
+
+**Program Alignment:** Sprint 56 pre-work in the S48–S61 Correctness-First Architecture Blueprint.
+
+### Story Summary
+
+| Story | Title | Risk | Dependencies |
+|-------|-------|------|-------------|
+| 56.1 | Archive Flow Trigger Constraint Resolution | P1 | E55-A2 |
+| 56.2 | CI Lint Gate for No-Business-Trigger Rule | P1 | E55-A1 |
+
+### Key Decisions
+- Both stories are correctness infrastructure, not net-new features
+- Archive flow trigger must be resolved before AR/Treasury archive stories
+- CI lint gate for AGENTS.md §C is pre-requisite for the entire S48–S61 remainder
+
+### Exit Gate
+- `ap_reconciliation_snapshots` append-only trigger modified to allow archive path
+- `npm run lint:migrations` fails on new migration introducing business-logic trigger
+- E55-A1 and E55-A2 marked done in action-items.md

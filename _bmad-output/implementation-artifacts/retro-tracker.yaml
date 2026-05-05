@@ -1,0 +1,11 @@
+retro_session:
+  epic_number: 55
+  started_at: "2026-05-05T00:00:00Z"
+  completed_at: null
+  abandoned_at: null
+  current_phase: 7
+  phase_name: "Epic Review Discussion"
+  step_status: "in_progress"
+  step_status: "done"
+  updated_at: "2026-05-05T00:00:00Z"
+  session_status: "active"
