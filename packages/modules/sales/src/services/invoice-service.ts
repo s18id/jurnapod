@@ -965,13 +965,7 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
         }
 
         if (invoice.status === "VOID") {
-          const lines = await findInvoiceLines(executor, companyId, invoiceId);
-          const taxes = await findInvoiceTaxes(executor, companyId, invoiceId);
-          return {
-            ...normalizeInvoice(invoice),
-            lines,
-            taxes
-          };
+          throw new DatabaseConflictError("Invoice is already voided");
         }
 
         if (invoice.payment_status === "PARTIAL" || invoice.payment_status === "PAID") {

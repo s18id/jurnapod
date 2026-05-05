@@ -424,6 +424,10 @@ invoiceRoutes.patch("/:id", async (c) => {
       return errorResponse("CONFLICT", error.message, 409);
     }
 
+    if (error instanceof DatabaseConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
     if (error instanceof DiscountExceedsSubtotalError) {
       return errorResponse("INVALID_REQUEST", error.message, 400);
     }
@@ -507,6 +511,74 @@ invoiceRoutes.post("/:id/post", async (c) => {
 
     console.error("POST /sales/invoices/:id/post failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Invoice posting failed", 500);
+  }
+});
+
+// ============================================================================
+// POST /sales/invoices/:id/void - Void invoice
+// ============================================================================
+
+invoiceRoutes.post("/:id/void", async (c) => {
+  const auth = c.get("auth") as AuthContext;
+
+  try {
+    const accessResult = await requireAccess({
+      module: "sales",
+      permission: "create",
+      resource: "invoices"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const invoiceId = NumericIdSchema.parse(c.req.param("id"));
+
+    // Check if invoice exists and user has access
+    const invoice = await invoiceService.getInvoice(auth.companyId, invoiceId, {
+      userId: auth.userId
+    });
+    if (!invoice) {
+      return errorResponse("NOT_FOUND", "Invoice not found", 404);
+    }
+
+    const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, invoice.outlet_id);
+    if (!hasAccess) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
+
+    const voidedInvoice = await invoiceService.voidInvoice(auth.companyId, invoiceId, {
+      userId: auth.userId
+    });
+
+    if (!voidedInvoice) {
+      return errorResponse("NOT_FOUND", "Invoice not found", 404);
+    }
+
+    return successResponse(voidedInvoice);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid invoice ID", 400);
+    }
+
+    if (error instanceof SalesAuthorizationError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+
+    if (error instanceof DatabaseForbiddenError) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
+
+    if (error instanceof DatabaseConflictError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof InvoiceStatusError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    console.error("POST /sales/invoices/:id/void failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Invoice void failed", 500);
   }
 });
 
@@ -1161,6 +1233,111 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
 
       console.error("POST /sales/invoices/:id/post failed", error);
       return errorResponse("INTERNAL_SERVER_ERROR", "Invoice posting failed", 500);
+    }
+  }) as any);
+
+  // POST /sales/invoices/:id/void - Void invoice
+  const voidInvoiceRoute = createRoute({
+    path: "/sales/invoices/{id}/void",
+    method: "post",
+    tags: ["Sales"],
+    summary: "Void invoice",
+    description: "Mark a posted invoice as void. The original journal entries remain in the ledger.",
+    security: [{ BearerAuth: [] }],
+    request: {
+      params: zodOpenApi.object({
+        id: zodOpenApi.string().regex(/^\d+$/).openapi({ description: "Invoice ID" }),
+      }),
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: SalesInvoiceResponseSchema } },
+        description: "Invoice voided successfully",
+      },
+      400: {
+        content: { "application/json": { schema: InvoiceErrorResponseSchema } },
+        description: "Invalid invoice ID",
+      },
+      401: {
+        content: { "application/json": { schema: InvoiceErrorResponseSchema } },
+        description: "Unauthorized",
+      },
+      403: {
+        content: { "application/json": { schema: InvoiceErrorResponseSchema } },
+        description: "Forbidden",
+      },
+      404: {
+        content: { "application/json": { schema: InvoiceErrorResponseSchema } },
+        description: "Invoice not found",
+      },
+      409: {
+        content: { "application/json": { schema: InvoiceErrorResponseSchema } },
+        description: "Conflict (e.g., invoice has payments applied, or already voided)",
+      },
+    },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.openapi(voidInvoiceRoute, (async (c: any) => {
+    const auth = c.get("auth");
+
+    try {
+      const accessResult = await requireAccess({
+        module: "sales",
+        permission: "create",
+        resource: "invoices"
+      })(c.req.raw, auth);
+
+      if (accessResult !== null) {
+        return accessResult;
+      }
+
+      const invoiceId = NumericIdSchema.parse(c.req.param("id"));
+
+      const invoice = await invoiceService.getInvoice(auth.companyId, invoiceId, {
+        userId: auth.userId
+      });
+      if (!invoice) {
+        return errorResponse("NOT_FOUND", "Invoice not found", 404);
+      }
+
+      const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, invoice.outlet_id);
+      if (!hasAccess) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+
+      const voidedInvoice = await invoiceService.voidInvoice(auth.companyId, invoiceId, {
+        userId: auth.userId
+      });
+
+      if (!voidedInvoice) {
+        return errorResponse("NOT_FOUND", "Invoice not found", 404);
+      }
+
+      return successResponse(voidedInvoice);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return errorResponse("INVALID_REQUEST", "Invalid invoice ID", 400);
+      }
+
+      if (error instanceof SalesAuthorizationError) {
+        return errorResponse("FORBIDDEN", error.message, 403);
+      }
+
+      if (error instanceof DatabaseForbiddenError) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
+      }
+
+      if (error instanceof DatabaseConflictError) {
+        return errorResponse("CONFLICT", error.message, 409);
+      }
+
+      if (error instanceof InvoiceStatusError) {
+        return errorResponse("CONFLICT", error.message, 409);
+      }
+
+      console.error("POST /sales/invoices/:id/void failed", error);
+      return errorResponse("INTERNAL_SERVER_ERROR", "Invoice void failed", 500);
     }
   }) as any);
 }

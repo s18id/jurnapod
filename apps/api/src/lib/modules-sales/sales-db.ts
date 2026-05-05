@@ -568,12 +568,32 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
          WHERE company_id = ${companyId}
            AND id = ${invoiceId}`.execute(this._getDb());
     } else if (status === "VOID") {
-      await sql`UPDATE sales_invoices
-         SET status = 'VOID',
-             updated_by_user_id = ${updatedByUserId ?? null},
-             updated_at = CURRENT_TIMESTAMP
-         WHERE company_id = ${companyId}
-           AND id = ${invoiceId}`.execute(this._getDb());
+      // Idempotent void: only write if not already voided (skip re-void to avoid duplicate audit)
+      const existing = await sql`SELECT status, voided_at FROM sales_invoices WHERE company_id = ${companyId} AND id = ${invoiceId}`.execute(this._getDb());
+      if ((existing.rows[0] as { status?: string; voided_at?: string | null } | undefined)?.status === "VOID") {
+        // Already voided — no-op, don't re-insert audit or overwrite voided_at/voided_by
+      } else {
+        await sql`UPDATE sales_invoices
+           SET status = 'VOID',
+               voided_at = COALESCE(voided_at, CURRENT_TIMESTAMP),
+               voided_by = COALESCE(voided_by, ${updatedByUserId ?? null}),
+               updated_by_user_id = ${updatedByUserId ?? null},
+               updated_at = CURRENT_TIMESTAMP
+           WHERE company_id = ${companyId}
+             AND id = ${invoiceId}`.execute(this._getDb());
+
+        // Audit trail for invoice void
+        await sql`INSERT INTO audit_logs (company_id, outlet_id, user_id, action, result, success, payload_json)
+           VALUES (
+             ${companyId},
+             NULL,
+             ${updatedByUserId ?? null},
+             'VOID',
+             'SUCCESS',
+             1,
+             ${JSON.stringify({ entity_type: 'sales_invoice', entity_id: invoiceId, status: 'VOID' })}
+           )`.execute(this._getDb());
+      }
     }
   }
 
@@ -1813,10 +1833,36 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
      ORDER BY invoice_date DESC, id DESC
      LIMIT ${limit} OFFSET ${offset}`.execute(db);
 
-    return { 
-      total, 
+return {
+      total,
       invoices: (rows.rows as SalesInvoiceRow[]).map(normalizeInvoice)
     };
+  }
+
+  async insertAuditLog(input: {
+    companyId: number;
+    userId?: number | null;
+    action: string;
+    entityType: string;
+    entityId: number;
+    payload?: Record<string, unknown>;
+  }): Promise<void> {
+    await sql`
+      INSERT INTO audit_logs (company_id, outlet_id, user_id, action, result, success, payload_json)
+      VALUES (
+        ${input.companyId},
+        NULL,
+        ${input.userId ?? null},
+        ${input.action},
+        'SUCCESS',
+        1,
+        ${JSON.stringify({
+          entity_type: input.entityType,
+          entity_id: input.entityId,
+          ...input.payload
+        })}
+      )
+    `.execute(this._getDb());
   }
 }
 

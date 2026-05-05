@@ -197,10 +197,55 @@ export class ApiPaymentPostingHook implements PaymentPostingHook {
 
     // Call sales-posting.ts with the transaction handle
     // The transaction is passed as QueryExecutor (KyselySchema compatible)
-    return postSalesPaymentToJournal(
+    const postingResult = await postSalesPaymentToJournal(
       tx as unknown as QueryExecutor,
       payment,
       invoiceNo
     );
+
+    // Treasury handoff: create cash_bank_transactions row
+    // source = cash/bank GL account (payment.account_id), destination = customer AR receivable
+    // Guard: require outlet_id is present — AR payments must be outlet-scoped
+    if (!payment.outlet_id) {
+      throw new Error("AR payment treasury handoff requires outlet_id — payment must be outlet-scoped");
+    }
+
+    // Query AR receivable account from outlet-level account mappings
+    const arAccountRow = await sql<{ account_id: number }>`
+      SELECT account_id FROM account_mappings
+       WHERE company_id = ${companyId}
+         AND outlet_id = ${payment.outlet_id}
+         AND mapping_key = 'AR'
+       LIMIT 1
+    `.execute(tx as KyselySchema);
+
+    if (arAccountRow.rows.length === 0) {
+      throw new Error("AR account mapping not found for outlet");
+    }
+
+    const receivableAccountId = arAccountRow.rows[0].account_id;
+
+    await sql`
+      INSERT INTO cash_bank_transactions (
+        company_id, outlet_id, transaction_type, transaction_date,
+        reference, description, source_account_id, destination_account_id,
+        amount, currency_code, status, created_by_user_id
+      ) VALUES (
+        ${companyId},
+        ${payment.outlet_id},
+        'MUTATION',
+        ${new Date(payment.payment_at)},
+        ${payment.payment_no ?? null},
+        ${`AR payment for invoice ${invoiceNo}`},
+        ${receivableAccountId},
+        ${payment.account_id},
+        ${payment.amount},
+        'IDR',
+        'POSTED',
+        ${null}
+      )
+    `.execute(tx as KyselySchema);
+
+    return postingResult;
   }
 }

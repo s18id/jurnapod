@@ -153,6 +153,8 @@ export const SalesInvoiceSchema = z.object({
   customer_id: NumericIdSchema.nullable().optional(),
   approved_by_user_id: NumericIdSchema.nullable().optional(),
   approved_at: z.string().datetime().nullable().optional(),
+  voided_by: NumericIdSchema.nullable().optional(),
+  voided_at: z.string().datetime().nullable().optional(),
   created_by_user_id: NumericIdSchema.nullable().optional(),
   updated_by_user_id: NumericIdSchema.nullable().optional(),
   created_at: z.string().datetime(),

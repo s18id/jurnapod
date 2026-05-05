@@ -399,6 +399,16 @@ export interface SalesDbExecutor {
   deleteCreditNoteLines(creditNoteId: number): Promise<void>;
 
   listCreditNotes(companyId: number, filters: CreditNoteListFilters): Promise<{ total: number; creditNotes: SalesCreditNoteDetail[] }>;
+
+  // Audit log
+  insertAuditLog(input: {
+    companyId: number;
+    userId?: number | null;
+    action: string;
+    entityType: string;
+    entityId: number;
+    payload?: Record<string, unknown>;
+  }): Promise<void>;
 }
 
 // =============================================================================

@@ -77,7 +77,7 @@ NFR3: Templates must follow existing project conventions (AGENTS.md, existing pa
 | **Epic 54** | **AP Lifecycle Correctness** | **done** | **54** |
 | **Epic 55** | **AP Reconciliation/Snapshot Correctness** | **done** | **55** |
 | **Epic 56** | **Correctness Infrastructure** | **done** | **56** |
-| Epic 57 | Inventory/Costing Correctness | backlog | 57 |
+| **Epic 57** | **AR + Treasury Correctness** | **planned** | **57** |
 | Epic 58 | POS Core Correctness Consolidation | backlog | 58 |
 | Epic 59 | Tenant + ACL Correctness Hardening | backlog | 59 |
 | Epic 60 | Sync Contract Correctness Hardening | backlog | 60 |
@@ -356,3 +356,33 @@ So that custom lint rules are validated before introduction and do not regress.
 - `ap_reconciliation_snapshots` append-only trigger modified to allow archive path
 - `npm run lint:migrations` fails on new migration introducing business-logic trigger
 - E55-A1 and E55-A2 marked done in action-items.md
+
+---
+
+## Epic 57: AR + Treasury Correctness
+
+**Goal:** Prove AR invoice lifecycle, payment posting, and credit/void/refund invariants are correct; prove treasury handoff and reconciliation consistency. Unblocked by Epic 56's archive flow fix and trigger 0201.
+
+**Program Alignment:** Sprint 57 in the S48–S64 Correctness-First Architecture Blueprint. Builds on Epic 56 correctness infrastructure.
+
+### Story Summary
+
+| Story | Title | Risk | Dependencies |
+|-------|-------|------|-------------|
+| 57.1 | AR Snapshot/Archive Trigger Compatibility Verification | P1 | Epic 56 Story 56.1 (trigger 0201) |
+| 57.2 | AR Invoice + Payment Posting Correctness | P0 | 57.1 |
+| 57.3 | AR Credits/Void/Refund Invariants | P1 | 57.2 |
+| 57.4 | Treasury Handoff + Reconciliation Correctness | P1 | 57.2 |
+
+### Key Decisions
+- AR shares `ap_reconciliation_snapshots` table with AP — trigger 0201 applies identically
+- Archive path: `status='ARCHIVED'`, `archived_at`, `archive_version` — same pattern for AR as AP
+- AR corrections use VOID/REFUND pattern (immutable finalized records, not mutation)
+- Treasury balance is derived from `SUM(treasury_transactions)` — no separate balance column
+
+### Exit Gate
+- No unresolved P0/P1 in AR/treasury scope
+- AR invoice + payment posting produces balanced journals (debits = credits)
+- Credit/void/refund follow VOID/REFUND pattern with audit trail
+- Treasury handoff consistent: AR payment credits treasury cash account, reconciliation passes
+- `npx tsx scripts/validate-sprint-status.ts --epic 57` exits 0

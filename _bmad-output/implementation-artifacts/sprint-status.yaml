@@ -647,3 +647,10 @@ development_status:
   epic-56: done
   56-1-archive-flow-trigger-resolution: done
   56-2-ci-lint-gate-business-triggers: done
+
+  # Epic 57: AR + Treasury Correctness
+  epic-57: backlog
+  57-1-ar-snapshot-trigger-compatibility: done
+  57-2-ar-invoice-payment-posting-correctness: backlog
+  57-3-ar-credits-void-refund-invariants: backlog
+  57-4-treasury-handoff-reconciliation-correctness: backlog

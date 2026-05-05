@@ -249,6 +249,17 @@ export function createCreditNoteService(deps: CreditNoteServiceDeps): CreditNote
       if (!creditNote) {
         throw new Error("Created credit note not found");
       }
+
+      // Audit trail for credit note creation — entity_id is the original invoice being credited
+      await executor.insertAuditLog({
+        companyId,
+        userId: actor?.userId ?? null,
+        action: "CREDIT_NOTE",
+        entityType: "sales_invoice",
+        entityId: input.invoice_id,
+        payload: { creditNoteId: creditNoteId, creditNoteNo, invoiceId: input.invoice_id, amount: normalizedAmount }
+      });
+
       return creditNote;
     });
   }
