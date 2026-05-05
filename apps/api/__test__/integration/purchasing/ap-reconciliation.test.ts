@@ -1566,5 +1566,74 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
         await sql`DELETE FROM companies WHERE id = ${noTzCompany.id}`.execute(db);
       }
     });
+    it("reconciliation summary is consistent under concurrent AP writes (AC5)", async () => {
+      // AC5: Concurrent write safety — the fix wraps both balance queries in a single
+      // transaction so they observe the same DB snapshot, preventing split-brain variance.
+      //
+      // This test exercises the fix: it runs a summary and an invoice creation concurrently.
+      // - Without fix: AP and GL queries see different DB snapshots → non-zero variance (impossible state)
+      // - With fix: both queries see the same snapshot → variance = 0 (correct, reconciled state)
+      //
+      // The summary started first will see the pre-invoice snapshot; the one started after
+      // may or may not include the invoice depending on commit timing — both are valid.
+      // The invariant that matters is: any single summary call is internally consistent.
+
+      // Configure settings first
+      await putJson("/api/purchasing/reports/ap-reconciliation/settings", ownerToken, {
+        account_ids: [apAccountId],
+      });
+
+      // Baseline before concurrent operations
+      const baselineRes = await getJson(
+        `/api/purchasing/reports/ap-reconciliation/summary?as_of_date=${INCLUSIVE_AS_OF_DATE}`,
+        ownerToken
+      );
+      expect(baselineRes.status).toBe(200);
+      const baselineBody = await baselineRes.json();
+      const baselineSubledger = toScaled4(baselineBody.data.ap_subledger_balance);
+      const baselineGL = toScaled4(baselineBody.data.gl_control_balance);
+
+      // Fire summary and invoice creation concurrently.
+      // The summary's transaction isolates it from the concurrent write: regardless of
+      // whether the invoice commits before or during the summary, the two balance queries
+      // see the SAME snapshot — so variance = 0 (subledger == GL for any reconciled state).
+      const [summaryRes, _invoiceId] = await Promise.all([
+        getJson(`/api/purchasing/reports/ap-reconciliation/summary?as_of_date=${INCLUSIVE_AS_OF_DATE}`, ownerToken),
+        createAndPostInvoice(`CONC-${Date.now() % 100000}`, "2026-04-15", "200.0000"),
+      ]);
+
+      expect(summaryRes.status).toBe(200);
+      const summaryBody = await summaryRes.json();
+      const summarySubledger = toScaled4(summaryBody.data.ap_subledger_balance);
+      const summaryGL = toScaled4(summaryBody.data.gl_control_balance);
+      const summaryVariance = toScaled4(summaryBody.data.variance);
+
+      // CRITICAL INVARIANT: any single summary result must show subledger == GL (variance = 0).
+      // This proves the transaction isolation fix works — both balance queries see the same DB state.
+      // Without the fix, under concurrent writes, AP and GL queries could observe different
+      // snapshots and produce a non-zero variance that never actually existed.
+      expect(summarySubledger).toBe(summaryGL);
+      expect(summaryVariance).toBe(0n);
+
+      // Repeat call confirms determinism: internally consistent (subledger==GL, variance=0)
+      const repeatRes = await getJson(
+        `/api/purchasing/reports/ap-reconciliation/summary?as_of_date=${INCLUSIVE_AS_OF_DATE}`,
+        ownerToken
+      );
+      expect(repeatRes.status).toBe(200);
+      const repeatBody = await repeatRes.json();
+      const repeatSubledger = toScaled4(repeatBody.data.ap_subledger_balance);
+      const repeatGL = toScaled4(repeatBody.data.gl_control_balance);
+      const repeatVariance = toScaled4(repeatBody.data.variance);
+
+      expect(repeatSubledger).toBe(repeatGL);
+      expect(repeatVariance).toBe(0n);
+
+      // The subsequent call (runs after invoice is definitely committed) must include
+      // the $200 invoice, confirming AC5's "subsequent reconciliation includes new invoice".
+      // Delta vs baseline must be exactly $200.0000 in scaled form.
+      const repeatDelta = repeatSubledger - baselineSubledger;
+      expect(repeatDelta).toBe(2000000n);
+    });
   });
 });

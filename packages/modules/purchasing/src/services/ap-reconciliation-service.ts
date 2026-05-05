@@ -9,6 +9,7 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
+import { withTransaction } from "@jurnapod/db";
 import {
   AP_RECONCILIATION_ACCOUNT_IDS_KEY,
   AP_CONTROL_ACCOUNT_TYPE_NAMES,
@@ -308,8 +309,10 @@ export class ApReconciliationService {
 
   /**
    * Get AP subledger balance (open posted purchase invoices base amounts).
+   * Accepts optional executor for use within a transaction.
    */
-  private async getAPSubledgerBalance(companyId: number, asOfDate: string): Promise<bigint> {
+  private async getAPSubledgerBalance(companyId: number, asOfDate: string, executor?: KyselySchema): Promise<bigint> {
+    const db = executor ?? this.db;
     const rows = await sql`
       SELECT
         pi.grand_total,
@@ -337,7 +340,7 @@ export class ApReconciliationService {
       WHERE pi.company_id = ${companyId}
         AND pi.status = ${PURCHASE_INVOICE_STATUS.POSTED}
         AND pi.invoice_date <= ${asOfDate}
-    `.execute(this.db);
+    `.execute(db);
 
     let totalBase = 0n;
 
@@ -366,12 +369,19 @@ export class ApReconciliationService {
 
   /**
    * Get GL control balance (sum of debit - credit for configured AP accounts).
+   * Accepts optional executor for use within a transaction.
    */
-  private async getGLControlBalance(companyId: number, accountIds: number[], asOfDateUtcEnd: string): Promise<bigint> {
+  private async getGLControlBalance(
+    companyId: number,
+    accountIds: number[],
+    asOfDateUtcEnd: string,
+    executor?: KyselySchema
+  ): Promise<bigint> {
     if (accountIds.length === 0) {
       return 0n;
     }
 
+    const db = executor ?? this.db;
     const rows = await sql`
       SELECT
         SUM(jl.debit) AS total_debit,
@@ -381,7 +391,7 @@ export class ApReconciliationService {
       WHERE jl.company_id = ${companyId}
         AND jl.account_id IN (${sql.join(accountIds.map(id => sql`${id}`), sql`, `)})
         AND jb.posted_at <= ${asOfDateUtcEnd}
-    `.execute(this.db);
+    `.execute(db);
 
     if (rows.rows.length === 0) {
       return 0n;
@@ -414,10 +424,14 @@ export class ApReconciliationService {
     // Convert YYYY-MM-DD as_of_date to UTC boundaries in the tenant's timezone.
     const asOfDateUtcEnd = toUtcIso.businessDate(asOfDate, timezone, "end");
 
-    const [apBalance, glBalance] = await Promise.all([
-      this.getAPSubledgerBalance(companyId, asOfDate),
-      this.getGLControlBalance(companyId, settings.accountIds, asOfDateUtcEnd),
-    ]);
+    // Wrap both balance queries in a single transaction so they observe the same DB snapshot.
+    // This prevents the race condition where getAPSubledgerBalance and getGLControlBalance
+    // run in parallel and see inconsistent state under concurrent AP writes.
+    const { apBalance, glBalance } = await withTransaction(this.db, async (trx) => {
+      const ap = await this.getAPSubledgerBalance(companyId, asOfDate, trx);
+      const gl = await this.getGLControlBalance(companyId, settings.accountIds, asOfDateUtcEnd, trx);
+      return { apBalance: ap, glBalance: gl };
+    });
 
     const variance = apBalance - glBalance;
 

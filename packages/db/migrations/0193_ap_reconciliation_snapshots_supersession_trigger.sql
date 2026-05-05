@@ -10,7 +10,7 @@
 -- while all immutable financial/input fields remain unchanged.
 
 DROP TRIGGER IF EXISTS trg_ap_reconciliation_snapshots_before_update;
-
+-- lint:allow-business-trigger
 CREATE TRIGGER trg_ap_reconciliation_snapshots_before_update
 BEFORE UPDATE ON ap_reconciliation_snapshots
 FOR EACH ROW

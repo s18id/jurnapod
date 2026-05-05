@@ -44,6 +44,7 @@ SET UNIQUE_CHECKS=1;
 SET FOREIGN_KEY_CHECKS=0;
 
 DROP TRIGGER IF EXISTS trg_ap_reconciliation_snapshots_before_update;
+-- lint:allow-business-trigger
 CREATE TRIGGER trg_ap_reconciliation_snapshots_before_update
 BEFORE UPDATE ON ap_reconciliation_snapshots
 FOR EACH ROW
@@ -51,6 +52,7 @@ SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'ap_reconciliation_snapshots is append-only: UPDATE is not allowed';
 
 DROP TRIGGER IF EXISTS trg_ap_reconciliation_snapshots_before_delete;
+-- lint:allow-business-trigger
 CREATE TRIGGER trg_ap_reconciliation_snapshots_before_delete
 BEFORE DELETE ON ap_reconciliation_snapshots
 FOR EACH ROW
@@ -62,6 +64,7 @@ SET MESSAGE_TEXT = 'ap_reconciliation_snapshots is append-only: DELETE is not al
 -- =====================================================
 
 DROP TRIGGER IF EXISTS trg_ap_reconciliation_audit_trail_before_update;
+-- lint:allow-business-trigger
 CREATE TRIGGER trg_ap_reconciliation_audit_trail_before_update
 BEFORE UPDATE ON ap_reconciliation_audit_trail
 FOR EACH ROW
@@ -69,6 +72,7 @@ SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'ap_reconciliation_audit_trail is append-only: UPDATE is not allowed';
 
 DROP TRIGGER IF EXISTS trg_ap_reconciliation_audit_trail_before_delete;
+-- lint:allow-business-trigger
 CREATE TRIGGER trg_ap_reconciliation_audit_trail_before_delete
 BEFORE DELETE ON ap_reconciliation_audit_trail
 FOR EACH ROW

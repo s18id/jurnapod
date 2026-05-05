@@ -191,41 +191,6 @@ async function triggerAutoSnapshotForFiscalYearClose(input: {
   }
 }
 
-async function hasAutoSnapshotForFiscalYearEnd(input: {
-  db: KyselySchema;
-  companyId: number;
-  fiscalYearId: number;
-}): Promise<boolean> {
-  const fiscalYear = await input.db
-    .selectFrom("fiscal_years")
-    .where("company_id", "=", input.companyId)
-    .where("id", "=", input.fiscalYearId)
-    .select(["end_date"])
-    .executeTakeFirst();
-
-  if (!fiscalYear?.end_date) {
-    return false;
-  }
-
-  const asOfDate = fiscalYear.end_date instanceof Date
-    ? fromUtcIso.dateOnly(toUtcIso.dateLike(fiscalYear.end_date) as string)
-    : String(fiscalYear.end_date).slice(0, 10);
-  const asOfDateValue = fiscalYear.end_date instanceof Date
-    ? fiscalYear.end_date
-    : new Date(`${asOfDate}T00:00:00.000Z`);
-
-  const existingAutoSnapshot = await input.db
-    .selectFrom("ap_reconciliation_snapshots")
-    .where("company_id", "=", input.companyId)
-    .where("as_of_date", "=", asOfDateValue)
-    .where("auto_generated", "=", 1)
-    .select(["id"])
-    .limit(1)
-    .executeTakeFirst();
-
-  return Boolean(existingAutoSnapshot);
-}
-
 // Wrapper functions that provide backward-compatible API
 
 export async function listFiscalYears(query: FiscalYearListQuery): Promise<FiscalYear[]> {
@@ -632,20 +597,11 @@ export async function approveFiscalYearClose(
     initialDelayMs: 200,
   });
 
-  // Replay-safe + recoverable side-effect rule:
-  // - First successful approve always attempts snapshot.
-  // - Replays attempt snapshot only if the expected auto-snapshot is missing
-  //   (recovery path for transient failure after close commit).
+  // Auto-snapshot always attempted on successful close.
+  // Idempotency is handled by the snapshot service's SELECT ... FOR UPDATE
+  // + inputsHash guard (append-only trigger blocks ON DUPLICATE KEY).
   const shouldAttemptAutoSnapshot = closeResult.success
-    && closeResult.newStatus === "CLOSED"
-    && (
-      !closeResult.replayed
-      || !(await hasAutoSnapshotForFiscalYearEnd({
-        db: db as KyselySchema,
-        companyId,
-        fiscalYearId,
-      }))
-    );
+    && closeResult.newStatus === "CLOSED";
 
   let snapshotWarning: AutoSnapshotWarning | null = null;
   if (shouldAttemptAutoSnapshot) {
