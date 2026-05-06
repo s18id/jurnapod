@@ -649,8 +649,8 @@ development_status:
   56-2-ci-lint-gate-business-triggers: done
 
   # Epic 57: AR + Treasury Correctness
-  epic-57: backlog
+  epic-57: done
   57-1-ar-snapshot-trigger-compatibility: done
   57-2-ar-invoice-payment-posting-correctness: done
   57-3-ar-credits-void-refund-invariants: done
-  57-4-treasury-handoff-reconciliation-correctness: backlog
+  57-4-treasury-handoff-reconciliation-correctness: done

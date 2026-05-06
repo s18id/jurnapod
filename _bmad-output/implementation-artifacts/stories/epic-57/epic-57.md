@@ -1,7 +1,7 @@
 # Epic 57 — AR + Treasury Correctness
 
 > **Owner:** Architecture Program (Correctness > Safety > Speed)
-> **Status:** planned
+> **Status:** done
 > **Sprint:** 57 (per S48–S64 blueprint, re-baselined 2026-05-05)
 > **Theme:** Prove AR invoice lifecycle, payment posting, and credit/void/refund invariants are correct; prove treasury handoff and reconciliation consistency.
 > **Primary Modules:** `modules-sales` (AR), `modules-treasury`

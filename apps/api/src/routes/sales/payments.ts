@@ -511,6 +511,13 @@ paymentRoutes.post("/", async (c) => {
       if (error.message === "Numbering template not configured") {
         return errorResponse("CONFLICT", numberingTemplateConflictMessage, 409);
       }
+      // Account validation errors (AC5/AC6/AC8) — invalid/inactive/missing account
+      if (
+        error.message.includes("Account not found or not a valid payment target account") ||
+        error.message.includes("account_id is required when splits not provided")
+      ) {
+        return errorResponse("INVALID_REQUEST", error.message, 400);
+      }
       return errorResponse("NOT_FOUND", "Resource not found", 404);
     }
 
@@ -520,6 +527,18 @@ paymentRoutes.post("/", async (c) => {
 
     if (error instanceof PaymentAllocationError) {
       return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+
+    // Cross-bundle fallback: in some test/runtime paths, instanceof DatabaseReferenceError
+    // can fail due to duplicated module instances. Preserve correct 400 mapping.
+    if (error instanceof Error) {
+      const message = error.message ?? "";
+      if (
+        message.includes("Account not found or not a valid payment target account") ||
+        message.includes("account_id is required when splits not provided")
+      ) {
+        return errorResponse("INVALID_REQUEST", message, 400);
+      }
     }
 
     console.error("POST /sales/payments failed", error);
@@ -1102,6 +1121,13 @@ export function registerSalesPaymentRoutes(app: { openapi: OpenAPIHonoType["open
         if (error.message === "Numbering template not configured") {
           return errorResponse("CONFLICT", numberingTemplateConflictMessage, 409);
         }
+        // Account validation errors (AC5/AC6/AC8) — invalid/inactive/missing account
+        if (
+          error.message.includes("Account not found or not a valid payment target account") ||
+          error.message.includes("account_id is required when splits not provided")
+        ) {
+          return errorResponse("INVALID_REQUEST", error.message, 400);
+        }
         return errorResponse("NOT_FOUND", "Resource not found", 404);
       }
 
@@ -1111,6 +1137,18 @@ export function registerSalesPaymentRoutes(app: { openapi: OpenAPIHonoType["open
 
       if (error instanceof PaymentAllocationError) {
         return errorResponse("INVALID_REQUEST", error.message, 400);
+      }
+
+      // Cross-bundle fallback: in some test/runtime paths, instanceof DatabaseReferenceError
+      // can fail due to duplicated module instances. Preserve correct 400 mapping.
+      if (error instanceof Error) {
+        const message = error.message ?? "";
+        if (
+          message.includes("Account not found or not a valid payment target account") ||
+          message.includes("account_id is required when splits not provided")
+        ) {
+          return errorResponse("INVALID_REQUEST", message, 400);
+        }
       }
 
       console.error("POST /sales/payments failed", error);
