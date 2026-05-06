@@ -61,6 +61,10 @@ export {
   type PaymentPostingHook
 } from "./interfaces/payment-posting-hook.js";
 
+export {
+  type InvoicePostingHook
+} from "./interfaces/invoice-posting-hook.js";
+
 // Re-export repository interfaces for API adapter implementation
 export type {
   // Invoice types re-exported for posting integration
@@ -78,6 +82,10 @@ export {
   InvoiceStatusError,
   DiscountExceedsSubtotalError,
   INVOICE_DUE_TERM_DAYS
+} from "./types/invoices.js";
+
+export type {
+  PostInvoiceInput
 } from "./types/invoices.js";
 
 // Repository interfaces

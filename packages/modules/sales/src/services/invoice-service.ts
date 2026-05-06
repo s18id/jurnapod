@@ -15,9 +15,8 @@
 
 import { fromUtcIso, toUtcIso } from "@jurnapod/shared";
 import type { AccessScopeChecker } from "../interfaces/access-scope-checker.js";
-import {
-  SalesPermissions
-} from "../interfaces/access-scope-checker.js";
+import { SalesPermissions } from "../interfaces/access-scope-checker.js";
+import type { InvoicePostingHook } from "../interfaces/invoice-posting-hook.js";
 import type {
   SalesInvoiceDetail,
   InvoiceListFilters,
@@ -30,7 +29,8 @@ import type {
   SalesInvoice,
   SalesInvoiceLine,
   SalesInvoiceTax,
-  InvoiceStatusError
+  InvoiceStatusError,
+  PostInvoiceInput
 } from "../types/invoices.js";
 import { DiscountExceedsSubtotalError } from "../types/invoices.js";
 import type { SalesDb, SalesDbExecutor } from "./sales-db.js";
@@ -313,6 +313,7 @@ export interface InvoiceService {
 export interface InvoiceServiceDeps {
   db: SalesDb;
   accessScopeChecker: AccessScopeChecker;
+  postingHook?: InvoicePostingHook;
 }
 
 // =============================================================================
@@ -320,7 +321,7 @@ export interface InvoiceServiceDeps {
 // =============================================================================
 
 export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
-  const { db, accessScopeChecker } = deps;
+  const { db, accessScopeChecker, postingHook } = deps;
 
   async function withTransaction<T>(operation: (executor: SalesDbExecutor) => Promise<T>): Promise<T> {
     return db.withTransaction(operation);
@@ -875,6 +876,15 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
         const postedInvoice = await findInvoiceById(executor, companyId, invoiceId);
         if (!postedInvoice) {
           throw new Error("Posted invoice not found");
+        }
+
+        // Post to journal if hook is provided (graceful degradation if undefined)
+        const tx = executor.getTransaction();
+        if (postingHook && tx) {
+          await postingHook.postInvoiceToJournal({
+            _invoiceId: invoiceId,
+            _companyId: companyId
+          }, tx);
         }
 
         const lines = await findInvoiceLines(executor, companyId, invoiceId);

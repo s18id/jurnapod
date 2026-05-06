@@ -23,7 +23,6 @@ import {
   NumericIdSchema
 } from "@jurnapod/shared";
 import {
-  createInvoiceService as getInvoiceService,
   type InvoiceService,
   DatabaseConflictError,
   DatabaseForbiddenError,
@@ -37,18 +36,12 @@ import { requireAccess, type AuthContext } from "@/lib/auth-guard";
 import { getCompanyService } from "@/lib/companies";
 import { customerExistsInCompany } from "@/lib/customers";
 import { errorResponse, successResponse } from "@/lib/response";
-import { createApiSalesDb } from "@/lib/modules-sales/sales-db";
-import { getAccessScopeChecker } from "@/lib/modules-sales/access-scope-checker";
+import { getComposedInvoiceService } from "@/lib/modules-sales";
 
 const invoiceRoutes = new Hono();
 
-// Create invoice service instance using the adapter layer
-const db = createApiSalesDb();
-const accessScopeChecker = getAccessScopeChecker();
-const invoiceService: InvoiceService = getInvoiceService({
-  db,
-  accessScopeChecker
-});
+// Create invoice service instance using the composed adapter with posting hook
+const invoiceService: InvoiceService = getComposedInvoiceService();
 
 const numberingTemplateConflictMessage =
   "No numbering template configured. Please configure document numbering in settings.";
@@ -430,6 +423,21 @@ invoiceRoutes.patch("/:id", async (c) => {
 
     if (error instanceof DiscountExceedsSubtotalError) {
       return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+
+    // Defensive mapping for invoice immutability/status-transition conflicts.
+    // In some runtime paths, domain conflict errors may surface as generic Error
+    // (class identity boundary), so map canonical messages to 409.
+    if (error instanceof Error) {
+      const message = error.message ?? "";
+      if (
+        message.includes("Invoice is not editable") ||
+        message.includes("Invoice cannot be posted") ||
+        message.includes("Only draft invoices can be approved") ||
+        message.includes("Posted invoices cannot be approved")
+      ) {
+        return errorResponse("CONFLICT", message, 409);
+      }
     }
 
     console.error("PATCH /sales/invoices/:id failed", error);

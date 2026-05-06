@@ -651,6 +651,6 @@ development_status:
   # Epic 57: AR + Treasury Correctness
   epic-57: backlog
   57-1-ar-snapshot-trigger-compatibility: done
-  57-2-ar-invoice-payment-posting-correctness: backlog
+  57-2-ar-invoice-payment-posting-correctness: done
   57-3-ar-credits-void-refund-invariants: backlog
   57-4-treasury-handoff-reconciliation-correctness: backlog

@@ -179,3 +179,13 @@ export class DiscountExceedsSubtotalError extends Error {
     this.name = "DiscountExceedsSubtotalError";
   }
 }
+
+// =============================================================================
+// Post Invoice Input (for hook)
+// =============================================================================
+
+export type PostInvoiceInput = {
+  /** Internal fields for journal posting - set by InvoiceService before calling postingHook */
+  _invoiceId?: number;
+  _companyId?: number;
+};
