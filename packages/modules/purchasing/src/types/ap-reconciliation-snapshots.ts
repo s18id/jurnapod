@@ -88,6 +88,13 @@ export interface CompareAPReconciliationSnapshotsParams {
   withSnapshotId: number;
 }
 
+export interface ArchiveAPReconciliationSnapshotParams {
+  companyId: number;
+  snapshotId: number;
+  archivedBy: number;
+  reason?: string;
+}
+
 export interface GenerateSnapshotCSVParams {
   snapshot: APReconciliationSnapshotRecord;
 }

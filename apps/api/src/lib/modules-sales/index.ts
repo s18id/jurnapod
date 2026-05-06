@@ -11,5 +11,7 @@ export { ApiAccessScopeChecker, getAccessScopeChecker } from "./access-scope-che
 export { ApiSalesDbExecutor, createApiSalesDb } from "./sales-db.js";
 export { ApiPaymentPostingHook } from "./payment-posting-hook.js";
 export { ApiInvoicePostingHook } from "./invoice-posting-hook.js";
+export { ApiCreditNotePostingHook } from "./credit-note-posting-hook.js";
 export { createComposedPaymentService, getComposedPaymentService } from "./payment-service-composition.js";
 export { createComposedInvoiceService, getComposedInvoiceService } from "./invoice-service-composition.js";
+export { createComposedCreditNoteService, getComposedCreditNoteService } from "./credit-note-service-composition.js";

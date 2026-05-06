@@ -208,6 +208,10 @@ paymentRoutes.patch("/:id", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid request", 400);
     }
 
+    if (error instanceof PaymentStatusError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
     if (error instanceof DatabaseConflictError) {
       return errorResponse("CONFLICT", error.message, 409);
     }

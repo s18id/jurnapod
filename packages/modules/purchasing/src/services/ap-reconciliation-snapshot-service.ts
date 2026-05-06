@@ -21,6 +21,7 @@ import type {
   ListAPReconciliationSnapshotsParams,
   GetAPReconciliationSnapshotByIdParams,
   CompareAPReconciliationSnapshotsParams,
+  ArchiveAPReconciliationSnapshotParams,
   GenerateSnapshotCSVParams,
 } from "../types/ap-reconciliation-snapshots.js";
 import {
@@ -105,6 +106,14 @@ function computeDelta(a: string, b: string): string {
   const left = toScaled(a, 4);
   const right = toScaled(b, 4);
   return fromScaled4(right - left);
+}
+
+function computeNextArchiveVersion(current: string | null): string {
+  const parsed = current === null ? 0 : Number.parseInt(current, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return "1";
+  }
+  return String(parsed + 1);
 }
 
 function normalizeDateOnly(date: string): string {
@@ -496,6 +505,76 @@ export class ApReconciliationSnapshotService {
       },
       changedFields,
     };
+  }
+
+  async archiveAPReconciliationSnapshot(
+    params: ArchiveAPReconciliationSnapshotParams
+  ): Promise<APReconciliationSnapshotRecord> {
+    const { companyId, snapshotId, archivedBy, reason } = params;
+
+    return this.db.transaction().execute(async (trx) => {
+      const currentSnapshot = await fetchSnapshotById(trx as KyselySchema, companyId, snapshotId);
+
+      if (currentSnapshot.status === "ARCHIVED") {
+        return currentSnapshot;
+      }
+
+      const nextArchiveVersion = computeNextArchiveVersion(currentSnapshot.archiveVersion);
+
+      await sql`
+        UPDATE ap_reconciliation_snapshots
+        SET status = 'ARCHIVED',
+            archived_at = COALESCE(archived_at, CURRENT_TIMESTAMP),
+            archive_version = ${nextArchiveVersion}
+        WHERE company_id = ${companyId}
+          AND id = ${snapshotId}
+      `.execute(trx);
+
+      try {
+        await sql`
+          INSERT INTO ap_reconciliation_audit_trail (
+            company_id,
+            snapshot_id,
+            previous_snapshot_id,
+            action_type,
+            change_summary,
+            change_reason,
+            changed_by,
+            metadata
+          ) VALUES (
+            ${companyId},
+            ${snapshotId},
+            NULL,
+            'ARCHIVED',
+            ${JSON.stringify({
+              before: {
+                status: currentSnapshot.status,
+                archived_at: currentSnapshot.archivedAt,
+                archive_version: currentSnapshot.archiveVersion,
+              },
+              after: {
+                status: "ARCHIVED",
+                archive_version: nextArchiveVersion,
+              },
+              changed_fields: ["status", "archived_at", "archive_version"],
+            })},
+            ${reason ?? "retention_archive"},
+            ${archivedBy},
+            ${JSON.stringify({
+              as_of_date: currentSnapshot.asOfDate,
+              snapshot_version: currentSnapshot.snapshotVersion,
+            })}
+          )
+        `.execute(trx);
+      } catch (auditError) {
+        const safeMessage = auditError instanceof Error ? auditError.message : String(auditError);
+        console.error(
+          `[ApReconciliationSnapshotService] Archive audit trail creation failed for snapshot ${snapshotId}: ${safeMessage}`
+        );
+      }
+
+      return fetchSnapshotById(trx as KyselySchema, companyId, snapshotId);
+    });
   }
 
   generateSnapshotCSV(snapshot: APReconciliationSnapshotRecord): string {

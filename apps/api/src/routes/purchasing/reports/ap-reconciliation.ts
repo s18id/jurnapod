@@ -55,6 +55,7 @@ import {
 } from "@/lib/purchasing/ap-reconciliation-drilldown";
 import {
   APReconciliationSnapshotNotFoundError,
+  archiveAPReconciliationSnapshot,
   compareAPReconciliationSnapshots,
   createAPReconciliationSnapshot,
   generateSnapshotCSV,
@@ -810,6 +811,46 @@ apReconciliationRoutes.get("/snapshots/:id/compare", async (c) => {
     }
     console.error("GET /purchasing/reports/ap-reconciliation/snapshots/:id/compare failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to compare AP reconciliation snapshots", 500);
+  }
+});
+
+apReconciliationRoutes.post("/snapshots/:id/archive", async (c) => {
+  try {
+    const auth = c.get("auth");
+
+    // ACL: module='purchasing', resource='reports', permission='manage'
+    const accessResult = await requireAccess({
+      module: "purchasing",
+      resource: "reports",
+      permission: "manage",
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const snapshotId = Number(c.req.param("id"));
+    if (!Number.isSafeInteger(snapshotId) || snapshotId <= 0) {
+      return errorResponse("INVALID_REQUEST", "Invalid snapshot ID", 400);
+    }
+
+    if (!Number.isSafeInteger(auth.userId) || (auth.userId ?? 0) <= 0) {
+      return errorResponse("UNAUTHORIZED", "Authenticated user context is required", 401);
+    }
+
+    const snapshot = await archiveAPReconciliationSnapshot({
+      companyId: auth.companyId,
+      snapshotId,
+      archivedBy: auth.userId,
+    });
+
+    return successResponse({ snapshot: mapSnapshotResponse(snapshot) });
+  } catch (error) {
+    if (error instanceof APReconciliationSnapshotNotFoundError) {
+      return errorResponse("NOT_FOUND", error.message, 404);
+    }
+    console.error("POST /purchasing/reports/ap-reconciliation/snapshots/:id/archive failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to archive AP reconciliation snapshot", 500);
   }
 });
 

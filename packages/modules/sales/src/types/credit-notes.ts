@@ -102,3 +102,13 @@ export type CreditCapacity = {
   already_credited: number;
   remaining: number;
 };
+
+// =============================================================================
+// Post Credit Note Input (for hook)
+// =============================================================================
+
+export type PostCreditNoteInput = {
+  /** Internal fields for journal posting — set by CreditNoteService before calling postingHook */
+  _creditNoteId?: number;
+  _companyId?: number;
+};

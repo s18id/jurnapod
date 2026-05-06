@@ -226,6 +226,72 @@ describe("purchasing.ap-reconciliation-snapshots", { timeout: 90000 }, () => {
     expect(Array.isArray(compareBody.data.changed_fields)).toBe(true);
   });
 
+  it("archives snapshot via API and records ARCHIVED audit trail", async () => {
+    const createRes = await postJson(
+      "/api/purchasing/reports/ap-reconciliation/snapshots",
+      ownerToken,
+      { as_of_date: "2026-04-22", reason: "archive-target" }
+    );
+
+    expect(createRes.status).toBe(201);
+    const createBody = await createRes.json();
+    const snapshotId = Number(createBody.data.snapshot.id);
+
+    const archiveRes = await postJson(
+      `/api/purchasing/reports/ap-reconciliation/snapshots/${snapshotId}/archive`,
+      ownerToken
+    );
+
+    expect(archiveRes.status).toBe(200);
+    const archiveBody = await archiveRes.json();
+    expect(archiveBody.success).toBe(true);
+    expect(archiveBody.data.snapshot.status).toBe("ARCHIVED");
+    expect(archiveBody.data.snapshot.archived_at).toBeTruthy();
+    expect(archiveBody.data.snapshot.archive_version).toBe("1");
+
+    // Re-archive is idempotent (no-op)
+    const rearchiveRes = await postJson(
+      `/api/purchasing/reports/ap-reconciliation/snapshots/${snapshotId}/archive`,
+      ownerToken
+    );
+    expect(rearchiveRes.status).toBe(200);
+    const rearchiveBody = await rearchiveRes.json();
+    expect(rearchiveBody.data.snapshot.status).toBe("ARCHIVED");
+    expect(rearchiveBody.data.snapshot.archive_version).toBe("1");
+
+    const db = getTestDb();
+    const auditRows = await sql<{ action_type: string }>`
+      SELECT action_type
+      FROM ap_reconciliation_audit_trail
+      WHERE company_id = ${companyId}
+        AND snapshot_id = ${snapshotId}
+      ORDER BY id DESC
+      LIMIT 1
+    `.execute(db);
+
+    expect(auditRows.rows.length).toBeGreaterThan(0);
+    expect(auditRows.rows[0]?.action_type).toBe("ARCHIVED");
+  });
+
+  it("enforces ACL: analyze-only cannot archive snapshot", async () => {
+    const createRes = await postJson(
+      "/api/purchasing/reports/ap-reconciliation/snapshots",
+      ownerToken,
+      { as_of_date: "2026-04-23", reason: "archive-acl" }
+    );
+
+    expect(createRes.status).toBe(201);
+    const createBody = await createRes.json();
+    const snapshotId = Number(createBody.data.snapshot.id);
+
+    const archiveRes = await postJson(
+      `/api/purchasing/reports/ap-reconciliation/snapshots/${snapshotId}/archive`,
+      analyzeOnlyToken
+    );
+
+    expect(archiveRes.status).toBe(403);
+  });
+
   it("exports snapshot in CSV format", async () => {
     const res = await getJson(
       `/api/purchasing/reports/ap-reconciliation/snapshots/${createdSnapshotId}/export?format=csv`,
@@ -1041,7 +1107,7 @@ describe("purchasing.ap-reconciliation-snapshots", { timeout: 90000 }, () => {
     const archiveResults = await db.updateTable("ap_reconciliation_snapshots")
       .set({
         status: "ARCHIVED",
-        archive_version: 1,
+        archive_version: "1",
       })
       .where("id", "=", snapshot.id)
       .execute();
@@ -1051,8 +1117,8 @@ describe("purchasing.ap-reconciliation-snapshots", { timeout: 90000 }, () => {
 
     // Verify the snapshot is now ARCHIVED in DB
     const result = await sql`SELECT status, archive_version FROM ap_reconciliation_snapshots WHERE id = ${snapshot.id}`.execute(db);
-    expect(result.rows[0].status).toBe("ARCHIVED");
-    expect(Number(result.rows[0].archive_version)).toBe(1);
+    expect((result.rows[0] as { status: string; archive_version: string | null }).status).toBe("ARCHIVED");
+    expect((result.rows[0] as { status: string; archive_version: string | null }).archive_version).toBe("1");
   });
 
   it("AC1+AC2: archive of already-archived snapshot is a no-op (edge case)", async () => {
@@ -1077,7 +1143,7 @@ describe("purchasing.ap-reconciliation-snapshots", { timeout: 90000 }, () => {
     await db.updateTable("ap_reconciliation_snapshots")
       .set({
         status: "ARCHIVED",
-        archive_version: 1,
+        archive_version: "1",
       })
       .where("id", "=", snapshot.id)
       .execute();
@@ -1086,7 +1152,7 @@ describe("purchasing.ap-reconciliation-snapshots", { timeout: 90000 }, () => {
     const result2 = await db.updateTable("ap_reconciliation_snapshots")
       .set({
         status: "ARCHIVED",
-        archive_version: 2,
+        archive_version: "2",
       })
       .where("id", "=", snapshot.id)
       .execute();
@@ -1096,6 +1162,6 @@ describe("purchasing.ap-reconciliation-snapshots", { timeout: 90000 }, () => {
 
     // Verify archive_version incremented
     const result2rows = await sql`SELECT archive_version FROM ap_reconciliation_snapshots WHERE id = ${snapshot.id}`.execute(db);
-    expect(Number(result2rows.rows[0].archive_version)).toBeGreaterThanOrEqual(1);
+    expect((result2rows.rows[0] as { archive_version: string | null }).archive_version).toBe("2");
   });
 });

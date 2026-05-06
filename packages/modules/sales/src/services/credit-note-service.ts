@@ -16,6 +16,7 @@ import type { AccessScopeChecker } from "../interfaces/access-scope-checker.js";
 import {
   SalesPermissions
 } from "../interfaces/access-scope-checker.js";
+import type { CreditNotePostingHook } from "../interfaces/credit-note-posting-hook.js";
 import type {
   SalesCreditNoteDetail,
   CreateCreditNoteInput,
@@ -113,6 +114,7 @@ export interface CreditNoteService {
 export interface CreditNoteServiceDeps {
   db: SalesDb;
   accessScopeChecker: AccessScopeChecker;
+  postingHook?: CreditNotePostingHook;
 }
 
 // =============================================================================
@@ -120,7 +122,7 @@ export interface CreditNoteServiceDeps {
 // =============================================================================
 
 export function createCreditNoteService(deps: CreditNoteServiceDeps): CreditNoteService {
-  const { db, accessScopeChecker } = deps;
+  const { db, accessScopeChecker, postingHook } = deps;
 
   async function withTransaction<T>(operation: (executor: SalesDbExecutor) => Promise<T>): Promise<T> {
     return db.withTransaction(operation);
@@ -421,8 +423,14 @@ export function createCreditNoteService(deps: CreditNoteServiceDeps): CreditNote
         );
       }
 
-      // Note: Posting to journal is handled by the API adapter which has access to posting functions
-      // The module only manages the status update here
+      // Post to journal if hook is provided (graceful degradation if undefined)
+      const tx = executor.getTransaction();
+      if (postingHook && tx) {
+        await postingHook.postCreditNoteToJournal({
+          _creditNoteId: creditNoteId,
+          _companyId: companyId
+        }, tx);
+      }
 
       await executor.updateCreditNoteStatus(companyId, creditNoteId, "POSTED", actor?.userId);
 

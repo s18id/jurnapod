@@ -69,6 +69,17 @@ export async function compareAPReconciliationSnapshots(input: {
   return service.compareAPReconciliationSnapshots(input);
 }
 
+export async function archiveAPReconciliationSnapshot(input: {
+  companyId: number;
+  snapshotId: number;
+  archivedBy: number;
+  reason?: string;
+}): Promise<APReconciliationSnapshotRecord> {
+  const db = getDb();
+  const service = new ApReconciliationSnapshotService(db);
+  return service.archiveAPReconciliationSnapshot(input);
+}
+
 export function generateSnapshotCSV(snapshot: APReconciliationSnapshotRecord): string {
   const header = [
     "snapshot_id",

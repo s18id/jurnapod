@@ -18,10 +18,7 @@ import type {
   MutationActor,
   CreditNoteService
 } from "@jurnapod/modules-sales";
-import {
-  createCreditNoteService
-} from "@jurnapod/modules-sales";
-import { createApiSalesDb, getAccessScopeChecker } from "@/lib/modules-sales";
+import { getComposedCreditNoteService } from "@/lib/modules-sales";
 
 // Re-export types for convenience
 export type {
@@ -44,12 +41,7 @@ let creditNoteService: CreditNoteService | null = null;
 
 function getCreditNoteService(): CreditNoteService {
   if (!creditNoteService) {
-    const db = createApiSalesDb();
-    const accessScopeChecker = getAccessScopeChecker();
-    creditNoteService = createCreditNoteService({
-      db,
-      accessScopeChecker
-    });
+    creditNoteService = getComposedCreditNoteService();
   }
   return creditNoteService;
 }

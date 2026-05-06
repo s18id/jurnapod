@@ -220,6 +220,22 @@ creditNoteRoutes.post("/", async (c) => {
       return errorResponse("INVALID_REQUEST", "Invalid request", 400);
     }
 
+    if (error instanceof Error) {
+      const message = error.message ?? "";
+      if (
+        message.includes("Invoice not found or not posted") ||
+        message.includes("Invoice outlet mismatch")
+      ) {
+        return errorResponse("NOT_FOUND", message, 404);
+      }
+      if (
+        message.includes("exceeds remaining credit capacity") ||
+        message.includes("Line totals sum")
+      ) {
+        return errorResponse("CONFLICT", message, 409);
+      }
+    }
+
     console.error("POST /sales/credit-notes failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Credit note creation failed", 500);
   }
@@ -715,6 +731,22 @@ export function registerSalesCreditNoteRoutes(app: { openapi: OpenAPIHonoType["o
 
       if (error instanceof z.ZodError) {
         return errorResponse("INVALID_REQUEST", "Invalid request", 400);
+      }
+
+      if (error instanceof Error) {
+        const message = error.message ?? "";
+        if (
+          message.includes("Invoice not found or not posted") ||
+          message.includes("Invoice outlet mismatch")
+        ) {
+          return errorResponse("NOT_FOUND", message, 404);
+        }
+        if (
+          message.includes("exceeds remaining credit capacity") ||
+          message.includes("Line totals sum")
+        ) {
+          return errorResponse("CONFLICT", message, 409);
+        }
       }
 
       console.error("POST /sales/credit-notes failed", error);

@@ -144,7 +144,7 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
     const row = await sql`
       SELECT status, archived_at FROM ap_reconciliation_snapshots WHERE id = ${snapshotId}
     `.execute(db);
-    expect(row.rows[0]?.status).toBe('ARCHIVED');
+    expect((row.rows[0] as { status: string } | undefined)?.status).toBe('ARCHIVED');
 
     // Cleanup
     await sql`UPDATE ap_reconciliation_snapshots SET status='ARCHIVED', archived_at=NOW() WHERE id=${snapshotId}`.execute(db);

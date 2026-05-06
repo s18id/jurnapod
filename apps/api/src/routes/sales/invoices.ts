@@ -585,6 +585,16 @@ invoiceRoutes.post("/:id/void", async (c) => {
       return errorResponse("CONFLICT", error.message, 409);
     }
 
+    if (error instanceof Error) {
+      const message = error.message ?? "";
+      if (
+        message.includes("Invoice is already voided") ||
+        message.includes("Cannot void invoice with payments")
+      ) {
+        return errorResponse("CONFLICT", message, 409);
+      }
+    }
+
     console.error("POST /sales/invoices/:id/void failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Invoice void failed", 500);
   }
@@ -1342,6 +1352,16 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
 
       if (error instanceof InvoiceStatusError) {
         return errorResponse("CONFLICT", error.message, 409);
+      }
+
+      if (error instanceof Error) {
+        const message = error.message ?? "";
+        if (
+          message.includes("Invoice is already voided") ||
+          message.includes("Cannot void invoice with payments")
+        ) {
+          return errorResponse("CONFLICT", message, 409);
+        }
       }
 
       console.error("POST /sales/invoices/:id/void failed", error);

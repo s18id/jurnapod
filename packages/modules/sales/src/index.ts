@@ -65,6 +65,10 @@ export {
   type InvoicePostingHook
 } from "./interfaces/invoice-posting-hook.js";
 
+export {
+  type CreditNotePostingHook
+} from "./interfaces/credit-note-posting-hook.js";
+
 // Re-export repository interfaces for API adapter implementation
 export type {
   // Invoice types re-exported for posting integration
@@ -126,7 +130,8 @@ export type {
   CreateCreditNoteInput,
   UpdateCreditNoteInput,
   CreditNoteListFilters,
-  CreditCapacity
+  CreditCapacity,
+  PostCreditNoteInput
 } from "./types/credit-notes.js";
 
 // Payment types
