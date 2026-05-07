@@ -19,3 +19,6 @@ export * from "./services/index.js";
 
 // Re-export error classes
 export * from "./errors.js";
+
+// Re-export test fixtures (owner-package canonical fixtures)
+export * from "./test-fixtures/index.js";
