@@ -1,6 +1,6 @@
 # Story 58.2: Stock Movement & Outlet Scoping Correctness
 
-**Status:** planned
+**Status:** done
 
 > ⚠️ **Sprint-Status Append-Only Rule (E45-A1 / E46-A1) — MANDATORY:**
 > If this story modifies `_bmad-output/implementation-artifacts/sprint-status.yaml`:
