@@ -21,6 +21,7 @@ import {
   getStockTransactions,
   getLowStockAlerts,
   adjustStock,
+  InventoryForbiddenError,
   type StockAdjustmentInput
 } from "../lib/stock.js";
 import { authenticateRequest, requireAccess, type AuthContext } from "../lib/auth-guard.js";
@@ -194,6 +195,13 @@ stockRoutes.get(
       if (error instanceof z.ZodError) {
         return errorResponse("VALIDATION_ERROR", "Invalid request parameters", 400);
       }
+
+      if (
+        error instanceof InventoryForbiddenError ||
+        (error instanceof Error && error.name === "InventoryForbiddenError")
+      ) {
+        return errorResponse("INVALID_REQUEST", error.message, 400);
+      }
       
       return errorResponse(
         "INTERNAL_ERROR",
@@ -255,6 +263,10 @@ stockRoutes.get(
       if (error instanceof z.ZodError) {
         return errorResponse("VALIDATION_ERROR", "Invalid request parameters", 400);
       }
+
+      if (error instanceof InventoryForbiddenError) {
+        return errorResponse("INVALID_REQUEST", error.message, 400);
+      }
       
       return errorResponse(
         "INTERNAL_ERROR",
@@ -295,6 +307,13 @@ stockRoutes.get(
       
       if (error instanceof z.ZodError) {
         return errorResponse("VALIDATION_ERROR", "Invalid request parameters", 400);
+      }
+
+      if (
+        error instanceof InventoryForbiddenError ||
+        (error instanceof Error && error.name === "InventoryForbiddenError")
+      ) {
+        return errorResponse("INVALID_REQUEST", error.message, 400);
       }
       
       return errorResponse(
@@ -365,6 +384,13 @@ stockRoutes.post(
       
       if (error instanceof z.ZodError) {
         return errorResponse("VALIDATION_ERROR", "Invalid request parameters", 400);
+      }
+
+      if (
+        error instanceof InventoryForbiddenError ||
+        (error instanceof Error && error.name === "InventoryForbiddenError")
+      ) {
+        return errorResponse("INVALID_REQUEST", error.message, 400);
       }
       
       return errorResponse(
@@ -635,6 +661,12 @@ export const registerStockRoutes = (app: OpenAPIHonoInterface): void => {
         console.error("Stock adjustment error:", error);
         if (error instanceof z.ZodError) {
           return errorResponse("VALIDATION_ERROR", "Invalid request parameters", 400);
+        }
+        if (
+          error instanceof InventoryForbiddenError ||
+          (error instanceof Error && error.name === "InventoryForbiddenError")
+        ) {
+          return errorResponse("INVALID_REQUEST", error.message, 400);
         }
         return errorResponse("INTERNAL_ERROR", error instanceof Error ? error.message : "Failed to adjust stock", 500);
       }
