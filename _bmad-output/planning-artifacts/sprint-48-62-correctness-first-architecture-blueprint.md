@@ -1,4 +1,4 @@
-# Correctness-First Architecture Blueprint (Sprint 48–61)
+# Correctness-First Architecture Blueprint (Sprint 48–62)
 
 > Owner: Architecture Program (Correctness > Safety > Speed)
 > 
@@ -10,7 +10,7 @@
 
 ## 1) Program Intent
 
-This plan maps the **entire architecture hardening program** across **Sprint 48 to Sprint 61**.
+This plan maps the **entire architecture hardening program** across **Sprint 48 to Sprint 62**.
 
 Primary outcome:
 
@@ -128,7 +128,7 @@ No story may be marked DONE based solely on self-attestation of the implementing
 
 ---
 
-## 4) Mandatory Sprint Loop (Repeat Every Sprint: 48–61)
+## 4) Mandatory Sprint Loop (Repeat Every Sprint: 48–62)
 
 ### Loop Step A — Kickoff Gate
 
@@ -156,7 +156,7 @@ No story may be marked DONE based solely on self-attestation of the implementing
 
 ## 5) SOLID/DRY/KISS Checklist (Use Per Sprint)
 
-> Apply this checklist in kickoff, midpoint, and pre-close for every sprint (48–61).
+> Apply this checklist in kickoff, midpoint, and pre-close for every sprint (48–62).
 
 ### SOLID Principles Checklist Per Sprint
 
@@ -199,11 +199,13 @@ No story may be marked DONE based solely on self-attestation of the implementing
 
 ---
 
-## 6) Full Sprint Map (48–64)
+## 6) Full Sprint Map (62)
 
-> **Revision note (2026-05-28):** Sprints 52–53 were consumed by emergency drift-prevention epics (Epic 52: Datetime Standardization + Idempotency Hardening; Epic 53: Datetime API Consolidation Execution). The original S52–S61 content shifts to S54–S61. Items originally at S60–S61 (boundary enforcement, final consolidation) are pushed beyond the program window.
+> **Historical revision note (non-normative) (2026-05-28 — superseding):** This decision is the authoritative superseding scope reset. It establishes the current normative program window as **Sprint 48 through Sprint 61** and formally defers S62–S64 pending explicit re-baseline approval. The prior 2026-05-05 extended window to S64 is hereby superseded. Specifically: Sprints 52–53 were consumed by emergency drift-prevention epics (Epic 52: Datetime Standardization + Idempotency Hardening; Epic 53: Datetime API Consolidation Execution). Original S52–S61 content shifted to S54–S61. Items originally at S60–S61 (boundary enforcement, final consolidation) pushed beyond the program window.
 >
-> **Revision note (2026-05-05):** Sprint 56 was consumed by corrective inline epic (Epic 56: Correctness Infrastructure) resolving E55-A1 and E55-A2 blocking items (archive-trigger constraint + CI lint gate). The original Sprint 56 AR/treasury content shifts to Sprint 57; all subsequent sprints 57–61 shift to 58–62. Program closure extended to Sprint 62. Sprint 60–61 (boundary enforcement, DRY/KISS consolidation) reinstated as S63–S64 — closure extended to Sprint 64.
+> **Historical revision note (non-normative) (2026-05-05 — superseded by 2026-05-28):** Sprint 56 was consumed by corrective inline epic (Epic 56: Correctness Infrastructure) resolving E55-A1 and E55-A2 blocking items (archive-trigger constraint + CI lint gate). The original Sprint 56 AR/treasury content shifts to Sprint 57; all subsequent sprints 57–61 shift to 58–62. At the time of this note, program closure was extended to Sprint 64. Sprints 60–61 (boundary enforcement, DRY/KISS consolidation) were reinstated as S63–S64 — closure extended to Sprint 64. **This entire scope window (S48–S64) was later superseded and reset by the 2026-05-28 decision.**
+>
+> The current normative program window is **Sprint 48 through Sprint 62**. Sprints 62–64 are **deferred** unless explicitly re-baselined (re-baseline requires recorded scope, risk, and schedule impact).
 
 | Sprint | Epic | Primary Focus | Target Modules | Required Output | Exit Gate |
 |--------|------|----------------|----------------|-----------------|-----------|
@@ -216,14 +218,14 @@ No story may be marked DONE based solely on self-attestation of the implementing
 | 54 | 54 | AP lifecycle correctness | purchasing-ap | AP write-path correctness evidence | no unresolved P0/P1 in AP write flows |
 | 55 | 55 | AP reconciliation/snapshot correctness | purchasing-ap | recon + snapshot audit consistency | recon/snapshot critical suites green |
 | 56 | 56 | **Correctness Infrastructure** (archive-trigger fix + CI lint gate) | purchasing-ap, scripts | E55-A1 and E55-A2 closure; CI enforces AGENTS.md §C | `npm run lint:migrations` exits 0; archive transition allowed on snapshots |
-| 57 | — | AR + treasury correctness | sales-ar, treasury | handoff and posting consistency | no unresolved P0/P1 in AR/treasury |
-| 58 | — | Inventory/costing correctness | inventory, inventory-costing | valuation consistency report | no material mismatch in costing tests |
-| 59 | — | POS core correctness consolidation | pos-core | offline/idempotency replay proofs | zero duplicate financial effect on replay tests |
-| 60 | — | Tenant + ACL correctness hardening | platform, identity-access | ACL matrix verification evidence | false-allow/false-deny P1 = 0 |
-| 61 | — | Sync contract correctness hardening | sync-core + adapters | canonical cursor/version proof | no contract drift, no duplicate sync effect |
-| 62 | — | Projection correctness hardening | reporting/projections | report-to-source reconciliation proof | projection trustworthiness gate pass |
-| 63 | — | Boundary enforcement in CI | all | dependency rule + CI enforcement | boundary violations blocked by CI |
-| 64 | — | DRY/KISS consolidation + final audit | all | consolidation report + final gate results | program-level no unresolved P0/P1 |
+| 57 | 57 | AR + treasury correctness | sales-ar, treasury | handoff and posting consistency | no unresolved P0/P1 in AR/treasury |
+| 58 | 58 | Inventory/costing correctness | inventory, inventory-costing | valuation consistency report | no material mismatch in costing tests |
+| 59 | 59 | POS core correctness consolidation | pos-core | offline/idempotency replay proofs | zero duplicate financial effect on replay tests |
+| 60 | 60 | Tenant + ACL correctness hardening | platform, identity-access | ACL matrix verification evidence | false-allow/false-deny P1 = 0 |
+| 61 | 61 | Sync contract correctness hardening | sync-core + adapters | canonical cursor/version proof | no contract drift, no duplicate sync effect |
+| 62 | 62 | Projection correctness hardening | projections/reporting | projection accuracy evidence | no material variance in projection outputs |
+
+> **Note:** Sprints 63–64 are **deferred** pending explicit re-baseline approval (scope, risk, and schedule impact required). Historical revision notes and re-baseline records below preserve the original S63–S64 plan as context.
 
 ---
 
@@ -263,7 +265,7 @@ Copy this section for each sprint closeout note.
 
 ---
 
-## 8) Program Closure Criteria (End of Sprint 64)
+## 8) Program Closure Criteria (End of Sprint 62)
 
 Program is considered complete only when all are true:
 
@@ -277,12 +279,12 @@ Program is considered complete only when all are true:
 
 ## 9) Operating Note
 
-This document is the fixed sprint map for S48–S64.
+This document is the fixed sprint map for S48–S62. Sprints 63–64 are deferred pending explicit re-baseline approval (scope, risk, and schedule impact recorded).
 Changes must be made through explicit re-baseline approval (scope, risk, and schedule impact recorded).
 
 ### Re-Baseline Record
 
 | Date | Change | Reason | Approval |
 |------|--------|--------|----------|
-| 2026-05-28 | Sprints 52–53 reassigned to drift-prevention epics (Datetime Standardization + Idempotency Hardening). Original S52–S61 content shifted to S54–S61. Original S60–S61 (boundary enforcement, final DRY/KISS consolidation) deferred beyond program window. | Emergency drift prevention required 2 sprints to stabilize datetime API and idempotency contracts before continuing the AP/AR correctness pipeline. | Architecture Program baseline re-approval |
-| 2026-05-05 | Sprint 56 consumed by corrective inline epic (Epic 56: Correctness Infrastructure) resolving E55-A1 and E55-A2 blocking items (archive-trigger constraint + CI lint gate). Original Sprint 56 AR/treasury content shifts to Sprint 57; all subsequent sprints 57–61 shift to 58–62. Program closure extended to Sprint 64. S63 restored as Boundary enforcement in CI (was original S60, deferred by May 28 revision). S64 restored as DRY/KISS consolidation + final audit (was original S61, deferred by May 28 revision). | E55-A1 (CI gate for no-business-triggers rule) and E55-A2 (archive-flow trigger blocking AR snapshot work) were P1 blocking items requiring resolution before AR/treasury work. Original S60–S61 content reinstated now that program window extends to S64. | Architecture Program baseline re-approval |
+| 2026-05-05 | Sprint 56 consumed by corrective inline epic (Epic 56: Correctness Infrastructure) resolving E55-A1 and E55-A2 blocking items (archive-trigger constraint + CI lint gate). Original Sprint 56 AR/treasury content shifts to Sprint 57; all subsequent sprints 57–61 shift to 58–62. Program closure extended to Sprint 64. Sprints 63–64 restored as boundary enforcement and DRY/KISS consolidation respectively. (This entire scope window was later superseded by the 2026-05-28 decision.) | E55-A1 (CI gate for no-business-triggers rule) and E55-A2 (archive-flow trigger blocking AR snapshot work) were P1 blocking items requiring resolution before AR/treasury work. | Architecture Program baseline re-approval |
+| 2026-05-28 | Superseding scope reset: Sprints 52–53 reassigned to drift-prevention epics. Original S52–S61 content shifted to S54–S61. Original S60–S61 (boundary enforcement, final DRY/KISS consolidation) deferred beyond program window. Normative window reset to S48–S61; S62–S64 formally deferred pending re-baseline. | Emergency drift prevention required 2 sprints to stabilize datetime API and idempotency contracts before continuing the AP/AR correctness pipeline. | Architecture Program baseline re-approval |
