@@ -163,6 +163,17 @@ class AVGCostingStrategy implements CostingStrategy {
         ? summaryMethod
         : "AVG";
 
+    // Decrement remaining_qty on each cost layer (FIFO order), proportional to consumption.
+    // This mirrors FIFO/LIFO behavior so that per-layer remaining_qty stays consistent
+    // with the aggregate total_layers_qty in inventory_item_costs.
+    await this.consumeLayersProportionally(
+      input.companyId,
+      input.itemId,
+      input.quantity,
+      availableQty,
+      db
+    );
+
     await sql`
       INSERT INTO inventory_item_costs
       (company_id, item_id, costing_method, current_avg_cost, total_layers_qty, total_layers_cost)
@@ -179,6 +190,68 @@ class AVGCostingStrategy implements CostingStrategy {
       totalCost,
       consumedLayers: [],
     };
+  }
+
+  /**
+   * Decrement remaining_qty on cost layers in FIFO order (oldest first).
+   * Consumes proportionally across layers so that SUM(remaining_qty) matches
+   * the updated total_layers_qty in inventory_item_costs.
+   */
+  private async consumeLayersProportionally(
+    companyId: number,
+    itemId: number,
+    quantity: number,
+    availableQty: number,
+    db: KyselySchema
+  ): Promise<void> {
+    // Lock available layers in chronological order (FIFO)
+    const layerRows = await sql<InventoryLayerRow>`
+      SELECT id, remaining_qty, unit_cost
+      FROM inventory_cost_layers
+      WHERE company_id = ${companyId} AND item_id = ${itemId} AND remaining_qty > 0
+      ORDER BY acquired_at ASC, id ASC
+      FOR UPDATE
+    `.execute(db);
+
+    const layers = layerRows.rows;
+
+    // F1 FIX: If no layers exist but quantity > 0, this is a data-integrity issue.
+    // The summary was locked and validated (availableQty >= quantity) but no layers exist.
+    // Throw instead of silently returning — the system cannot satisfy the deduction.
+    if (layers.length === 0) {
+      throw new CostTrackingError(
+        `Cost layer integrity failure for item ${itemId} in company ${companyId}: ` +
+        `summary indicates ${availableQty} units available (requested ${quantity}) ` +
+        "but no cost layers exist. Ensure inventory_cost_layers and inventory_item_costs are synchronized."
+      );
+    }
+
+    let remainingToConsume = quantity;
+
+    for (const layer of layers) {
+      if (remainingToConsume <= 0) break;
+
+      const layerRemainingQty = Number(layer.remaining_qty);
+      const consumeFromLayer = Math.min(remainingToConsume, layerRemainingQty);
+
+      // Decrement layer remaining quantity
+      await sql`
+        UPDATE inventory_cost_layers
+        SET remaining_qty = remaining_qty - ${consumeFromLayer}
+        WHERE id = ${layer.id}
+      `.execute(db);
+
+      remainingToConsume -= consumeFromLayer;
+    }
+
+    // Post-loop guard: detect data integrity failure where layers don't sum to summary
+    if (remainingToConsume > 0) {
+      throw new CostTrackingError(
+        `Cost layer integrity failure for item ${itemId} in company ${companyId}: ` +
+        `consumed ${quantity - remainingToConsume} of ${quantity} units from layers, ` +
+        "but total layer remaining_qty (SUM) is less than total_layers_qty in inventory_item_costs."
+      );
+    }
   }
 }
 
@@ -415,23 +488,27 @@ export async function createCostLayer(
   db: KyselySchema
 ): Promise<CostLayer> {
   return withExecutorTransaction(db, async (executor) => {
-    // Insert cost layer
+    // F3 FIX: Lock summary FIRST to align lock order with deduction path.
+    // Both createCostLayer and calculateCost must lock summary before any layer ops.
+    // This prevents the deadlock scenario where AVG holds summary and waits for layers
+    // while createCostLayer has inserted a layer and waits for summary.
+    const existingSummaryRows = await sql<CostSummaryRow>`
+      SELECT costing_method, total_layers_qty, total_layers_cost
+      FROM inventory_item_costs
+      WHERE company_id = ${params.companyId} AND item_id = ${params.itemId}
+      FOR UPDATE
+    `.execute(executor);
+
+    // Insert cost layer (summary lock is now held, so layer insert is safe)
     const result = await sql`
-      INSERT INTO inventory_cost_layers 
+      INSERT INTO inventory_cost_layers
       (company_id, item_id, transaction_id, unit_cost, original_qty, remaining_qty, acquired_at)
       VALUES (${params.companyId}, ${params.itemId}, ${params.transactionId}, ${params.unitCost}, ${params.quantity}, ${params.quantity}, NOW())
     `.execute(executor);
 
     const insertId = result.insertId;
 
-    // Update summary table for AVG calculation
-    const existingSummaryRows = await sql<CostSummaryRow>`
-      SELECT costing_method, total_layers_qty, total_layers_cost 
-      FROM inventory_item_costs 
-      WHERE company_id = ${params.companyId} AND item_id = ${params.itemId}
-      FOR UPDATE
-    `.execute(executor);
-
+    // Update summary table for AVG calculation (still holding summary lock)
     const summary = existingSummaryRows.rows[0];
     const summaryMethod = summary?.costing_method ? String(summary.costing_method) : null;
     const currentMethod: CostingMethod =
@@ -446,7 +523,7 @@ export async function createCostLayer(
     const newAvg = newQty > 0 ? newCost / newQty : 0;
 
     await sql`
-      INSERT INTO inventory_item_costs 
+      INSERT INTO inventory_item_costs
       (company_id, item_id, costing_method, current_avg_cost, total_layers_qty, total_layers_cost)
       VALUES (${params.companyId}, ${params.itemId}, ${currentMethod}, ${newAvg}, ${newQty}, ${newCost})
       ON DUPLICATE KEY UPDATE
