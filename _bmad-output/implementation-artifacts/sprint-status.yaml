@@ -654,3 +654,11 @@ development_status:
   57-2-ar-invoice-payment-posting-correctness: done
   57-3-ar-credits-void-refund-invariants: done
   57-4-treasury-handoff-reconciliation-correctness: done
+
+  # Epic 58: Inventory/Costing Correctness
+  epic-58: in-progress
+  58-1-inventory-item-recipe-correctness: done
+  58-2-stock-movement-outlet-scoping-correctness: backlog
+  58-3-costing-method-correctness: backlog
+  58-4-inventory-gl-reconciliation-correctness: backlog
+  58-5-gate-validation-automation-evidence-scripts: backlog
