@@ -105,6 +105,34 @@ interface PriceRow {
   price: string | null;
 }
 
+async function ensureStockTrackedItem(
+  executor: KyselySchema,
+  companyId: number,
+  itemId: number,
+  operation: string
+): Promise<void> {
+  const itemRows = await sql<{ item_type: string; track_stock: number | string | null }>`
+    SELECT item_type, track_stock
+    FROM items
+    WHERE company_id = ${companyId}
+      AND id = ${itemId}
+    LIMIT 1
+  `.execute(executor);
+
+  const item = itemRows.rows[0];
+  if (!item) {
+    throw new InventoryReferenceError(`Item ${itemId} not found for company ${companyId}`);
+  }
+
+  const trackStock = Number(item.track_stock ?? 0);
+  const itemType = String(item.item_type ?? "").toUpperCase();
+  if (trackStock !== 1 || itemType === "SERVICE" || itemType === "RECIPE") {
+    throw new InventoryForbiddenError(
+      `${operation} not allowed for non-stock-tracked item ${itemId} (type: ${itemType || "UNKNOWN"})`
+    );
+  }
+}
+
 // Resolves unit cost for inbound stock movements
 async function resolveInboundUnitCost(
   executor: KyselySchema,
@@ -224,6 +252,8 @@ export class StockServiceImpl implements StockService {
   ): Promise<boolean> {
     return withExecutorTransaction(this.db, async (trx) => {
       for (const item of items) {
+        await ensureStockTrackedItem(trx, companyId, item.product_id, "Stock deduction");
+
         const stockRows = await sql<StockRow>`
           SELECT quantity, available_quantity
           FROM inventory_stock
@@ -575,6 +605,8 @@ export class StockServiceImpl implements StockService {
       const stockTxItems: Array<{ itemId: number; qty: number; stockTxId: number; quantity: number }> = [];
 
       for (const item of items) {
+        await ensureStockTrackedItem(trx, company_id, item.product_id, "Stock deduction");
+
         const stockRows = await sql<StockRow>`
           SELECT quantity, available_quantity
           FROM inventory_stock
@@ -684,6 +716,8 @@ export class StockServiceImpl implements StockService {
 
     return withExecutorTransaction(db, async (executor) => {
       for (const item of items) {
+        await ensureStockTrackedItem(executor, company_id, item.product_id, "Stock restore");
+
         // Update inventory_stock: add to quantity and available_quantity
         const updateResult = await sql`
           UPDATE inventory_stock
@@ -750,6 +784,8 @@ export class StockServiceImpl implements StockService {
     const { company_id, outlet_id, product_id, adjustment_quantity, reference_id } = input;
 
     return withExecutorTransaction(db, async (executor) => {
+      await ensureStockTrackedItem(executor, company_id, product_id, "Stock adjustment");
+
       // Lock the inventory_stock row with FOR UPDATE
       const stockRows = await sql<StockRow>`
         SELECT quantity, reserved_quantity, available_quantity
