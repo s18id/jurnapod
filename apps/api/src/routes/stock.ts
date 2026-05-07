@@ -21,7 +21,10 @@ import {
   getStockTransactions,
   getLowStockAlerts,
   adjustStock,
+  InventoryConflictError,
   InventoryForbiddenError,
+  InventoryReferenceError,
+  InsufficientStockError,
   type StockAdjustmentInput
 } from "../lib/stock.js";
 import { authenticateRequest, requireAccess, type AuthContext } from "../lib/auth-guard.js";
@@ -34,7 +37,7 @@ import { NumericIdSchema } from "@jurnapod/shared";
 // Note: outlet_id comes from path parameter (:outletId), not body/query
 const StockAdjustmentBodySchema = z.object({
   product_id: NumericIdSchema,
-  adjustment_quantity: z.number().int(),
+  adjustment_quantity: z.number().int().refine((v) => v !== 0, "adjustment_quantity must not be zero"),
   reason: z.string().min(1).max(500)
 });
 
@@ -158,6 +161,26 @@ async function requireOutletAccess(c: Context, next: () => Promise<void>): Promi
   await next();
 }
 
+function mapStockDomainError(error: unknown): Response | null {
+  if (error instanceof InventoryForbiddenError) {
+    return errorResponse("INVALID_REQUEST", error.message, 400);
+  }
+
+  if (error instanceof InsufficientStockError) {
+    return errorResponse("INSUFFICIENT_STOCK", error.message, 400);
+  }
+
+  if (error instanceof InventoryReferenceError) {
+    return errorResponse("NOT_FOUND", error.message, 404);
+  }
+
+  if (error instanceof InventoryConflictError) {
+    return errorResponse("CONFLICT", error.message, 409);
+  }
+
+  return null;
+}
+
 // Apply outlet access middleware to all stock routes
 stockRoutes.use(requireOutletAccess);
 
@@ -196,11 +219,9 @@ stockRoutes.get(
         return errorResponse("VALIDATION_ERROR", "Invalid request parameters", 400);
       }
 
-      if (
-        error instanceof InventoryForbiddenError ||
-        (error instanceof Error && error.name === "InventoryForbiddenError")
-      ) {
-        return errorResponse("INVALID_REQUEST", error.message, 400);
+      const stockError = mapStockDomainError(error);
+      if (stockError) {
+        return stockError;
       }
       
       return errorResponse(
@@ -264,8 +285,9 @@ stockRoutes.get(
         return errorResponse("VALIDATION_ERROR", "Invalid request parameters", 400);
       }
 
-      if (error instanceof InventoryForbiddenError) {
-        return errorResponse("INVALID_REQUEST", error.message, 400);
+      const stockError = mapStockDomainError(error);
+      if (stockError) {
+        return stockError;
       }
       
       return errorResponse(
@@ -309,11 +331,9 @@ stockRoutes.get(
         return errorResponse("VALIDATION_ERROR", "Invalid request parameters", 400);
       }
 
-      if (
-        error instanceof InventoryForbiddenError ||
-        (error instanceof Error && error.name === "InventoryForbiddenError")
-      ) {
-        return errorResponse("INVALID_REQUEST", error.message, 400);
+      const stockError = mapStockDomainError(error);
+      if (stockError) {
+        return stockError;
       }
       
       return errorResponse(
@@ -386,11 +406,9 @@ stockRoutes.post(
         return errorResponse("VALIDATION_ERROR", "Invalid request parameters", 400);
       }
 
-      if (
-        error instanceof InventoryForbiddenError ||
-        (error instanceof Error && error.name === "InventoryForbiddenError")
-      ) {
-        return errorResponse("INVALID_REQUEST", error.message, 400);
+      const stockError = mapStockDomainError(error);
+      if (stockError) {
+        return stockError;
       }
       
       return errorResponse(
@@ -662,11 +680,10 @@ export const registerStockRoutes = (app: OpenAPIHonoInterface): void => {
         if (error instanceof z.ZodError) {
           return errorResponse("VALIDATION_ERROR", "Invalid request parameters", 400);
         }
-        if (
-          error instanceof InventoryForbiddenError ||
-          (error instanceof Error && error.name === "InventoryForbiddenError")
-        ) {
-          return errorResponse("INVALID_REQUEST", error.message, 400);
+
+        const stockError = mapStockDomainError(error);
+        if (stockError) {
+          return stockError;
         }
         return errorResponse("INTERNAL_ERROR", error instanceof Error ? error.message : "Failed to adjust stock", 500);
       }

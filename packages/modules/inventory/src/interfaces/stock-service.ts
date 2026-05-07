@@ -183,6 +183,18 @@ export interface StockService {
   ): Promise<boolean>;
 
   /**
+   * Transfer stock atomically from one outlet to another.
+   */
+  transferStock(
+    companyId: number,
+    fromOutletId: number,
+    toOutletId: number,
+    items: StockItem[],
+    referenceId: string,
+    userId: number
+  ): Promise<boolean>;
+
+  /**
    * Reserve stock for pending transactions.
    */
   reserveStock(

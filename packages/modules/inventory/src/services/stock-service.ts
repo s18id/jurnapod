@@ -36,11 +36,12 @@ import type {
 import {
   InventoryConflictError,
   InventoryReferenceError,
-  InventoryForbiddenError
+  InventoryForbiddenError,
+  InsufficientStockError
 } from "../errors.js";
 
 // Re-export error classes for API compatibility
-export { InventoryConflictError, InventoryReferenceError, InventoryForbiddenError };
+export { InventoryConflictError, InventoryReferenceError, InventoryForbiddenError, InsufficientStockError };
 
 // Transaction type constants
 const TRANSACTION_TYPE = {
@@ -186,12 +187,11 @@ export class StockServiceImpl implements StockService {
     for (const item of items) {
       const rows = await sql<StockRow>`
         SELECT product_id, available_quantity
-        FROM inventory_stock
-        WHERE company_id = ${companyId}
-          AND product_id = ${item.product_id}
-          AND (outlet_id = ${outletId} OR outlet_id IS NULL)
-        ORDER BY outlet_id IS NULL ASC
-        LIMIT 1
+          FROM inventory_stock
+          WHERE company_id = ${companyId}
+            AND product_id = ${item.product_id}
+            AND outlet_id = ${outletId}
+          LIMIT 1
       `.execute(this.db);
 
       const stock = rows.rows[0];
@@ -259,19 +259,24 @@ export class StockServiceImpl implements StockService {
           FROM inventory_stock
           WHERE company_id = ${companyId}
             AND product_id = ${item.product_id}
-            AND (outlet_id = ${outletId} OR outlet_id IS NULL)
-          ORDER BY outlet_id IS NULL ASC
+            AND outlet_id = ${outletId}
           LIMIT 1
           FOR UPDATE
         `.execute(trx);
 
         if (stockRows.rows.length === 0) {
-          return false;
+          throw new InventoryReferenceError(
+            `Stock not found for product ${item.product_id} at outlet ${outletId}`
+          );
         }
 
         const stock = stockRows.rows[0];
-        if (Number(stock.quantity) < item.quantity) {
-          return false;
+        const available = Number(stock.available_quantity);
+        if (available < item.quantity) {
+          const shortfall = item.quantity - available;
+          throw new InsufficientStockError(
+            `Insufficient stock for product ${item.product_id}: requested ${item.quantity}, available ${available}, shortfall ${shortfall}`
+          );
         }
 
         const updateResult = await sql`
@@ -281,12 +286,14 @@ export class StockServiceImpl implements StockService {
               updated_at = CURRENT_TIMESTAMP
           WHERE company_id = ${companyId}
             AND product_id = ${item.product_id}
-            AND (outlet_id = ${outletId} OR outlet_id IS NULL)
-            AND quantity >= ${item.quantity}
+            AND outlet_id = ${outletId}
+            AND available_quantity >= ${item.quantity}
         `.execute(trx);
 
         if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
-          return false;
+          throw new InventoryConflictError(
+            `Stock deduction failed for product ${item.product_id}: concurrent modification detected`
+          );
         }
 
         await sql`
@@ -344,7 +351,7 @@ export class StockServiceImpl implements StockService {
               updated_at = CURRENT_TIMESTAMP
           WHERE company_id = ${companyId}
             AND product_id = ${item.product_id}
-            AND (outlet_id = ${outletId} OR outlet_id IS NULL)
+            AND outlet_id = ${outletId}
             AND available_quantity >= ${item.quantity}
         `.execute(trx);
 
@@ -390,8 +397,7 @@ export class StockServiceImpl implements StockService {
           FROM inventory_stock
           WHERE company_id = ${companyId}
             AND product_id = ${item.product_id}
-            AND (outlet_id = ${outletId} OR outlet_id IS NULL)
-          ORDER BY outlet_id IS NULL ASC
+            AND outlet_id = ${outletId}
           LIMIT 1
           FOR UPDATE
         `.execute(trx);
@@ -414,7 +420,7 @@ export class StockServiceImpl implements StockService {
               updated_at = CURRENT_TIMESTAMP
           WHERE company_id = ${companyId}
             AND product_id = ${item.product_id}
-            AND (outlet_id = ${outletId} OR outlet_id IS NULL)
+            AND outlet_id = ${outletId}
             AND reserved_quantity >= ${releaseQty}
         `.execute(trx);
 
@@ -449,7 +455,7 @@ export class StockServiceImpl implements StockService {
     let query = sql`
       SELECT product_id, outlet_id, quantity, reserved_quantity, available_quantity, updated_at
       FROM inventory_stock
-      WHERE company_id = ${companyId} AND (outlet_id = ${outletId} OR outlet_id IS NULL)
+      WHERE company_id = ${companyId} AND outlet_id = ${outletId}
     `;
 
     if (productIds && productIds.length > 0) {
@@ -490,7 +496,7 @@ export class StockServiceImpl implements StockService {
     conditions.push(sql`company_id = ${companyId}`);
 
     if (outletId !== null) {
-      conditions.push(sql`(outlet_id = ${outletId} OR outlet_id IS NULL)`);
+      conditions.push(sql`outlet_id = ${outletId}`);
     }
     if (product_id !== undefined) {
       conditions.push(sql`product_id = ${product_id}`);
@@ -558,7 +564,7 @@ export class StockServiceImpl implements StockService {
       WHERE i.company_id = ${companyId}
         AND i.track_stock = 1
         AND i.low_stock_threshold IS NOT NULL
-        AND (s.outlet_id = ${outletId} OR s.outlet_id IS NULL)
+        AND s.outlet_id = ${outletId}
         AND s.available_quantity <= i.low_stock_threshold
     `.execute(this.db);
 
@@ -612,8 +618,7 @@ export class StockServiceImpl implements StockService {
           FROM inventory_stock
           WHERE company_id = ${company_id}
             AND product_id = ${item.product_id}
-            AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
-          ORDER BY outlet_id IS NULL ASC
+            AND outlet_id = ${outlet_id}
           LIMIT 1
           FOR UPDATE
         `.execute(trx);
@@ -623,11 +628,27 @@ export class StockServiceImpl implements StockService {
         }
 
         const stock = stockRows.rows[0];
-        if (Number(stock.quantity) < item.quantity) {
-          throw new InventoryConflictError(
-            `Insufficient stock for product ${item.product_id}: ` +
-            `requested ${item.quantity}, available ${stock.quantity}`
+        const available = Number(stock.available_quantity);
+        if (available < item.quantity) {
+          const shortfall = item.quantity - available;
+          throw new InsufficientStockError(
+            `Insufficient stock for product ${item.product_id}: requested ${item.quantity}, available ${available}, shortfall ${shortfall}`
           );
+        }
+
+        const updateResult = await sql`
+          UPDATE inventory_stock
+          SET quantity = quantity - ${item.quantity},
+              available_quantity = available_quantity - ${item.quantity},
+              updated_at = CURRENT_TIMESTAMP
+          WHERE company_id = ${company_id}
+            AND product_id = ${item.product_id}
+            AND outlet_id = ${outlet_id}
+            AND available_quantity >= ${item.quantity}
+        `.execute(trx);
+
+        if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
+          throw new InventoryConflictError(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
         }
 
         const txResult = await sql`
@@ -652,25 +673,7 @@ export class StockServiceImpl implements StockService {
         });
       }
 
-      // Phase 2: Update stock quantities
-      for (const item of items) {
-        const updateResult = await sql`
-          UPDATE inventory_stock
-          SET quantity = quantity - ${item.quantity},
-              available_quantity = available_quantity - ${item.quantity},
-              updated_at = CURRENT_TIMESTAMP
-          WHERE company_id = ${company_id}
-            AND product_id = ${item.product_id}
-            AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
-            AND quantity >= ${item.quantity}
-        `.execute(trx);
-
-        if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
-          throw new InventoryConflictError(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
-        }
-      }
-
-      // Phase 3: Delegate cost calculation to costing package using stockTxId pattern
+      // Phase 2: Delegate cost calculation to costing package using stockTxId pattern
       const deductionInput = stockTxItems.map(i => ({
         itemId: i.itemId,
         qty: i.qty,
@@ -683,7 +686,7 @@ export class StockServiceImpl implements StockService {
         trx
       );
 
-      // Phase 4: Build results matching existing StockDeductResult interface
+      // Phase 3: Build results matching existing StockDeductResult interface
       // Map stockTxIds back to their corresponding items using the order
       const results: StockDeductResult[] = [];
       for (let i = 0; i < stockTxItems.length; i++) {
@@ -726,7 +729,7 @@ export class StockServiceImpl implements StockService {
               updated_at = CURRENT_TIMESTAMP
           WHERE company_id = ${company_id}
             AND product_id = ${item.product_id}
-            AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+            AND outlet_id = ${outlet_id}
         `.execute(executor);
 
         if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
@@ -783,6 +786,10 @@ export class StockServiceImpl implements StockService {
   ): Promise<boolean> {
     const { company_id, outlet_id, product_id, adjustment_quantity, reference_id } = input;
 
+    if (adjustment_quantity === 0) {
+      return true;
+    }
+
     return withExecutorTransaction(db, async (executor) => {
       await ensureStockTrackedItem(executor, company_id, product_id, "Stock adjustment");
 
@@ -790,10 +797,9 @@ export class StockServiceImpl implements StockService {
       const stockRows = await sql<StockRow>`
         SELECT quantity, reserved_quantity, available_quantity
         FROM inventory_stock
-        WHERE company_id = ${company_id}
-          AND product_id = ${product_id}
-          AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
-        ORDER BY outlet_id IS NULL ASC
+          WHERE company_id = ${company_id}
+            AND product_id = ${product_id}
+            AND outlet_id = ${outlet_id}
         LIMIT 1
         FOR UPDATE
       `.execute(executor);
@@ -810,7 +816,16 @@ export class StockServiceImpl implements StockService {
       const newAvailable = newQty - currentReserved;
 
       if (newQty < 0) {
-        return false; // Stock cannot go negative
+        const shortfall = Math.abs(newQty);
+        throw new InsufficientStockError(
+          `Insufficient stock for product ${product_id}: requested ${Math.abs(adjustment_quantity)}, available ${currentQty}, shortfall ${shortfall}`
+        );
+      }
+
+      if (newAvailable < 0) {
+        throw new InventoryConflictError(
+          `Cannot adjust stock for product ${product_id}: reserved quantity (${currentReserved}) would exceed available stock`
+        );
       }
 
       if (stockRows.rows.length > 0) {
@@ -822,11 +837,13 @@ export class StockServiceImpl implements StockService {
               updated_at = CURRENT_TIMESTAMP
           WHERE company_id = ${company_id}
             AND product_id = ${product_id}
-            AND (outlet_id = ${outlet_id} OR outlet_id IS NULL)
+            AND outlet_id = ${outlet_id}
         `.execute(executor);
 
         if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
-          return false;
+          throw new InventoryConflictError(
+            `Stock adjustment failed for product ${product_id}: concurrent modification detected`
+          );
         }
       } else {
         // Insert new stock row if it doesn't exist
@@ -915,26 +932,35 @@ export class StockServiceImpl implements StockService {
         const stockRows = await sql<StockRow>`
           SELECT quantity, available_quantity 
           FROM inventory_stock 
-          WHERE company_id = ${companyId} AND variant_id = ${variantId} AND outlet_id IS NOT NULL
+          WHERE company_id = ${companyId} AND variant_id = ${variantId} AND outlet_id = ${outletId}
           LIMIT 1
           FOR UPDATE
         `.execute(trx);
 
         if (stockRows.rows.length > 0) {
           // Use inventory_stock variant tracking
-          const currentQty = Number(stockRows.rows[0].quantity);
-          if (currentQty < item.quantity) {
-            throw new InventoryConflictError(`Insufficient stock for variant ${variantId}: ${currentQty} < ${item.quantity}`);
+          const currentAvailable = Number(stockRows.rows[0].available_quantity);
+          if (currentAvailable < item.quantity) {
+            throw new InventoryConflictError(`Insufficient stock for variant ${variantId}: ${currentAvailable} < ${item.quantity}`);
           }
 
           // Update inventory_stock for variant
-          await sql`
+          const updateResult = await sql`
             UPDATE inventory_stock 
             SET quantity = quantity - ${item.quantity}, 
                 available_quantity = available_quantity - ${item.quantity}, 
                 updated_at = CURRENT_TIMESTAMP
-            WHERE company_id = ${companyId} AND variant_id = ${variantId}
+            WHERE company_id = ${companyId}
+              AND variant_id = ${variantId}
+              AND outlet_id = ${outletId}
+              AND available_quantity >= ${item.quantity}
           `.execute(trx);
+
+          if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
+            throw new InventoryConflictError(
+              `Stock deduction failed for variant ${variantId}: concurrent modification detected`
+            );
+          }
 
           // Also update item_variants.stock_quantity as source of truth
           await sql`
@@ -1034,8 +1060,7 @@ export class StockServiceImpl implements StockService {
                 FROM inventory_stock
                 WHERE company_id = ${companyId}
                   AND product_id = ${item.product_id}
-                  AND (outlet_id = ${outletId} OR outlet_id IS NULL)
-                ORDER BY outlet_id IS NULL ASC
+                  AND outlet_id = ${outletId}
                 LIMIT 1
                 FOR UPDATE
               `.execute(trx);
@@ -1045,11 +1070,27 @@ export class StockServiceImpl implements StockService {
               }
 
               const stock = stockRows.rows[0];
-              if (Number(stock.quantity) < item.quantity) {
-                throw new InventoryConflictError(
-                  `Insufficient stock for product ${item.product_id}: ` +
-                  `requested ${item.quantity}, available ${stock.quantity}`
+              const available = Number(stock.available_quantity);
+              if (available < item.quantity) {
+                const shortfall = item.quantity - available;
+                throw new InsufficientStockError(
+                  `Insufficient stock for product ${item.product_id}: requested ${item.quantity}, available ${available}, shortfall ${shortfall}`
                 );
+              }
+
+              const updateResult = await sql`
+                UPDATE inventory_stock
+                SET quantity = quantity - ${item.quantity},
+                    available_quantity = available_quantity - ${item.quantity},
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE company_id = ${companyId}
+                  AND product_id = ${item.product_id}
+                  AND outlet_id = ${outletId}
+                  AND available_quantity >= ${item.quantity}
+              `.execute(trx);
+
+              if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
+                throw new InventoryConflictError(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
               }
 
               // Insert inventory_transactions
@@ -1066,24 +1107,6 @@ export class StockServiceImpl implements StockService {
                 stockTxId: Number(txResult.insertId),
                 quantity: item.quantity
               });
-            }
-
-            // Update stock quantities
-            for (const item of stockItems) {
-              const updateResult = await sql`
-                UPDATE inventory_stock
-                SET quantity = quantity - ${item.quantity},
-                    available_quantity = available_quantity - ${item.quantity},
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE company_id = ${companyId}
-                  AND product_id = ${item.product_id}
-                  AND (outlet_id = ${outletId} OR outlet_id IS NULL)
-                  AND quantity >= ${item.quantity}
-              `.execute(trx);
-
-              if (!updateResult.numAffectedRows || updateResult.numAffectedRows === BigInt(0)) {
-                throw new InventoryConflictError(`Stock deduction failed for product ${item.product_id}: concurrent modification detected`);
-              }
             }
 
             // Delegate cost calculation to costing package
@@ -1122,6 +1145,137 @@ export class StockServiceImpl implements StockService {
       }
 
       return results;
+    });
+  }
+
+  async transferStock(
+    companyId: number,
+    fromOutletId: number,
+    toOutletId: number,
+    items: StockItem[],
+    referenceId: string,
+    userId: number
+  ): Promise<boolean> {
+    void userId;
+    if (fromOutletId === toOutletId) {
+      return true;
+    }
+
+    return withExecutorTransaction(this.db, async (trx) => {
+      const existingTransferRows = await sql<{ total: string }>`
+        SELECT COUNT(*) AS total
+        FROM inventory_transactions
+        WHERE company_id = ${companyId}
+          AND reference_id = ${referenceId}
+          AND transaction_type = ${TRANSACTION_TYPE.TRANSFER}
+          AND reference_type = 'TRANSFER_OUT'
+      `.execute(trx);
+
+      if (Number(existingTransferRows.rows[0]?.total ?? 0) > 0) {
+        return true;
+      }
+
+      for (const item of items) {
+        await ensureStockTrackedItem(trx, companyId, item.product_id, "Stock transfer");
+
+        const sourceRows = await sql<StockRow>`
+          SELECT quantity, reserved_quantity, available_quantity
+          FROM inventory_stock
+          WHERE company_id = ${companyId}
+            AND product_id = ${item.product_id}
+            AND outlet_id = ${fromOutletId}
+          LIMIT 1
+          FOR UPDATE
+        `.execute(trx);
+
+        if (sourceRows.rows.length === 0) {
+          throw new InventoryReferenceError(`Source stock not found for product ${item.product_id} at outlet ${fromOutletId}`);
+        }
+
+        const sourceAvailable = Number(sourceRows.rows[0].available_quantity);
+        if (sourceAvailable < item.quantity) {
+          const shortfall = item.quantity - sourceAvailable;
+          throw new InsufficientStockError(
+            `Insufficient stock for product ${item.product_id}: requested ${item.quantity}, available ${sourceAvailable}, shortfall ${shortfall}`
+          );
+        }
+
+        const sourceUpdate = await sql`
+          UPDATE inventory_stock
+          SET quantity = quantity - ${item.quantity},
+              available_quantity = available_quantity - ${item.quantity},
+              updated_at = CURRENT_TIMESTAMP
+          WHERE company_id = ${companyId}
+            AND product_id = ${item.product_id}
+            AND outlet_id = ${fromOutletId}
+            AND available_quantity >= ${item.quantity}
+        `.execute(trx);
+
+        if (!sourceUpdate.numAffectedRows || sourceUpdate.numAffectedRows === BigInt(0)) {
+          throw new InventoryConflictError(`Stock transfer failed while deducting source for product ${item.product_id}`);
+        }
+
+        const destinationRows = await sql<StockRow>`
+          SELECT quantity, reserved_quantity
+          FROM inventory_stock
+          WHERE company_id = ${companyId}
+            AND product_id = ${item.product_id}
+            AND outlet_id = ${toOutletId}
+          LIMIT 1
+          FOR UPDATE
+        `.execute(trx);
+
+        if (destinationRows.rows.length > 0) {
+          await sql`
+            UPDATE inventory_stock
+            SET quantity = quantity + ${item.quantity},
+                available_quantity = available_quantity + ${item.quantity},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE company_id = ${companyId}
+              AND product_id = ${item.product_id}
+              AND outlet_id = ${toOutletId}
+          `.execute(trx);
+        } else {
+          await sql`
+            INSERT INTO inventory_stock (
+              company_id,
+              outlet_id,
+              product_id,
+              quantity,
+              reserved_quantity,
+              available_quantity,
+              created_at,
+              updated_at
+            ) VALUES (
+              ${companyId},
+              ${toOutletId},
+              ${item.product_id},
+              ${item.quantity},
+              0,
+              ${item.quantity},
+              CURRENT_TIMESTAMP,
+              CURRENT_TIMESTAMP
+            )
+          `.execute(trx);
+        }
+
+        await sql`
+          INSERT INTO inventory_transactions (
+            company_id,
+            outlet_id,
+            transaction_type,
+            reference_type,
+            reference_id,
+            product_id,
+            quantity_delta,
+            created_at
+          ) VALUES
+          (${companyId}, ${fromOutletId}, ${TRANSACTION_TYPE.TRANSFER}, 'TRANSFER_OUT', ${referenceId}, ${item.product_id}, ${-item.quantity}, CURRENT_TIMESTAMP),
+          (${companyId}, ${toOutletId}, ${TRANSACTION_TYPE.TRANSFER}, 'TRANSFER_IN', ${referenceId}, ${item.product_id}, ${item.quantity}, CURRENT_TIMESTAMP)
+        `.execute(trx);
+      }
+
+      return true;
     });
   }
 }

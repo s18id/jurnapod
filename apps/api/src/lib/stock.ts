@@ -53,7 +53,7 @@ export interface DeductStockForSaleResult {
 }
 
 // Re-export error classes from modules-inventory
-export { InventoryConflictError, InventoryReferenceError, InventoryForbiddenError } from "@jurnapod/modules-inventory";
+export { InventoryConflictError, InventoryReferenceError, InventoryForbiddenError, InsufficientStockError } from "@jurnapod/modules-inventory";
 
 // Import service from modules-inventory for basic operations
 import { getStockService } from "@jurnapod/modules-inventory";
@@ -229,6 +229,23 @@ export async function deductStock(
   const database = db ?? getDb();
   const service = getStockService(database);
   return service.deductStock(company_id, outlet_id, items, reference_id, user_id);
+}
+
+/**
+ * Transfer stock atomically between outlets.
+ */
+export async function transferStock(
+  company_id: number,
+  from_outlet_id: number,
+  to_outlet_id: number,
+  items: StockItem[],
+  reference_id: string,
+  user_id: number,
+  db?: KyselySchema
+): Promise<boolean> {
+  const database = db ?? getDb();
+  const service = getStockService(database);
+  return service.transferStock(company_id, from_outlet_id, to_outlet_id, items, reference_id, user_id);
 }
 
 // ============================================================================

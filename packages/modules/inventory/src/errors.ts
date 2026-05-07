@@ -25,6 +25,13 @@ export class InventoryForbiddenError extends Error {
   }
 }
 
+export class InsufficientStockError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InsufficientStockError";
+  }
+}
+
 export class ItemNotFoundError extends Error {
   constructor(itemId: number) {
     super(`Item ${itemId} not found`);
