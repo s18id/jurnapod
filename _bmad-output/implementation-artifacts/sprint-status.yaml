@@ -659,6 +659,6 @@ development_status:
   epic-58: in-progress
   58-1-inventory-item-recipe-correctness: done
   58-2-stock-movement-outlet-scoping-correctness: done
-  58-3-costing-method-correctness: backlog
+  58-3-costing-method-correctness: done
   58-4-inventory-gl-reconciliation-correctness: backlog
   58-5-gate-validation-automation-evidence-scripts: backlog

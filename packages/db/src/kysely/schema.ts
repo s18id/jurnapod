@@ -837,6 +837,7 @@ export interface Items {
   low_stock_threshold: Generated<Decimal | null>;
   name: string;
   sku: Generated<string | null>;
+  standard_cost: Generated<Decimal | null>;
   track_stock: Generated<number>;
   updated_at: Generated<Date>;
 }

@@ -59,6 +59,17 @@ import {
   fromMinorUnits,
 } from "./types/costing.js";
 
+import {
+  planAverageDeduction,
+  planLayerConsumption,
+} from "./costing-planner.js";
+
+import {
+  calculateStandardVariance,
+  parseStandardVarianceAccountId,
+  STANDARD_VARIANCE_ACCOUNT_SETTING_KEY,
+} from "./standard-costing.js";
+
 import { KyselySettingsAdapter, type SettingsPort } from "@jurnapod/modules-platform/settings";
 
 // -----------------------------------------------------------------------------
@@ -82,6 +93,10 @@ interface InventoryLayerRow {
   original_qty: string;
   acquired_at: Date;
   transaction_reference_id?: number | null;
+}
+
+interface ItemStandardCostRow {
+  standard_cost: string | null;
 }
 
 // -----------------------------------------------------------------------------
@@ -142,19 +157,12 @@ class AVGCostingStrategy implements CostingStrategy {
     const availableQty = Number(summary?.total_layers_qty ?? 0);
     const totalLayersCost = Number(summary?.total_layers_cost ?? 0);
 
-    // Validate sufficient inventory
-    if (availableQty < input.quantity) {
-      throw new InsufficientInventoryError(input.quantity, availableQty);
-    }
-
-    // Calculate total cost using minor-unit math
-    const totalCostMinor = toMinorUnits(avgCost) * input.quantity;
-    const totalCost = fromMinorUnits(totalCostMinor);
-
-    // Update summary state: reduce available quantity and total cost
-    const newQty = availableQty - input.quantity;
-    const newTotalCost = totalLayersCost - totalCost;
-    const newAvg = newQty > 0 ? newTotalCost / newQty : 0;
+    const deductionPlan = planAverageDeduction({
+      availableQty,
+      quantity: input.quantity,
+      currentAvgCost: avgCost,
+      totalLayersCost,
+    });
 
     // Preserve existing costing_method or default to AVG
     const summaryMethod = summary?.costing_method ? String(summary.costing_method) : null;
@@ -177,7 +185,7 @@ class AVGCostingStrategy implements CostingStrategy {
     await sql`
       INSERT INTO inventory_item_costs
       (company_id, item_id, costing_method, current_avg_cost, total_layers_qty, total_layers_cost)
-      VALUES (${input.companyId}, ${input.itemId}, ${currentMethod}, ${newAvg}, ${newQty}, ${newTotalCost})
+      VALUES (${input.companyId}, ${input.itemId}, ${currentMethod}, ${deductionPlan.newAvgCost}, ${deductionPlan.newQty}, ${deductionPlan.newTotalCost})
       ON DUPLICATE KEY UPDATE
       costing_method = VALUES(costing_method),
       current_avg_cost = VALUES(current_avg_cost),
@@ -187,7 +195,7 @@ class AVGCostingStrategy implements CostingStrategy {
 
     // AVG method doesn't track specific layers consumed
     return {
-      totalCost,
+      totalCost: deductionPlan.totalCost,
       consumedLayers: [],
     };
   }
@@ -279,56 +287,36 @@ class FIFOCostingStrategy implements CostingStrategy {
       FOR UPDATE
     `.execute(db);
 
-    const layers = layerRows.rows;
-
-    // PRE-CHECK: Calculate total available BEFORE any mutations
-    const totalAvailable = layers.reduce(
-      (sum: number, layer: InventoryLayerRow) => sum + Number(layer.remaining_qty),
-      0
+    const plan = planLayerConsumption(
+      layerRows.rows.map((layer: InventoryLayerRow) => ({
+        id: layer.id,
+        acquiredAt: layer.acquired_at,
+        remainingQty: Number(layer.remaining_qty),
+        unitCost: Number(layer.unit_cost),
+      })),
+      input.quantity,
+      "FIFO",
     );
 
-    if (totalAvailable < input.quantity) {
-      throw new InsufficientInventoryError(input.quantity, totalAvailable);
-    }
-
-    // Only proceed with mutations if sufficient inventory confirmed
-    let remainingToConsume = input.quantity;
-    const consumedLayers: ConsumedLayer[] = [];
-    let totalCost = 0;
-
-    for (const layer of layers) {
-      if (remainingToConsume <= 0) break;
-
-      const layerRemainingQty = Number(layer.remaining_qty);
-      const layerUnitCost = Number(layer.unit_cost);
-      const consumeFromLayer = Math.min(remainingToConsume, layerRemainingQty);
-
-      // Update layer remaining quantity
+    for (const consumed of plan.consumedLayers) {
       await sql`
-        UPDATE inventory_cost_layers 
-        SET remaining_qty = remaining_qty - ${consumeFromLayer}
-        WHERE id = ${layer.id}
+        UPDATE inventory_cost_layers
+        SET remaining_qty = remaining_qty - ${consumed.consumedQty}
+        WHERE id = ${consumed.layerId}
       `.execute(db);
 
-      // Record consumption trace
-      const layerTotalCost = consumeFromLayer * layerUnitCost;
+      const layerTotalCost = consumed.consumedQty * consumed.unitCost;
       await sql`
-        INSERT INTO cost_layer_consumption 
+        INSERT INTO cost_layer_consumption
         (company_id, layer_id, transaction_id, consumed_qty, unit_cost, total_cost)
-        VALUES (${input.companyId}, ${layer.id}, ${input.transactionId}, ${consumeFromLayer}, ${layerUnitCost}, ${layerTotalCost})
+        VALUES (${input.companyId}, ${consumed.layerId}, ${input.transactionId}, ${consumed.consumedQty}, ${consumed.unitCost}, ${layerTotalCost})
       `.execute(db);
-
-      consumedLayers.push({
-        layerId: layer.id,
-        consumedQty: consumeFromLayer,
-        unitCost: layerUnitCost,
-      });
-
-      totalCost += layerTotalCost;
-      remainingToConsume -= consumeFromLayer;
     }
 
-    return { totalCost, consumedLayers };
+    return {
+      totalCost: plan.totalCost,
+      consumedLayers: plan.consumedLayers,
+    };
   }
 }
 
@@ -356,56 +344,36 @@ class LIFOCostingStrategy implements CostingStrategy {
       FOR UPDATE
     `.execute(db);
 
-    const layers = layerRows.rows;
-
-    // PRE-CHECK: Calculate total available BEFORE any mutations
-    const totalAvailable = layers.reduce(
-      (sum: number, layer: InventoryLayerRow) => sum + Number(layer.remaining_qty),
-      0
+    const plan = planLayerConsumption(
+      layerRows.rows.map((layer: InventoryLayerRow) => ({
+        id: layer.id,
+        acquiredAt: layer.acquired_at,
+        remainingQty: Number(layer.remaining_qty),
+        unitCost: Number(layer.unit_cost),
+      })),
+      input.quantity,
+      "LIFO",
     );
 
-    if (totalAvailable < input.quantity) {
-      throw new InsufficientInventoryError(input.quantity, totalAvailable);
-    }
-
-    // Only proceed with mutations if sufficient inventory confirmed
-    let remainingToConsume = input.quantity;
-    const consumedLayers: ConsumedLayer[] = [];
-    let totalCost = 0;
-
-    for (const layer of layers) {
-      if (remainingToConsume <= 0) break;
-
-      const layerRemainingQty = Number(layer.remaining_qty);
-      const layerUnitCost = Number(layer.unit_cost);
-      const consumeFromLayer = Math.min(remainingToConsume, layerRemainingQty);
-
-      // Update layer remaining quantity
+    for (const consumed of plan.consumedLayers) {
       await sql`
-        UPDATE inventory_cost_layers 
-        SET remaining_qty = remaining_qty - ${consumeFromLayer}
-        WHERE id = ${layer.id}
+        UPDATE inventory_cost_layers
+        SET remaining_qty = remaining_qty - ${consumed.consumedQty}
+        WHERE id = ${consumed.layerId}
       `.execute(db);
 
-      // Record consumption trace
-      const layerTotalCost = consumeFromLayer * layerUnitCost;
+      const layerTotalCost = consumed.consumedQty * consumed.unitCost;
       await sql`
-        INSERT INTO cost_layer_consumption 
+        INSERT INTO cost_layer_consumption
         (company_id, layer_id, transaction_id, consumed_qty, unit_cost, total_cost)
-        VALUES (${input.companyId}, ${layer.id}, ${input.transactionId}, ${consumeFromLayer}, ${layerUnitCost}, ${layerTotalCost})
+        VALUES (${input.companyId}, ${consumed.layerId}, ${input.transactionId}, ${consumed.consumedQty}, ${consumed.unitCost}, ${layerTotalCost})
       `.execute(db);
-
-      consumedLayers.push({
-        layerId: layer.id,
-        consumedQty: consumeFromLayer,
-        unitCost: layerUnitCost,
-      });
-
-      totalCost += layerTotalCost;
-      remainingToConsume -= consumeFromLayer;
     }
 
-    return { totalCost, consumedLayers };
+    return {
+      totalCost: plan.totalCost,
+      consumedLayers: plan.consumedLayers,
+    };
   }
 }
 
@@ -454,6 +422,69 @@ export async function getCompanyCostingMethod(
   }
 
   return method as CostingMethod;
+}
+
+export async function resolveStandardVarianceAccountId(
+  companyId: number,
+  settingsPort: SettingsPort,
+): Promise<number> {
+  const value = await settingsPort.resolve<number | string | null>(
+    companyId,
+    STANDARD_VARIANCE_ACCOUNT_SETTING_KEY,
+  );
+  return parseStandardVarianceAccountId(value);
+}
+
+export async function resolveCompanyStandardVarianceAccountId(
+  companyId: number,
+  db: KyselySchema,
+): Promise<number> {
+  const settingsPort = new KyselySettingsAdapter(db);
+  return resolveStandardVarianceAccountId(companyId, settingsPort);
+}
+
+export async function getItemStandardCost(
+  companyId: number,
+  itemId: number,
+  db: KyselySchema,
+): Promise<number | null> {
+  const rows = await sql<ItemStandardCostRow>`
+    SELECT standard_cost
+    FROM items
+    WHERE company_id = ${companyId} AND id = ${itemId}
+    LIMIT 1
+  `.execute(db);
+
+  const row = rows.rows[0];
+  if (!row || row.standard_cost == null) {
+    return null;
+  }
+
+  return Number(row.standard_cost);
+}
+
+export async function calculateStandardVarianceForItem(
+  companyId: number,
+  itemId: number,
+  quantity: number,
+  actualUnitCost: number,
+  db: KyselySchema,
+) {
+  const varianceAccountId = await resolveCompanyStandardVarianceAccountId(companyId, db);
+  const standardUnitCost = await getItemStandardCost(companyId, itemId, db);
+
+  if (standardUnitCost == null) {
+    throw new CostTrackingError(
+      `Missing standard cost for item ${itemId}. Set items.standard_cost before using standard-cost variance tracking.`,
+    );
+  }
+
+  return calculateStandardVariance({
+    quantity,
+    standardUnitCost,
+    actualUnitCost,
+    varianceAccountId,
+  });
 }
 
 /**
@@ -829,6 +860,17 @@ export {
   fromMinorUnits,
 } from "./types/costing.js";
 
+export {
+  STANDARD_VARIANCE_ACCOUNT_SETTING_KEY,
+  calculateStandardVariance,
+  parseStandardVarianceAccountId,
+} from "./standard-costing.js";
+
+export {
+  planLayerConsumption,
+  planAverageDeduction,
+} from "./costing-planner.js";
+
 export type {
   CostingMethod,
   CostLayer,
@@ -842,3 +884,23 @@ export type {
   CostLayerWithConsumption,
   ItemCostSummaryExtended,
 } from "./types/costing.js";
+
+export type {
+  StandardVarianceDirection,
+  StandardVarianceInput,
+  StandardVarianceResult,
+} from "./standard-costing.js";
+
+export type {
+  AverageDeductionPlan,
+  AverageDeductionPlanInput,
+  LayerConsumptionPlan,
+  LayerSnapshot,
+} from "./costing-planner.js";
+
+export {
+  createTestCostLayer,
+  createTestCostLayerSet,
+  createTestStandardCostingSetup,
+  createTestVarianceRecord,
+} from "./test-fixtures/index.js";

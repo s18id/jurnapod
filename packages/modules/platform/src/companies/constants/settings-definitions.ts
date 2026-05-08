@@ -162,6 +162,13 @@ export const SETTINGS_DEFINITIONS = [
       parseCostingMethod(value, "AVG", "JP_INVENTORY_COSTING_METHOD")
   },
   {
+    key: "inventory.standard_variance_account_id",
+    valueType: "int",
+    envKey: "JP_INVENTORY_STANDARD_VARIANCE_ACCOUNT_ID",
+    parse: (value: string | undefined) =>
+      parsePositiveInt(value, 0, "JP_INVENTORY_STANDARD_VARIANCE_ACCOUNT_ID")
+  },
+  {
     key: "inventory.warn_on_negative",
     valueType: "boolean",
     envKey: "JP_INVENTORY_WARN_ON_NEGATIVE",

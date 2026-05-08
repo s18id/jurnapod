@@ -52,6 +52,7 @@ export const SETTINGS_KEYS = [
   "inventory.reorder_point",
   "inventory.allow_negative_stock",
   "inventory.costing_method",
+  "inventory.standard_variance_account_id",
   "inventory.warn_on_negative"
 ] as const;
 
@@ -131,6 +132,11 @@ export const SETTINGS_REGISTRY: Record<SettingKey, SettingsRegistryEntry> = {
     valueType: "enum",
     defaultValue: "AVG",
     schema: InventoryCostingMethodInputSchema
+  },
+  "inventory.standard_variance_account_id": {
+    valueType: "int",
+    defaultValue: 0,
+    schema: z.coerce.number().int().min(1)
   },
   "inventory.warn_on_negative": {
     valueType: "boolean",
