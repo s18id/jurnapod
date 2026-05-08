@@ -660,5 +660,5 @@ development_status:
   58-1-inventory-item-recipe-correctness: done
   58-2-stock-movement-outlet-scoping-correctness: done
   58-3-costing-method-correctness: done
-  58-4-inventory-gl-reconciliation-correctness: backlog
+  58-4-inventory-gl-reconciliation-correctness: done
   58-5-gate-validation-automation-evidence-scripts: backlog
