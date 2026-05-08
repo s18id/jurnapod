@@ -30,6 +30,7 @@ import type {
   DeductStockInput,
   RestoreStockInput,
   StockAdjustmentInput,
+  StockAdjustmentResult,
   PosStockDeductResult,
   ResolveAndDeductInput
 } from "../interfaces/stock-service.js";
@@ -783,11 +784,11 @@ export class StockServiceImpl implements StockService {
   async adjustStock(
     input: StockAdjustmentInput,
     db: KyselySchema
-  ): Promise<boolean> {
+  ): Promise<StockAdjustmentResult> {
     const { company_id, outlet_id, product_id, adjustment_quantity, reference_id } = input;
 
     if (adjustment_quantity === 0) {
-      return true;
+      throw new InventoryConflictError("adjustment_quantity must not be zero");
     }
 
     return withExecutorTransaction(db, async (executor) => {
@@ -874,23 +875,45 @@ export class StockServiceImpl implements StockService {
           created_at
         ) VALUES (${company_id}, ${outlet_id}, ${TRANSACTION_TYPE.ADJUSTMENT}, 'ADJUSTMENT', ${reference_id ?? `ADJ-${Date.now()}`}, ${product_id}, ${adjustment_quantity}, CURRENT_TIMESTAMP)
       `.execute(executor);
+      const txId = Number(txResult.insertId);
+      if (!Number.isSafeInteger(txId) || txId <= 0) {
+        throw new InventoryConflictError("Failed to create stock adjustment transaction with a safe numeric ID");
+      }
+
+      let unitCost = 0;
+      let totalCost = 0;
 
       // For positive adjustments, create inbound cost layer
       if (adjustment_quantity > 0) {
-        const unitCost = await resolveInboundUnitCost(executor, company_id, product_id);
+        unitCost = await resolveInboundUnitCost(executor, company_id, product_id);
         await createCostLayer(
           {
             companyId: company_id,
             itemId: product_id,
-            transactionId: Number(txResult.insertId),
+            transactionId: txId,
             unitCost,
             quantity: adjustment_quantity,
           },
           executor
         );
+        totalCost = adjustment_quantity * unitCost;
+      } else {
+        const deduction = await deductWithCost(
+          company_id,
+          [{ itemId: product_id, qty: Math.abs(adjustment_quantity), stockTxId: txId }],
+          executor
+        );
+        const cost = deduction.itemCosts[0];
+        unitCost = cost?.unitCost ?? 0;
+        totalCost = cost?.totalCost ?? 0;
       }
 
-      return true;
+      return {
+        success: true,
+        transactionId: txId,
+        unitCost,
+        totalCost,
+      };
     });
   }
 

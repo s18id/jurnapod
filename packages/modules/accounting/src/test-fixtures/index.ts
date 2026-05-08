@@ -13,6 +13,7 @@ export type {
   FiscalYearFixture,
   FiscalPeriodFixture,
   APReconciliationSettingsFixture,
+  AccountingAccountFixture,
 } from "./types.js";
 
 // Fiscal year fixtures
@@ -36,3 +37,8 @@ export {
   clearTestAPReconciliationSettings,
   setTestCompanyStringSetting,
 } from "./ap-reconciliation-settings-fixtures.js";
+
+export {
+  createTestInventoryGLAccount,
+  createTestVarianceAccount,
+} from "./account-fixtures.js";

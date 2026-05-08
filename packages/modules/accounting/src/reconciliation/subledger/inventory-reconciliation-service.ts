@@ -22,6 +22,7 @@ import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import {
   toUtcIso,
+  fromUtcIso,
   isValidTimeZone,
 } from "@jurnapod/shared";
 import type {
@@ -212,13 +213,14 @@ export class InventoryReconciliationService {
       WHERE i.company_id = ${companyId}
         AND a.is_active = 1
         AND i.inventory_asset_account_id IS NOT NULL
-      LIMIT 1
     `.execute(this.db);
 
     if (inventoryAccountResult.rows.length > 0) {
-      const inventoryAccountId = Number((inventoryAccountResult.rows[0] as { id: number }).id);
+      const inventoryAccountIds = inventoryAccountResult.rows
+        .map((r) => Number((r as { id: number }).id))
+        .filter((id) => Number.isSafeInteger(id) && id > 0);
       return {
-        accountIds: [inventoryAccountId],
+        accountIds: Array.from(new Set(inventoryAccountIds)),
         source: "fallback_company_default",
       };
     }
@@ -229,13 +231,14 @@ export class InventoryReconciliationService {
       WHERE company_id = ${companyId}
         AND is_active = 1
         AND type_name IN (${sql.join(INVENTORY_CONTROL_ACCOUNT_TYPE_NAMES.map(t => sql`${t}`), sql`, `)})
-      LIMIT 1
     `.execute(this.db);
 
     if (fallbackResult.rows.length > 0) {
-      const fallbackAccountId = Number((fallbackResult.rows[0] as { id: number }).id);
+      const fallbackAccountIds = fallbackResult.rows
+        .map((r) => Number((r as { id: number }).id))
+        .filter((id) => Number.isSafeInteger(id) && id > 0);
       return {
-        accountIds: [fallbackAccountId],
+        accountIds: Array.from(new Set(fallbackAccountIds)),
         source: "fallback_company_default",
       };
     }
@@ -333,27 +336,45 @@ export class InventoryReconciliationService {
   /**
    * Get Inventory subledger balance from inventory_cost_layers.
    *
-   * Computes SUM(remaining_qty × unit_cost) for all cost layers acquired
-   * up to the given cutoff date. This represents the current remaining value
-   * of inventory that was acquired on or before the cutoff.
-   *
-   * Note: remaining_qty reflects CURRENT remaining quantities. For past-date
-   * reconciliation, consumption after the cutoff date will cause the subledger
-   * balance to under-report vs the actual value at the cutoff. This is an
-   * accepted limitation — the primary use case is current-date reconciliation,
-   * where both sides are in sync.
+   * Computes historical as-of inventory value from layer history:
+   * SUM((original_qty - consumed_qty_up_to_cutoff) × unit_cost)
+   * across layers acquired on/before the cutoff.
    *
    * Query uses inventory_cost_layers (not inventory_item_costs) because
    * inventory_item_costs is a running aggregate without date columns.
    * inventory_cost_layers.acquired_at provides the date scope needed for
    * asOfDate filtering.
    */
-  private async getInventorySubledgerBalance(companyId: number, asOfDate: string): Promise<bigint> {
+  private async getInventorySubledgerBalance(companyId: number, asOfDateUtcEnd: string): Promise<bigint> {
+    const asOfDateMysql = fromUtcIso.mysql(asOfDateUtcEnd);
     const rows = await sql<{ inventory_value: string | null }>`
-      SELECT COALESCE(ROUND(SUM(CAST(icl.remaining_qty AS DECIMAL(19,4)) * CAST(icl.unit_cost AS DECIMAL(19,4))), 4), 0) AS inventory_value
+      SELECT COALESCE(
+        ROUND(
+          SUM(
+            CAST(
+              GREATEST(
+                CAST(icl.original_qty AS DECIMAL(19,4)) - CAST(COALESCE(consumed.consumed_qty, 0) AS DECIMAL(19,4)),
+                0
+              ) AS DECIMAL(19,4)
+            ) * CAST(icl.unit_cost AS DECIMAL(19,4))
+          ),
+          4
+        ),
+        0
+      ) AS inventory_value
       FROM inventory_cost_layers icl
+      LEFT JOIN (
+        SELECT
+          icc.layer_id,
+          SUM(CAST(icc.consumed_qty AS DECIMAL(19,4))) AS consumed_qty
+        FROM cost_layer_consumption icc
+        INNER JOIN inventory_transactions it ON it.id = icc.transaction_id
+        WHERE icc.company_id = ${companyId}
+          AND it.created_at <= ${asOfDateMysql}
+        GROUP BY icc.layer_id
+      ) consumed ON consumed.layer_id = icl.id
       WHERE icl.company_id = ${companyId}
-        AND DATE(icl.acquired_at) <= ${asOfDate}
+        AND icl.acquired_at <= ${asOfDateMysql}
     `.execute(this.db);
 
     if (rows.rows.length === 0 || rows.rows[0].inventory_value === null) {
@@ -371,6 +392,7 @@ export class InventoryReconciliationService {
       return 0n;
     }
 
+    const asOfDateMysql = fromUtcIso.mysql(asOfDateUtcEnd);
     const rows = await sql<{ total_debit: string | null; total_credit: string | null }>`
       SELECT
         COALESCE(SUM(jl.debit), 0) AS total_debit,
@@ -378,8 +400,9 @@ export class InventoryReconciliationService {
       FROM journal_lines jl
       INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
       WHERE jl.company_id = ${companyId}
+        AND jb.company_id = ${companyId}
         AND jl.account_id IN (${sql.join(accountIds.map(id => sql`${id}`), sql`, `)})
-        AND jb.posted_at <= ${asOfDateUtcEnd}
+        AND jb.posted_at <= ${asOfDateMysql}
     `.execute(this.db);
 
     if (rows.rows.length === 0) {
@@ -413,7 +436,7 @@ export class InventoryReconciliationService {
     const asOfDateUtcEnd = this.normalizeDate(asOfDate, timezone, true);
 
     const [inventoryBalance, glBalance] = await Promise.all([
-      this.getInventorySubledgerBalance(companyId, asOfDate),
+      this.getInventorySubledgerBalance(companyId, asOfDateUtcEnd),
       this.getGLControlBalance(companyId, settings.accountIds, asOfDateUtcEnd),
     ]);
 

@@ -28,3 +28,11 @@ export type APReconciliationSettingsFixture = {
   companyId: number;
   accountIds: number[];
 };
+
+export type AccountingAccountFixture = {
+  id: number;
+  companyId: number;
+  code: string;
+  name: string;
+  typeName: string;
+};

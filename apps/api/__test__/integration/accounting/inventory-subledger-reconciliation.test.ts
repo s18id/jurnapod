@@ -188,6 +188,7 @@ describe("inventory-subledger-reconciliation", { timeout: 60000 }, () => {
       expect(d.inventory_subledger_balance).toBe("0.0000");
       expect(d.gl_control_balance).toBe("0.0000");
       expect(d.variance).toBe("0.0000");
+      expect(Math.abs(Number(d.variance))).toBeLessThan(0.01);
     });
 
     it("returns deterministic balance across multiple calls", async () => {

@@ -50,6 +50,16 @@ interface TestContext {
 // Deterministic sale date (fixed, not NOW)
 const FIXED_SALE_DATE = new Date("2026-04-01T10:00:00Z");
 
+function toScaled4BigInt(value: string | number): bigint {
+  const text = typeof value === "number" ? value.toFixed(4) : value;
+  const normalized = text.trim();
+  const sign = normalized.startsWith("-") ? -1n : 1n;
+  const unsigned = sign < 0n ? normalized.slice(1) : normalized;
+  const [integerPart, fractionPart = ""] = unsigned.split(".");
+  const paddedFraction = (fractionPart + "0000").slice(0, 4);
+  return sign * (BigInt(integerPart) * 10000n + BigInt(paddedFraction));
+}
+
 function makeCogsInput(ctx: TestContext, overrides: Partial<CogsPostingInput>): CogsPostingInput {
   // caller MUST supply saleId explicitly — no default is provided
   // postedBy: sentinel 999999 used for test isolation (no FK constraint enforcement in test DB)
@@ -385,6 +395,13 @@ describe("CogsPosting", () => {
     const totalDebit = lines.rows.reduce((s, r) => s + Number((r as { debit: string }).debit), 0);
     const totalCredit = lines.rows.reduce((s, r) => s + Number((r as { credit: string }).credit), 0);
     expect(totalDebit).toBe(totalCredit);
+
+    // AC2 bridge: posted COGS journal debit total equals reported COGS total from posting result
+    const cogsJournalTotal = cogsLines.reduce(
+      (s, r) => s + toScaled4BigInt((r as { debit: string }).debit),
+      0n,
+    );
+    expect(cogsJournalTotal).toBe(toScaled4BigInt(result.totalCogs));
   });
 
   // -------------------------------------------------------------------------

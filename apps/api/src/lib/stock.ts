@@ -29,7 +29,7 @@ export const TransactionType = {
 export type TransactionTypeValue = typeof TransactionType[keyof typeof TransactionType];
 
 // Types (re-exported from modules-inventory)
-export type { StockItem, StockCheckResult, StockReservationResult, StockTransaction, StockLevel, LowStockAlert, StockDeductResult, StockAdjustmentInput } from "@jurnapod/modules-inventory";
+export type { StockItem, StockCheckResult, StockReservationResult, StockTransaction, StockLevel, LowStockAlert, StockDeductResult, StockAdjustmentInput, StockAdjustmentResult } from "@jurnapod/modules-inventory";
 
 export interface DeductStockForSaleInput {
   company_id: number;
@@ -57,7 +57,63 @@ export { InventoryConflictError, InventoryReferenceError, InventoryForbiddenErro
 
 // Import service from modules-inventory for basic operations
 import { getStockService } from "@jurnapod/modules-inventory";
-import type { StockItem, StockCheckResult, StockReservationResult, StockTransaction, StockLevel, LowStockAlert, StockDeductResult, StockAdjustmentInput } from "@jurnapod/modules-inventory";
+import type { StockItem, StockCheckResult, StockReservationResult, StockTransaction, StockLevel, LowStockAlert, StockDeductResult, StockAdjustmentInput, StockAdjustmentResult } from "@jurnapod/modules-inventory";
+
+const STANDARD_VARIANCE_ACCOUNT_SETTING_KEY = "inventory.standard_variance_account_id";
+
+async function postStockAdjustmentVariance(input: StockAdjustmentInput, result: StockAdjustmentResult, db: KyselySchema): Promise<void> {
+    if (!result.success || !result.transactionId || result.totalCost <= 0) return;
+
+    const settingRow = await sql<{ setting_value: string | null }>`
+      SELECT setting_value
+      FROM settings_strings
+      WHERE company_id = ${input.company_id}
+        AND outlet_id IS NULL
+        AND setting_key = ${STANDARD_VARIANCE_ACCOUNT_SETTING_KEY}
+      ORDER BY updated_at DESC, id DESC
+      LIMIT 1
+    `.execute(db);
+    const varianceAccountId = Number((settingRow.rows[0] as { setting_value?: string | null } | undefined)?.setting_value ?? 0);
+    if (!Number.isSafeInteger(varianceAccountId) || varianceAccountId <= 0) return;
+
+    const itemRow = await sql<{ inventory_asset_account_id: number | null }>`
+      SELECT inventory_asset_account_id
+      FROM items
+      WHERE company_id = ${input.company_id} AND id = ${input.product_id}
+      LIMIT 1
+    `.execute(db);
+    const inventoryAccountId = Number((itemRow.rows[0] as { inventory_asset_account_id?: number | null } | undefined)?.inventory_asset_account_id ?? 0);
+    if (!Number.isSafeInteger(inventoryAccountId) || inventoryAccountId <= 0) return;
+
+    const amount = result.totalCost.toFixed(4);
+    const batch = await sql`
+      INSERT INTO journal_batches (company_id, outlet_id, doc_type, doc_id, posted_at)
+      VALUES (${input.company_id}, ${input.outlet_id ?? null}, 'STOCK_ADJUSTMENT', ${result.transactionId}, NOW())
+    `.execute(db);
+    const batchId = batch.insertId;
+
+    if (input.adjustment_quantity > 0) {
+      await sql`
+        INSERT INTO journal_lines (journal_batch_id, company_id, outlet_id, account_id, debit, credit, description, line_date, created_at, updated_at)
+        VALUES
+          (${batchId}, ${input.company_id}, ${input.outlet_id ?? null}, ${inventoryAccountId}, ${amount}, 0, ${`Stock adjustment gain ${input.reference_id ?? result.transactionId}`}, CURDATE(), NOW(), NOW()),
+          (${batchId}, ${input.company_id}, ${input.outlet_id ?? null}, ${varianceAccountId}, 0, ${amount}, ${`Stock adjustment variance ${input.reason}`}, CURDATE(), NOW(), NOW())
+      `.execute(db);
+    } else {
+      await sql`
+        INSERT INTO journal_lines (journal_batch_id, company_id, outlet_id, account_id, debit, credit, description, line_date, created_at, updated_at)
+        VALUES
+          (${batchId}, ${input.company_id}, ${input.outlet_id ?? null}, ${varianceAccountId}, ${amount}, 0, ${`Stock adjustment variance ${input.reason}`}, CURDATE(), NOW(), NOW()),
+          (${batchId}, ${input.company_id}, ${input.outlet_id ?? null}, ${inventoryAccountId}, 0, ${amount}, ${`Stock adjustment loss ${input.reference_id ?? result.transactionId}`}, CURDATE(), NOW(), NOW())
+      `.execute(db);
+    }
+
+    await sql`
+      UPDATE inventory_transactions
+      SET journal_batch_id = ${batchId}
+      WHERE id = ${result.transactionId} AND company_id = ${input.company_id}
+    `.execute(db);
+}
 
 async function withExecutorTransaction<T>(
   db: KyselySchema,
@@ -376,8 +432,13 @@ export async function restoreStock(
 export async function adjustStock(
   input: StockAdjustmentInput,
   db?: KyselySchema
-): Promise<boolean> {
+): Promise<StockAdjustmentResult> {
   const database = db ?? getDb();
   const service = getStockService(database);
-  return service.adjustStock(input, database);
+
+  return withExecutorTransaction(database, async (executor) => {
+    const result = await service.adjustStock(input, executor);
+    await postStockAdjustmentVariance(input, result, executor);
+    return result;
+  });
 }

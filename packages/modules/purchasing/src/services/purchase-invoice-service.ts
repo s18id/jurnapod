@@ -598,8 +598,9 @@ export class PurchaseInvoiceService {
     const taxAmountScaled4 = toScaled4(pi.tax_amount);
     const rateScaled8 = toScaled8(exchangeRate);
 
-    const subtotalInCompanyCurrency = (subtotalScaled4 * rateScaled8) / 100000000n;
-    const taxAmountInCompanyCurrency = (taxAmountScaled4 * rateScaled8) / 100000000n;
+    const rateDivisor = 100000000n;
+    const subtotalInCompanyCurrency = (subtotalScaled4 * rateScaled8 + (rateDivisor / 2n)) / rateDivisor;
+    const taxAmountInCompanyCurrency = (taxAmountScaled4 * rateScaled8 + (rateDivisor / 2n)) / rateDivisor;
     const grandTotalInCompanyCurrency = subtotalInCompanyCurrency + taxAmountInCompanyCurrency;
 
     const supplier = await this.db
@@ -642,10 +643,10 @@ export class PurchaseInvoiceService {
       const qty = toScaled4(String(line.qty));
       const unitPrice = toScaled4(String(line.unit_price));
       const lineTotal = scale4Mul(qty, unitPrice);
-      const lineTotalInCompanyCurrency = (lineTotal * rateScaled8) / 100000000n;
+      const lineTotalInCompanyCurrency = (lineTotal * rateScaled8 + (rateDivisor / 2n)) / rateDivisor;
 
       const taxAmount = toScaled4(String(line.tax_amount));
-      const taxAmountInCompanyCurrency = (taxAmount * rateScaled8) / 100000000n;
+      const taxAmountInCompanyCurrency = (taxAmount * rateScaled8 + (rateDivisor / 2n)) / rateDivisor;
 
       let lineExpenseAccountId: number | null = null;
       let lineTaxAccountId: number | null = null;

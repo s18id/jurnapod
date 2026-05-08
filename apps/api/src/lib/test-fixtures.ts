@@ -1203,7 +1203,7 @@ export async function createTestStock(
     user_id: userId,
   });
 
-  if (!result) {
+  if (!result.success) {
     throw new Error(`Failed to create test stock for item ${itemId}`);
   }
 
@@ -1378,7 +1378,7 @@ export async function createTestInventoryTransaction(
     user_id: userId,
   });
 
-  if (!ok) {
+  if (!ok.success) {
     throw new Error(`Failed to create inventory transaction for item ${itemId}`);
   }
 
@@ -1431,6 +1431,39 @@ export async function setTestItemLowStockThreshold(
       await trx
         .updateTable("items")
         .set({ low_stock_threshold: null })
+        .where("company_id", "=", companyId)
+        .where("id", "=", itemId)
+        .execute();
+    });
+  });
+}
+
+/**
+ * Set inventory_asset_account_id for a test item.
+ * Canonical helper to avoid ad-hoc SQL UPDATE in integration tests.
+ */
+export async function setTestItemInventoryAssetAccount(
+  companyId: number,
+  itemId: number,
+  inventoryAssetAccountId: number
+): Promise<void> {
+  const db = getDb();
+
+  await withTransactionRetry(db, async (trx) => {
+    await trx
+      .updateTable("items")
+      .set({ inventory_asset_account_id: inventoryAssetAccountId })
+      .where("company_id", "=", companyId)
+      .where("id", "=", itemId)
+      .execute();
+  });
+
+  registerFixtureCleanup(`item_inventory_asset_account_${itemId}`, async () => {
+    const cleanupDb = getDb();
+    await withTransactionRetry(cleanupDb, async (trx) => {
+      await trx
+        .updateTable("items")
+        .set({ inventory_asset_account_id: null })
         .where("company_id", "=", companyId)
         .where("id", "=", itemId)
         .execute();

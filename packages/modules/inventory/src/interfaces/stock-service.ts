@@ -141,6 +141,13 @@ export interface StockAdjustmentInput {
   user_id: number;
 }
 
+export interface StockAdjustmentResult {
+  success: boolean;
+  transactionId: number | null;
+  unitCost: number;
+  totalCost: number;
+}
+
 export interface StockService {
   /**
    * Check stock availability for multiple items.
@@ -281,7 +288,7 @@ export interface StockService {
   adjustStock(
     input: StockAdjustmentInput,
     db: KyselySchema
-  ): Promise<boolean>;
+  ): Promise<StockAdjustmentResult>;
 
   /**
    * Resolve and deduct stock for a POS transaction.

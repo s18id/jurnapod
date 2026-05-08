@@ -6,10 +6,22 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
-import { closeTestDb } from '../../helpers/db';
+import { closeTestDb, getTestDb } from '../../helpers/db';
 import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
-import { resetFixtureRegistry, getTestAccessToken, getSeedSyncContext, createTestItem, createTestPrice, createTestStock } from '../../fixtures';
+import {
+  resetFixtureRegistry,
+  getTestAccessToken,
+  getSeedSyncContext,
+  createTestItem,
+  createTestPrice,
+  createTestStock,
+  createTestInventoryGLAccount,
+  createTestVarianceAccount,
+  setTestCompanyStringSetting,
+  setTestItemInventoryAssetAccount,
+} from '../../fixtures';
 import { makeTag } from '../../helpers/tags';
+import { sql } from 'kysely';
 
 let baseUrl: string;
 let accessToken: string;
@@ -124,7 +136,7 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.success).toBe(false);
-    expect(body.error.code).toBe('ADJUSTMENT_FAILED');
+    expect(body.error.code).toBe('INSUFFICIENT_STOCK');
   });
 
   it('creates negative adjustment when sufficient stock exists', async () => {
@@ -158,6 +170,91 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
     const body = await res.json();
     expect(body.success).toBe(true);
     expect(body.data.adjustment_quantity).toBe(-30);
+  });
+
+  it('AC4: posts balanced STOCK_ADJUSTMENT journal to variance account', async () => {
+    const db = getTestDb();
+    const item = await createTestItem(companyId, {
+      sku: makeTag('ADJ'),
+      name: 'Variance Posting Test',
+      type: 'PRODUCT',
+      trackStock: true
+    });
+    await createTestPrice(companyId, item.id, cashierUserId, { price: 10000, isActive: true });
+    await createTestStock(companyId, item.id, outletId, 20, cashierUserId);
+
+    const inventoryAssetAccount = await createTestInventoryGLAccount(companyId, {
+      code: `INV-${makeTag('AC4')}`,
+      name: 'Inventory Asset AC4',
+    });
+    const varianceAccount = await createTestVarianceAccount(companyId, {
+      code: `VAR-${makeTag('AC4')}`,
+      name: 'Inventory Variance AC4',
+    });
+
+    await setTestItemInventoryAssetAccount(companyId, item.id, inventoryAssetAccount.id);
+    await setTestCompanyStringSetting(companyId, 'inventory.standard_variance_account_id', String(varianceAccount.id));
+
+    const res = await fetch(`${baseUrl}/api/outlets/${outletId}/stock/adjustments`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        product_id: item.id,
+        adjustment_quantity: 5,
+        reason: 'AC4 variance posting check'
+      })
+    });
+    expect(res.status).toBe(200);
+
+    const txRows = await sql<{ id: number }>`
+      SELECT id
+      FROM inventory_transactions
+      WHERE company_id = ${companyId}
+        AND product_id = ${item.id}
+        AND transaction_type = 5
+      ORDER BY id DESC
+      LIMIT 1
+    `.execute(db);
+    expect(txRows.rows.length).toBe(1);
+    const txId = Number(txRows.rows[0].id);
+
+    const batchRows = await sql<{ id: number }>`
+      SELECT id
+      FROM journal_batches
+      WHERE company_id = ${companyId}
+        AND doc_type = 'STOCK_ADJUSTMENT'
+        AND doc_id = ${txId}
+      ORDER BY id DESC
+      LIMIT 1
+    `.execute(db);
+    expect(batchRows.rows.length).toBe(1);
+    const batchId = Number(batchRows.rows[0].id);
+
+    const lines = await sql<{ account_id: number; debit: string; credit: string }>`
+      SELECT account_id, debit, credit
+      FROM journal_lines
+      WHERE company_id = ${companyId} AND journal_batch_id = ${batchId}
+      ORDER BY id ASC
+    `.execute(db);
+    expect(lines.rows.length).toBe(2);
+
+    const expectedVarianceAccountId = String(varianceAccount.id);
+    const expectedInventoryAccountId = String(inventoryAssetAccount.id);
+    const accountIds = lines.rows.map((l) => String(l.account_id));
+    expect(accountIds).toContain(expectedVarianceAccountId);
+    expect(accountIds).toContain(expectedInventoryAccountId);
+    const varianceLine = lines.rows.find((l) => String(l.account_id) === expectedVarianceAccountId);
+    const inventoryLine = lines.rows.find((l) => String(l.account_id) === expectedInventoryAccountId);
+    expect(varianceLine).toBeDefined();
+    expect(inventoryLine).toBeDefined();
+
+    const totalDebit = lines.rows.reduce((sum, l) => sum + Number(l.debit), 0);
+    const totalCredit = lines.rows.reduce((sum, l) => sum + Number(l.credit), 0);
+    expect(totalDebit).toBe(totalCredit);
+    expect(Math.abs(Number(varianceLine!.credit) - Number(inventoryLine!.debit))).toBeLessThan(0.0001);
   });
 
   it('validates required reason field', async () => {
@@ -246,7 +343,7 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
     expect(res.status).toBe(400);
   });
 
-  it('accepts zero adjustment (no-op)', async () => {
+  it('rejects zero adjustment quantity', async () => {
     const item = await createTestItem(companyId, {
       sku: makeTag('ADJ'),
       name: 'Zero Adjustment Test',
@@ -267,9 +364,9 @@ describe('stock.adjustments', { timeout: 30000 }, () => {
       })
     });
 
-    // Zero is allowed (no-op adjustment), though it may fail if stock doesn't exist
-    // The API accepts it - result depends on whether stock record exists
-    expect([200, 400]).toContain(res.status);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
   });
 
   it('creates adjustment transaction record', async () => {

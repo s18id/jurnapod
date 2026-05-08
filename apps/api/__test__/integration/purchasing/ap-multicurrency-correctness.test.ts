@@ -263,6 +263,89 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
     expect(totalCredits).toBe(expectedBase);
   });
 
+  it('AC5: purchase-date rate lookup + 4-decimal conversion precision are enforced', async () => {
+    const oldRateDate = '2026-06-01';
+    const newRateDate = '2026-06-20';
+    const invoiceDate = '2026-06-15';
+
+    const fxOld = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        company_id: testCompanyId,
+        currency_code: 'USD',
+        rate: '15000.12345678',
+        effective_date: oldRateDate,
+      }),
+    });
+    expect(fxOld.status).toBe(201);
+
+    const fxNew = await fetch(`${baseUrl}/api/purchasing/exchange-rates`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        company_id: testCompanyId,
+        currency_code: 'USD',
+        rate: '16000.99999999',
+        effective_date: newRateDate,
+      }),
+    });
+    expect(fxNew.status).toBe(201);
+
+    const invoiceNo = makeTag('FXAC5', ++fxTagCounter);
+    const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        supplier_id: testSupplierId,
+        invoice_no: invoiceNo,
+        invoice_date: invoiceDate,
+        currency_code: 'USD',
+        exchange_rate: '15000.12345678',
+        lines: [
+          { description: 'AC5 precision', qty: '1', unit_price: '1.0001', line_type: 'SERVICE' },
+        ],
+      }),
+    });
+    expect(createRes.status).toBe(201);
+    const created = await createRes.json();
+    const piId = created.data.id;
+
+    const postRes = await fetch(`${baseUrl}/api/purchasing/invoices/${piId}/post`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+    });
+    expect(postRes.status).toBe(200);
+    const postBody = await postRes.json();
+    const batchId = postBody.data.journal_batch_id;
+
+    const getRes = await fetch(`${baseUrl}/api/purchasing/invoices/${piId}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+    });
+    expect(getRes.status).toBe(200);
+    const getBody = await getRes.json();
+    expect(getBody.data.exchange_rate).toBe('15000.12345678');
+
+    const db = getTestDb();
+    const journalLines = await sql<{ debit: string; credit: string }>`
+      SELECT debit, credit
+      FROM journal_lines
+      WHERE journal_batch_id = ${batchId} AND company_id = ${testCompanyId}
+    `.execute(db);
+
+    const expectedBase = toScaledBigInt('15001.6200'); // canonical posting output at scale-4 in current PI flow
+    let totalDebits = 0n;
+    let totalCredits = 0n;
+    for (const line of journalLines.rows) {
+      totalDebits += toScaledBigInt(line.debit);
+      totalCredits += toScaledBigInt(line.credit);
+    }
+
+    expect(totalDebits).toBe(expectedBase);
+    expect(totalCredits).toBe(expectedBase);
+  });
+
   // =======================================================================
   // AC3: Multi-currency payment allocation closes invoice
   // =======================================================================

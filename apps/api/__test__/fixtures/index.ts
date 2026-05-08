@@ -71,6 +71,9 @@ import {
   createTestAPReconciliationSettings as pkgCreateTestAPReconciliationSettings,
   clearTestAPReconciliationSettings as pkgClearTestAPReconciliationSettings,
   setTestCompanyStringSetting as pkgSetTestCompanyStringSetting,
+  createTestInventoryGLAccount as pkgCreateTestInventoryGLAccount,
+  createTestVarianceAccount as pkgCreateTestVarianceAccount,
+  type AccountingAccountFixture as AccountingAccountFixtureType,
   type FiscalYearFixture as AccountingFiscalYearFixture,
   type FiscalPeriodFixture as AccountingFiscalPeriodFixture,
   type APReconciliationSettingsFixture as AccountingAPReconciliationSettingsFixture,
@@ -88,6 +91,7 @@ export {
   createTestInventoryStock,
   createTestInventoryTransaction,
   setTestItemLowStockThreshold,
+  setTestItemInventoryAssetAccount,
   createTestFixtureSet,
   createFullTestFixtureSet,
   registerFixtureCleanup,
@@ -199,11 +203,26 @@ export async function setTestCompanyStringSetting(
   return pkgSetTestCompanyStringSetting(getTestDb(), companyId, settingKey, settingValue);
 }
 
+export async function createTestInventoryGLAccount(
+  companyId: number,
+  options: { code: string; name?: string }
+): Promise<AccountingAccountFixtureType> {
+  return pkgCreateTestInventoryGLAccount(getTestDb(), companyId, options);
+}
+
+export async function createTestVarianceAccount(
+  companyId: number,
+  options: { code: string; name?: string }
+): Promise<AccountingAccountFixtureType> {
+  return pkgCreateTestVarianceAccount(getTestDb(), companyId, options);
+}
+
 export type CompanyFixture = PlatformCompanyFixture;
 export type OutletFixture = PlatformOutletFixture;
 export type FiscalYearFixture = AccountingFiscalYearFixture;
 export type FiscalPeriodFixture = AccountingFiscalPeriodFixture;
 export type APReconciliationSettingsFixture = AccountingAPReconciliationSettingsFixture;
+export type AccountingAccountFixture = AccountingAccountFixtureType;
 
 // Re-export canonical constants from @jurnapod/db/test-fixtures
 // Q49-001 Pass 1: evidence of consumer flip to package fixture export

@@ -119,6 +119,23 @@ function requireStockAccess(roles: readonly string[], permission: "read" | "crea
   };
 }
 
+async function ensureAdjustmentJournalAccess(
+  c: Context,
+  auth: AuthContext,
+  outletId: number,
+): Promise<Response | null> {
+  const accountingGuard = requireAccess({
+    roles: ["OWNER", "ADMIN", "ACCOUNTANT"],
+    module: "accounting",
+    resource: "journals",
+    permission: "create",
+    outletId,
+  });
+
+  const result = await accountingGuard(c.req.raw, auth);
+  return result ?? null;
+}
+
 // Create stock routes Hono instance
 // Note: Routes are mounted at /outlets/:outletId/stock/* (nesting handled by server.ts)
 const stockRoutes = new Hono();
@@ -363,16 +380,21 @@ stockRoutes.post(
   async (c) => {
     const auth = c.get("auth");
 
-    try {
-      const outletId = parseInt(c.req.param("outletId") ?? "", 10);
-      const { product_id, adjustment_quantity, reason } = c.req.valid('json') as {
+      try {
+        const outletId = parseInt(c.req.param("outletId") ?? "", 10);
+        const { product_id, adjustment_quantity, reason } = c.req.valid('json') as {
         product_id: number;
         adjustment_quantity: number;
-        reason: string;
-      };
+          reason: string;
+        };
 
-      const adjustmentInput: StockAdjustmentInput = {
-        company_id: auth.companyId,
+        const journalAccessError = await ensureAdjustmentJournalAccess(c, auth, outletId);
+        if (journalAccessError) {
+          return journalAccessError;
+        }
+
+        const adjustmentInput: StockAdjustmentInput = {
+          company_id: auth.companyId,
         outlet_id: outletId,
         product_id,
         adjustment_quantity,
@@ -381,9 +403,9 @@ stockRoutes.post(
         user_id: auth.userId
       };
 
-      const success = await adjustStock(adjustmentInput);
+      const result = await adjustStock(adjustmentInput);
 
-      if (!success) {
+      if (!result.success) {
         return errorResponse(
           "ADJUSTMENT_FAILED",
           "Failed to adjust stock. Insufficient quantity or stock record not found.",
@@ -651,6 +673,11 @@ export const registerStockRoutes = (app: OpenAPIHonoInterface): void => {
         const outletId = parseInt(c.req.param("outletId") ?? "", 10);
         const { product_id, adjustment_quantity, reason } = c.req.valid('json');
 
+        const journalAccessError = await ensureAdjustmentJournalAccess(c, auth, outletId);
+        if (journalAccessError) {
+          return journalAccessError;
+        }
+
         const adjustmentInput: StockAdjustmentInput = {
           company_id: auth.companyId,
           outlet_id: outletId,
@@ -661,9 +688,9 @@ export const registerStockRoutes = (app: OpenAPIHonoInterface): void => {
           user_id: auth.userId
         };
 
-        const success = await adjustStock(adjustmentInput);
+        const result = await adjustStock(adjustmentInput);
 
-        if (!success) {
+        if (!result.success) {
           return errorResponse("ADJUSTMENT_FAILED", "Failed to adjust stock. Insufficient quantity or stock record not found.", 400);
         }
 
