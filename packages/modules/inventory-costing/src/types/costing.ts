@@ -192,3 +192,20 @@ export function toMinorUnits(value: number): number {
 export function fromMinorUnits(value: number): number {
   return value / MONEY_MULTIPLIER;
 }
+
+// -----------------------------------------------------------------------------
+// Aggregated Cost Summary (NFR2)
+// -----------------------------------------------------------------------------
+
+/**
+ * Aggregated cost summary across ALL items for a company.
+ * Used for NFR2 cross-module comparison — cross-module diff MUST be zero
+ * (two modules computing the same quantity from the same data must agree exactly).
+ */
+export interface AggregatedCostSummary {
+  companyId: number;
+  totalQuantity: number;        // SUM(remaining_qty) across all stock-tracked items
+  totalCost: string;            // SUM(remaining_qty * unit_cost) as DECIMAL(18,4) string
+  averageCost: string;          // totalCost / totalQuantity as DECIMAL(18,4) string
+  itemCount: number;            // COUNT(distinct item_id)
+}

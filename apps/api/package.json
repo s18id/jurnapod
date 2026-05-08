@@ -21,7 +21,7 @@
     "test:batch": "node --import ../../scripts/test/load-root-env.mjs ./scripts/run-vitest-batch.mjs",
     "test:single": "vitest run",
     "test:unit:costing": "vitest run __test__/unit --testNamePattern='costing'",
-    "test:integration:inventory": "vitest run __test__/integration --testNamePattern='inventory'",
+    "test:integration:inventory": "vitest run __test__/integration --testNamePattern='inventory(?!.*posting)(?!.*performance)'",
     "test:integration:inventory:posting": "vitest run __test__/integration --testNamePattern='inventory.*posting'",
     "test:integration:inventory:performance": "vitest run __test__/integration --testNamePattern='inventory.*performance'",
     "test:watch": "vitest",

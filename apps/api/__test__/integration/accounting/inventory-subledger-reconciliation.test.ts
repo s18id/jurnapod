@@ -298,6 +298,17 @@ describe("inventory-subledger-reconciliation", { timeout: 60000 }, () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.data.variance).toBe("0.0000");
+
+      const gatePayload = {
+        version: 1,
+        gate: "GATE1",
+        variance: String(body.data.variance ?? "0.0000"),
+        threshold: "0.01",
+        pass: Math.abs(Number(body.data.variance ?? 0)) <= 0.01,
+      };
+
+      // Story 58.5 gate contract line
+      console.log(`__EPIC58_GATE__ ${JSON.stringify(gatePayload)}`);
     });
   });
 });

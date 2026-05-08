@@ -57,6 +57,7 @@ import {
   InvalidCostingMethodError,
   toMinorUnits,
   fromMinorUnits,
+  AggregatedCostSummary,
 } from "./types/costing.js";
 
 import {
@@ -791,6 +792,68 @@ export async function getItemCostSummaryExtended(
 }
 
 // -----------------------------------------------------------------------------
+// NFR2: Aggregated Cost Summary (Cross-Module Diff = 0)
+// -----------------------------------------------------------------------------
+
+interface AggregatedCostRow {
+  total_quantity: string | null;
+  total_cost: string | null;
+  average_cost: string | null;
+  item_count: string | null;
+}
+
+/**
+ * Aggregates cost summary across ALL items for a company.
+ *
+ * Used for NFR2 cross-module comparison:
+ * "Consistent valuation across all inventory modules — cross-module diff MUST be zero
+ * (two modules computing the same quantity from the same data must agree exactly)."
+ *
+ * Only PRODUCT and INGREDIENT items contribute to the summary (stock-tracked).
+ * SERVICE and RECIPE items are excluded (not stock-tracked).
+ *
+ * @param companyId - Company scope
+ * @param db - Kysely database executor
+ * @returns AggregatedCostSummary with totalQuantity, totalCost (string), averageCost (string), itemCount
+ */
+export async function getAllItemsCostSummary(
+  companyId: number,
+  db: KyselySchema,
+): Promise<AggregatedCostSummary> {
+  const rows = await sql<AggregatedCostRow>`
+    SELECT
+      CAST(COALESCE(SUM(l.remaining_qty), 0) AS DECIMAL(18,4)) AS total_quantity,
+      CAST(COALESCE(SUM(l.remaining_qty * l.unit_cost), 0) AS DECIMAL(18,4)) AS total_cost,
+      CAST(
+        CASE
+          WHEN COALESCE(SUM(l.remaining_qty), 0) = 0 THEN 0
+          ELSE COALESCE(SUM(l.remaining_qty * l.unit_cost), 0) / COALESCE(SUM(l.remaining_qty), 0)
+        END
+      AS DECIMAL(18,4)) AS average_cost,
+      COUNT(DISTINCT l.item_id) AS item_count
+    FROM inventory_cost_layers l
+    INNER JOIN items i ON i.id = l.item_id AND i.company_id = l.company_id
+    WHERE l.company_id = ${companyId}
+      AND l.remaining_qty > 0
+      AND i.item_type IN ('PRODUCT', 'INGREDIENT')
+  `.execute(db);
+
+  const row = rows.rows[0];
+  const totalQty = Number(row?.total_quantity ?? "0");
+  const totalCostNum = Number(row?.total_cost ?? "0");
+  const averageCostNum = Number(row?.average_cost ?? "0");
+  const itemCount = Number(row?.item_count ?? 0);
+
+  return {
+    companyId,
+    totalQuantity: totalQty,
+    totalCost: totalCostNum.toFixed(4),
+    averageCost: averageCostNum.toFixed(4),
+    itemCount,
+  };
+}
+
+// -----------------------------------------------------------------------------
 // DeductWithCost Contract
 // -----------------------------------------------------------------------------
 
@@ -883,6 +946,7 @@ export type {
   ItemCostResult,
   CostLayerWithConsumption,
   ItemCostSummaryExtended,
+  AggregatedCostSummary,
 } from "./types/costing.js";
 
 export type {
