@@ -1564,6 +1564,25 @@ export async function createTestFiscalPeriod(
   return fixture;
 }
 
+/**
+ * Set fiscal period status for period-close enforcement tests (Story 61.4).
+ * Updates status to 1=OPEN or 2=CLOSED for all periods in the fiscal year.
+ */
+export async function setTestFiscalPeriodStatus(
+  fiscalYearId: number,
+  companyId: number,
+  status: "OPEN" | "CLOSED"
+): Promise<void> {
+  const db = getDb();
+  const statusCode = status === "CLOSED" ? 2 : 1;
+  await db
+    .updateTable("fiscal_periods")
+    .set({ status: statusCode })
+    .where("fiscal_year_id", "=", fiscalYearId)
+    .where("company_id", "=", companyId)
+    .execute();
+}
+
 // ============================================================================
 // AP Reconciliation Settings Fixtures (Epic 47.1)
 // ============================================================================

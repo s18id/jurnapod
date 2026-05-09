@@ -115,6 +115,7 @@ export {
   createTestBankAccount,
   setTestSupplierActive,
   setTestBankAccountActive,
+  setTestFiscalPeriodStatus,
   setTestPurchasingDefaultApAccount,
   createTestSupplierStatement,
   createTestAPException,
