@@ -10,7 +10,6 @@
 
 | When you need... | Use this agent |
 |------------------|----------------|
-| **File exploration / mapping** | `bmad-explorer` |
 | Story implementation (from spec) | `bmad-dev` |
 | Quick code change / bug fix | `bmad-master` |
 | Solo dev on a small task | `bmad-master` |
@@ -23,8 +22,6 @@
 | QA / test generation | `bmad-qa` |
 | UX design | `bmad-ux-designer` |
 | Technical writing / documentation | `bmad-tech-writer` |
-
-> **Exploration Rule (MANDATORY):** All file exploration tasks — including `grep`, `map`, `find`, `ls`, `tree`, `count`, content search, line counting, and any file/directory navigation — MUST be delegated to `bmad-explorer`. Do NOT perform file system operations directly.
 
 ---
 
@@ -700,12 +697,23 @@ requireAccess({ module: 'inventory', permission: 'READ' })
 | COMPANY_ADMIN | CRUDA (31) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) |
 | ADMIN | READ (1) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) |
 | ACCOUNTANT | READ (1) | CRUDA (31) | READ (1) | READ (1) | READ (1) | READ (1) | CRUDA (31) | 0 |
-| CASHIER | 0 | 0 | 0 | 0 | 0 | CRUDA (31) | 0 | CRUDA (31) |
+| CASHIER | 0 | 0 | READ (1) | READ (1) | CRUDA (31) | CRUDA (31) | 0 | CRUDA (31) |
 
 **Key Rules:**
 - `reports` module removed — use `ANALYZE` on source modules (e.g., `sales.ANALYZE` for sales reports)
 - MANAGE on `platform` for COMPANY_ADMIN: configuration, NOT company creation (SUPER_ADMIN only)
 - MANAGE on `accounting.inventory.treasury` for COMPANY_ADMIN: fiscal year setup, costing method, bank accounts
+- CASHIER has READ access to `inventory` (to see items at POS) and `sales` (to handle customer inquiries) — this is correct behavior, not a gap
+- Void/refund operations MUST use DELETE permission — void IS the financial equivalent of soft-delete for immutable finalized records (CREATE is for new records, UPDATE for field modifications, DELETE for void/cancellation)
+
+### Route-Level ACL Conventions
+
+- **CREATE**: Creating new records (POST /items, POST /orders)
+- **READ**: Reading/viewing records (GET /items, GET /orders/:id)
+- **UPDATE**: Modifying existing records (PATCH /items/:id), status transitions (POST /:id/post, POST /:id/close)
+- **DELETE**: Void/cancel/refund operations (POST /:id/void) — financial soft-delete
+- **ANALYZE**: Reports, dashboards, analytics (GET /reports/*)
+- **MANAGE**: Configuration, setup, administration
 
 ### Module Resource Breakdown
 

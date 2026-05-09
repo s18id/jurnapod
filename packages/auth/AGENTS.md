@@ -125,7 +125,7 @@ const config: AuthConfig = {
 | COMPANY_ADMIN | CRUDA (31) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) | CRUDAM (63) |
 | ADMIN | READ (1) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) | CRUDA (31) |
 | ACCOUNTANT | READ (1) | CRUDA (31) | READ (1) | READ (1) | READ (1) | READ (1) | CRUDA (31) | 0 |
-| CASHIER | 0 | 0 | 0 | 0 | 0 | CRUDA (31) | 0 | CRUDA (31) |
+| CASHIER | 0 | 0 | READ (1) | READ (1) | CRUDA (31) | CRUDA (31) | 0 | CRUDA (31) |
 
 See root `AGENTS.md` for full Epic 39 ACL documentation.
 
