@@ -676,8 +676,19 @@ development_status:
   59-8-pos-sale-reversal-journal-correctness: done
 
   # Epic 60: Tenant + ACL Correctness Hardening
-  epic-60: in-progress
-  60-1-tenant-isolation-outlet-scoping-audit: ready-for-dev
-  60-2-acl-resource-level-enforcement-audit: ready-for-dev
-  60-3-role-boundary-tenant-leakage-negative-tests: ready-for-dev
-  60-4-audit-log-filter-correctness: ready-for-dev
+  epic-60: done
+  60-1-tenant-isolation-outlet-scoping-audit: done
+  60-2-acl-resource-level-enforcement-audit: done
+  60-3-role-boundary-tenant-leakage-negative-tests: done
+  60-4-audit-log-filter-correctness: done
+  60-5-tenant-acl-correctness: done
+  epic-60-retrospective: done
+
+  # Epic 61: Sales & Purchasing Lifecycle Correctness
+  epic-61: backlog
+  61-1-sales-invoice-lifecycle-correctness: backlog
+  61-2-sales-payment-lifecycle-fx-correctness: backlog
+  61-3-purchasing-document-chain-correctness: backlog
+  61-4-ap-invoice-payment-lifecycle-period-close: backlog
+  61-5-deferred-debt-closure-epic-55-60: backlog
+  61-6-sales-purchasing-gl-reconciliation-gate: backlog
