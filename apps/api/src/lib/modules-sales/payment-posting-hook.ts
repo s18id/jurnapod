@@ -13,6 +13,7 @@ import type { Transaction } from "@jurnapod/db";
 import type { PaymentPostingHook } from "@jurnapod/modules-sales";
 import type { PostPaymentInput, SalesPayment, SalesPaymentSplit } from "@jurnapod/modules-sales";
 import type { PostingResult } from "@jurnapod/shared";
+import { toUtcIso } from "@jurnapod/shared";
 import { postSalesPaymentToJournal, voidSalesPaymentToJournal } from "@/lib/sales-posting";
 import type { KyselySchema } from "@/lib/db";
 import type { QueryExecutor } from "@/lib/shared/common-utils";
@@ -91,7 +92,7 @@ async function findPaymentByIdWithTx(
     shortfall_reason: row.shortfall_reason ?? undefined,
     shortfall_settled_by_user_id: row.shortfall_settled_by_user_id ? Number(row.shortfall_settled_by_user_id) : undefined,
     shortfall_settled_at: row.shortfall_settled_at ?? undefined,
-    fx_acknowledged_at: row.fx_acknowledged_at ?? undefined,
+    fx_acknowledged_at: row.fx_acknowledged_at ? toUtcIso.dateLike(row.fx_acknowledged_at) as string : undefined,
     fx_acknowledged_by: row.fx_acknowledged_by ? Number(row.fx_acknowledged_by) : undefined,
     created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : undefined,
     updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : undefined,

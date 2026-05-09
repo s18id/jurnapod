@@ -64,8 +64,8 @@ describe('sync.idempotency', { timeout: 30000 }, () => {
     }
   });
 
-  // Deterministic constant for trx_at (client_tx_id values are computed in beforeAll)
-  const FIXTURE_TRX_AT = '2024-01-15T10:30:00+07:00';
+  // Deterministic constant for trx_at — MUST be Z-only per Epic 53 datetime rules.
+  const FIXTURE_TRX_AT = '2024-01-15T03:30:00Z';
 
   it('accepts first transaction', async () => {
     const res = await fetch(`${baseUrl}/api/sync/push`, {

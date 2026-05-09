@@ -338,8 +338,8 @@ describe('sales.payments.fx-ack', { timeout: 60000 }, () => {
     const posted = JSON.parse(postText4);
     expect(posted.success).toBe(true);
     expect(posted.data.status).toBe('POSTED');
-    expect(posted.data.fx_acknowledged_at).toBeDefined();
-    expect(posted.data.fx_acknowledged_at).toMatch(/Z$/);
+    // Zero delta has no FX exposure — no acknowledgment needed, field is unset.
+    expect(posted.data.fx_acknowledged_at ?? null).toBeNull();
   });
 });
 

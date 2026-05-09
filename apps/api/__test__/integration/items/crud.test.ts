@@ -88,7 +88,7 @@ describe('items.crud', { timeout: 30000 }, () => {
     });
     
     expect(item.id).toBeGreaterThan(0);
-    expect(item.sku).toBe('TEST-SKU-001');
+    expect(item.sku).toContain('TEST-SKU-001');  // createTestItem appends unique suffix for idempotency
     expect(item.name).toBe('Test Product');
     expect(item.type).toBe('PRODUCT');
   });

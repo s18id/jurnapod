@@ -135,7 +135,7 @@ describe('import.apply', { timeout: 30000 }, () => {
 
   it('updates existing items via apply', async () => {
     // 1. CREATE — UUID SKU guarantees uniqueness across all parallel tests
-    const itemSku = `APPLY-UPD-${crypto.randomUUID()}`;
+    const itemSku = `APPLY-UPD-${crypto.randomUUID().slice(0, 8)}`;
     const item = await createTestItem(companyId, {
       sku: itemSku,
       name: 'Original Name',
@@ -150,7 +150,7 @@ describe('import.apply', { timeout: 30000 }, () => {
       .select(['id', 'sku', 'name', 'item_type'])
       .executeTakeFirst();
     expect(before?.name).toBe('Original Name');
-    expect(before?.sku).toBe(itemSku);
+    expect(before?.sku).toContain(itemSku);  // createTestItem appends runId suffix, sliced to 30 chars
 
     // 2b. SELECT by SKU — confirm the SKU is findable
     const bySku = await db.selectFrom('items')
