@@ -6,7 +6,7 @@
  *
  * Public API:
  * - String wrappers: add, sub, mul, div, gt, lt, eq, gte, lte, sum
- * - BigInt primitives: scaled, unscaled, scaledMul (for multi-step arithmetic)
+ * - BigInt primitives: scaled, unscaled, scaledMul, scaledDiv, scaledN (for multi-step arithmetic)
  *
  * Quantity operations MUST use Number(), NOT this module.
  */
@@ -18,13 +18,18 @@ const FACTOR = 10000n;
 // BigInt primitives — for multi-step arithmetic (FX conversion, etc.)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Convert decimal string to scaled BigInt (×10000). */
-export function scaled(value: string): bigint {
+/** Convert decimal string to scaled BigInt (×10000).
+ *  Pass `{ signed: true }` to accept negative values (for variance/adjustment paths). */
+export function scaled(value: string, opts?: { signed?: boolean }): bigint {
   const trimmed = value.trim();
-  if (!/^\d+(\.\d{1,4})?$/.test(trimmed))
+  const re = opts?.signed ? /^-?\d+(\.\d{1,4})?$/ : /^\d+(\.\d{1,4})?$/;
+  if (!re.test(trimmed))
     throw new Error(`Invalid decimal: ${value}`);
-  const [i, f = ""] = trimmed.split(".");
-  return BigInt(i) * FACTOR + BigInt((f + "0000").slice(0, SCALE));
+  const neg = trimmed.startsWith("-");
+  const abs = neg ? trimmed.slice(1) : trimmed;
+  const [i, f = ""] = abs.split(".");
+  const magnitude = BigInt(i) * FACTOR + BigInt((f + "0000").slice(0, SCALE));
+  return neg ? -magnitude : magnitude;
 }
 
 /** Convert scaled BigInt back to decimal string. */
@@ -39,14 +44,34 @@ export function scaledMul(a: bigint, b: bigint): bigint {
   return (a * b) / FACTOR;
 }
 
-/** Convert decimal string to scaled BigInt with arbitrary scale (e.g. scale 8 for FX rates). */
-export function scaledN(value: string, scale: number): bigint {
+/**
+ * Divide a scale-4 amount by a scale-N amount, producing a scale-4 result.
+ * Half-up rounding. Returns `a` if divisor ≤ 0.
+ *
+ * Used for: base-currency ÷ exchange-rate → supplier-currency conversion
+ * and any pattern where a fixed-scale amount must be divided by an arbitrary-scale divisor.
+ */
+export function scaledDiv(a: bigint, divisor: bigint, divisorScale: number): bigint {
+  if (divisor <= 0n) return a;
+  const factor = 10n ** BigInt(divisorScale);
+  return (a * factor + divisor / 2n) / divisor;
+}
+
+/** Convert decimal string to scaled BigInt with arbitrary scale (e.g. scale 8 for FX rates).
+ *  Pass `{ signed: true }` to accept negative values. */
+export function scaledN(value: string, scale: number, opts?: { signed?: boolean }): bigint {
   const trimmed = value.trim();
-  if (!new RegExp(`^\\d+(\\.\\d{1,${scale}})?$`).test(trimmed))
+  const re = opts?.signed
+    ? new RegExp(`^-?\\d+(\\.\\d{1,${scale}})?$`)
+    : new RegExp(`^\\d+(\\.\\d{1,${scale}})?$`);
+  if (!re.test(trimmed))
     throw new Error(`Invalid decimal: ${value}`);
-  const [i, f = ""] = trimmed.split(".");
+  const neg = trimmed.startsWith("-");
+  const abs = neg ? trimmed.slice(1) : trimmed;
+  const [i, f = ""] = abs.split(".");
   const factor = 10n ** BigInt(scale);
-  return BigInt(i) * factor + BigInt((f + "0".repeat(scale)).slice(0, scale));
+  const magnitude = BigInt(i) * factor + BigInt((f + "0".repeat(scale)).slice(0, scale));
+  return neg ? -magnitude : magnitude;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

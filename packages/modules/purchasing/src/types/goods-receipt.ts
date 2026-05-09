@@ -97,27 +97,4 @@ export interface CreateGoodsReceiptResult {
 // Decimal Helpers (scale 4)
 // =============================================================================
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Internal decimal helpers — NOT exported. Use @jurnapod/shared API instead.
-// ═══════════════════════════════════════════════════════════════════════════
 
-function toScaled4(value: string): bigint {
-  const trimmed = value.trim();
-  if (!/^\d+(\.\d{1,4})?$/.test(trimmed)) {
-    throw new Error(`Invalid decimal value: ${value}`);
-  }
-  const [integer, fraction = ""] = trimmed.split(".");
-  const frac4 = (fraction + "0000").slice(0, 4);
-  return BigInt(integer) * 10000n + BigInt(frac4);
-}
-
-/**
- * Convert scaled integer back to decimal string.
- */
-function fromScaled4(value: bigint): string {
-  const sign = value < 0n ? "-" : "";
-  const abs = value < 0n ? -value : value;
-  const intPart = abs / 10000n;
-  const fracPart = (abs % 10000n).toString().padStart(4, "0");
-  return `${sign}${intPart.toString()}.${fracPart}`;
-}

@@ -6,7 +6,7 @@
  */
 
 import type { KyselySchema } from "@jurnapod/db";
-import { PURCHASE_ORDER_STATUS, toUtcIso } from "@jurnapod/shared";
+import { PURCHASE_ORDER_STATUS, toUtcIso, scaled, unscaled } from "@jurnapod/shared";
 
 // Re-export the shared constants for convenience
 export { PURCHASE_ORDER_STATUS } from "@jurnapod/shared";
@@ -214,44 +214,18 @@ export interface TransitionPurchaseOrderStatusResult {
 }
 
 // =============================================================================
-// Decimal Helpers (scale 4)
+// Line Total Computation — delegates to @jurnapod/shared decimal-scale4
 // =============================================================================
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Internal decimal helpers — NOT exported. Use @jurnapod/shared API instead.
-// ═══════════════════════════════════════════════════════════════════════════
-
-function toScaled4(value: string): bigint {
-  const trimmed = value.trim();
-  if (!/^\d+(\.\d{1,4})?$/.test(trimmed)) {
-    throw new Error(`Invalid decimal value: ${value}`);
-  }
-  const [integer, fraction = ""] = trimmed.split(".");
-  const frac4 = (fraction + "0000").slice(0, 4);
-  return BigInt(integer) * 10000n + BigInt(frac4);
-}
-
-function fromScaled4(value: bigint): string {
-  const sign = value < 0n ? "-" : "";
-  const abs = value < 0n ? -value : value;
-  const intPart = abs / 10000n;
-  const fracPart = (abs % 10000n).toString().padStart(4, "0");
-  return `${sign}${intPart.toString()}.${fracPart}`;
-}
-
-/**
- * Compute line total: qty * unit_price * (1 + tax_rate).
- * All inputs are decimal strings; result is a decimal string with scale 4.
- */
 export function computeLineTotal(qty: string, unitPrice: string, taxRate: string): string {
-  const q = toScaled4(qty);
-  const u = toScaled4(unitPrice);
-  const t = toScaled4(taxRate || "0");
+  const q = scaled(qty);
+  const u = scaled(unitPrice);
+  const t = scaled(taxRate || "0");
 
   const denominator = 100000000n;
   const numerator = q * u * (10000n + t);
-  const scaled = (numerator + denominator / 2n) / denominator;
-  return fromScaled4(scaled);
+  const result = (numerator + denominator / 2n) / denominator;
+  return unscaled(result);
 }
 
 /**
@@ -260,9 +234,9 @@ export function computeLineTotal(qty: string, unitPrice: string, taxRate: string
 export function computeTotalAmount(lines: Array<{ line_total: string }>): string {
   let total = 0n;
   for (const line of lines) {
-    total += toScaled4(line.line_total);
+    total += scaled(line.line_total);
   }
-  return fromScaled4(total);
+  return unscaled(total);
 }
 
 // =============================================================================

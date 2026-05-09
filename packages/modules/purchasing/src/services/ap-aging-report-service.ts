@@ -9,7 +9,7 @@
 
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
-import { AP_PAYMENT_STATUS, PURCHASE_CREDIT_STATUS, PURCHASE_INVOICE_STATUS, toUtcIso, fromUtcIso } from "@jurnapod/shared";
+import { AP_PAYMENT_STATUS, PURCHASE_CREDIT_STATUS, PURCHASE_INVOICE_STATUS, toUtcIso, fromUtcIso, scaled, unscaled, scaledN, scaledDiv } from "@jurnapod/shared";
 import type {
   APAgingSummary,
   APAgingSupplierDetail,
@@ -21,39 +21,29 @@ import type {
 } from "../types/ap-aging-report.js";
 
 // =============================================================================
-// BigInt Scaled Decimal Helpers
+// Aging Bucket Helpers
 // =============================================================================
 
-function toScaled(value: string, scale: number): bigint {
-  const trimmed = value.trim();
-  const re = new RegExp(`^\\d+(\\.\\d{1,${scale}})?$`);
-  if (!re.test(trimmed)) {
-    throw new Error(`Invalid decimal value: ${value}`);
-  }
-  const [integer, fraction = ""] = trimmed.split(".");
-  const scaleFactor = 10n ** BigInt(scale);
-  const fracScaled = (fraction + "0".repeat(scale)).slice(0, scale);
-  return BigInt(integer) * scaleFactor + BigInt(fracScaled);
+const ALL_BUCKETS: AgingBucketKey[] = ["current", "due_1_30", "due_31_60", "due_61_90", "due_over_90"];
+
+function zeroBuckets(): Record<AgingBucketKey, bigint> {
+  return {
+    current: 0n,
+    due_1_30: 0n,
+    due_31_60: 0n,
+    due_61_90: 0n,
+    due_over_90: 0n,
+  };
 }
 
-/** PROHIBITED: low-level primitive — use only inside domain wrappers. */
-function toScaled4(value: string): bigint {
-  return toScaled(value, 4);
-}
-
-function fromScaled4(value: bigint): string {
-  const sign = value < 0n ? "-" : "";
-  const abs = value < 0n ? -value : value;
-  const intPart = abs / 10000n;
-  const fracPart = (abs % 10000n).toString().padStart(4, "0");
-  return `${sign}${intPart.toString()}.${fracPart}`;
-}
-
-function divScaled4(numeratorScaled4: bigint, denominatorScaled8: bigint): bigint {
-  if (denominatorScaled8 <= 0n) {
-    return numeratorScaled4;
-  }
-  return (numeratorScaled4 * 100000000n + denominatorScaled8 / 2n) / denominatorScaled8;
+function formatBuckets(buckets: Record<AgingBucketKey, bigint>): APAgingBuckets {
+  return {
+    current: unscaled(buckets.current),
+    due_1_30: unscaled(buckets.due_1_30),
+    due_31_60: unscaled(buckets.due_31_60),
+    due_61_90: unscaled(buckets.due_61_90),
+    due_over_90: unscaled(buckets.due_over_90),
+  };
 }
 
 // =============================================================================
@@ -81,26 +71,6 @@ function resolveBucket(asOfDate: string, dueDate: string): AgingBucketKey {
   if (overdueDays <= 60) return "due_31_60";
   if (overdueDays <= 90) return "due_61_90";
   return "due_over_90";
-}
-
-function zeroBuckets(): Record<AgingBucketKey, bigint> {
-  return {
-    current: 0n,
-    due_1_30: 0n,
-    due_31_60: 0n,
-    due_61_90: 0n,
-    due_over_90: 0n,
-  };
-}
-
-function formatBuckets(buckets: Record<AgingBucketKey, bigint>): APAgingBuckets {
-  return {
-    current: fromScaled4(buckets.current),
-    due_1_30: fromScaled4(buckets.due_1_30),
-    due_31_60: fromScaled4(buckets.due_31_60),
-    due_61_90: fromScaled4(buckets.due_61_90),
-    due_over_90: fromScaled4(buckets.due_over_90),
-  };
 }
 
 // =============================================================================
@@ -236,17 +206,17 @@ export class ApAgingReportService {
     let grandBase = 0n;
 
     for (const row of rows) {
-      const baseTotal = toScaled4(String(row.base_total ?? "0"));
-      const paidBase = toScaled4(String(row.paid_base ?? "0"));
-      const creditedBase = toScaled4(String(row.credited_base ?? "0"));
+      const baseTotal = scaled(String(row.base_total ?? "0"));
+      const paidBase = scaled(String(row.paid_base ?? "0"));
+      const creditedBase = scaled(String(row.credited_base ?? "0"));
       const openBase = baseTotal - paidBase - creditedBase;
 
       if (openBase <= 0n) {
         continue;
       }
 
-      const exchangeRateScaled8 = toScaled(String(row.exchange_rate ?? "1"), 8);
-      const openSupplier = divScaled4(openBase, exchangeRateScaled8);
+      const exchangeRateScaled8 = scaledN(String(row.exchange_rate ?? "1"), 8);
+      const openSupplier = scaledDiv(openBase, exchangeRateScaled8, 8);
 
       const dueDate = resolveDueDate(row);
       const bucket = resolveBucket(asOfDate, dueDate);
@@ -277,8 +247,8 @@ export class ApAgingReportService {
         supplier_id: row.supplier_id,
         supplier_name: row.supplier_name,
         currency: row.currency,
-        total_open_amount: fromScaled4(row.total_open_amount),
-        base_open_amount: fromScaled4(row.base_open_amount),
+        total_open_amount: unscaled(row.total_open_amount),
+        base_open_amount: unscaled(row.base_open_amount),
         exchange_rate_note: "per_invoice_rate",
         buckets: formatBuckets(row.buckets),
       }));
@@ -287,13 +257,13 @@ export class ApAgingReportService {
       as_of_date: asOfDate,
       suppliers,
       grand_totals: {
-        base_open_amount: fromScaled4(grandBase),
+        base_open_amount: unscaled(grandBase),
         buckets: formatBuckets(grandBuckets),
         currency_totals: Array.from(currencyTotals.entries())
           .sort((a, b) => a[0].localeCompare(b[0]))
           .map(([currency, total]) => ({
             currency,
-            total_open_amount: fromScaled4(total),
+            total_open_amount: unscaled(total),
           })),
       },
     };
@@ -348,17 +318,17 @@ export class ApAgingReportService {
     }> = [];
 
     for (const row of rows) {
-      const baseTotal = toScaled4(String(row.base_total ?? "0"));
-      const paidBase = toScaled4(String(row.paid_base ?? "0"));
-      const creditedBase = toScaled4(String(row.credited_base ?? "0"));
+      const baseTotal = scaled(String(row.base_total ?? "0"));
+      const paidBase = scaled(String(row.paid_base ?? "0"));
+      const creditedBase = scaled(String(row.credited_base ?? "0"));
       const openBase = baseTotal - paidBase - creditedBase;
 
       if (openBase <= 0n) {
         continue;
       }
 
-      const exchangeRateScaled8 = toScaled(String(row.exchange_rate ?? "1"), 8);
-      const openSupplier = divScaled4(openBase, exchangeRateScaled8);
+      const exchangeRateScaled8 = scaledN(String(row.exchange_rate ?? "1"), 8);
+      const openSupplier = scaledDiv(openBase, exchangeRateScaled8, 8);
 
       const termsDays = resolvePaymentTermsDays(row);
       const dueDate = resolveDueDate(row);
@@ -377,8 +347,8 @@ export class ApAgingReportService {
         currency: row.invoice_currency,
         exchange_rate: String(row.exchange_rate),
         original_amount: String(row.grand_total),
-        balance: fromScaled4(openSupplier),
-        base_balance: fromScaled4(openBase),
+        balance: unscaled(openSupplier),
+        base_balance: unscaled(openBase),
         bucket,
       });
     }
@@ -398,8 +368,8 @@ export class ApAgingReportService {
       currency: supplierCurrency,
       invoices,
       totals: {
-        total_open_amount: fromScaled4(totalOpen),
-        base_open_amount: fromScaled4(totalBaseOpen),
+        total_open_amount: unscaled(totalOpen),
+        base_open_amount: unscaled(totalBaseOpen),
         buckets: formatBuckets(buckets),
       },
     };

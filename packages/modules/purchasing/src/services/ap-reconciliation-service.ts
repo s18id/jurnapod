@@ -19,6 +19,9 @@ import {
   PURCHASE_INVOICE_STATUS,
   toUtcIso,
   isValidTimeZone,
+  scaledN,
+  unscaled,
+  scaledDiv,
 } from "@jurnapod/shared";
 import type {
   APReconciliationSettings,
@@ -38,36 +41,24 @@ import {
 } from "../types/ap-reconciliation.js";
 
 // =============================================================================
-// BigInt Scaled Decimal Helpers
+// Decimal helpers — delegates to @jurnapod/shared decimal-scale4.
+// `toScaled` accepts signed values for variance/adjustment paths.
 // =============================================================================
 
-export function toScaled(value: string, scale: number): bigint {
-  const trimmed = value.trim();
-  // Accept optional leading minus for adjustment/variance paths.
-  const re = new RegExp(`^-?\\d+(\\.\\d{1,${scale}})?$`);
-  if (!re.test(trimmed)) {
-    throw new Error(`Invalid decimal value: ${value}`);
-  }
-  const sign = trimmed.startsWith("-") ? -1n : 1n;
-  const unsigned = sign < 0n ? trimmed.slice(1) : trimmed;
-  const [integer, fraction = ""] = unsigned.split(".");
-  const scaleFactor = 10n ** BigInt(scale);
-  const fracScaled = (fraction + "0".repeat(scale)).slice(0, scale);
-  const magnitude = BigInt(integer) * scaleFactor + BigInt(fracScaled);
-  return sign * magnitude;
-}
+export const toScaled = (value: string, scale: number): bigint =>
+  scaledN(value, scale, { signed: true });
 
-export function fromScaled(value: bigint, scale: number): string {
+export const fromScaled = (value: bigint, scale: number): string => {
+  // For scale != 4, use custom unscaling since shared unscaled is fixed at scale 4.
+  if (scale === 4) return unscaled(value);
   const sign = value < 0n ? "-" : "";
   const abs = value < 0n ? -value : value;
   const intPart = abs / (10n ** BigInt(scale));
   const fracPart = (abs % (10n ** BigInt(scale))).toString().padStart(scale, "0");
   return `${sign}${intPart.toString()}.${fracPart}`;
-}
+};
 
-export function fromScaled4(value: bigint): string {
-  return fromScaled(value, 4);
-}
+export const fromScaled4 = unscaled;
 
 /**
  * Compute base amount from original amount and exchange rate.
@@ -79,10 +70,7 @@ export function fromScaled4(value: bigint): string {
 export function computeBaseAmount(originalAmount: string, exchangeRate: string): bigint {
   const originalScaled = toScaled(originalAmount, 4);
   const rateScaled = toScaled(exchangeRate, 8);
-  // original * rate: (scale4 * scale8) = scale12
-  // To get back to scale4, divide by 10^8
-  const scaleFactor = 10n ** 8n;
-  return (originalScaled * rateScaled + scaleFactor / 2n) / scaleFactor;
+  return scaledDiv(originalScaled, rateScaled, 8);
 }
 
 // =============================================================================

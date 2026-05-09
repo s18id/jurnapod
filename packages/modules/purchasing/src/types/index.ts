@@ -4,8 +4,8 @@
 /**
  * Type exports for purchasing module.
  *
- * Note: toScaled4 is exported only from purchase-order.ts to avoid collision.
- * If you need it from goods-receipt.ts context, import directly from that file.
+ * Decimal scaling primitives are provided by @jurnapod/shared (decimal-scale4.ts).
+ * Import { scaled, unscaled, scaledN, scaledDiv } directly from shared.
  */
 
 // Re-export guardrail decision type
@@ -19,8 +19,6 @@ export * from "./supplier-contact.js";
 export * from "./exchange-rate.js";
 
 // Purchase order types
-// Note: toScaled4 NOT re-exported here via export* to avoid collision with goods-receipt
-// Import toScaled4 directly from purchase-order.ts or goods-receipt.ts if needed
 export {
   VALID_TRANSITIONS,
   PURCHASE_ORDER_STATUS,
@@ -49,8 +47,6 @@ export type {
 } from "./purchase-order.js";
 
 // Goods receipt types
-// Note: toScaled4 NOT re-exported here via export* to avoid collision with purchase-order
-// Import toScaled4 directly from goods-receipt.ts if needed
 export type {
   GoodsReceiptLineResult,
   GoodsReceiptResult,
