@@ -18,6 +18,7 @@ import {
   resetFixtureRegistry,
   getTestAccessToken,
   createTestItem,
+  createTestItemExactSku,
   createTestPrice,
   registerFixtureCleanup,
   getSeedSyncContext as loadSeedSyncContext,
@@ -134,9 +135,9 @@ describe('import.apply', { timeout: 30000 }, () => {
   });
 
   it('updates existing items via apply', async () => {
-    // 1. CREATE — UUID SKU guarantees uniqueness across all parallel tests
+    // 1. CREATE — exact SKU (no suffix) for CSV import lookup compatibility
     const itemSku = `APPLY-UPD-${crypto.randomUUID().slice(0, 8)}`;
-    const item = await createTestItem(companyId, {
+    const item = await createTestItemExactSku(companyId, {
       sku: itemSku,
       name: 'Original Name',
       type: 'PRODUCT'
@@ -150,7 +151,7 @@ describe('import.apply', { timeout: 30000 }, () => {
       .select(['id', 'sku', 'name', 'item_type'])
       .executeTakeFirst();
     expect(before?.name).toBe('Original Name');
-    expect(before?.sku).toContain(itemSku);  // createTestItem appends runId suffix, sliced to 30 chars
+    expect(before?.sku).toBe(itemSku);  // exact SKU match (createTestItemExactSku stores exact caller-provided SKU)
 
     // 2b. SELECT by SKU — confirm the SKU is findable
     const bySku = await db.selectFrom('items')
@@ -197,8 +198,8 @@ describe('import.apply', { timeout: 30000 }, () => {
   it('creates prices via apply', async () => {
     const timestamp = Date.now();
     
-    // Create an item first
-    const item = await createTestItem(companyId, { 
+    // Create an item first with exact SKU for CSV import lookup
+    const item = await createTestItemExactSku(companyId, { 
       sku: `PRICE-APPLY-${timestamp}`, 
       name: 'Price Apply Test Item',
       type: 'PRODUCT'
@@ -242,8 +243,8 @@ describe('import.apply', { timeout: 30000 }, () => {
   it('updates existing prices via apply', async () => {
     const timestamp = Date.now();
     
-    // Create an item and price
-    const item = await createTestItem(companyId, { 
+    // Create an item and price with exact SKU for CSV import lookup
+    const item = await createTestItemExactSku(companyId, { 
       sku: `PRICE-UPD-${timestamp}`, 
       name: 'Price Update Test Item',
       type: 'PRODUCT'
@@ -354,9 +355,9 @@ describe('import.apply', { timeout: 30000 }, () => {
   it('handles mixed create/update in same batch', async () => {
     const timestamp = Date.now();
     
-    // Create one existing item
+    // Create one existing item with exact SKU for CSV import lookup
     const existingSku = `MIXED-UPD-${timestamp}`;
-    await createTestItem(companyId, { 
+    await createTestItemExactSku(companyId, { 
       sku: existingSku, 
       name: 'Existing Mixed Item',
       type: 'PRODUCT'

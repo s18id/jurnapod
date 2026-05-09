@@ -1043,6 +1043,54 @@ export async function createTestItem(
   }
 }
 
+/**
+ * Creates a test item with an exact caller-provided SKU (no runId suffix appended).
+ * Use ONLY when the test must reference the item by SKU in later operations
+ * (e.g., import/apply CSV lookup where exact SKU matching is required).
+ *
+ * WARNING: This bypasses the default unique-SKU isolation convention. Callers
+ * are responsible for ensuring the SKU does not collide with other tests.
+ */
+export async function createTestItemExactSku(
+  companyId: number,
+  options: {
+    sku: string;
+    name?: string;
+    type?: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE";
+    isActive?: boolean;
+    trackStock?: boolean;
+  }
+): Promise<ItemFixture> {
+  try {
+    const item = await createItem(companyId, {
+      sku: options.sku,
+      name: options.name ?? `Test Item Exact ${options.sku}`,
+      type: options.type ?? "PRODUCT",
+      is_active: options.isActive ?? true,
+      track_stock: options.trackStock ?? true,
+    });
+    createdFixtures.items.push(item);
+    return item;
+  } catch (error: unknown) {
+    if (error instanceof DatabaseConflictError) {
+      const db = getDb();
+      const result = await sql`SELECT id, company_id, sku, name, item_type FROM items WHERE company_id = ${companyId} AND sku = ${options.sku} LIMIT 1`.execute(db);
+      if (result.rows.length > 0) {
+        const row = result.rows[0] as { id: number; company_id: number; sku: string | null; name: string; item_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE" };
+        const existing: ItemFixture = {
+          id: Number(row.id),
+          company_id: Number(row.company_id),
+          sku: row.sku,
+          name: row.name,
+          type: row.item_type,
+        };
+        return existing;
+      }
+    }
+    throw error;
+  }
+}
+
 // ============================================================================
 // Variant Fixtures
 // ============================================================================

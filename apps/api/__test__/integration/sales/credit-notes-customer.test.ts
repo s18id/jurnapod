@@ -18,6 +18,8 @@ import {
   createTestCustomer,
   createTestCustomerForCompany,
   registerFixtureCleanup,
+  createTestFiscalYear,
+  createTestFiscalPeriod,
 } from '../../fixtures';
 import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { makeTag } from '../../helpers/tags';
@@ -151,6 +153,15 @@ describe('sales.credit-notes.customer - customer_id feature', { timeout: 30000 }
     outletId = seedCtx.outletId;
     companyId = seedCtx.companyId;
     companyCode = process.env.JP_COMPANY_CODE || 'JURNAPOD';
+
+    // Ensure an open fiscal year exists for the seed company (needed for invoice posting).
+    const fiscalYear = await createTestFiscalYear(companyId, {
+      year: 2026,
+      startDate: '2026-01-01',
+      endDate: '2026-12-31',
+      status: 'OPEN',
+    });
+    await createTestFiscalPeriod(fiscalYear.id);
 
     const cashier = await getOrCreateTestCashierForPermission(
       companyId,

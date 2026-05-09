@@ -85,6 +85,7 @@ export {
   createTestOutlet,
   createTestUser,
   createTestItem,
+  createTestItemExactSku,
   createTestVariant,
   createTestPrice,
   createTestStock,

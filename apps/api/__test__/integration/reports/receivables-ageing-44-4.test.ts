@@ -14,7 +14,9 @@ import {
   getSeedSyncContext,
   createTestItem,
   createTestCustomer,
-  getOrCreateTestCashierForPermission
+  getOrCreateTestCashierForPermission,
+  createTestFiscalYear,
+  createTestFiscalPeriod,
 } from '../../fixtures';
 
 let baseUrl: string;
@@ -39,6 +41,15 @@ describe('reports.receivables-ageing.story-44-4', { timeout: 60000 }, () => {
     baseUrl = getTestBaseUrl();
     ownerToken = await getTestAccessToken(baseUrl);
     seedContext = await getSeedSyncContext();
+
+    // Ensure an open fiscal year exists for the seed company (needed for invoice posting).
+    const fiscalYear = await createTestFiscalYear(seedContext.companyId, {
+      year: 2026,
+      startDate: '2026-01-01',
+      endDate: '2026-12-31',
+      status: 'OPEN',
+    });
+    await createTestFiscalPeriod(fiscalYear.id);
 
     // Get cashier token for permission tests
     const cashier = await getOrCreateTestCashierForPermission(

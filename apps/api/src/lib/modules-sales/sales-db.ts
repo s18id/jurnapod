@@ -800,7 +800,12 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
       shortfall_reason: row.shortfall_reason ?? undefined,
       shortfall_settled_by_user_id: row.shortfall_settled_by_user_id ? Number(row.shortfall_settled_by_user_id) : undefined,
       shortfall_settled_at: row.shortfall_settled_at ?? undefined,
-      fx_acknowledged_at: row.fx_acknowledged_at ?? undefined,
+      fx_acknowledged_at: (() => {
+        const raw = row.fx_acknowledged_at;
+        const converted = raw ? toUtcIso.dateLike(raw) as string : undefined;
+        if (raw) console.log('[DEBUG findPaymentById] raw fx_acknowledged_at:', JSON.stringify(raw), '-> converted:', JSON.stringify(converted));
+        return converted;
+      })(),
       fx_acknowledged_by: row.fx_acknowledged_by ? Number(row.fx_acknowledged_by) : undefined,
       created_by_user_id: row.created_by_user_id ? Number(row.created_by_user_id) : undefined,
       updated_by_user_id: row.updated_by_user_id ? Number(row.updated_by_user_id) : undefined,

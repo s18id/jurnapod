@@ -15,6 +15,8 @@ import {
   getTestAccessToken,
   getSeedSyncContext,
   createTestItem,
+  createTestFiscalYear,
+  createTestFiscalPeriod,
 } from '../../fixtures';
 import { makeTag } from '../../helpers/tags';
 
@@ -33,6 +35,15 @@ describe('sales.credit-notes.void - idempotency', { timeout: 30000 }, () => {
     const seedCtx = await getSeedSyncContext();
     outletId = seedCtx.outletId;
     companyId = seedCtx.companyId;
+
+    // Ensure an open fiscal year exists for the seed company (needed for invoice posting).
+    const fiscalYear = await createTestFiscalYear(companyId, {
+      year: 2026,
+      startDate: '2026-01-01',
+      endDate: '2026-12-31',
+      status: 'OPEN',
+    });
+    await createTestFiscalPeriod(fiscalYear.id);
   });
 
   afterAll(async () => {
