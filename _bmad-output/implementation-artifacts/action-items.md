@@ -1,6 +1,6 @@
 # Action Items Tracker
 
-**Last Updated:** 2026-05-09T00:00:00Z
+**Last Updated:** 2026-05-09T13:30:00Z
 **Review Cadence:** Monthly at sprint retrospective
 
 ---
@@ -11,9 +11,9 @@
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
 | P1 | 0 | 12 | 0 | 12 |
-| P2 | 0 | 12 | 0 | 12 |
+| P2 | 0 | 14 | 0 | 14 |
 | P3 | 1 | 5 | 3 | 9 |
-| **Total** | **1** | **33** | **3** | **37** |
+| **Total** | **1** | **35** | **3** | **39** |
 
 > **Note:** The Historical section (Pre-Epic 8) is tracked separately (32 items) and excluded from summary totals above.
 
@@ -115,6 +115,8 @@
 | **E54-A5** | Add seeded-data integration test for non-zero inventory reconciliation path | Epic 51 retro | E54 batch | Created `apps/api/__test__/integration/inventory-reconciliation-seeded.integration.test.ts`; tests cost layer creation, `inventory_item_costs` summary, partial consumption via `deductStockWithCost`, and subledger balance verification |
 | **E58-A2** | Investigate and size concurrent posting deadlock; choose Option A (<1 sprint in Epic 59) or Option B (>1 sprint backlog with estimate) | Epic 58 retro | Epic 59 | Option A selected and executed via Story 59.3 evidence + gate contract. Validation output: `__EPIC59_GATE__ {"version":1,"gate":"E58_A2_OPTION_A","decision":"OPTION_A","story_59_3_evidence_present":true,"pass":true}` from `scripts/validate-epic-59-gates.ts` (exit 0). |
 | **E58-A1** | Add cross-module error boundary verification to story kickoff artifacts and enforce `instanceof` + `error.name` fallback planning | Epic 58 retro | Epic 59 kickoff | Added `Cross-Module Error Boundary Verification (MANDATORY — E58-A1)` to `docs/templates/story-spec-template.md` and populated matrices in `story-59.1.md` through `story-59.6.md` with concrete error classes and fallback determinations. |
+| **E60-A1** | Resolve ACCOUNTANT treasury READ seed data gap | Epic 60 retro | Epic 60 post-close | Migrations 0207 seeds canonical `module_roles` for ALL companies from `roles.defaults.json`; ACCOUNTANT `treasury.transactions=1` present for all 3,831 companies; `role-boundary-treasury.test.ts` passes 5/5 with no ad-hoc `setModulePermission` for ACCOUNTANT. |
+| **E60-A2** | Eliminate pre-existing typecheck errors in `audit-log-filter.test.ts` | Epic 60 retro | Epic 60 post-close | `npm run typecheck -w @jurnapod/api` exits 0; zero type errors in `audit-log-filter.test.ts`. |
 
 ### P3
 
