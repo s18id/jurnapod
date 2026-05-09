@@ -182,10 +182,10 @@ cashBankTransactionsRoutes.post("/:id/post", async (c) => {
     const auth = c.get("auth");
     const service = getCashBankService();
     
-    // Check access permission - posting requires create permission (not update)
+    // Check access permission - posting requires update permission
     const accessResult = await requireAccess({
       module: "treasury",
-      permission: "create",
+      permission: "update",
       resource: "transactions"
     })(c.req.raw, auth);
 
@@ -230,10 +230,10 @@ cashBankTransactionsRoutes.post("/:id/void", async (c) => {
     const auth = c.get("auth");
     const service = getCashBankService();
     
-    // Check access permission - voiding requires create permission (not delete)
+    // Check access permission - voiding requires delete permission
     const accessResult = await requireAccess({
       module: "treasury",
-      permission: "create",
+      permission: "delete",
       resource: "transactions"
     })(c.req.raw, auth);
 

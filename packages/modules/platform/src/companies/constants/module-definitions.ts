@@ -37,6 +37,21 @@ export const MODULE_DEFINITIONS = [
     description: "Purchasing and payables"
   },
   {
+    code: "treasury",
+    name: "Treasury",
+    description: "Cash and bank transaction management"
+  },
+  {
+    code: "accounting",
+    name: "Accounting",
+    description: "General ledger, journals, accounts, fiscal years"
+  },
+  {
+    code: "reservations",
+    name: "Reservations",
+    description: "Bookings and table management"
+  },
+  {
     code: "reports",
     name: "Reports",
     description: "Reporting and analytics"
@@ -70,6 +85,10 @@ export const COMPANY_MODULE_DEFAULTS = [
   { code: "sales", enabled: true, config: {} },
   { code: "inventory", enabled: true, config: { level: 0 } },
   { code: "purchasing", enabled: false, config: {} },
+  { code: "treasury", enabled: true, config: {} },
+  { code: "accounting", enabled: true, config: {} },
+  { code: "reservations", enabled: true, config: {} },
+  { code: "payments", enabled: true, config: {} },
   { code: "reports", enabled: true, config: {} },
   { code: "settings", enabled: true, config: {} },
   { code: "accounts", enabled: true, config: {} },

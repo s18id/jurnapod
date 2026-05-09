@@ -12,7 +12,8 @@ import {
   COMPANY_MODULE_DEFAULTS,
   ROLE_DEFINITIONS,
   MODULE_ROLE_DEFAULTS_API,
-  SETTINGS_DEFINITIONS
+  SETTINGS_DEFINITIONS,
+  type ModuleCode
 } from "../constants/index.js";
 
 // Use API-scoped permission defaults to guarantee explicit module.resource rows.
@@ -306,22 +307,19 @@ async function ensureCompanyModuleRoles(
   companyId: number,
   roleIds: Record<string, number>
 ): Promise<void> {
+  // Build in-memory valid module set from MODULE_DEFINITIONS — no DB query needed.
+  const validModules = new Set(MODULE_DEFINITIONS.map((m) => m.code));
+
   for (const moduleRoleDefault of MODULE_ROLE_DEFAULTS) {
     const roleId = roleIds[moduleRoleDefault.roleCode];
     if (!roleId) continue;
-    
-    const moduleRow = await db
-      .selectFrom('modules')
-      .where('code', '=', moduleRoleDefault.module)
-      .select(['id'])
-      .executeTakeFirst();
-    
-    if (moduleRow) {
-      await sql`
-        INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
-        VALUES (${companyId}, ${roleId}, ${moduleRoleDefault.module}, ${moduleRoleDefault.resource}, ${moduleRoleDefault.permissionMask})
-      `.execute(db);
-    }
+
+    if (!validModules.has(moduleRoleDefault.module as ModuleCode)) continue;
+
+    await sql`
+      INSERT IGNORE INTO module_roles (company_id, role_id, module, resource, permission_mask)
+      VALUES (${companyId}, ${roleId}, ${moduleRoleDefault.module}, ${moduleRoleDefault.resource}, ${moduleRoleDefault.permissionMask})
+    `.execute(db);
   }
 }
 

@@ -28,7 +28,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
-import { authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";
+import { authenticateRequest, requireAccess, type AuthContext } from "../../lib/auth-guard.js";
 import { errorResponse } from "../../lib/response.js";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
 import { checkDuplicateClientTx } from "../../lib/sync/check-duplicate.js";
@@ -62,6 +62,17 @@ checkDuplicateRoutes.use("/*", async (c, next) => {
 checkDuplicateRoutes.post("/", async (c) => {
   const auth = c.get("auth");
   const correlationId = getRequestCorrelationId(c.req.raw);
+
+  // Check POS module access - duplicate check is a POS operation
+  const accessResult = await requireAccess({
+    module: "pos",
+    resource: "transactions",
+    permission: "read"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
 
   try {
     const body = await c.req.json();
@@ -180,6 +191,17 @@ export function registerCheckDuplicateRoutes(app: { openapi: OpenAPIHonoType["op
   app.openapi(checkDuplicateRoute, (async (c: any) => {
     const auth = c.get("auth");
     const correlationId = getRequestCorrelationId(c.req.raw);
+
+    // Check POS module access - duplicate check is a POS operation
+    const accessResult = await requireAccess({
+      module: "pos",
+      resource: "transactions",
+      permission: "read"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
 
     try {
       const body = await c.req.json();

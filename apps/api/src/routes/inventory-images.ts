@@ -65,6 +65,7 @@ const ImageUpdateSchema = z.object({
 function requireInventoryAccess(permission: ModulePermission): AuthenticatedRouteGuard {
   return requireAccess({
     module: "inventory",
+    resource: "items",
     permission
   });
 }

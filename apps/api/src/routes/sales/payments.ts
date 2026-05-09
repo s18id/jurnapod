@@ -164,6 +164,17 @@ paymentRoutes.patch("/:id", async (c) => {
   const auth = c.get("auth") as AuthContext;
 
   try {
+    // Check module permission
+    const accessResult = await requireAccess({
+      module: "sales",
+      permission: "update",
+      resource: "payments"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
     const paymentId = NumericIdSchema.parse(c.req.param("id"));
 
     let payload: unknown;
@@ -218,6 +229,10 @@ paymentRoutes.patch("/:id", async (c) => {
 
     if (error instanceof PaymentAllocationError) {
       return errorResponse("INVALID_REQUEST", error.message, 400);
+    }
+
+    if (error instanceof DatabaseForbiddenError) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
     }
 
     console.error("PATCH /sales/payments/:id failed", error);
@@ -623,6 +638,7 @@ export function registerSalesPaymentRoutes(app: { openapi: OpenAPIHonoType["open
     try {
       const accessResult = await requireAccess({
         module: "sales",
+        resource: "payments",
         permission: "read"
       })(c.req.raw, auth);
 
@@ -722,6 +738,7 @@ export function registerSalesPaymentRoutes(app: { openapi: OpenAPIHonoType["open
     try {
       const accessResult = await requireAccess({
         module: "sales",
+        resource: "payments",
         permission: "read"
       })(c.req.raw, auth);
 
@@ -805,6 +822,17 @@ export function registerSalesPaymentRoutes(app: { openapi: OpenAPIHonoType["open
     const auth = c.get("auth");
 
     try {
+      // Check module permission
+      const accessResult = await requireAccess({
+        module: "sales",
+        permission: "update",
+        resource: "payments"
+      })(c.req.raw, auth);
+
+      if (accessResult !== null) {
+        return accessResult;
+      }
+
       const paymentId = NumericIdSchema.parse(c.req.param("id"));
 
       let payload: unknown;
@@ -854,6 +882,10 @@ export function registerSalesPaymentRoutes(app: { openapi: OpenAPIHonoType["open
 
       if (error instanceof PaymentAllocationError) {
         return errorResponse("INVALID_REQUEST", error.message, 400);
+      }
+
+      if (error instanceof DatabaseForbiddenError) {
+        return errorResponse("FORBIDDEN", "Forbidden", 403);
       }
 
       console.error("PATCH /sales/payments/:id failed", error);

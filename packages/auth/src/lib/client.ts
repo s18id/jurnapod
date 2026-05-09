@@ -237,6 +237,7 @@ export function createAuthClient(
             user_id: record.userId,
             action: 'LOGIN',
             result: record.result,
+            success: record.result === "SUCCESS" ? 1 : 0,
             ip_address: record.ipAddress,
             user_agent: record.userAgent,
             payload_json: JSON.stringify({

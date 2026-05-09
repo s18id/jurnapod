@@ -214,7 +214,7 @@ suppliesRoutes.patch("/:id", async (c) => {
     const accessResult = await requireAccess({
       module: "inventory",
       resource: "items",
-      permission: "update"
+      permission: "create"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -420,6 +420,18 @@ export function registerSupplyRoutes(app: { openapi: OpenAPIHonoType["openapi"] 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.openapi(createSupplyRoute, (async (c: any) => {
     const auth = c.get("auth");
+    
+    // Check access permission using bitmask system
+    const accessResult = await requireAccess({
+      module: "inventory",
+      resource: "items",
+      permission: "create"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
     const payload = await c.req.json();
     const input = SupplyCreateSchema.parse(payload);
 
