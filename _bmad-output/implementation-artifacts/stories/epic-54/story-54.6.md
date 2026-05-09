@@ -128,12 +128,14 @@ If checks fail, classify as blocking pre-existing issue or tracked follow-up per
 
 ### D54-002 — `invoiced_qty` Accumulator
 
+> **⚠️ Correction (Epic 61, 2026-05-09):** The original implementation used `toScaled4(String(line.qty))` for the accumulator update, incorrectly applying money/FX scaling to quantity values. As of Epic 61, the accumulator uses raw `line.qty` (no scaling). The column type `DECIMAL(19,4)` from migration 0201 remains deployed but stores raw decimal quantities; a future migration SHALL reduce precision to `DECIMAL(19,2)`.
+
 | Aspect | Decision | Rationale |
 |--------|----------|-----------|
 | Column | `purchase_order_lines.invoiced_qty DECIMAL(19,4) NOT NULL DEFAULT 0.0000` | Same type as `received_qty`; additive-only |
 | Migration | 0201, rerunnable via `information_schema` | Follows canonical migration pattern |
-| Update | Atomic `UPDATE SET invoiced_qty = invoiced_qty + qty` inside posting transaction | Already inside `FOR UPDATE` lock scope |
-| Decrement | Atomic `UPDATE SET invoiced_qty = invoiced_qty - qty` inside void transaction | Reverses accumulator; must handle partial void edge cases |
+| Update | Atomic `UPDATE SET invoiced_qty = invoiced_qty + line.qty` inside posting transaction | Already inside `FOR UPDATE` lock scope; qty is raw decimal, NOT scaled |
+| Decrement | Atomic `UPDATE SET invoiced_qty = invoiced_qty - line.qty` inside void transaction | Reverses accumulator; qty is raw decimal, NOT scaled |
 | Guard change | From `invoice_qty <= received_qty` to `invoice_qty <= (received_qty - invoiced_qty_old)` | Fixes cumulative over-invoicing bug |
 
 ### D54-003 — DRY Extraction

@@ -12,6 +12,8 @@
 
 Epic 54 (Accounts Payable Correctness) resolved five correctness defects in the AP subsystem and added a full proof suite. This ADR records the architectural decisions, invariant rules, and operational constraints established during that epic so they are:
 
+> **⚠️ Correction (Epic 61, 2026-05-09):** The original ADR-0024 documented `toScaled4(String(line.qty))` for the `invoiced_qty` accumulator updates. This was incorrect — `toScaled4` is a money/FX scaling function (multiplies by 10000 for 4-decimal currency precision). Quantities are not money and MUST NOT be scaled. The code examples below have been corrected to use raw `line.qty` values. The column type `DECIMAL(19,4)` from migration 0201 remains deployed but stores raw decimal quantities; a future migration SHALL reduce precision to `DECIMAL(19,2)`.
+
 1. **Enforceable** — QA can validate test coverage against them
 2. **Discoverable** — new team members can understand invariants without reading test code
 3. **Immutable without ADR** — future changes require a new ADR, not a silent override
@@ -65,10 +67,10 @@ const newInvoicedQty = receivedQty - currentInvoicedQty;
 if (invoiceQty > newInvoicedQty) {
   throw new PIGrnInsufficientQtyError(line.po_line_id, line.qty, String(newInvoicedQty));
 }
-// Then increment
+// Then increment — qty is a raw decimal, NOT scaled with toScaled4
 await sql`
   UPDATE purchase_order_lines
-  SET invoiced_qty = invoiced_qty + ${toScaled4(String(line.qty))}
+  SET invoiced_qty = invoiced_qty + ${line.qty}
   WHERE id = ${line.po_line_id}
 `.execute(trx);
 ```
@@ -77,7 +79,7 @@ await sql`
 ```typescript
 await sql`
   UPDATE purchase_order_lines
-  SET invoiced_qty = invoiced_qty - ${toScaled4(String(line.qty))}
+  SET invoiced_qty = invoiced_qty - ${line.qty}
   WHERE id = ${line.po_line_id}
 `.execute(trx);
 ```
