@@ -45,7 +45,7 @@ import {
   PurchaseCreditNoApplicableInvoiceError,
   PurchaseCreditJournalNotBalancedError,
 } from "../types/purchase-credit.js";
-import { fromScaled4, scale4Mul, toScaled4 } from "./decimal-scale4.js";
+import { add, sub, mul, gt, lt, lte } from "@jurnapod/shared";
 import { computePurchaseInvoiceOpenAmount } from "./purchase-invoice-open-amount.js";
 
 async function getPurchasingAccountsForUpdate(
@@ -189,7 +189,7 @@ export class PurchaseCreditService {
     let result: { creditId: number };
     try {
       result = await this.db.transaction().execute(async (trx) => {
-      let totalCredit = 0n;
+      let totalCredit = "0.0000";
 
       const headerResult = await trx
         .insertInto("purchase_credits")
@@ -214,10 +214,8 @@ export class PurchaseCreditService {
 
       for (let i = 0; i < input.lines.length; i++) {
         const line = input.lines[i];
-        const qty = toScaled4(line.qty);
-        const unitPrice = toScaled4(line.unitPrice);
-        const lineAmount = scale4Mul(qty, unitPrice);
-        totalCredit += lineAmount;
+        const lineAmount = mul(line.qty, line.unitPrice);
+        totalCredit = add(totalCredit, lineAmount);
 
         await trx
           .insertInto("purchase_credit_lines")
@@ -230,7 +228,7 @@ export class PurchaseCreditService {
             description: line.description ?? null,
             qty: line.qty,
             unit_price: line.unitPrice,
-            line_amount: fromScaled4(lineAmount),
+            line_amount: lineAmount,
             reason: line.reason ?? null,
           })
           .executeTakeFirst();
@@ -238,7 +236,7 @@ export class PurchaseCreditService {
 
       await trx
         .updateTable("purchase_credits")
-        .set({ total_credit_amount: fromScaled4(totalCredit) })
+        .set({ total_credit_amount: totalCredit })
         .where("id", "=", creditId)
         .executeTakeFirst();
 
@@ -342,22 +340,13 @@ export class PurchaseCreditService {
     `.execute(this.db);
 
     return {
-      credits: rows.rows.map((row) => {
-        const totalCredit = toScaled4(String(row.total_credit_amount));
-        const applied = toScaled4(String(row.applied_amount));
-        const remaining = totalCredit - applied;
+      credits: rows.rows.map((row: any) => {
+        const totalCredit = String(row.total_credit_amount);
+        const applied = String(row.applied_amount);
+        const remaining = sub(totalCredit, applied);
         return {
-          id: row.id,
-          company_id: row.company_id,
-          supplier_id: row.supplier_id,
-          supplier_name: row.supplier_name,
-          credit_no: row.credit_no,
-          credit_date: toUtcIso.dateLike(row.credit_date) as string,
-          description: row.description,
-          status: toPurchaseCreditStatusLabel(row.status),
-          total_credit_amount: String(row.total_credit_amount),
-          applied_amount: String(row.applied_amount),
-          remaining_amount: fromScaled4(remaining > 0n ? remaining : 0n),
+          ...row,
+          remaining_amount: gt(remaining, "0.0000") ? remaining : "0.0000",
           journal_batch_id: row.journal_batch_id,
           posted_at: row.posted_at ? toUtcIso.dateLike(row.posted_at) as string : null,
           voided_at: row.voided_at ? toUtcIso.dateLike(row.voided_at) as string : null,
@@ -453,22 +442,12 @@ export class PurchaseCreditService {
       .orderBy("id", "asc")
       .execute();
 
-    const totalCredit = toScaled4(String(h.total_credit_amount));
-    const applied = toScaled4(String(h.applied_amount));
-    const remaining = totalCredit - applied;
-
+    const totalCredit = String(h.total_credit_amount);
+    const applied = String(h.applied_amount);
+    const remaining = sub(totalCredit, applied);
     return {
-      id: h.id,
-      company_id: h.company_id,
-      supplier_id: h.supplier_id,
-      supplier_name: h.supplier_name,
-      credit_no: h.credit_no,
-      credit_date: toUtcIso.dateLike(h.credit_date) as string,
-      description: h.description,
-      status: toPurchaseCreditStatusLabel(h.status),
-      total_credit_amount: String(h.total_credit_amount),
-      applied_amount: String(h.applied_amount),
-      remaining_amount: fromScaled4(remaining > 0n ? remaining : 0n),
+      ...(h as any),
+      remaining_amount: gt(remaining, "0.0000") ? remaining : "0.0000",
       journal_batch_id: h.journal_batch_id,
       posted_at: toUtcIso.dateLike(h.posted_at, { nullable: true }) as string,
       posted_by_user_id: h.posted_by_user_id,
@@ -595,8 +574,8 @@ export class PurchaseCreditService {
 
       const fifoInvoiceIds = fifoInvoiceRows.rows.map((row) => Number(row.id));
 
-      let totalAppliedNow = 0n;
-      const appliedByInvoiceId = new Map<number, bigint>();
+      let totalAppliedNow = "0.0000";
+      const appliedByInvoiceId = new Map<number, string>();
 
       const ensureInvoiceEligible = async (invoiceId: number): Promise<void> => {
         const invoice = await trx
@@ -618,19 +597,19 @@ export class PurchaseCreditService {
       };
 
       for (const line of lines) {
-        let remainingLineAmount = toScaled4(String(line.line_amount));
+        let remainingLineAmount = String(line.line_amount);
 
         if (line.purchase_invoice_id) {
           const invoiceId = line.purchase_invoice_id;
           await ensureInvoiceEligible(invoiceId);
 
           const open = await computePurchaseInvoiceOpenAmount(trx as KyselySchema, companyId, invoiceId);
-          const alreadyApplied = appliedByInvoiceId.get(invoiceId) ?? 0n;
-          const effectiveOpen = open - alreadyApplied;
-          const effectiveOpenSafe = effectiveOpen > 0n ? effectiveOpen : 0n;
-          const applied = effectiveOpenSafe < remainingLineAmount ? effectiveOpenSafe : remainingLineAmount;
+          const alreadyApplied = appliedByInvoiceId.get(invoiceId) ?? "0.0000";
+          const effectiveOpen = sub(open, alreadyApplied);
+          const effectiveOpenSafe = gt(effectiveOpen, "0.0000") ? effectiveOpen : "0.0000";
+          const applied = lt(effectiveOpenSafe, remainingLineAmount) ? effectiveOpenSafe : remainingLineAmount;
 
-          if (applied > 0n) {
+          if (gt(applied, "0.0000")) {
             await trx
               .insertInto("purchase_credit_applications")
               .values({
@@ -638,33 +617,33 @@ export class PurchaseCreditService {
                 purchase_credit_id: creditId,
                 purchase_credit_line_id: line.id,
                 purchase_invoice_id: invoiceId,
-                applied_amount: fromScaled4(applied),
+                applied_amount: applied,
                 applied_at: new Date(),
               })
               .executeTakeFirst();
 
-            totalAppliedNow += applied;
-            appliedByInvoiceId.set(invoiceId, alreadyApplied + applied);
-            remainingLineAmount -= applied;
+            totalAppliedNow = add(totalAppliedNow, applied);
+            appliedByInvoiceId.set(invoiceId, add(alreadyApplied, applied));
+            remainingLineAmount = sub(remainingLineAmount, applied);
           }
 
           continue;
         }
 
         for (const invoiceId of fifoInvoiceIds) {
-          if (remainingLineAmount <= 0n) {
+          if (lte(remainingLineAmount, "0.0000")) {
             break;
           }
 
           const open = await computePurchaseInvoiceOpenAmount(trx as KyselySchema, companyId, invoiceId);
-          const alreadyApplied = appliedByInvoiceId.get(invoiceId) ?? 0n;
-          const effectiveOpen = open - alreadyApplied;
-          const effectiveOpenSafe = effectiveOpen > 0n ? effectiveOpen : 0n;
-          if (effectiveOpenSafe <= 0n) {
+          const alreadyApplied = appliedByInvoiceId.get(invoiceId) ?? "0.0000";
+          const effectiveOpen = sub(open, alreadyApplied);
+          const effectiveOpenSafe = gt(effectiveOpen, "0.0000") ? effectiveOpen : "0.0000";
+          if (lte(effectiveOpenSafe, "0.0000")) {
             continue;
           }
 
-          const applied = effectiveOpenSafe < remainingLineAmount ? effectiveOpenSafe : remainingLineAmount;
+          const applied = lt(effectiveOpenSafe, remainingLineAmount) ? effectiveOpenSafe : remainingLineAmount;
           await trx
             .insertInto("purchase_credit_applications")
             .values({
@@ -672,18 +651,18 @@ export class PurchaseCreditService {
               purchase_credit_id: creditId,
               purchase_credit_line_id: line.id,
               purchase_invoice_id: invoiceId,
-              applied_amount: fromScaled4(applied),
+              applied_amount: applied,
               applied_at: new Date(),
             })
             .executeTakeFirst();
 
-          totalAppliedNow += applied;
-          appliedByInvoiceId.set(invoiceId, alreadyApplied + applied);
-          remainingLineAmount -= applied;
+          totalAppliedNow = add(totalAppliedNow, applied);
+          appliedByInvoiceId.set(invoiceId, add(alreadyApplied, applied));
+          remainingLineAmount = sub(remainingLineAmount, applied);
         }
       }
 
-      if (totalAppliedNow <= 0n) {
+      if (lte(totalAppliedNow, "0.0000")) {
         throw new PurchaseCreditNoApplicableInvoiceError();
       }
 
@@ -691,13 +670,9 @@ export class PurchaseCreditService {
 
       const supplierName = supplier.name ?? `Supplier #${credit.supplier_id}`;
       const desc = `Purchase Credit ${credit.credit_no} - ${supplierName}`;
-      const amount = fromScaled4(totalAppliedNow);
+      const amount = totalAppliedNow;
 
-      const totalDebits = toScaled4(amount);
-      const totalCredits = toScaled4(amount);
-      if (totalDebits !== totalCredits) {
-        throw new PurchaseCreditJournalNotBalancedError(fromScaled4(totalDebits), fromScaled4(totalCredits));
-      }
+      // Journal is balanced (debits == credits by construction)
 
       const batchResult = await sql`
         INSERT INTO journal_batches (
@@ -718,12 +693,12 @@ export class PurchaseCreditService {
           (${batchId}, ${companyId}, NULL, ${expenseAccountId}, ${credit.credit_date}, '0.0000', ${amount}, ${desc})
       `.execute(trx);
 
-      const previousApplied = toScaled4(String(credit.applied_amount));
-      const newApplied = previousApplied + totalAppliedNow;
-      const totalCredit = toScaled4(String(credit.total_credit_amount));
-      const remaining = totalCredit - newApplied;
+      const previousApplied = String(credit.applied_amount);
+      const newApplied = add(previousApplied, totalAppliedNow);
+      const totalCredit = String(credit.total_credit_amount);
+      const remaining = sub(totalCredit, newApplied);
 
-      const newStatus = remaining > 0n
+      const newStatus = gt(remaining, "0.0000")
         ? PURCHASE_CREDIT_STATUS.PARTIAL
         : PURCHASE_CREDIT_STATUS.APPLIED;
 
@@ -731,7 +706,7 @@ export class PurchaseCreditService {
         .updateTable("purchase_credits")
         .set({
           status: newStatus,
-          applied_amount: fromScaled4(newApplied),
+          applied_amount: newApplied,
           journal_batch_id: batchId,
           posted_at: new Date(),
           posted_by_user_id: userId,
@@ -753,8 +728,8 @@ export class PurchaseCreditService {
 
       return {
         batchId,
-        appliedAmount: fromScaled4(totalAppliedNow),
-        remainingAmount: fromScaled4(remaining > 0n ? remaining : 0n),
+        appliedAmount: totalAppliedNow,
+        remainingAmount: gt(remaining, "0.0000") ? remaining : "0.0000",
         status: (newStatus === PURCHASE_CREDIT_STATUS.APPLIED ? "APPLIED" : "PARTIAL") as
           | "PARTIAL"
           | "APPLIED",

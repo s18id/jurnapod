@@ -24,6 +24,7 @@ export interface POLineRow {
   unit_price: string;
   tax_rate: string;
   received_qty: string;
+  invoiced_qty: string;
   line_total: string;
 }
 
@@ -36,6 +37,7 @@ export interface POLine {
   unit_price: string;
   tax_rate: string;
   received_qty: string;
+  invoiced_qty: string;
   line_total: string;
 }
 
@@ -215,8 +217,11 @@ export interface TransitionPurchaseOrderStatusResult {
 // Decimal Helpers (scale 4)
 // =============================================================================
 
-// Internal helpers (exported for service use)
-export function toScaled4(value: string): bigint {
+// ═══════════════════════════════════════════════════════════════════════════
+// Internal decimal helpers — NOT exported. Use @jurnapod/shared API instead.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function toScaled4(value: string): bigint {
   const trimmed = value.trim();
   if (!/^\d+(\.\d{1,4})?$/.test(trimmed)) {
     throw new Error(`Invalid decimal value: ${value}`);
@@ -318,6 +323,7 @@ function formatOrderRow(order: {
       unit_price: String(l.unit_price),
       tax_rate: String(l.tax_rate),
       received_qty: String(l.received_qty),
+      invoiced_qty: String(l.invoiced_qty),
       line_total: String(l.line_total),
     })),
   };

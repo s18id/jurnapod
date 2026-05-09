@@ -123,6 +123,12 @@ export interface PaymentService {
     acknowledgedAt: Date,
     actor: MutationActor
   ): Promise<SalesPayment | null>;
+
+  voidPayment(
+    companyId: number,
+    paymentId: number,
+    actor?: MutationActor
+  ): Promise<SalesPayment | null>;
 }
 
 export interface PaymentServiceDeps {
@@ -851,12 +857,104 @@ export function createPaymentService(deps: PaymentServiceDeps): PaymentService {
     });
   }
 
+  async function voidPayment(
+    companyId: number,
+    paymentId: number,
+    actor?: MutationActor
+  ): Promise<SalesPayment | null> {
+    return withTransaction(async (executor) => {
+      const payment = await executor.findPaymentById(companyId, paymentId, true);
+      if (!payment) {
+        return null;
+      }
+
+      // Only POSTED payments can be voided
+      if (payment.status === "DRAFT") {
+        throw new PaymentStatusError("Draft payments cannot be voided. Delete the payment instead.");
+      }
+
+      if (payment.status === "VOID") {
+        throw new PaymentStatusError("Payment is already voided");
+      }
+
+      if (payment.status !== "POSTED") {
+        throw new PaymentStatusError("Only posted payments can be voided");
+      }
+
+      if (actor) {
+        await accessScopeChecker.assertOutletAccess({
+          actorUserId: actor.userId,
+          companyId,
+          outletId: payment.outlet_id,
+          permission: SalesPermissions.VOID_PAYMENT
+        });
+      }
+
+      // Transition status to VOID
+      await executor.updatePaymentStatus({
+        companyId,
+        paymentId,
+        status: "VOID",
+        paymentDeltaIdr: 0, // Required by NOT NULL constraint
+        updatedByUserId: actor?.userId
+      });
+
+      // Reversal: revert the invoice paid_total
+      // Get the invoice to recalculate
+      const invoice = await executor.findInvoiceById(companyId, payment.invoice_id, true);
+      if (invoice) {
+        const invoiceData = invoice as { grand_total?: number; paid_total?: number };
+        const grandTotal = Number(invoiceData.grand_total ?? 0);
+        const paidTotal = Number(invoiceData.paid_total ?? 0);
+        const paymentAmountApplied = payment.invoice_amount_idr ?? payment.payment_amount_idr ?? payment.amount;
+        const newPaidTotal = normalizeMoney(Math.max(0, paidTotal - paymentAmountApplied));
+
+        const newPaymentStatus =
+          newPaidTotal >= grandTotal
+            ? "PAID"
+            : newPaidTotal > 0
+              ? "PARTIAL"
+              : "UNPAID";
+
+        await executor.updateInvoicePaidTotal({
+          companyId,
+          invoiceId: payment.invoice_id,
+          paidTotal: newPaidTotal,
+          paymentStatus: newPaymentStatus,
+          updatedByUserId: actor?.userId ?? undefined
+        });
+      }
+
+      // Post reversal journal entries if hook is provided
+      const tx = executor.getTransaction();
+      if (postingHook && tx) {
+        await postingHook.voidPaymentToJournal({
+          _paymentId: paymentId,
+          _companyId: companyId,
+          _invoiceId: payment.invoice_id
+        }, tx);
+      }
+
+      const voidedPayment = await executor.findPaymentById(companyId, paymentId);
+      if (!voidedPayment) {
+        throw new Error("Voided payment not found");
+      }
+
+      const splits = await executor.findPaymentSplits(companyId, paymentId);
+      if (splits.length > 0) {
+        return attachSplitsToPayment(voidedPayment, splits);
+      }
+      return voidedPayment;
+    });
+  }
+
   return {
     createPayment,
     getPayment,
     updatePayment,
     listPayments,
     postPayment,
-    acknowledgeFxDelta
+    acknowledgeFxDelta,
+    voidPayment
   };
 }

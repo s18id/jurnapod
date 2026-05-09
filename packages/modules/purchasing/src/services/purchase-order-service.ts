@@ -30,7 +30,6 @@ import {
   computeTotalAmount,
   toIso,
   formatOrderRow,
-  toScaled4,
 } from "../types/purchase-order.js";
 
 // =============================================================================
@@ -165,7 +164,7 @@ export class PurchaseOrderService {
       .where("company_id", "=", companyId)
       .select([
         "id", "line_no", "item_id", "description", "qty", "unit_price",
-        "tax_rate", "received_qty", "line_total",
+        "tax_rate", "received_qty", "invoiced_qty", "line_total",
       ])
       .orderBy("line_no", "asc")
       .execute();
@@ -515,8 +514,8 @@ export class PurchaseOrderService {
           .execute();
 
         const allLinesReceived = lines.every((line) => {
-          const qty = toScaled4(String(line.qty));
-          const receivedQty = toScaled4(String(line.received_qty ?? "0"));
+          const qty = Number(line.qty);
+          const receivedQty = Number(line.received_qty ?? "0");
           return receivedQty >= qty;
         });
 

@@ -488,4 +488,235 @@ export async function voidCreditNote(
   });
 }
 
+// =============================================================================
+// Void Sales Invoice Mapper — reverses the original invoice posting entries
+// =============================================================================
+
+/**
+ * Void Sales Invoice Posting Mapper
+ *
+ * Creates reversal journal entries for voided invoices.
+ * Reverses the original sales invoice posting:
+ *   Original: DR AR (grand_total), CR Revenue (subtotal), CR Tax (tax_amount)
+ *   Reversal: CR AR (grand_total), DR Revenue (subtotal), DR Tax (tax_amount)
+ */
+export class VoidSalesInvoicePostingMapper implements PostingMapper {
+  constructor(
+    private readonly executor: SalesPostingExecutor,
+    private readonly invoice: SalesInvoicePostingData
+  ) {}
+
+  async mapToJournal(_request: PostingRequest): Promise<JournalLine[]> {
+    const mapping = await this.executor.readOutletAccountMappingByKey(
+      this.invoice.company_id,
+      this.invoice.outlet_id
+    );
+
+    const lines: JournalLine[] = [];
+
+    // Reverse AR: originally DR AR, now CR AR
+    lines.push({
+      account_id: mapping.AR,
+      debit: 0,
+      credit: normalizeMoney(this.invoice.grand_total),
+      description: `Void Invoice ${this.invoice.invoice_no} - AR Reversal`
+    });
+
+    // Reverse Revenue: originally CR Revenue, now DR Revenue
+    lines.push({
+      account_id: mapping.SALES_REVENUE,
+      debit: normalizeMoney(this.invoice.subtotal),
+      credit: 0,
+      description: `Void Invoice ${this.invoice.invoice_no} - Revenue Reversal`
+    });
+
+    // Reverse Tax entries: originally CR Tax, now DR Tax
+    if (this.invoice.taxes && this.invoice.taxes.length > 0) {
+      const taxRateIds = this.invoice.taxes.map((t) => t.tax_rate_id);
+      if (taxRateIds.length > 0) {
+        const taxRateAccountMap = await this.executor.readTaxRatesByIds(
+          taxRateIds,
+          this.invoice.company_id
+        );
+
+        for (const taxLine of this.invoice.taxes) {
+          if (taxLine.amount <= 0) continue;
+
+          const taxRateInfo = taxRateAccountMap.get(taxLine.tax_rate_id);
+          if (!taxRateInfo || !taxRateInfo.account_id) {
+            const taxCode = taxRateInfo?.code ?? `ID:${taxLine.tax_rate_id}`;
+            throw new Error(`${TAX_ACCOUNT_MISSING_MESSAGE}:${taxCode}`);
+          }
+
+          lines.push({
+            account_id: taxRateInfo.account_id,
+            debit: normalizeMoney(taxLine.amount),
+            credit: 0,
+            description: `Void Invoice ${this.invoice.invoice_no} - Tax Reversal (${taxRateInfo.code})`
+          });
+        }
+      }
+    }
+
+    return lines;
+  }
+}
+
+/**
+ * Post void reversal journal entries for a voided sales invoice.
+ *
+ * Creates a new journal batch with SALES_INVOICE_VOID doc_type containing
+ * reversal lines that undo the original invoice posting entries.
+ */
+export async function voidSalesInvoice(
+  db: KyselySchema,
+  executor: SalesPostingExecutor,
+  invoice: SalesInvoicePostingData,
+  options: SalesPostingOptions = {}
+): Promise<PostingResult> {
+  const postingRequest: PostingRequest = {
+    doc_type: `${SALES_INVOICE_DOC_TYPE}_VOID`,
+    doc_id: invoice.id,
+    company_id: invoice.company_id,
+    outlet_id: invoice.outlet_id
+  };
+
+  const postingService = new PostingService(
+    new SalesPostingRepository(db, fromUtcIso.mysql(toUtcIso.dateLike(invoice.updated_at) as string)),
+    {
+      [`${SALES_INVOICE_DOC_TYPE}_VOID`]: new VoidSalesInvoicePostingMapper(executor, invoice)
+    }
+  );
+
+  return postingService.post(postingRequest, {
+    transactionOwner: options.transactionOwner ?? "external"
+  });
+}
+
+// =============================================================================
+// Void Sales Payment Posting
+// =============================================================================
+
+/**
+ * Reverses the original payment posting: credits bank/cash, debits AR, and
+ * reverses the FX delta variance entry.
+ */
+export class VoidSalesPaymentPostingMapper implements PostingMapper {
+  constructor(
+    private readonly executor: SalesPostingExecutor,
+    private readonly payment: SalesPaymentPostingData,
+    private readonly invoiceNo: string
+  ) {}
+
+  async mapToJournal(_request: PostingRequest): Promise<JournalLine[]> {
+    const mapping = await this.executor.readOutletAccountMappingByKey(
+      this.payment.company_id,
+      this.payment.outlet_id
+    );
+
+    const lines: JournalLine[] = [];
+
+    const paymentAmount = this.payment.actual_amount_idr ?? this.payment.payment_amount_idr ?? this.payment.amount;
+    const invoiceAmountApplied = this.payment.invoice_amount_idr ?? paymentAmount;
+    const delta = this.payment.payment_delta_idr ?? 0;
+
+    // Reverse split/header: CR bank/cash instead of DR
+    const splits = this.payment.splits;
+    if (splits && splits.length > 0) {
+      for (const split of splits) {
+        const accountLabel = split.account_name ?? `Account #${split.account_id}`;
+        lines.push({
+          account_id: split.account_id,
+          debit: 0,
+          credit: normalizeMoney(split.amount),
+          description: `Void Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - ${accountLabel} (Split ${split.split_index + 1}/${splits.length})`
+        });
+      }
+    } else {
+      const cashBankAccountId = this.payment.account_id;
+      const accountLabel = this.payment.account_name ?? `Account #${cashBankAccountId}`;
+      lines.push({
+        account_id: cashBankAccountId,
+        debit: 0,
+        credit: normalizeMoney(paymentAmount),
+        description: `Void Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - ${accountLabel}`
+      });
+    }
+
+    // Reverse AR: DR AR instead of CR
+    lines.push({
+      account_id: mapping.AR,
+      debit: normalizeMoney(invoiceAmountApplied),
+      credit: 0,
+      description: `Void Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - AR Reversal`
+    });
+
+    // Reverse FX delta
+    if (delta !== 0) {
+      const varianceAccounts = await this.executor.readCompanyPaymentVarianceAccounts(
+        this.payment.company_id
+      );
+
+      if (delta > 0) {
+        if (!varianceAccounts.gain) {
+          throw new Error("PAYMENT_VARIANCE_GAIN_MISSING");
+        }
+        lines.push({
+          account_id: varianceAccounts.gain,
+          debit: normalizeMoney(delta),
+          credit: 0,
+          description: `Void Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - Variance Gain Reversal`
+        });
+      } else if (delta < 0) {
+        if (!varianceAccounts.loss) {
+          throw new Error("PAYMENT_VARIANCE_LOSS_MISSING");
+        }
+        lines.push({
+          account_id: varianceAccounts.loss,
+          debit: 0,
+          credit: normalizeMoney(Math.abs(delta)),
+          description: `Void Payment ${this.payment.payment_no} for Invoice ${this.invoiceNo} - Variance Loss Reversal`
+        });
+      }
+    }
+
+    // Guard posting balance
+    const totalDebitsMinor = lines.reduce((sum, line) => sum + Math.round(line.debit * 100), 0);
+    const totalCreditsMinor = lines.reduce((sum, line) => sum + Math.round(line.credit * 100), 0);
+    if (totalDebitsMinor !== totalCreditsMinor) {
+      throw new Error(`VOID_PAYMENT_IMBALANCE: debits_minor=${totalDebitsMinor}, credits_minor=${totalCreditsMinor}`);
+    }
+
+    return lines;
+  }
+}
+
+const SALES_PAYMENT_VOID_DOC_TYPE = "SALES_PAYMENT_VOID";
+
+export async function voidSalesPayment(
+  db: KyselySchema,
+  executor: SalesPostingExecutor,
+  payment: SalesPaymentPostingData,
+  invoiceNo: string,
+  options: SalesPostingOptions = {}
+): Promise<PostingResult> {
+  const postingRequest: PostingRequest = {
+    doc_type: SALES_PAYMENT_VOID_DOC_TYPE,
+    doc_id: payment.id,
+    company_id: payment.company_id,
+    outlet_id: payment.outlet_id
+  };
+
+  const postingService = new PostingService(
+    new SalesPostingRepository(db, fromUtcIso.mysql(toUtcIso.dateLike(payment.updated_at) as string)),
+    {
+      [SALES_PAYMENT_VOID_DOC_TYPE]: new VoidSalesPaymentPostingMapper(executor, payment, invoiceNo)
+    }
+  );
+
+  return postingService.post(postingRequest, {
+    transactionOwner: options.transactionOwner ?? "external"
+  });
+}
+
 

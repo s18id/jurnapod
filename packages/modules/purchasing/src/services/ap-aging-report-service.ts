@@ -36,6 +36,7 @@ function toScaled(value: string, scale: number): bigint {
   return BigInt(integer) * scaleFactor + BigInt(fracScaled);
 }
 
+/** PROHIBITED: low-level primitive — use only inside domain wrappers. */
 function toScaled4(value: string): bigint {
   return toScaled(value, 4);
 }

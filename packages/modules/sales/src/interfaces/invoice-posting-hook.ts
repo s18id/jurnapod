@@ -30,4 +30,15 @@ export interface InvoicePostingHook {
    * @returns posting result with journal batch ID and lines
    */
   postInvoiceToJournal(input: PostInvoiceInput, tx: Transaction): Promise<PostingResult>;
+
+  /**
+   * Post void reversal journal entry.
+   * Called from within the invoice void's own DB transaction.
+   * Creates reversal journal lines that undo the original invoice posting.
+   * 
+   * @param input - invoice void options (same shape as PostInvoiceInput)
+   * @param tx - live transaction handle for linking journal to invoice
+   * @returns posting result with journal batch ID and lines
+   */
+  voidInvoiceToJournal(input: PostInvoiceInput, tx: Transaction): Promise<PostingResult>;
 }

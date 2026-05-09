@@ -965,19 +965,30 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
           return null;
         }
 
+        // AC5: Only POSTED invoices can be voided. DRAFT invoices are deleted, not voided.
+        if (invoice.status === "DRAFT") {
+          throw new DatabaseConflictError("Draft invoices cannot be voided. Use DELETE to remove the invoice.");
+        }
+
+        if (invoice.status === "APPROVED") {
+          throw new DatabaseConflictError("Only posted invoices can be voided. Post the invoice first.");
+        }
+
+        // AC3: Only POSTED invoices can transition to VOID
+        if (invoice.status === "VOID") {
+          throw new DatabaseConflictError("Invoice is already voided");
+        }
+
         if (actor) {
           await accessScopeChecker.assertOutletAccess({
             actorUserId: actor.userId,
             companyId,
             outletId: invoice.outlet_id,
-            permission: SalesPermissions.CREATE_INVOICE
+            permission: SalesPermissions.VOID_INVOICE
           });
         }
 
-        if (invoice.status === "VOID") {
-          throw new DatabaseConflictError("Invoice is already voided");
-        }
-
+        // AC4: Invoices with payments cannot be voided
         if (invoice.payment_status === "PARTIAL" || invoice.payment_status === "PAID") {
           throw new DatabaseConflictError("Cannot void invoice with payments. Process refunds first.");
         }
@@ -987,6 +998,15 @@ export function createInvoiceService(deps: InvoiceServiceDeps): InvoiceService {
         const voidedInvoice = await findInvoiceById(executor, companyId, invoiceId);
         if (!voidedInvoice) {
           throw new Error("Voided invoice not found");
+        }
+
+        // AC3: Post reversal journal entries (debiting revenue, crediting AR)
+        const tx = executor.getTransaction();
+        if (postingHook && tx) {
+          await postingHook.voidInvoiceToJournal({
+            _invoiceId: invoiceId,
+            _companyId: companyId
+          }, tx);
         }
 
         const lines = await findInvoiceLines(executor, companyId, invoiceId);

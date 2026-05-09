@@ -38,14 +38,11 @@ import {
   PIGrnInsufficientQtyError,
 } from "../types/purchase-invoice.js";
 import { ExchangeRateService } from "./exchange-rate-service.js";
-import { fromScaled4, scale4Mul, toScaled, toScaled4 } from "./decimal-scale4.js";
+import { scaled, unscaled, scaledMul, scaledN, add, sub, mul, div, gt, eq } from "@jurnapod/shared";
 
-// =============================================================================
-// BigInt Scaled Decimal Helpers
-// =============================================================================
-
-function toScaled8(value: string): bigint {
-  return toScaled(value, 8);
+/** Multiply qty × unitPrice; returns scaled BigInt for multi-step arithmetic. */
+function multiplyQtyPrice(qty: string, unitPrice: string): bigint {
+  return scaledMul(scaled(qty), scaled(unitPrice));
 }
 
 // =============================================================================
@@ -78,7 +75,7 @@ async function computeCreditUtilization(
     return null;
   }
 
-  const creditLimit = toScaled4(String(supplier.credit_limit));
+  const creditLimit = scaled(String(supplier.credit_limit));
   if (creditLimit === 0n) {
     return null;
   }
@@ -91,7 +88,7 @@ async function computeCreditUtilization(
       AND pi.status = ${PURCHASE_INVOICE_STATUS.POSTED}
   `.execute(db);
 
-  const currentOutstanding = toScaled4(String(outstandingResult.rows[0]?.total ?? "0"));
+  const currentOutstanding = scaled(String(outstandingResult.rows[0]?.total ?? "0"));
 
   const newOutstanding = currentOutstanding + invoiceGrandTotal;
   const currentUtilization = creditLimit > 0n ? Number((currentOutstanding * 100n) / creditLimit) : 0;
@@ -178,9 +175,7 @@ export class PurchaseInvoiceService {
 
       for (let i = 0; i < input.lines.length; i++) {
         const line = input.lines[i];
-        const qty = toScaled4(line.qty);
-        const unitPrice = toScaled4(line.unitPrice);
-        const lineTotal = scale4Mul(qty, unitPrice);
+        const lineTotal = multiplyQtyPrice(line.qty, line.unitPrice);
 
         let taxAmount = 0n;
         if (line.taxRateId) {
@@ -192,8 +187,8 @@ export class PurchaseInvoiceService {
             .executeTakeFirst();
 
           if (taxRate) {
-            const taxRatePercent = toScaled4(String(taxRate.rate_percent)) / 100n;
-            taxAmount = scale4Mul(lineTotal, taxRatePercent);
+            const taxRatePercent = scaled(String(taxRate.rate_percent)) / 100n;
+            taxAmount = scaledMul(lineTotal, taxRatePercent);
           }
         }
 
@@ -208,9 +203,9 @@ export class PurchaseInvoiceService {
             description: line.description,
             qty: line.qty,
             unit_price: line.unitPrice,
-            line_total: fromScaled4(lineTotal),
+            line_total: unscaled(lineTotal),
             tax_rate_id: line.taxRateId ?? null,
-            tax_amount: fromScaled4(taxAmount),
+            tax_amount: unscaled(taxAmount),
             line_type: line.lineType ?? "ITEM",
           })
           .executeTakeFirst();
@@ -224,9 +219,9 @@ export class PurchaseInvoiceService {
       await trx
         .updateTable("purchase_invoices")
         .set({
-          subtotal: fromScaled4(subtotal),
-          tax_amount: fromScaled4(taxTotal),
-          grand_total: fromScaled4(grandTotal),
+          subtotal: unscaled(subtotal),
+          tax_amount: unscaled(taxTotal),
+          grand_total: unscaled(grandTotal),
         })
         .where("id", "=", piId)
         .executeTakeFirst();
@@ -594,9 +589,9 @@ export class PurchaseInvoiceService {
       description: string;
     }> = [];
 
-    const subtotalScaled4 = toScaled4(pi.subtotal);
-    const taxAmountScaled4 = toScaled4(pi.tax_amount);
-    const rateScaled8 = toScaled8(exchangeRate);
+    const subtotalScaled4 = scaled(pi.subtotal);
+    const taxAmountScaled4 = scaled(pi.tax_amount);
+    const rateScaled8 = scaledN(exchangeRate, 8);
 
     const rateDivisor = 100000000n;
     const subtotalInCompanyCurrency = (subtotalScaled4 * rateScaled8 + (rateDivisor / 2n)) / rateDivisor;
@@ -619,20 +614,20 @@ export class PurchaseInvoiceService {
         this.db,
         companyId,
         pi.supplier_id,
-        toScaled4(pi.grand_total),
+        scaled(pi.grand_total),
         pi.currency_code
       );
 
       if (creditUtil && creditUtil.newUtilizationPercent > 100) {
         throw new PICreditLimitExceededError(
           creditUtil.newUtilizationPercent,
-          fromScaled4(creditUtil.creditLimit)
+          unscaled(creditUtil.creditLimit)
         );
       }
 
       if (creditUtil && creditUtil.newUtilizationPercent > 80) {
         warnings.push(
-          `Credit utilization will be ${creditUtil.newUtilizationPercent.toFixed(1)}% of limit ${fromScaled4(creditUtil.creditLimit)}`
+          `Credit utilization will be ${creditUtil.newUtilizationPercent.toFixed(1)}% of limit ${unscaled(creditUtil.creditLimit)}`
         );
       }
     }
@@ -640,12 +635,10 @@ export class PurchaseInvoiceService {
     const linesByExpenseAccount = new Map<number, { base: bigint; tax: bigint; descriptions: string[] }>();
 
     for (const line of lines) {
-      const qty = toScaled4(String(line.qty));
-      const unitPrice = toScaled4(String(line.unit_price));
-      const lineTotal = scale4Mul(qty, unitPrice);
+      const lineTotal = multiplyQtyPrice(String(line.qty), String(line.unit_price));
       const lineTotalInCompanyCurrency = (lineTotal * rateScaled8 + (rateDivisor / 2n)) / rateDivisor;
 
-      const taxAmount = toScaled4(String(line.tax_amount));
+      const taxAmount = scaled(String(line.tax_amount));
       const taxAmountInCompanyCurrency = (taxAmount * rateScaled8 + (rateDivisor / 2n)) / rateDivisor;
 
       let lineExpenseAccountId: number | null = null;
@@ -722,7 +715,7 @@ export class PurchaseInvoiceService {
     for (const [accountId, data] of linesByExpenseAccount) {
       journalLines.push({
         account_id: accountId,
-        debit: fromScaled4(data.base + data.tax),
+        debit: unscaled(data.base + data.tax),
         credit: "0.0000",
         description: data.descriptions.slice(0, 2).join("; "),
       });
@@ -731,21 +724,21 @@ export class PurchaseInvoiceService {
     journalLines.push({
       account_id: apAccountId,
       debit: "0.0000",
-      credit: fromScaled4(grandTotalInCompanyCurrency),
+      credit: unscaled(grandTotalInCompanyCurrency),
       description: invoiceDesc,
     });
 
     let totalDebits = 0n;
     let totalCredits = 0n;
     for (const line of journalLines) {
-      totalDebits += toScaled4(line.debit);
-      totalCredits += toScaled4(line.credit);
+      totalDebits += scaled(line.debit);
+      totalCredits += scaled(line.credit);
     }
 
     if (totalDebits !== totalCredits) {
       throw new PIError(
         "JOURNAL_NOT_BALANCED",
-        `Journal not balanced: debits=${fromScaled4(totalDebits)}, credits=${fromScaled4(totalCredits)}`
+        `Journal not balanced: debits=${unscaled(totalDebits)}, credits=${unscaled(totalCredits)}`
       );
     }
 
@@ -807,11 +800,11 @@ export class PurchaseInvoiceService {
               throw new PIError("SUPPLIER_MISMATCH", `PO line ${line.po_line_id} belongs to a different supplier`);
             }
 
-            const receivedQty = toScaled4(String(poLine.received_qty));
-            const invoicedQty = toScaled4(String(poLine.invoiced_qty ?? "0"));
-            const orderedQty = toScaled4(String(poLine.qty));
+            const receivedQty = Number(poLine.received_qty);
+            const invoicedQty = Number(poLine.invoiced_qty ?? "0");
+            const orderedQty = Number(poLine.qty);
             const availableQty = receivedQty - invoicedQty;
-            const invoiceQty = toScaled4(String(line.qty));
+            const invoiceQty = Number(line.qty);
 
             // Three-way matching: cap by ordered_qty when enabled (D54-001)
             const threeWayAvailable = orderedQty - invoicedQty;
@@ -860,7 +853,7 @@ export class PurchaseInvoiceService {
         if (line.po_line_id) {
           await sql`
             UPDATE purchase_order_lines
-            SET invoiced_qty = invoiced_qty + ${toScaled4(String(line.qty))}
+            SET invoiced_qty = invoiced_qty + ${line.qty}
             WHERE id = ${line.po_line_id}
               AND company_id = ${companyId}
           `.execute(trx);
@@ -987,7 +980,7 @@ export class PurchaseInvoiceService {
         if (line.po_line_id) {
           await sql`
             UPDATE purchase_order_lines
-            SET invoiced_qty = invoiced_qty - ${toScaled4(String(line.qty))}
+            SET invoiced_qty = invoiced_qty - ${line.qty}
             WHERE id = ${line.po_line_id}
               AND company_id = ${companyId}
           `.execute(trx);

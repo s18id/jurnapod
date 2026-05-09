@@ -97,11 +97,11 @@ export interface CreateGoodsReceiptResult {
 // Decimal Helpers (scale 4)
 // =============================================================================
 
-/**
- * Parse a decimal string to scaled integer (scale 4).
- * Accepts up to 4 decimal places.
- */
-export function toScaled4(value: string): bigint {
+// ═══════════════════════════════════════════════════════════════════════════
+// Internal decimal helpers — NOT exported. Use @jurnapod/shared API instead.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function toScaled4(value: string): bigint {
   const trimmed = value.trim();
   if (!/^\d+(\.\d{1,4})?$/.test(trimmed)) {
     throw new Error(`Invalid decimal value: ${value}`);
@@ -114,7 +114,7 @@ export function toScaled4(value: string): bigint {
 /**
  * Convert scaled integer back to decimal string.
  */
-export function fromScaled4(value: bigint): string {
+function fromScaled4(value: bigint): string {
   const sign = value < 0n ? "-" : "";
   const abs = value < 0n ? -value : value;
   const intPart = abs / 10000n;

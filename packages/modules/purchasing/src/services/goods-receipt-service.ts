@@ -13,8 +13,6 @@ import type { KyselySchema } from "@jurnapod/db";
 import { PURCHASE_ORDER_STATUS, type GoodsReceiptCreate, toUtcIso } from "@jurnapod/shared";
 import { sql } from "kysely";
 import {
-  toScaled4,
-  fromScaled4,
   type GoodsReceiptLineResult,
   type GoodsReceiptResult,
   type ListGoodsReceiptsParams,
@@ -268,9 +266,9 @@ export class GoodsReceiptService {
       // First pass: validate PO lines and collect over-receipt warnings
       const poLineUpdatesByIndex: Record<number, {
         po_line_id: number;
-        gr_qty: bigint;
-        remaining: bigint;
-        new_received_qty: bigint;
+        gr_qty: number;
+        remaining: number;
+        new_received_qty: number;
         over_receipt: boolean;
       }> = {};
 
@@ -309,19 +307,19 @@ export class GoodsReceiptService {
             }
           }
 
-          const grQty = toScaled4(line.qty);
-          const poQty = toScaled4(String((poLine as any).qty));
-          const poReceivedQty = toScaled4(String((poLine as any).received_qty));
+          const grQty = Number(line.qty);
+          const poQty = Number((poLine as any).qty);
+          const poReceivedQty = Number((poLine as any).received_qty);
           const remaining = poQty - poReceivedQty;
 
-          let newReceivedQty: bigint;
+          let newReceivedQty: number;
           let overReceipt = false;
 
           if (grQty > remaining) {
             overReceipt = true;
             newReceivedQty = poReceivedQty + grQty;
             overReceiptWarnings.push(
-              `Line ${i + 1}: Received qty ${line.qty} exceeds remaining PO qty ${fromScaled4(remaining)}. Over-receipt allowed.`
+              `Line ${i + 1}: Received qty ${line.qty} exceeds remaining PO qty ${remaining}. Over-receipt allowed.`
             );
           } else {
             newReceivedQty = poReceivedQty + grQty;
@@ -381,7 +379,7 @@ export class GoodsReceiptService {
           }
           await trx
             .updateTable("purchase_order_lines")
-            .set({ received_qty: fromScaled4(update.new_received_qty) })
+            .set({ received_qty: update.new_received_qty.toFixed(4) })
             .where("id", "=", update.po_line_id)
             .where("company_id", "=", companyId)
             .executeTakeFirst();
@@ -420,14 +418,14 @@ export class GoodsReceiptService {
           .execute();
 
         const allFullyReceived = allLines.every((l) => {
-          const qty = toScaled4(String(l.qty));
-          const receivedQty = toScaled4(String(l.received_qty));
+          const qty = Number(l.qty);
+          const receivedQty = Number(l.received_qty);
           return receivedQty >= qty;
         });
 
         const anyPartiallyReceived = allLines.some((l) => {
-          const qty = toScaled4(String(l.qty));
-          const receivedQty = toScaled4(String(l.received_qty));
+          const qty = Number(l.qty);
+          const receivedQty = Number(l.received_qty);
           return receivedQty < qty;
         });
 

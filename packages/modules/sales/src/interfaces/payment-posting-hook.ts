@@ -30,4 +30,15 @@ export interface PaymentPostingHook {
    * @returns posting result with journal batch ID and lines
    */
   postPaymentToJournal(input: PostPaymentInput, tx: Transaction): Promise<PostingResult>;
+
+  /**
+   * Post void reversal journal entry.
+   * Called from within the payment void's own DB transaction.
+   * Creates reversal journal lines that undo the original payment posting.
+   * 
+   * @param input - payment void options (same shape as PostPaymentInput)
+   * @param tx - live transaction handle for linking journal to payment
+   * @returns posting result with journal batch ID and lines
+   */
+  voidPaymentToJournal(input: PostPaymentInput, tx: Transaction): Promise<PostingResult>;
 }

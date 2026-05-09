@@ -8,13 +8,13 @@
 import type { KyselySchema } from "@jurnapod/db";
 import { sql } from "kysely";
 import { AP_PAYMENT_STATUS, PURCHASE_CREDIT_STATUS } from "@jurnapod/shared";
-import { toScaled4 } from "./decimal-scale4.js";
+import { sub } from "@jurnapod/shared";
 
 export async function computePurchaseInvoiceOpenAmount(
   db: KyselySchema,
   companyId: number,
   invoiceId: number
-): Promise<bigint> {
+): Promise<string> {
   const baseTotalResult = await sql<{ base_grand_total: string }>`
     SELECT COALESCE(ROUND(grand_total * exchange_rate, 4), 0) AS base_grand_total
     FROM purchase_invoices
@@ -24,10 +24,10 @@ export async function computePurchaseInvoiceOpenAmount(
   `.execute(db);
 
   if (baseTotalResult.rows.length === 0) {
-    return 0n;
+    return "0.0000";
   }
 
-  const baseGrandTotal = toScaled4(String(baseTotalResult.rows[0]?.base_grand_total ?? "0"));
+  const baseGrandTotal = String(baseTotalResult.rows[0]?.base_grand_total ?? "0");
 
   const paidResult = await sql<{ total: string }>`
     SELECT COALESCE(SUM(apl.allocation_amount), 0) as total
@@ -47,7 +47,7 @@ export async function computePurchaseInvoiceOpenAmount(
       AND pc.status IN (${PURCHASE_CREDIT_STATUS.PARTIAL}, ${PURCHASE_CREDIT_STATUS.APPLIED})
   `.execute(db);
 
-  const paidAmount = toScaled4(String(paidResult.rows[0]?.total ?? "0"));
-  const creditedAmount = toScaled4(String(creditedResult.rows[0]?.total ?? "0"));
-  return baseGrandTotal - paidAmount - creditedAmount;
+  const paidAmount = String(paidResult.rows[0]?.total ?? "0");
+  const creditedAmount = String(creditedResult.rows[0]?.total ?? "0");
+  return sub(sub(baseGrandTotal, paidAmount), creditedAmount);
 }
