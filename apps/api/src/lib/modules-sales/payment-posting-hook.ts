@@ -13,7 +13,7 @@ import type { Transaction } from "@jurnapod/db";
 import type { PaymentPostingHook } from "@jurnapod/modules-sales";
 import type { PostPaymentInput, SalesPayment, SalesPaymentSplit } from "@jurnapod/modules-sales";
 import type { PostingResult } from "@jurnapod/shared";
-import { postSalesPaymentToJournal } from "@/lib/sales-posting";
+import { postSalesPaymentToJournal, voidSalesPaymentToJournal } from "@/lib/sales-posting";
 import type { KyselySchema } from "@/lib/db";
 import type { QueryExecutor } from "@/lib/shared/common-utils";
 
@@ -245,6 +245,47 @@ export class ApiPaymentPostingHook implements PaymentPostingHook {
         ${null}
       )
     `.execute(tx as KyselySchema);
+
+    return postingResult;
+  }
+
+  async voidPaymentToJournal(
+    input: PostPaymentInput,
+    tx: Transaction
+  ): Promise<PostingResult> {
+    // Extract internal IDs that were set by PaymentService
+    const paymentId = input._paymentId;
+    const companyId = input._companyId;
+    const invoiceId = input._invoiceId;
+
+    if (!paymentId || !companyId || !invoiceId) {
+      throw new Error("PaymentPostingHook.voidPaymentToJournal requires _paymentId, _companyId, and _invoiceId in input");
+    }
+
+    // Query for the payment using the live transaction
+    const payment = await findPaymentByIdWithTx(tx, companyId, paymentId);
+    if (!payment) {
+      throw new Error("Payment not found for void journal posting");
+    }
+
+    // Query for the invoice number
+    const invoiceNo = await findInvoiceNoWithTx(tx, companyId, invoiceId);
+    if (!invoiceNo) {
+      throw new Error("Invoice not found for void journal posting");
+    }
+
+    // Query for payment splits if any
+    const splits = await findPaymentSplitsWithTx(tx, companyId, paymentId);
+    if (splits.length > 0) {
+      payment.splits = splits;
+    }
+
+    // Call void sales-payment-to-journal with the transaction handle
+    const postingResult = await voidSalesPaymentToJournal(
+      tx as unknown as QueryExecutor,
+      payment,
+      invoiceNo
+    );
 
     return postingResult;
   }

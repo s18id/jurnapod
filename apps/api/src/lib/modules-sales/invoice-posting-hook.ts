@@ -14,6 +14,7 @@ import type { InvoicePostingHook } from "@jurnapod/modules-sales";
 import type { PostInvoiceInput, SalesInvoiceDetail } from "@jurnapod/modules-sales";
 import type { PostingResult } from "@jurnapod/shared";
 import { postSalesInvoiceToJournal } from "@/lib/sales-posting";
+import { voidSalesInvoiceToJournal } from "@/lib/sales-posting";
 import type { KyselySchema } from "@/lib/db";
 import type { QueryExecutor } from "@/lib/shared/common-utils";
 
@@ -184,6 +185,79 @@ export class ApiInvoicePostingHook implements InvoicePostingHook {
 
     // Call sales-posting.ts with the transaction handle
     const postingResult = await postSalesInvoiceToJournal(
+      tx as unknown as QueryExecutor,
+      invoiceDetail
+    );
+
+    return postingResult;
+  }
+
+  async voidInvoiceToJournal(
+    input: PostInvoiceInput,
+    tx: Transaction
+  ): Promise<PostingResult> {
+    const invoiceId = input._invoiceId;
+    const companyId = input._companyId;
+
+    if (!invoiceId || !companyId) {
+      throw new Error("InvoicePostingHook.voidInvoiceToJournal requires _invoiceId and _companyId in input");
+    }
+
+    // Query for the invoice using the live transaction
+    const invoice = await findInvoiceByIdWithTx(tx, companyId, invoiceId);
+    if (!invoice) {
+      throw new Error(`Invoice not found for void journal reversal: companyId=${companyId}, invoiceId=${invoiceId}`);
+    }
+
+    // Query for lines and taxes
+    const lines = await findInvoiceLinesWithTx(tx, companyId, invoiceId);
+    const taxes = await findInvoiceTaxesWithTx(tx, companyId, invoiceId);
+
+    // Build SalesInvoiceDetail from query results
+    const invoiceDetail: SalesInvoiceDetail = {
+      id: Number(invoice.id),
+      company_id: Number(invoice.company_id),
+      outlet_id: Number(invoice.outlet_id),
+      invoice_no: invoice.invoice_no,
+      client_ref: invoice.client_ref ?? undefined,
+      invoice_date: invoice.invoice_date,
+      due_date: invoice.due_date ?? undefined,
+      status: invoice.status as "DRAFT" | "APPROVED" | "POSTED" | "VOID",
+      payment_status: invoice.payment_status as "UNPAID" | "PARTIAL" | "PAID",
+      subtotal: Number(invoice.subtotal),
+      discount_percent: invoice.discount_percent != null ? Number(invoice.discount_percent) : undefined,
+      discount_fixed: invoice.discount_fixed != null ? Number(invoice.discount_fixed) : undefined,
+      tax_amount: Number(invoice.tax_amount),
+      grand_total: Number(invoice.grand_total),
+      paid_total: Number(invoice.paid_total),
+      customer_id: invoice.customer_id != null ? Number(invoice.customer_id) : undefined,
+      approved_by_user_id: invoice.approved_by_user_id ? Number(invoice.approved_by_user_id) : undefined,
+      approved_at: invoice.approved_at ?? undefined,
+      created_by_user_id: invoice.created_by_user_id ? Number(invoice.created_by_user_id) : undefined,
+      updated_by_user_id: invoice.updated_by_user_id ? Number(invoice.updated_by_user_id) : undefined,
+      created_at: invoice.created_at,
+      updated_at: invoice.updated_at,
+      lines: lines.map(l => ({
+        id: Number(l.id),
+        invoice_id: Number(l.invoice_id),
+        line_no: Number(l.line_no),
+        line_type: l.line_type,
+        item_id: l.item_id !== null ? Number(l.item_id) : null,
+        description: l.description,
+        qty: Number(l.qty),
+        unit_price: Number(l.unit_price),
+        line_total: Number(l.line_total)
+      })),
+      taxes: taxes.map(t => ({
+        id: Number(t.id),
+        invoice_id: Number(t.invoice_id),
+        tax_rate_id: Number(t.tax_rate_id),
+        amount: Number(t.amount)
+      }))
+    };
+
+    // Call sales-posting.ts void function with the transaction handle
+    const postingResult = await voidSalesInvoiceToJournal(
       tx as unknown as QueryExecutor,
       invoiceDetail
     );

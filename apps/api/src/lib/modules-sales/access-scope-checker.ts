@@ -47,11 +47,13 @@ function mapSalesPermissionToModulePermission(
     "sales:create_invoice": { module: "sales", resource: "invoices", permission: "create" },
     "sales:update_invoice": { module: "sales", resource: "invoices", permission: "update" },
     "sales:read_invoice": { module: "sales", resource: "invoices", permission: "read" },
+    "sales:void_invoice": { module: "sales", resource: "invoices", permission: "delete" },
     // Payment permissions - map to sales.payments (payments module doesn't exist in ACL)
     "payments:create": { module: "sales", resource: "payments", permission: "create" },
     "payments:read": { module: "sales", resource: "payments", permission: "read" },
     "payments:update": { module: "sales", resource: "payments", permission: "update" },
     "payments:post": { module: "sales", resource: "payments", permission: "update" },
+    "payments:void": { module: "sales", resource: "payments", permission: "delete" },
     // Credit note permissions - map to sales.invoices (best-compatible; no credit_notes resource exists)
     "credit_notes:create": { module: "sales", resource: "invoices", permission: "create" },
     "credit_notes:read": { module: "sales", resource: "invoices", permission: "read" },

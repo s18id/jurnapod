@@ -130,7 +130,7 @@ invoiceRoutes.post("/", async (c) => {
     // Check resource permission using bitmask
       const accessResult = await requireAccess({
         module: "sales",
-        permission: "delete",
+        permission: "create",
         resource: "invoices"
       })(c.req.raw, auth);
 
@@ -589,7 +589,9 @@ invoiceRoutes.post("/:id/void", async (c) => {
       const message = error.message ?? "";
       if (
         message.includes("Invoice is already voided") ||
-        message.includes("Cannot void invoice with payments")
+        message.includes("Cannot void invoice with payments") ||
+        message.includes("Draft invoices cannot be voided") ||
+        message.includes("Only posted invoices can be voided")
       ) {
         return errorResponse("CONFLICT", message, 409);
       }
@@ -1302,7 +1304,7 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
     try {
       const accessResult = await requireAccess({
         module: "sales",
-        permission: "update",
+        permission: "delete",
         resource: "invoices"
       })(c.req.raw, auth);
 
@@ -1358,7 +1360,9 @@ export function registerSalesInvoiceRoutes(app: { openapi: OpenAPIHonoType["open
         const message = error.message ?? "";
         if (
           message.includes("Invoice is already voided") ||
-          message.includes("Cannot void invoice with payments")
+          message.includes("Cannot void invoice with payments") ||
+          message.includes("Draft invoices cannot be voided") ||
+          message.includes("Only posted invoices can be voided")
         ) {
           return errorResponse("CONFLICT", message, 409);
         }

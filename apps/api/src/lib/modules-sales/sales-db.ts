@@ -567,6 +567,18 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
              updated_at = CURRENT_TIMESTAMP
          WHERE company_id = ${companyId}
            AND id = ${invoiceId}`.execute(this._getDb());
+
+      // Audit trail for invoice post
+      await sql`INSERT INTO audit_logs (company_id, outlet_id, user_id, action, result, success, payload_json)
+         VALUES (
+           ${companyId},
+           NULL,
+           ${updatedByUserId ?? null},
+           'POST',
+           'SUCCESS',
+           1,
+           ${JSON.stringify({ entity_type: 'sales_invoice', entity_id: invoiceId, status: 'POSTED' })}
+         )`.execute(this._getDb());
     } else if (status === "VOID") {
       // Idempotent void: only write if not already voided (skip re-void to avoid duplicate audit)
       const existing = await sql`SELECT status, voided_at FROM sales_invoices WHERE company_id = ${companyId} AND id = ${invoiceId}`.execute(this._getDb());

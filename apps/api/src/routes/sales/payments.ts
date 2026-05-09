@@ -227,6 +227,10 @@ paymentRoutes.patch("/:id", async (c) => {
       return errorResponse("CONFLICT", error.message, 409);
     }
 
+    if (error instanceof PaymentStatusError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
     if (error instanceof PaymentAllocationError) {
       return errorResponse("INVALID_REQUEST", error.message, 400);
     }
@@ -328,6 +332,65 @@ paymentRoutes.patch("/:id/acknowledge-fx", async (c) => {
 
     console.error("PATCH /sales/payments/:id/acknowledge-fx failed", err);
     return errorResponse("INTERNAL_SERVER_ERROR", "FX acknowledgment failed", 500);
+  }
+});
+
+// ============================================================================
+// POST /sales/payments/:id/void - Void payment (reversal)
+// ============================================================================
+
+paymentRoutes.post("/:id/void", async (c) => {
+  const auth = c.get("auth") as AuthContext;
+
+  try {
+    // AC6: Void uses DELETE permission on sales.payments
+    const accessResult = await requireAccess({
+      module: "sales",
+      permission: "delete",
+      resource: "payments"
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const paymentId = NumericIdSchema.parse(c.req.param("id"));
+
+    // Check payment exists and user has outlet access
+    const existingPayment = await getComposedPaymentService().getPayment(auth.companyId, paymentId);
+    if (!existingPayment) {
+      return errorResponse("NOT_FOUND", "Payment not found", 404);
+    }
+
+    const hasAccess = await userHasOutletAccess(auth.userId, auth.companyId, existingPayment.outlet_id);
+    if (!hasAccess) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
+
+    const voidedPayment = await getComposedPaymentService().voidPayment(auth.companyId, paymentId, {
+      userId: auth.userId
+    });
+
+    if (!voidedPayment) {
+      return errorResponse("NOT_FOUND", "Payment not found", 404);
+    }
+
+    return successResponse(voidedPayment);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid payment ID", 400);
+    }
+
+    if (error instanceof PaymentStatusError) {
+      return errorResponse("CONFLICT", error.message, 409);
+    }
+
+    if (error instanceof DatabaseForbiddenError) {
+      return errorResponse("FORBIDDEN", "Forbidden", 403);
+    }
+
+    console.error("POST /sales/payments/:id/void failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Payment void failed", 500);
   }
 });
 
@@ -877,6 +940,10 @@ export function registerSalesPaymentRoutes(app: { openapi: OpenAPIHonoType["open
       }
 
       if (error instanceof DatabaseConflictError) {
+        return errorResponse("CONFLICT", error.message, 409);
+      }
+
+      if (error instanceof PaymentStatusError) {
         return errorResponse("CONFLICT", error.message, 409);
       }
 

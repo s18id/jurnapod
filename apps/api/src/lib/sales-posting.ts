@@ -30,6 +30,8 @@ import {
   postSalesPayment,
   postCreditNote,
   voidCreditNote,
+  voidSalesInvoice,
+  voidSalesPayment,
   PaymentVarianceConfigError,
   SALES_OUTLET_ACCOUNT_MAPPING_MISSING_MESSAGE,
   SALES_TAX_ACCOUNT_MISSING_MESSAGE,
@@ -333,6 +335,41 @@ export async function postSalesInvoiceToJournal(
   }
 }
 
+export async function voidSalesInvoiceToJournal(
+  dbExecutor: QueryExecutor,
+  invoice: SalesInvoiceDetail
+): Promise<PostingResult> {
+  await ensureDateWithinOpenFiscalYearWithExecutor(
+    dbExecutor,
+    invoice.company_id,
+    invoice.invoice_date
+  );
+
+  const executor = new ApiSalesPostingExecutor(dbExecutor as KyselySchema);
+
+  const postingData: SalesInvoicePostingData = {
+    id: invoice.id,
+    company_id: invoice.company_id,
+    outlet_id: invoice.outlet_id,
+    invoice_no: invoice.invoice_no,
+    invoice_date: invoice.invoice_date,
+    subtotal: invoice.subtotal,
+    grand_total: invoice.grand_total,
+    taxes: invoice.taxes,
+    updated_at: invoice.updated_at
+  };
+
+  try {
+    const result = await voidSalesInvoice(dbExecutor as KyselySchema, executor, postingData);
+    journalMetrics.recordPostSuccess(invoice.company_id, "sales");
+    return result;
+  } catch (error) {
+    const reason = categorizePostingError(error);
+    journalMetrics.recordPostFailure(invoice.company_id, "sales", reason);
+    throw error;
+  }
+}
+
 export async function postSalesPaymentToJournal(
   dbExecutor: QueryExecutor,
   payment: SalesPayment,
@@ -365,6 +402,47 @@ export async function postSalesPaymentToJournal(
 
   try {
     const result = await postSalesPayment(dbExecutor as KyselySchema, executor, postingData, invoiceNo);
+    journalMetrics.recordPostSuccess(payment.company_id, "sales");
+    return result;
+  } catch (error) {
+    const reason = categorizePostingError(error);
+    journalMetrics.recordPostFailure(payment.company_id, "sales", reason);
+    throw error;
+  }
+}
+
+export async function voidSalesPaymentToJournal(
+  dbExecutor: QueryExecutor,
+  payment: SalesPayment,
+  invoiceNo: string
+): Promise<PostingResult> {
+  await ensureDateWithinOpenFiscalYearWithExecutor(
+    dbExecutor,
+    payment.company_id,
+    fromUtcIso.dateOnly(toUtcIso.dateLike(payment.payment_at) as string)
+  );
+
+  const executor = new ApiSalesPostingExecutor(dbExecutor as KyselySchema);
+
+  const postingData: SalesPaymentPostingData = {
+    id: payment.id,
+    company_id: payment.company_id,
+    outlet_id: payment.outlet_id,
+    payment_no: payment.payment_no,
+    payment_at: payment.payment_at,
+    actual_amount_idr: payment.actual_amount_idr ?? undefined,
+    payment_amount_idr: payment.payment_amount_idr ?? undefined,
+    amount: payment.amount,
+    invoice_amount_idr: payment.invoice_amount_idr ?? undefined,
+    payment_delta_idr: payment.payment_delta_idr ?? undefined,
+    account_id: payment.account_id,
+    account_name: payment.account_name,
+    splits: payment.splits,
+    updated_at: payment.updated_at
+  };
+
+  try {
+    const result = await voidSalesPayment(dbExecutor as KyselySchema, executor, postingData, invoiceNo);
     journalMetrics.recordPostSuccess(payment.company_id, "sales");
     return result;
   } catch (error) {

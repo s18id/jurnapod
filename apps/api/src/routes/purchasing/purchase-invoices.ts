@@ -317,7 +317,7 @@ invoiceRoutes.post("/:id/void", async (c) => {
     const accessResult = await requireAccess({
       module: "purchasing",
       resource: "invoices",
-      permission: "update"
+      permission: "delete"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
