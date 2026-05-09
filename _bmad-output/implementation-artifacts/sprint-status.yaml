@@ -685,10 +685,10 @@ development_status:
   epic-60-retrospective: done
 
   # Epic 61: Sales & Purchasing Lifecycle Correctness
-  epic-61: backlog
-  61-1-sales-invoice-lifecycle-correctness: backlog
-  61-2-sales-payment-lifecycle-fx-correctness: backlog
-  61-3-purchasing-document-chain-correctness: backlog
-  61-4-ap-invoice-payment-lifecycle-period-close: backlog
-  61-5-deferred-debt-closure-epic-55-60: backlog
-  61-6-sales-purchasing-gl-reconciliation-gate: backlog
+  epic-61: in-progress
+  61-1-sales-invoice-lifecycle-correctness: ready-for-dev
+  61-2-sales-payment-lifecycle-fx-correctness: ready-for-dev
+  61-3-purchasing-document-chain-correctness: ready-for-dev
+  61-4-ap-invoice-payment-lifecycle-period-close: ready-for-dev
+  61-5-deferred-debt-closure-epic-55-60: ready-for-dev
+  61-6-sales-purchasing-gl-reconciliation-gate: ready-for-dev

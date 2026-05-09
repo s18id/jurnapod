@@ -1,6 +1,6 @@
 # Epic 61: Sales & Purchasing Lifecycle Correctness
 
-**Status:** planned
+**Status:** in-progress
 **Sprint:** 61
 **Theme:** Prove sales and purchasing document lifecycles are immutable post-finalization, journal-linked, and tenant-safe. Close remaining Epic 55–60 deferred debt.
 **Primary Modules:** `apps/api`, `@jurnapod/modules-sales`, `@jurnapod/modules-purchasing`, `@jurnapod/modules-accounting`
@@ -15,9 +15,9 @@ Epic 61 MUST NOT begin before Epic 60 close gates are confirmed.
 
 | Gate ID | Requirement | Artifact | Status |
 |---------|-------------|----------|--------|
-| E60-G1 | No unresolved P0/P1 in Epic 60 scope | sprint-status + review output | required |
-| E60-G2 | Tenant scoping + ACL suites green | Epic 60 gate evidence | required |
-| E60-G3 | Epic 60 retrospective complete | epic-60.retrospective.md | required |
+| E60-G1 | No unresolved P0/P1 in Epic 60 scope | sprint-status + review output | ✅ CONFIRMED — Epic 60 done, 0 P0/P1 open |
+| E60-G2 | Tenant scoping + ACL suites green | Epic 60 gate evidence | ✅ CONFIRMED — 6/6 ACL files, 43/43 tests pass |
+| E60-G3 | Epic 60 retrospective complete | epic-60.retrospective.md | ✅ CONFIRMED
 
 ---
 
@@ -163,21 +163,26 @@ Prove that sales and purchasing journal postings reconcile to their respective s
 
 ## 7) Sprint Kickoff Checkpoint
 
-### 7.1 Pre-Flight Gate
+### 7.1 Pre-Flight Gate (EXECUTED 2026-05-09T13:30Z)
 
 ```bash
-npm run lint -w @jurnapod/api
-npm run typecheck -w @jurnapod/api
-npx tsx scripts/validate-sprint-status.ts
+# npm run lint -w @jurnapod/api
+✅ 0 errors, 158 warnings (no-explicit-any only)
+
+# npm run typecheck -w @jurnapod/api
+✅ passes cleanly
+
+# npx tsx scripts/validate-sprint-status.ts
+✅ sprint-status.yaml is healthy — 61 epics confirmed
 ```
 
-### 7.2 SOLID/DRY/KISS Baseline
+### 7.2 SOLID/DRY/KISS Baseline (2026-05-09T13:30Z)
 
-| Principle | Score |
-|-----------|-------|
-| SOLID | Unknown |
-| DRY | Unknown |
-| KISS | Unknown |
+| Principle | Score | Evidence |
+|-----------|-------|----------|
+| SOLID | Pass | Sales + purchasing packages have clear boundaries; interfaces are focused; no inheritance issues |
+| DRY | Pass | Lifecycle patterns consistent across sales (invoice, payment) and purchasing (PO, receipt, AP) |
+| KISS | Pass | State-machine validation is straightforward; journal reconciliation follows established patterns |
 
 ---
 
@@ -194,4 +199,4 @@ npx tsx scripts/validate-fixture-flow.ts -w @jurnapod/api
 
 ---
 
-_Last Updated: 2026-05-09_
+_Last Updated: 2026-05-09T13:30Z_
