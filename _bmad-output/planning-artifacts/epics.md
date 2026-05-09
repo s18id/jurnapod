@@ -1,6 +1,6 @@
 ---
-stepsCompleted: ["step-01-validate-prerequisites", "step-02-design-epics", "step-03-create-stories", "step-04-final-validation"]
-inputDocuments: ["docs/prd/prd-jurnapod-overview.md", "docs/architecture.md", "_bmad-output/planning-artifacts/sprint-48-61-correctness-first-architecture-blueprint.md"]
+stepsCompleted: ["step-01-validate-prerequisites"]
+inputDocuments: ["docs/prd/prd-jurnapod-overview.md", "docs/architecture.md", "_bmad-output/planning-artifacts/sprint-48-61-correctness-first-architecture-blueprint.md", "_bmad-output/planning-artifacts/sprint-48-62-correctness-first-architecture-blueprint.md", "_bmad-output/planning-artifacts/epic-49-api-lib-boundary-migration-queue.md"]
 ---
 
 # jurnapod - Epic Breakdown
@@ -786,3 +786,65 @@ So that Sprint 58 can close with confidence and without manual gate validation.
 **Scope note:** Story 58.5 implements only `scripts/validate-epic-58-gates.ts`. Defining the npm test scripts (`test:unit:costing`, `test:integration:inventory`, etc.) is an Epic 58 startup prerequisite — see Precondition #5.
 
 **Required new function:** A new `getAllItemsCostSummary(companyId: number, db: Kysely): Promise<AggregatedCostSummary>` function MUST be added to `@jurnapod/modules-inventory-costing` to support NFR2 cross-module comparison. This function is a prerequisite for NFR2 evidence and MUST be implemented before `test:integration:inventory:posting` can emit valid `__EPIC58_GATE__` lines for NFR2.
+
+---
+
+## Epic 62: Projection Correctness Hardening
+
+**Goal:** Prove that read-model projections (`projections/reporting`) produce outputs with zero material variance against source-of-truth data (GL, inventory, AR/AP, treasury, sales). Enforce the architectural boundary that projections have READ authority only — never financial write authority. Migrate remaining reporting/projection code from API lib to canonical packages.
+
+**Program Alignment:** Sprint 62 in the S48–S62 Correctness-First Architecture Blueprint. This is the final sprint in the architecture hardening program.
+
+### Requirements Inventory
+
+#### Functional Requirements (Epic 62-Scoped)
+
+FR1: The system MUST produce read-model projections with zero material variance against source-of-truth data (GL, inventory, AR/AP, treasury)
+FR2: The system MUST enforce that projections/reporting layer has READ authority only — projections MUST NOT write back to financial source tables
+FR3: The system MUST provide projection accuracy evidence in machine-verifiable format (JSON lines suitable for CI gate parsing)
+FR4: The system MUST validate projection outputs against source-of-truth data for every reporting module
+FR5: The system MUST migrate report/projection code from `apps/api/src/lib` (`reports.ts`, `report-context.ts`, `report-error-handler.ts`, `report-telemetry.ts`, admin dashboards read-model helpers) to canonical packages (`packages/modules/reporting`, `packages/telemetry`, `packages/shared`)
+FR6: The system MUST scope all projection queries by `company_id` (tenant isolation)
+FR7: The system MUST verify projection outputs are deterministic — identical inputs MUST produce identical outputs on repeated computation
+
+#### Non-Functional Requirements (Epic 62-Scoped)
+
+Scope note: NFR labels in this section are scoped to Epic 62 and MUST NOT be interpreted as document-global NFR identifiers.
+
+NFR1: Exit gate — zero material variance in projection outputs; projection values MUST exactly match source-of-truth aggregated values (no rounding tolerance)
+NFR2: Projections MUST be read-only — no write-path dependency from projections back to source data
+NFR3: All projection domain logic MUST live in canonical packages (`packages/modules/reporting`); `apps/api/src/lib` MUST contain only thin orchestration adapters
+NFR4: Projection evidence MUST be machine-verifiable for CI gate compatibility
+NFR5: Projected monetary values MUST use DECIMAL precision — never FLOAT/DOUBLE
+NFR6: Projection performance MUST NOT regress; existing report query performance MUST remain within 2× of baseline
+
+#### Additional Requirements
+
+- Projections/reporting is a read-model only — no financial write authority (per Architecture Blueprint §3.2)
+- Follows same correctness-hardening story pattern as Epics 54–61 (reproducible defect → failing test → fix → passing test + evidence)
+- SOLID/DRY/KISS sprint gates apply at kickoff, midpoint, and pre-close
+- No net-new features — correctness hardening only
+- Exit gate: no material variance in projection outputs, all critical suites 3× consecutive green
+- Migration targets from Queue B (epic-49-api-lib-boundary-migration-queue.md): `packages/modules/reporting`, `packages/telemetry`, `packages/shared`
+- API lib areas to migrate when touched: `reports.ts`, `report-context.ts`, `report-error-handler.ts`, `report-telemetry.ts`, admin dashboards read-model helpers
+- Follow-up closure bucket for any non-blocking P2/P3 items
+
+#### FR Coverage Map
+
+{{requirements_coverage_map}}
+
+### Story Summary
+
+{{epics_list}}
+
+### Key Decisions
+
+_(To be populated during epic design)_
+
+### Preconditions
+
+_(To be populated during epic design)_
+
+### Exit Gate
+
+_(To be populated during epic design)_

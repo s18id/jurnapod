@@ -1,6 +1,6 @@
 # Epic 61: Sales & Purchasing Lifecycle Correctness
 
-**Status:** in-progress
+**Status:** done
 **Sprint:** 61
 **Theme:** Prove sales and purchasing document lifecycles are immutable post-finalization, journal-linked, and tenant-safe. Close remaining Epic 55–60 deferred debt.
 **Primary Modules:** `apps/api`, `@jurnapod/modules-sales`, `@jurnapod/modules-purchasing`, `@jurnapod/modules-accounting`
