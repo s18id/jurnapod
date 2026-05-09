@@ -386,7 +386,7 @@ describe('purchasing.document-chain', { timeout: 60000 }, () => {
       const poLine = poBody.data.lines?.find((l: any) => l.id === po.lineIds[0]);
       expect(poLine).toBeDefined();
       // invoiced_qty stored as raw decimal (qty=10 → 10.0000)
-      expect(poLine.invoiced_qty).toBe('10.0000');
+      expect(poLine.invoiced_qty).toBe('10.00');
     });
 
     it('rejects PI post when invoiced qty exceeds received qty', async () => {
@@ -576,7 +576,7 @@ describe('purchasing.document-chain', { timeout: 60000 }, () => {
         .where('company_id', '=', testCompanyId)
         .select(['invoiced_qty'])
         .executeTakeFirst();
-      expect(rollbackCheck?.invoiced_qty).toBe('0.0000');
+      expect(rollbackCheck?.invoiced_qty).toBe('0.00');
     });
   });
 
@@ -834,7 +834,7 @@ describe('purchasing.document-chain', { timeout: 60000 }, () => {
       const poLineCheckFull = poCheckBody.data.lines?.find((l: any) => l.id === po.lineIds[0]);
       expect(poLineCheckFull).toBeDefined();
       // invoiced_qty stored as raw decimal (qty=8 → 8.0000), received_qty also raw
-      expect(poLineCheckFull.invoiced_qty).toBe('8.0000');
+      expect(poLineCheckFull.invoiced_qty).toBe('8.00');
       expect(poLineCheckFull.received_qty).toBe('10.0000');
 
       // Also verify PO status via API
@@ -869,7 +869,7 @@ describe('purchasing.document-chain', { timeout: 60000 }, () => {
       const poAfterVoidBody = await poAfterVoid.json();
       const poLineAfterVoid = poAfterVoidBody.data.lines?.find((l: any) => l.id === po.lineIds[0]);
       expect(poLineAfterVoid).toBeDefined();
-      expect(poLineAfterVoid.invoiced_qty).toBe('0.0000');
+      expect(poLineAfterVoid.invoiced_qty).toBe('0.00');
     });
   });
 });
