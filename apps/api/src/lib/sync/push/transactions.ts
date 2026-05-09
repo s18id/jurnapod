@@ -412,17 +412,18 @@ export async function processSyncPushTransactionPhase2(
 
     // Run posting hook
     let postingResult: SyncPushPostingHookResult;
+    const isRelevantStatus = acceptedContext.status === "COMPLETED" || acceptedContext.status === "VOID" || acceptedContext.status === "REFUND";
     try {
       const executor = new KyselyPosSyncPushPostingExecutor(db, acceptedContext);
       postingResult = await runSyncPushPostingHook(db, executor, acceptedContext);
       // Record success - POS sync posting is part of sales domain
       journalMetrics.recordPostSuccess(acceptedContext.companyId, "sales");
 
-      // GL Imbalance Check (Story 30.7)
-      // Verify the created journal batch is balanced after posting
+      // GL Imbalance Check (Story 30.7 + Epic 59.8)
+      // Verify the created journal batch (posting or reversal) is balanced
       if (
         (postingResult.mode === "active" || postingResult.mode === "shadow") &&
-        acceptedContext.status === "COMPLETED" &&
+        isRelevantStatus &&
         postingResult.journalBatchId !== null
       ) {
         const imbalanceResult = await checkGlImbalanceByBatchId(
@@ -465,10 +466,10 @@ export async function processSyncPushTransactionPhase2(
     }
 
     // Check for missing journal alert
-    // If active mode, COMPLETED status, but no journal created - that's a problem
+    // If active mode, relevant status (COMPLETED/VOID/REFUND), but no journal created - that's a problem
     if (
       postingResult.mode === "active" &&
-      acceptedContext.status === "COMPLETED" &&
+      isRelevantStatus &&
       postingResult.journalBatchId === null
     ) {
       // This should not happen - posting succeeded but no journal was created

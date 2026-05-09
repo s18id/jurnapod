@@ -46,6 +46,29 @@ So that **{benefit}**.
 
 ---
 
+## Cross-Module Error Boundary Verification (MANDATORY — E58-A1)
+
+> **Purpose:** Verify domain errors thrown by one package are handled correctly by consuming packages at module boundaries.
+
+### Pre-Implementation Checklist
+
+- [ ] Producer error classes are enumerated for this story.
+- [ ] Consumer catch paths validate `instanceof` checks for each producer error class.
+- [ ] Consumer catch paths include `error.name` fallback handling for cross-package boundary mismatches.
+- [ ] Error response mapping is deterministic across `instanceof` and `error.name` detection paths.
+- [ ] Any missing fallback path is recorded and blocked before implementation starts.
+
+### Error Boundary Test Matrix
+
+| Error Class | Source Package | Consumer Package | instanceof Works | error.name Fallback |
+|-------------|----------------|------------------|------------------|---------------------|
+| `{DomainErrorClass}` | `@jurnapod/modules-{domain}` | `apps/api` | ✅/❌ | ✅/❌ |
+| `{ValidationErrorClass}` | `@jurnapod/shared` | `apps/api` | ✅/❌ | ✅/❌ |
+
+**Hard gate:** Domain errors MUST be handled deterministically across module boundaries. Consumer code MUST NOT rely on `instanceof` only when cross-package loading can break prototype identity.
+
+---
+
 ## Cross-Module Decision Gate (MANDATORY — E54-A1 Follow-Up)
 
 > **Purpose:** When a story touches multiple modules, architectural decisions MUST be identified and signed off by Winston (Architect) before implementation begins — not discovered mid-story. This gate prevents the three-way-matching-granularity problem from recurring.

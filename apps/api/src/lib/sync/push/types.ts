@@ -159,6 +159,11 @@ export type AcceptedSyncPushContext = {
   status: "COMPLETED" | "VOID" | "REFUND";
   trxAt: string;
   posTransactionId: number;
+  /** 
+   * When status is VOID or REFUND, this MUST be set to the original
+   * COMPLETED transaction's ID. Used to locate POS_SALE journals to reverse.
+   */
+  originalPosTransactionId?: number;
 };
 
 // ============================================================================

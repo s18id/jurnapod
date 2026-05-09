@@ -711,6 +711,9 @@ export class FiscalYearService {
       .where("status", "=", "OPEN")
       .where("start_date", "<=", dateValue)
       .where("end_date", ">=", dateValue)
+      // Align posting guard lock intent with close path lock semantics
+      // to reduce lock-order inversion risk during overlap windows.
+      .forUpdate()
       .orderBy("start_date", "asc")
       .orderBy("id", "asc")
       .select(["id", "company_id", "code", "name", "start_date", "end_date", "status", "created_at", "updated_at"])

@@ -16,14 +16,17 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "kysely";
 import { randomUUID } from "node:crypto";
+import { ensureDateWithinOpenFiscalYearWithExecutor } from "@/lib/fiscal-years";
 import { closeTestDb, getTestDb } from "../../helpers/db";
 import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
 import { getTestBaseUrl } from "../../helpers/env";
 import {
   assignUserGlobalRole,
+  createTestAPReconciliationSettings,
   createTestCompanyMinimal,
   createTestFiscalCloseBalanceFixture,
   createTestFiscalYear,
+  createTestPurchasingAccounts,
   createTestRole,
   createTestUser,
   clearTestAPReconciliationSettings,
@@ -73,6 +76,13 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
     }
 
     return {};
+  };
+
+  const ensureAPReconciliationSettings = async () => {
+    const { ap_account_id } = await createTestPurchasingAccounts(companyId, {
+      apAccountName: `AP FYCLOSE ${randomUUID().slice(0, 8)}`,
+    });
+    await createTestAPReconciliationSettings(companyId, [ap_account_id]);
   };
 
   beforeAll(async () => {
@@ -163,6 +173,8 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
 
     const closeRequestId = `approve-test-${randomUUID()}`;
 
+    await ensureAPReconciliationSettings();
+
     // Step 1: Initiate
     const initiateRes = await postJson(
       `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
@@ -209,6 +221,8 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
     });
 
     const closeRequestId = `idempotent-${randomUUID()}`;
+
+    await ensureAPReconciliationSettings();
 
     // Initiate
     const initiateRes = await postJson(
@@ -347,6 +361,8 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
 
     const closeRequestId = `concurrent-approve-${randomUUID()}`;
 
+    await ensureAPReconciliationSettings();
+
     // Initiate first (creates PENDING close request)
     const initiateRes = await postJson(
       `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
@@ -457,6 +473,95 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
   });
 
   /**
+   * E58-A2 Option A: posting guard lock intent overlaps with close approval.
+   * While a posting transaction holds fiscal-year guard lock, close approve must wait
+   * and complete after lock release without deadlock.
+   */
+  it("approve waits for overlapping posting fiscal-year guard lock and completes after release", async () => {
+    await createTestFiscalCloseBalanceFixture(companyId, {
+      asOfDate: "2046-12-31",
+      plBalance: "220.0000",
+    });
+
+    const fiscalYear = await createTestFiscalYear(companyId, {
+      year: 2046,
+      startDate: "2046-01-01",
+      endDate: "2046-12-31",
+      status: "OPEN",
+    });
+
+    const closeRequestId = `overlap-lock-${randomUUID()}`;
+
+    await ensureAPReconciliationSettings();
+
+    const initiateRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
+      ownerToken,
+      { close_request_id: closeRequestId, reason: "E58-A2 overlap test" }
+    );
+    expect(initiateRes.status).toBe(200);
+
+    const db = getTestDb();
+    let releaseGuardLock: (() => void) | undefined;
+    const releaseGuardLockPromise = new Promise<void>((resolve) => {
+      releaseGuardLock = resolve;
+    });
+
+    let signalGuardLocked: (() => void) | undefined;
+    const guardLockedPromise = new Promise<void>((resolve) => {
+      signalGuardLocked = resolve;
+    });
+
+    const guardTxPromise = db.transaction().execute(async (trx) => {
+      await ensureDateWithinOpenFiscalYearWithExecutor(trx, companyId, "2046-06-15");
+      signalGuardLocked?.();
+      await releaseGuardLockPromise;
+    });
+
+    await guardLockedPromise;
+
+    const approvePromise = postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close/approve`,
+      ownerToken,
+      { close_request_id: closeRequestId }
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    const pendingRows = await sql<{ status: string }>`
+      SELECT status
+      FROM fiscal_year_close_requests
+      WHERE company_id = ${companyId}
+        AND fiscal_year_id = ${fiscalYear.id}
+        AND close_request_id = ${closeRequestId}
+    `.execute(db);
+    expect(pendingRows.rows).toHaveLength(1);
+    expect(pendingRows.rows[0]?.status).toBe("PENDING");
+
+    const statusDuringLockRes = await getJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/status`,
+      ownerToken
+    );
+    const statusDuringLockBody = await statusDuringLockRes.json();
+    expect(statusDuringLockBody.data.status).toBe("OPEN");
+
+    releaseGuardLock?.();
+    await guardTxPromise;
+
+    const approveRes = await approvePromise;
+    expect(approveRes.status).toBe(200);
+    const approveBody = await approveRes.json();
+    expect(approveBody.success).toBe(true);
+
+    const statusAfterLockRes = await getJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/status`,
+      ownerToken
+    );
+    const statusAfterLockBody = await statusAfterLockRes.json();
+    expect(statusAfterLockBody.data.status).toBe("CLOSED");
+  });
+
+  /**
    * AC-7: Auto-snapshot failure is non-blocking warning - approve still returns 200 with warning.
    * When AP reconciliation settings are missing, the snapshot call fails, but the close/posting
    * itself succeeds and the response is 200 with a top-level warnings array.
@@ -538,6 +643,8 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
 
     const closeRequestId = `det-ts-${randomUUID()}`;
 
+    await ensureAPReconciliationSettings();
+
     // Step 1: Initiate
     const initiateRes = await postJson(
       `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
@@ -606,6 +713,8 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
 
     // First: close the fiscal year with original request id
     const originalCloseRequestId = `original-close-${randomUUID()}`;
+
+    await ensureAPReconciliationSettings();
 
     const initRes = await postJson(
       `/api/accounts/fiscal-years/${fiscalYear.id}/close`,

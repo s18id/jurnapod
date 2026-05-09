@@ -28,6 +28,8 @@ import type {
   ItemCancellationResult,
   VariantSaleResult,
   VariantStockAdjustmentResult,
+  PostingHookFn,
+  PostingHookContext,
 } from "./types.js";
 
 import {
@@ -90,6 +92,8 @@ import { postCogsForSale, type StockCostEntry } from "@jurnapod/modules-accounti
 // ============================================================================
 
 const PAYLOAD_HASH_VERSION_CANONICAL_TRX_AT = 2;
+const COGS_DOC_TYPE = "COGS";
+const COGS_REVERSAL_DOC_TYPE = "COGS_REVERSAL";
 
 // ============================================================================
 // Timestamp Helpers
@@ -187,6 +191,321 @@ function canonicalizeTransactionForLegacyHash(tx: TransactionPush): string {
   });
 }
 
+function canonicalizeTransactionBusinessIdentity(tx: TransactionPush): string {
+  const trxAtMs = normalizeTrxAtForHash(tx.trx_at);
+  const trxAtCanonical = toMysqlDateTimeStrict(tx.trx_at);
+  const openedAtVal = tx.opened_at ? toMysqlDateTimeStrict(tx.opened_at) : trxAtCanonical;
+  const closedAtVal = tx.closed_at ? toMysqlDateTimeStrict(tx.closed_at) : trxAtCanonical;
+
+  return JSON.stringify({
+    company_id: tx.company_id,
+    outlet_id: tx.outlet_id,
+    cashier_user_id: tx.cashier_user_id,
+    service_type: tx.service_type ?? "TAKEAWAY",
+    table_id: tx.table_id ?? null,
+    reservation_id: tx.reservation_id ?? null,
+    guest_count: tx.guest_count ?? null,
+    order_status: tx.order_status ?? "COMPLETED",
+    opened_at: openedAtVal,
+    closed_at: closedAtVal,
+    notes: tx.notes ?? null,
+    trx_at: trxAtMs,
+    discount_percent: tx.discount_percent ?? 0,
+    discount_fixed: tx.discount_fixed ?? 0,
+    discount_code: tx.discount_code ?? null,
+    items: tx.items.map((item) => ({
+      item_id: item.item_id,
+      variant_id: item.variant_id ?? null,
+      qty: item.qty,
+      price_snapshot: item.price_snapshot,
+      name_snapshot: item.name_snapshot,
+    })),
+    payments: tx.payments.map((payment) => ({
+      method: payment.method,
+      amount: payment.amount,
+    })),
+    taxes: (tx.taxes ?? [])
+      .map((tax) => ({ tax_rate_id: tax.tax_rate_id, amount: tax.amount }))
+      .sort((a, b) => a.tax_rate_id - b.tax_rate_id),
+  });
+}
+
+interface ExistingPosTransactionCandidate {
+  id: number;
+  status: "COMPLETED" | "VOID" | "REFUND";
+  company_id: number;
+  outlet_id: number;
+  cashier_user_id: number | null;
+  service_type: string;
+  table_id: number | null;
+  reservation_id: number | null;
+  guest_count: number | null;
+  order_status: string;
+  opened_at: string | null;
+  closed_at: string | null;
+  notes: string | null;
+  trx_at_ts: number;
+  discount_percent: string | number;
+  discount_fixed: string | number;
+  discount_code: string | null;
+}
+
+function canonicalizeExistingTransactionBusinessIdentity(
+  tx: ExistingPosTransactionCandidate,
+  items: Array<{ item_id: number; variant_id: number | null; qty: string | number; price_snapshot: string | number; name_snapshot: string }>,
+  payments: Array<{ method: string; amount: string | number }>,
+  taxes: Array<{ tax_rate_id: number; amount: string | number }>,
+): string {
+  return JSON.stringify({
+    company_id: tx.company_id,
+    outlet_id: tx.outlet_id,
+    cashier_user_id: tx.cashier_user_id,
+    service_type: tx.service_type,
+    table_id: tx.table_id,
+    reservation_id: tx.reservation_id,
+    guest_count: tx.guest_count,
+    order_status: tx.order_status,
+    opened_at: tx.opened_at,
+    closed_at: tx.closed_at,
+    notes: tx.notes,
+    trx_at: tx.trx_at_ts,
+    discount_percent: Number(tx.discount_percent ?? 0),
+    discount_fixed: Number(tx.discount_fixed ?? 0),
+    discount_code: tx.discount_code,
+    items: items.map((item) => ({
+      item_id: Number(item.item_id),
+      variant_id: item.variant_id == null ? null : Number(item.variant_id),
+      qty: Number(item.qty),
+      price_snapshot: Number(item.price_snapshot),
+      name_snapshot: item.name_snapshot,
+    })),
+    payments: payments.map((payment) => ({
+      method: payment.method,
+      amount: Number(payment.amount),
+    })),
+    taxes: taxes
+      .map((tax) => ({ tax_rate_id: Number(tax.tax_rate_id), amount: Number(tax.amount) }))
+      .sort((a, b) => a.tax_rate_id - b.tax_rate_id),
+  });
+}
+
+async function findMatchingFinalizedTransactionByBusinessIdentity(
+  db: KyselySchema,
+  tx: TransactionPush,
+): Promise<{ id: number; status: "COMPLETED" | "VOID" | "REFUND" } | null> {
+  const incomingIdentity = canonicalizeTransactionBusinessIdentity(tx);
+  const trxAtTs = toTimestampMs(tx.trx_at, "trx_at");
+
+  const candidateRows = await sql<ExistingPosTransactionCandidate>`
+    SELECT
+      id,
+      status,
+      company_id,
+      outlet_id,
+      cashier_user_id,
+      service_type,
+      table_id,
+      reservation_id,
+      guest_count,
+      order_status,
+      opened_at,
+      closed_at,
+      notes,
+      trx_at_ts,
+      discount_percent,
+      discount_fixed,
+      discount_code
+    FROM pos_transactions
+    WHERE company_id = ${tx.company_id}
+      AND outlet_id = ${tx.outlet_id}
+      AND cashier_user_id = ${tx.cashier_user_id}
+      AND trx_at_ts = ${trxAtTs}
+      AND service_type = ${tx.service_type ?? "TAKEAWAY"}
+      AND status IN ('COMPLETED', 'VOID', 'REFUND')
+    ORDER BY id DESC
+  `.execute(db);
+
+  for (const candidate of candidateRows.rows) {
+    const candidateId = Number(candidate.id);
+
+    const itemRows = await sql<{
+      item_id: number;
+      variant_id: number | null;
+      qty: string | number;
+      price_snapshot: string | number;
+      name_snapshot: string;
+    }>`
+      SELECT item_id, variant_id, qty, price_snapshot, name_snapshot
+      FROM pos_transaction_items
+      WHERE pos_transaction_id = ${candidateId}
+      ORDER BY line_no ASC
+    `.execute(db);
+
+    const paymentRows = await sql<{ method: string; amount: string | number }>`
+      SELECT method, amount
+      FROM pos_transaction_payments
+      WHERE pos_transaction_id = ${candidateId}
+      ORDER BY payment_no ASC
+    `.execute(db);
+
+    const taxRows = await sql<{ tax_rate_id: number; amount: string | number }>`
+      SELECT tax_rate_id, amount
+      FROM pos_transaction_taxes
+      WHERE pos_transaction_id = ${candidateId}
+      ORDER BY tax_rate_id ASC
+    `.execute(db);
+
+    const candidateIdentity = canonicalizeExistingTransactionBusinessIdentity(
+      candidate,
+      itemRows.rows,
+      paymentRows.rows,
+      taxRows.rows,
+    );
+
+    if (candidateIdentity === incomingIdentity) {
+      return {
+        id: candidateId,
+        status: candidate.status,
+      };
+    }
+  }
+
+  return null;
+}
+
+interface ExistingCogsJournalBatchRow {
+  id: number;
+}
+
+interface ExistingJournalLineRow {
+  account_id: number;
+  debit: string | number;
+  credit: string | number;
+}
+
+function toMinorUnits(value: number): number {
+  return Math.round(value * 100);
+}
+
+function buildReversalLinkageTag(params: {
+  status: "VOID" | "REFUND";
+  originalBatchId: number;
+  originalPosTransactionId: number;
+  correctionPosTransactionId: number;
+  clientTxId: string;
+}): string {
+  return `[REV:${params.status}|OB:${params.originalBatchId}|OT:${params.originalPosTransactionId}|CT:${params.correctionPosTransactionId}|CTX:${params.clientTxId}]`;
+}
+
+async function createCogsReversalJournalsForCorrection(
+  db: KyselySchema,
+  params: {
+    companyId: number;
+    outletId: number;
+    status: "VOID" | "REFUND";
+    originalPosTransactionId: number;
+    correctionPosTransactionId: number;
+    correctionPostedAt: string;
+    clientTxId: string;
+  },
+): Promise<void> {
+  const originalCogsBatches = await sql<ExistingCogsJournalBatchRow>`
+    SELECT id
+    FROM journal_batches
+    WHERE company_id = ${params.companyId}
+      AND outlet_id = ${params.outletId}
+      AND doc_type = ${COGS_DOC_TYPE}
+      AND doc_id = ${params.originalPosTransactionId}
+    ORDER BY id ASC
+  `.execute(db);
+
+  if (originalCogsBatches.rows.length === 0) {
+    return;
+  }
+
+  const reversalLineDate = params.correctionPostedAt.slice(0, 10);
+
+  for (const batch of originalCogsBatches.rows) {
+    const originalBatchId = Number(batch.id);
+    const originalLines = await sql<ExistingJournalLineRow>`
+      SELECT account_id, debit, credit
+      FROM journal_lines
+      WHERE journal_batch_id = ${originalBatchId}
+        AND company_id = ${params.companyId}
+        AND outlet_id = ${params.outletId}
+      ORDER BY id ASC
+    `.execute(db);
+
+    if (originalLines.rows.length === 0) {
+      continue;
+    }
+
+    const linkageTag = buildReversalLinkageTag({
+      status: params.status,
+      originalBatchId,
+      originalPosTransactionId: params.originalPosTransactionId,
+      correctionPosTransactionId: params.correctionPosTransactionId,
+      clientTxId: params.clientTxId,
+    });
+
+    const reversalLines = originalLines.rows.map((line) => ({
+      account_id: Number(line.account_id),
+      debit: Number(line.credit),
+      credit: Number(line.debit),
+      description: linkageTag,
+    }));
+
+    const totalDebitMinor = reversalLines.reduce((sum, line) => sum + toMinorUnits(line.debit), 0);
+    const totalCreditMinor = reversalLines.reduce((sum, line) => sum + toMinorUnits(line.credit), 0);
+    if (totalDebitMinor !== totalCreditMinor) {
+      throw new Error(`COGS_REVERSAL_UNBALANCED:${originalBatchId}`);
+    }
+
+    const reversalBatchInsert = await sql`
+      INSERT INTO journal_batches (
+        company_id,
+        outlet_id,
+        doc_type,
+        doc_id,
+        posted_at
+      ) VALUES (
+        ${params.companyId},
+        ${params.outletId},
+        ${COGS_REVERSAL_DOC_TYPE},
+        ${params.originalPosTransactionId},
+        ${params.correctionPostedAt}
+      )
+    `.execute(db);
+
+    const reversalBatchId = Number(reversalBatchInsert.insertId);
+    const values = reversalLines.map((line) => sql`
+      (
+        ${reversalBatchId},
+        ${params.companyId},
+        ${params.outletId},
+        ${line.account_id},
+        ${reversalLineDate},
+        ${line.debit},
+        ${line.credit},
+        ${line.description}
+      )
+    `);
+
+    await sql`
+      INSERT INTO journal_lines (
+        journal_batch_id,
+        company_id,
+        outlet_id,
+        account_id,
+        line_date,
+        debit,
+        credit,
+        description
+      ) VALUES ${sql.join(values, sql`, `)}
+    `.execute(db);
+  }
+}
+
 function listLegacyEquivalentTrxAtVariants(trxAt: string): string[] {
   const variants = new Set<string>();
   const trimmed = trxAt.trim();
@@ -226,7 +545,8 @@ async function processTransaction(
   companyId: number,
   outletId: number,
   correlationId: string,
-  metricsCollector?: SyncIdempotencyMetricsCollector
+  metricsCollector?: SyncIdempotencyMetricsCollector,
+  postingHook?: PostingHookFn
 ): Promise<SyncPushResultItem> {
   const startedAtMs = Date.now();
 
@@ -291,6 +611,25 @@ async function processTransaction(
         return { client_tx_id: tx.client_tx_id, result: "ERROR", message: "IDEMPOTENCY_CONFLICT" };
       }
     }
+
+    const finalizedIdentityMatch = await findMatchingFinalizedTransactionByBusinessIdentity(db, tx);
+    if (finalizedIdentityMatch && finalizedIdentityMatch.status === "COMPLETED") {
+      if (tx.status === "COMPLETED") {
+        return {
+          client_tx_id: tx.client_tx_id,
+          result: "ERROR",
+          message: "FINALIZED_TRANSACTION_MUTATION_REQUIRES_VOID_OR_REFUND",
+        };
+      }
+      if (tx.status !== "VOID" && tx.status !== "REFUND") {
+        return {
+          client_tx_id: tx.client_tx_id,
+          result: "ERROR",
+          message: "FINALIZED_TRANSACTION_MUTATION_REQUIRES_VOID_OR_REFUND",
+        };
+      }
+    }
+    const originalCompletedTransactionId = finalizedIdentityMatch?.status === "COMPLETED" ? finalizedIdentityMatch.id : null;
 
     // Verify cashier belongs to company
     const cashierValid = await isCashierInCompany(db, tx.cashier_user_id, tx.company_id);
@@ -443,9 +782,52 @@ async function processTransaction(
         }
       }
 
-      // STUB: Posting hook - requires KyselyPosSyncPushPostingExecutor from API layer
-      // This will be implemented in story 27.6
-      // await runSyncPushPostingHook(...);
+      // Posting hook: create POS_SALE journal for COMPLETED transactions
+      if (postingHook) {
+        const hookContext: PostingHookContext = {
+          correlationId,
+          companyId: tx.company_id,
+          outletId: tx.outlet_id,
+          userId: tx.cashier_user_id,
+          clientTxId: tx.client_tx_id,
+          status: tx.status,
+          trxAt: tx.trx_at,
+          posTransactionId,
+        };
+        await postingHook(db, hookContext);
+      }
+    }
+
+    if ((tx.status === "VOID" || tx.status === "REFUND") && originalCompletedTransactionId !== null) {
+      await createCogsReversalJournalsForCorrection(db, {
+        companyId: tx.company_id,
+        outletId: tx.outlet_id,
+        status: tx.status,
+        originalPosTransactionId: originalCompletedTransactionId,
+        correctionPosTransactionId: posTransactionId,
+        correctionPostedAt: trxAtCanonical,
+        clientTxId: tx.client_tx_id,
+      });
+    }
+
+    // Posting hook: create POS_SALE_REVERSAL for VOID/REFUND corrections
+    if (
+      (tx.status === "VOID" || tx.status === "REFUND") &&
+      originalCompletedTransactionId !== null &&
+      postingHook
+    ) {
+      const hookContext: PostingHookContext = {
+        correlationId,
+        companyId: tx.company_id,
+        outletId: tx.outlet_id,
+        userId: tx.cashier_user_id,
+        clientTxId: tx.client_tx_id,
+        status: tx.status,
+        trxAt: tx.trx_at,
+        posTransactionId,
+        originalPosTransactionId: originalCompletedTransactionId,
+      };
+      await postingHook(db, hookContext);
     }
 
     // Record success metric
@@ -1222,6 +1604,7 @@ export async function handlePushSync(
     variantStockAdjustments,
     correlationId = `pos-push-${Date.now()}`,
     metricsCollector,
+    postingHook,
   } = params;
 
   const startTime = Date.now();
@@ -1267,7 +1650,7 @@ export async function handlePushSync(
 
       // Process new transactions sequentially to avoid race conditions
       for (const tx of newTransactions) {
-        const result = await processTransaction(db, tx, companyId, outletId, correlationId, metricsCollector);
+        const result = await processTransaction(db, tx, companyId, outletId, correlationId, metricsCollector, postingHook);
         results.push(result);
       }
     }

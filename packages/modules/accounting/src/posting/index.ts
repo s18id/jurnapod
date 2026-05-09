@@ -79,6 +79,7 @@ export type {
   SyncPushPostingExecutor,
   PosSyncPushPostingRepository,
   PosSyncPushPostingMapper,
+  PosSaleReversalParams,
 } from "./sync-push.js";
 export {
   // Sync push posting values
@@ -90,4 +91,7 @@ export {
   POS_EMPTY_PAYMENT_SET_MESSAGE,
   POS_OVERPAYMENT_NOT_SUPPORTED_MESSAGE,
   runSyncPushPostingHook,
+  createPosSaleReversalJournalsForCorrection,
+  readJournalLinesByBatch,
+  findJournalBatchesByDoc,
 } from "./sync-push.js";

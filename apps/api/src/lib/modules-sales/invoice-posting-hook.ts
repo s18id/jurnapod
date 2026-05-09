@@ -11,7 +11,7 @@
 import { sql } from "kysely";
 import type { Transaction } from "@jurnapod/db";
 import type { InvoicePostingHook } from "@jurnapod/modules-sales";
-import type { PostInvoiceInput, SalesInvoiceDetail, SalesInvoiceTax } from "@jurnapod/modules-sales";
+import type { PostInvoiceInput, SalesInvoiceDetail } from "@jurnapod/modules-sales";
 import type { PostingResult } from "@jurnapod/shared";
 import { postSalesInvoiceToJournal } from "@/lib/sales-posting";
 import type { KyselySchema } from "@/lib/db";

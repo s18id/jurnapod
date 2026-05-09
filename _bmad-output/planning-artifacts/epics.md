@@ -79,8 +79,8 @@ NFR3: Templates must follow existing project conventions (AGENTS.md, existing pa
 | **Epic 56** | **Correctness Infrastructure** | **done** | **56** |
 | **Epic 57** | **AR + Treasury Correctness** | **planned** | **57** |
 | Epic 58 | Inventory/Costing Correctness | backlog | 58 |
-| Epic 59 | POS Core Correctness Consolidation | backlog | 59 |
-| Epic 60 | Tenant + ACL Correctness Hardening | backlog | 60 |
+| **Epic 59** | **POS Core Correctness Consolidation** | **done** | **59** |
+| **Epic 60** | **Tenant + ACL Correctness Hardening** | **planned** | **60** |
 | Epic 61 | Sync Contract Correctness Hardening | backlog | 61 |
 | Epic 62 | Projection Correctness Hardening | backlog | 62 |
 

@@ -25,8 +25,13 @@ import type {
   OrderUpdatePush,
   ItemCancellationPush,
   VariantSalePush,
-  VariantStockAdjustmentPush
+  VariantStockAdjustmentPush,
+  PostingHookFn,
+  PostingHookContext,
 } from "@jurnapod/pos-sync";
+import { KyselyPosSyncPushPostingExecutor } from "../../lib/sync/push/posting-executor.js";
+import { runSyncPushPostingHook } from "@jurnapod/modules-accounting";
+import type { KyselySchema } from "@jurnapod/db";
 import { outboxMetrics, syncMetrics, type OutboxFailureReason } from "../../lib/metrics/index.js";
 
 declare module "hono" {
@@ -72,17 +77,23 @@ syncPushRoutes.post("/", async (c) => {
         company_id: auth.companyId,
         errors: validationResult.error.errors
       });
+
+      const clientTxIdError = extractClientTxIdValidationError(validationResult.error);
+      if (clientTxIdError) {
+        return errorResponse("VALIDATION_ERROR", clientTxIdError, 400);
+      }
       return errorResponse("VALIDATION_ERROR", "Invalid request payload", 400);
     }
 
-    const { outlet_id, transactions, active_orders, order_updates, item_cancellations, variant_sales, variant_stock_adjustments } = validationResult.data;
+    const { outlet_id: validatedOutletId, transactions, active_orders, order_updates, item_cancellations, variant_sales, variant_stock_adjustments } = validationResult.data;
+    outlet_id = validatedOutletId;
 
     const outletAccessGuard = requireAccess({
       roles: ["OWNER", "ADMIN", "CASHIER"],
       module: "pos",
       resource: "transactions",
       permission: "create",
-      outletId: outlet_id
+      outletId: validatedOutletId
     });
 
     const outletAccessResult = await outletAccessGuard(c.req.raw, auth);
@@ -102,6 +113,32 @@ syncPushRoutes.post("/", async (c) => {
 
     const db = dbPool;
 
+    // Create posting hook callback for POS_SALE journal creation/reversal
+    const postingHook: PostingHookFn = async (dbInstance: KyselySchema, ctx: PostingHookContext) => {
+      const executor = new KyselyPosSyncPushPostingExecutor(dbInstance, {
+        correlationId: ctx.correlationId,
+        companyId: ctx.companyId,
+        outletId: ctx.outletId,
+        userId: ctx.userId,
+        clientTxId: ctx.clientTxId,
+        status: ctx.status,
+        trxAt: ctx.trxAt,
+        posTransactionId: ctx.posTransactionId,
+        originalPosTransactionId: ctx.originalPosTransactionId,
+      });
+      return runSyncPushPostingHook(dbInstance, executor, {
+        correlationId: ctx.correlationId,
+        companyId: ctx.companyId,
+        outletId: ctx.outletId,
+        userId: ctx.userId,
+        clientTxId: ctx.clientTxId,
+        status: ctx.status,
+        trxAt: ctx.trxAt,
+        posTransactionId: ctx.posTransactionId,
+        originalPosTransactionId: ctx.originalPosTransactionId,
+      });
+    };
+
     // Phase 1 + Phase 2: Use PosSyncModule — phase2 is now handled inline in pos-sync
     const module = await getPosSyncModuleAsync();
 
@@ -116,7 +153,8 @@ syncPushRoutes.post("/", async (c) => {
       variantSales: (variant_sales ?? []) as VariantSalePush[],
       variantStockAdjustments: (variant_stock_adjustments ?? []) as VariantStockAdjustmentPush[],
       correlationId,
-      metricsCollector
+      metricsCollector,
+      postingHook,
     });
 
     const responsePayload = {
@@ -263,17 +301,22 @@ export function registerSyncPushRoutes(app: { openapi: OpenAPIHonoType["openapi"
       const validationResult = SyncPushRequestSchema.safeParse(body);
 
       if (!validationResult.success) {
+        const clientTxIdError = extractClientTxIdValidationError(validationResult.error);
+        if (clientTxIdError) {
+          return errorResponse("VALIDATION_ERROR", clientTxIdError, 400);
+        }
         return errorResponse("VALIDATION_ERROR", "Invalid request payload", 400);
       }
 
-      const { outlet_id, transactions, active_orders, order_updates, item_cancellations, variant_sales, variant_stock_adjustments } = validationResult.data;
+      const { outlet_id: validOutletId, transactions, active_orders, order_updates, item_cancellations, variant_sales, variant_stock_adjustments } = validationResult.data;
+      outlet_id = validOutletId;
 
       const outletAccessGuard = requireAccess({
         roles: ["OWNER", "ADMIN", "CASHIER"],
         module: "pos",
         resource: "transactions",
         permission: "create",
-        outletId: outlet_id
+        outletId: validOutletId
       });
 
       const outletAccessResult = await outletAccessGuard(c.req.raw, auth);
@@ -295,6 +338,32 @@ export function registerSyncPushRoutes(app: { openapi: OpenAPIHonoType["openapi"
 
       const module = await getPosSyncModuleAsync();
 
+      // Create posting hook callback for POS_SALE journal creation/reversal
+      const postingHook: PostingHookFn = async (dbInstance: KyselySchema, ctx: PostingHookContext) => {
+        const executor = new KyselyPosSyncPushPostingExecutor(dbInstance, {
+          correlationId: ctx.correlationId,
+          companyId: ctx.companyId,
+          outletId: ctx.outletId,
+          userId: ctx.userId,
+          clientTxId: ctx.clientTxId,
+          status: ctx.status,
+          trxAt: ctx.trxAt,
+          posTransactionId: ctx.posTransactionId,
+          originalPosTransactionId: ctx.originalPosTransactionId,
+        });
+        return runSyncPushPostingHook(dbInstance, executor, {
+          correlationId: ctx.correlationId,
+          companyId: ctx.companyId,
+          outletId: ctx.outletId,
+          userId: ctx.userId,
+          clientTxId: ctx.clientTxId,
+          status: ctx.status,
+          trxAt: ctx.trxAt,
+          posTransactionId: ctx.posTransactionId,
+          originalPosTransactionId: ctx.originalPosTransactionId,
+        });
+      };
+
       const phase1Results = await module.handlePushSync({
         db: db,
         companyId: auth.companyId,
@@ -306,6 +375,7 @@ export function registerSyncPushRoutes(app: { openapi: OpenAPIHonoType["openapi"
         variantSales: (variant_sales ?? []) as VariantSalePush[],
         variantStockAdjustments: (variant_stock_adjustments ?? []) as VariantStockAdjustmentPush[],
         correlationId,
+        postingHook,
       });
 
       const responsePayload = {
@@ -460,6 +530,40 @@ function classifySyncErrorReason(errorMessage: string | undefined): OutboxFailur
   }
   
   return "internal_error";
+}
+
+/**
+ * Extract a human-readable error message for client_tx_id validation failures.
+ * Returns undefined if the validation error is unrelated to client_tx_id.
+ *
+ * Maps Zod issues on `transactions[].client_tx_id` to specific, machine-readable messages
+ * required by the sync idempotency contract (AC4/AC5).
+ */
+function extractClientTxIdValidationError(error: { errors: Array<{ path: (string | number)[]; message: string; code: string }> }): string | undefined {
+  for (const issue of error.errors) {
+    const path = issue.path;
+    const lastPath = path[path.length - 1];
+    // Check if the error relates to client_tx_id — either by path or by message
+    const isClientTxIdPath = lastPath === "client_tx_id" && path.some(p => typeof p === "string" && p === "transactions");
+    const mentionsClientTxId = typeof lastPath === "string" && lastPath.includes("client_tx_id");
+    if (isClientTxIdPath || mentionsClientTxId) {
+      if (issue.code === "invalid_type") {
+        return "client_tx_id is required";
+      }
+      if (issue.code === "invalid_string" && issue.message.includes("uuid")) {
+        return `client_tx_id must be a valid UUID string, got invalid format`;
+      }
+      if (issue.code === "too_small" && issue.message.includes("at least 1")) {
+        return `client_tx_id must be a valid UUID string (empty string not allowed)`;
+      }
+      return `client_tx_id validation failed: ${issue.message}`;
+    }
+    // Fallback: any error message that mentions client_tx_id
+    if (issue.message && (issue.message.includes("client_tx_id") || issue.message.includes("clientTxId"))) {
+      return `client_tx_id validation failed: ${issue.message}`;
+    }
+  }
+  return undefined;
 }
 
 export { syncPushRoutes };

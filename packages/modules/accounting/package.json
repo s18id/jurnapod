@@ -14,6 +14,14 @@
       "types": "./dist/posting/cogs.d.ts",
       "default": "./dist/posting/cogs.js"
     },
+    "./posting/sync-push": {
+      "types": "./dist/posting/sync-push.d.ts",
+      "default": "./dist/posting/sync-push.js"
+    },
+    "./test-fixtures/pos-sale-journal-fixtures": {
+      "types": "./dist/test-fixtures/pos-sale-journal-fixtures.d.ts",
+      "default": "./dist/test-fixtures/pos-sale-journal-fixtures.js"
+    },
     "./reconciliation": {
       "types": "./dist/reconciliation/index.d.ts",
       "default": "./dist/reconciliation/index.js"

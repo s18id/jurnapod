@@ -11,7 +11,7 @@
 import { sql } from "kysely";
 import type { Transaction } from "@jurnapod/db";
 import type { CreditNotePostingHook } from "@jurnapod/modules-sales";
-import type { PostCreditNoteInput, SalesCreditNoteDetail, SalesCreditNoteLine } from "@jurnapod/modules-sales";
+import type { PostCreditNoteInput, SalesCreditNoteDetail } from "@jurnapod/modules-sales";
 import type { PostingResult } from "@jurnapod/shared";
 import { postCreditNoteToJournal } from "@/lib/sales-posting";
 import type { KyselySchema } from "@/lib/db";

@@ -1,6 +1,6 @@
 # Action Items Tracker
 
-**Last Updated:** 2026-05-05T10:45:00Z
+**Last Updated:** 2026-05-09T00:00:00Z
 **Review Cadence:** Monthly at sprint retrospective
 
 ---
@@ -11,9 +11,9 @@
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
 | P1 | 0 | 12 | 0 | 12 |
-| P2 | 0 | 10 | 0 | 10 |
+| P2 | 0 | 12 | 0 | 12 |
 | P3 | 1 | 5 | 3 | 9 |
-| **Total** | **1** | **31** | **3** | **35** |
+| **Total** | **1** | **33** | **3** | **37** |
 
 > **Note:** The Historical section (Pre-Epic 8) is tracked separately (32 items) and excluded from summary totals above.
 
@@ -35,6 +35,7 @@
 
 | ID | Action | From | Owner | Status |
 |----|--------|------|-------|--------|
+
 
 
 ---
@@ -112,6 +113,8 @@
 | **E45-A5a** | Add automated completion-note check to CI pipeline | Epic 44 | E54 batch | Created `scripts/validate-completion-notes.ts` with baseline+delta policy; 307 historical gaps captured in baseline; only NEW misses fail CI |
 | **E45-A5b** | Enhance database compatibility testing (MySQL + MariaDB dual-DB CI) | Epic 44 | E54 batch | Audit confirmed dual-DB CI already implemented: `test-critical` and `test-extended` both run against `[mysql:8.0, mariadb:11.8]` matrix; no gaps found |
 | **E54-A5** | Add seeded-data integration test for non-zero inventory reconciliation path | Epic 51 retro | E54 batch | Created `apps/api/__test__/integration/inventory-reconciliation-seeded.integration.test.ts`; tests cost layer creation, `inventory_item_costs` summary, partial consumption via `deductStockWithCost`, and subledger balance verification |
+| **E58-A2** | Investigate and size concurrent posting deadlock; choose Option A (<1 sprint in Epic 59) or Option B (>1 sprint backlog with estimate) | Epic 58 retro | Epic 59 | Option A selected and executed via Story 59.3 evidence + gate contract. Validation output: `__EPIC59_GATE__ {"version":1,"gate":"E58_A2_OPTION_A","decision":"OPTION_A","story_59_3_evidence_present":true,"pass":true}` from `scripts/validate-epic-59-gates.ts` (exit 0). |
+| **E58-A1** | Add cross-module error boundary verification to story kickoff artifacts and enforce `instanceof` + `error.name` fallback planning | Epic 58 retro | Epic 59 kickoff | Added `Cross-Module Error Boundary Verification (MANDATORY — E58-A1)` to `docs/templates/story-spec-template.md` and populated matrices in `story-59.1.md` through `story-59.6.md` with concrete error classes and fallback determinations. |
 
 ### P3
 
@@ -186,4 +189,4 @@ Examples:
 - `E8-A1` = Epic 8, Action 1
 - `E15-A2` = Epic 15, Action 2
 
-_Last Updated: 2026-05-05T10:45:00Z_
+_Last Updated: 2026-05-09T00:00:00Z_

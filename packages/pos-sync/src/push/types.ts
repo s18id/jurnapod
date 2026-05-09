@@ -13,6 +13,35 @@ import type {
   SyncOperationResult
 } from "@jurnapod/sync-core";
 import type { ItemCostResult } from "@jurnapod/modules-inventory-costing";
+import type { SyncPushPostingHookResult } from "@jurnapod/modules-accounting";
+
+// ============================================================================
+// Posting Hook Types
+// ============================================================================
+
+/**
+ * Context passed to the posting hook callback.
+ */
+export interface PostingHookContext {
+  correlationId: string;
+  companyId: number;
+  outletId: number;
+  userId: number;
+  clientTxId: string;
+  status: "COMPLETED" | "VOID" | "REFUND";
+  trxAt: string;
+  posTransactionId: number;
+  /** Set for VOID/REFUND corrections to enable reversal */
+  originalPosTransactionId?: number;
+}
+
+/**
+ * Signature for the optional posting hook callback.
+ */
+export type PostingHookFn = (
+  db: KyselySchema,
+  context: PostingHookContext
+) => Promise<SyncPushPostingHookResult>;
 
 // ============================================================================
 // Result Types
@@ -228,6 +257,8 @@ export type PushSyncParams = {
   correlationId?: string;
   /** Optional metrics collector */
   metricsCollector?: SyncIdempotencyMetricsCollector;
+  /** Optional posting hook callback (for POS_SALE journal creation/reversal) */
+  postingHook?: PostingHookFn;
 };
 
 export type PushSyncResult = {

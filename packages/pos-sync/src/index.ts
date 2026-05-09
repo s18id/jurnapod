@@ -28,6 +28,9 @@ export type {
   SyncVariantStockAdjustResult,
   PostPushResult,
   StockConflict,
+  // Posting hook types (Story 59.8)
+  PostingHookFn,
+  PostingHookContext,
 } from "./push/types.js";
 
 // Export domain errors (Story 27.1)

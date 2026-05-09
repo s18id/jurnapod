@@ -59,7 +59,29 @@ import { registerPeriodCloseRoutes } from "./admin-dashboards/period-close.js";
 import { registerSyncDashboardRoutes } from "./admin-dashboards/sync.js";
 
 // Create OpenAPIHono instance for spec generation
-const app = new OpenAPIHono();
+const app = new OpenAPIHono({
+  defaultHook: (result, c) => {
+    if (!result.success) {
+      // Extract client_tx_id-specific errors for sync push routes
+      const errors = result.error.errors;
+      for (const issue of errors) {
+        const lastPath = issue.path[issue.path.length - 1];
+        if (typeof lastPath === "string" && lastPath.includes("client_tx_id")) {
+          if (issue.code === "invalid_type") {
+            return c.json({
+              success: false,
+              error: { code: "VALIDATION_ERROR", message: "client_tx_id is required" },
+            }, 400);
+          }
+          return c.json({
+            success: false,
+            error: { code: "VALIDATION_ERROR", message: `client_tx_id validation failed: ${issue.message}` },
+          }, 400);
+        }
+      }
+    }
+  },
+});
 
 // Register routes with OpenAPIHono
 registerHealthRoutes(app);

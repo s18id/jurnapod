@@ -38,6 +38,15 @@ export {
   setTestCompanyStringSetting,
 } from "./ap-reconciliation-settings-fixtures.js";
 
+// POS_SALE journal fixtures
+export {
+  createPosSaleJournalFixture,
+} from "./pos-sale-journal-fixtures.js";
+export type {
+  PosSaleJournalFixture,
+  PosSaleReversalFixtureInput,
+} from "./pos-sale-journal-fixtures.js";
+
 export {
   createTestInventoryGLAccount,
   createTestVarianceAccount,

@@ -17,7 +17,6 @@ loadEnv({ path: path.resolve(process.cwd(), '.env') });
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { createKysely, type KyselySchema } from '@jurnapod/db';
-import { sql } from 'kysely';
 import { persistPushBatch, type TransactionPush, type SyncPushResultItem } from '../../src/push/index.js';
 
 // ============================================================================
@@ -79,45 +78,45 @@ async function setupTestFixtures(): Promise<TestFixtures> {
     );
   }
 
-  // Find a CASHIER user in this company (must have role with 'cashier' in name)
-  // This is required because processTransaction validates cashier_user_id via isCashierInCompany
-  const userResult = await sql`
-    SELECT u.id as id
-    FROM users u
-    INNER JOIN user_role_assignments ura ON ura.user_id = u.id
-    INNER JOIN roles r ON r.id = ura.role_id
-    WHERE u.company_id = ${Number(companyRows[0].company_id)}
-      AND LOWER(r.name) LIKE '%cashier%'
-      AND u.is_active = 1
-    LIMIT 1
-  `.execute(db);
+  // Find a CASHIER user in this company
+  const cashierUser = await db
+    .selectFrom("users as u")
+    .innerJoin("user_role_assignments as ura", "ura.user_id", "u.id")
+    .innerJoin("roles as r", "r.id", "ura.role_id")
+    .select(["u.id"])
+    .where("u.company_id", "=", Number(companyRows[0].company_id))
+    .where("u.is_active", "=", 1)
+    .where((eb) => eb("r.name", "like", "%cashier%").or("r.name", "like", "%CASHIER%"))
+    .limit(1)
+    .executeTakeFirst();
 
-  if (userResult.rows.length === 0) {
+  if (!cashierUser) {
     throw new Error(
       `Cashier fixture not found for company ${config.companyCode}. ` +
       `Please ensure a user with 'cashier' role exists in the seed data.`
     );
   }
 
-  // Find a real item for this company
-  const itemRows = await sql`
-    SELECT id FROM items 
-    WHERE company_id = ${Number(companyRows[0].company_id)}
-    LIMIT 1
-  `.execute(db);
+  // Find a real item for this company via Kysely-native
+  const itemRow = await db
+    .selectFrom("items")
+    .select("id")
+    .where("company_id", "=", Number(companyRows[0].company_id))
+    .limit(1)
+    .executeTakeFirst();
 
-  if (itemRows.rows.length === 0) {
+  if (!itemRow) {
     throw new Error(
       `Test requires at least one item in company ${config.companyCode} — run seed first`
     );
   }
-  const testItemId = Number((itemRows.rows[0] as { id: number }).id);
+  const testItemId = Number(itemRow.id);
 
   return {
     db,
     testCompanyId: Number(companyRows[0].company_id),
     testOutletId: Number(companyRows[0].outlet_id),
-    cashierUserId: Number((userResult.rows[0] as { id: number }).id),
+    cashierUserId: Number(cashierUser.id),
     testItemId,
   };
 }
@@ -190,6 +189,7 @@ describe('persistPushBatch Integration', () => {
           outlet_id: fixtures.testOutletId,
           cashier_user_id: fixtures.cashierUserId,
           status: 'COMPLETED',
+          notes: 'tx-new-1',
           service_type: 'TAKEAWAY',
           trx_at: '2024-01-15T10:30:00+07:00',
           items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
@@ -201,6 +201,7 @@ describe('persistPushBatch Integration', () => {
           outlet_id: fixtures.testOutletId,
           cashier_user_id: fixtures.cashierUserId,
           status: 'COMPLETED',
+          notes: 'tx-new-2',
           service_type: 'TAKEAWAY',
           trx_at: '2024-01-15T10:35:00+07:00',
           items: [{ item_id: fixtures.testItemId, qty: 2, price_snapshot: 15000, name_snapshot: 'Test Item' }],

@@ -77,6 +77,21 @@ export interface SyncPushPostingContext {
   trxAt: string;
   status: "COMPLETED" | "VOID" | "REFUND";
   posTransactionId: number;
+  /** 
+   * When status is VOID or REFUND, this MUST be set to the original
+   * COMPLETED transaction's ID. Used to locate POS_SALE journals to reverse.
+   */
+  originalPosTransactionId?: number;
+}
+
+export interface PosSaleReversalParams {
+  companyId: number;
+  outletId: number;
+  status: "VOID" | "REFUND";
+  originalPosTransactionId: number;
+  correctionPosTransactionId: number;
+  correctionPostedAt: string;
+  clientTxId: string;
 }
 
 export class SyncPushPostingHookError extends Error {
@@ -136,6 +151,7 @@ export interface SyncPushPostingExecutor {
 // =============================================================================
 
 const POS_SALE_DOC_TYPE = "POS_SALE";
+const POS_SALE_REVERSAL_DOC_TYPE = "POS_SALE_REVERSAL";
 
 export class PosSyncPushPostingRepository implements PostingRepository {
   private readonly lineDate: string;
@@ -148,40 +164,40 @@ export class PosSyncPushPostingRepository implements PostingRepository {
   }
 
   async createJournalBatch(request: PostingRequest): Promise<{ journal_batch_id: number }> {
-    const insertResult = await sql`
-      INSERT INTO journal_batches (
-        company_id,
-        outlet_id,
-        doc_type,
-        doc_id,
-        posted_at
-      ) VALUES (${request.company_id}, ${request.outlet_id ?? null}, ${request.doc_type}, ${request.doc_id}, ${this.postedAt})
-    `.execute(this.db);
+    const result = await this.db
+      .insertInto("journal_batches")
+      .values({
+        company_id: request.company_id,
+        outlet_id: request.outlet_id ?? null,
+        doc_type: request.doc_type,
+        doc_id: request.doc_id,
+        posted_at: sql`${this.postedAt}`,
+      })
+      .executeTakeFirstOrThrow();
 
     return {
-      journal_batch_id: Number(insertResult.insertId)
+      journal_batch_id: Number(result.insertId)
     };
   }
 
   async insertJournalLines(journalBatchId: number, request: PostingRequest, lines: JournalLine[]): Promise<void> {
     if (lines.length === 0) return;
 
-    const values = lines.map((line) => sql`
-      (${journalBatchId}, ${request.company_id}, ${request.outlet_id ?? null}, ${line.account_id}, ${this.lineDate}, ${line.debit}, ${line.credit}, ${line.description})
-    `);
-
-    await sql`
-      INSERT INTO journal_lines (
-        journal_batch_id,
-        company_id,
-        outlet_id,
-        account_id,
-        line_date,
-        debit,
-        credit,
-        description
-      ) VALUES ${sql.join(values, sql`, `)}
-    `.execute(this.db);
+    await this.db
+      .insertInto("journal_lines")
+      .values(
+        lines.map((line) => ({
+          journal_batch_id: journalBatchId,
+          company_id: request.company_id,
+          outlet_id: request.outlet_id ?? null,
+          account_id: line.account_id,
+          line_date: sql`${this.lineDate}`,
+          debit: line.debit,
+          credit: line.credit,
+          description: line.description,
+        }))
+      )
+      .execute();
   }
 }
 
@@ -201,6 +217,16 @@ function normalizePaymentMethodCode(method: string): string {
     throw new Error(UNSUPPORTED_PAYMENT_METHOD_MESSAGE);
   }
   return normalized;
+}
+
+function buildReversalLinkageTag(params: {
+  status: "VOID" | "REFUND";
+  originalBatchId: number;
+  originalPosTransactionId: number;
+  correctionPosTransactionId: number;
+  clientTxId: string;
+}): string {
+  return `[REV:${params.status}|OB:${params.originalBatchId}|OT:${params.originalPosTransactionId}|CT:${params.correctionPosTransactionId}|CTX:${params.clientTxId}]`;
 }
 
 export class PosSyncPushPostingMapper implements PostingMapper {
@@ -388,6 +414,204 @@ async function buildPosSaleJournalLines(
 }
 
 // =============================================================================
+// POS Sale Reversal
+// =============================================================================
+
+interface ExistingPosSaleBatchRow {
+  id: number;
+}
+
+interface ExistingJournalLineRow {
+  account_id: number;
+  debit: string | number;
+  credit: string | number;
+}
+
+/**
+ * Create POS_SALE_REVERSAL journal entries for a VOID or REFUND correction.
+ *
+ * Pattern: Find all POS_SALE journal batches linked to the original COMPLETED
+ * transaction, reverse each line (swap debit/credit), and create a new reversal
+ * journal batch with POS_SALE_REVERSAL doc type.
+ *
+ * This is the inverse operation of buildPosSaleJournalLines().
+ * Unlike buildPosSaleJournalLines which recomputes lines from source data,
+ * this function reverses the ACTUAL posted lines from the original journal —
+ * ensuring the reversal exactly matches what was posted, regardless of any
+ * subsequent changes to account mappings or tax rates.
+ *
+ * @param db - Database connection (MUST be inside a transaction if transactional
+ *             integrity is required between reversal batch and lines)
+ * @param params - Reversal parameters
+ * @returns The reversal batch ID, or null if no POS_SALE journal exists for the
+ *          original transaction
+ */
+
+// =============================================================================
+// Journal Batch Reader
+// =============================================================================
+
+/**
+ * Find journal batch IDs by document type and document ID.
+ *
+ * Production function — enforces tenant scoping (company_id + outlet_id).
+ * Used by createPosSaleReversalJournalsForCorrection to find original batches
+ * and check for existing reversals.
+ */
+export async function findJournalBatchesByDoc(
+  db: KyselySchema,
+  docType: string,
+  docId: number,
+  companyId: number,
+  outletId: number,
+): Promise<number[]> {
+  const rows = await db
+    .selectFrom("journal_batches")
+    .select("id")
+    .where("company_id", "=", companyId)
+    .where("outlet_id", "=", outletId)
+    .where("doc_type", "=", docType)
+    .where("doc_id", "=", docId)
+    .orderBy("id", "asc")
+    .execute();
+
+  return rows.map((r) => Number(r.id));
+}
+
+// =============================================================================
+// Journal Line Reader
+// =============================================================================
+
+export interface JournalLineRow {
+  account_id: number;
+  debit: number;
+  credit: number;
+  description: string | null;
+}
+
+/**
+ * Read journal lines for a batch.
+ *
+ * Production function — enforces tenant scoping (company_id + outlet_id).
+ * Used by createPosSaleReversalJournalsForCorrection to read original lines
+ * and by tests to verify reversal output.
+ */
+export async function readJournalLinesByBatch(
+  db: KyselySchema,
+  batchId: number,
+  companyId: number,
+  outletId: number,
+): Promise<JournalLineRow[]> {
+  const rows = await db
+    .selectFrom("journal_lines")
+    .select(["account_id", "debit", "credit", "description"])
+    .where("journal_batch_id", "=", batchId)
+    .where("company_id", "=", companyId)
+    .where("outlet_id", "=", outletId)
+    .orderBy("id", "asc")
+    .execute();
+
+  return rows.map((r) => ({
+    account_id: Number(r.account_id),
+    debit: Number(r.debit),
+    credit: Number(r.credit),
+    description: r.description as string | null,
+  }));
+}
+
+export async function createPosSaleReversalJournalsForCorrection(
+  db: KyselySchema,
+  params: PosSaleReversalParams
+): Promise<{ reversalBatchId: number } | null> {
+  // 1. Deduplication check: if reversal already exists, return existing batch ID
+  const existingBatches = await findJournalBatchesByDoc(
+    db, POS_SALE_REVERSAL_DOC_TYPE, params.originalPosTransactionId,
+    params.companyId, params.outletId,
+  );
+  if (existingBatches.length > 0) {
+    return { reversalBatchId: existingBatches[0] };
+  }
+
+  // 2. Find original POS_SALE batches
+  const originalBatchIds = await findJournalBatchesByDoc(
+    db, POS_SALE_DOC_TYPE, params.originalPosTransactionId,
+    params.companyId, params.outletId,
+  );
+  if (originalBatchIds.length === 0) {
+    return null;
+  }
+  let lastReversalBatchId: number | null = null;
+
+  // 3. For each original POS_SALE batch, create a reversal
+  for (const originalBatchId of originalBatchIds) {
+
+    const originalLines = await readJournalLinesByBatch(
+      db,
+      originalBatchId,
+      params.companyId,
+      params.outletId,
+    );
+
+    if (originalLines.length === 0) {
+      continue;
+    }
+
+    // Build linkage tag
+    const linkageTag = buildReversalLinkageTag({
+      status: params.status,
+      originalBatchId,
+      originalPosTransactionId: params.originalPosTransactionId,
+      correctionPosTransactionId: params.correctionPosTransactionId,
+      clientTxId: params.clientTxId,
+    });
+
+    // Build reversal lines: swap debit ⇄ credit
+    const reversalLines = originalLines.map((line) => ({
+      account_id: Number(line.account_id),
+      debit: Number(line.credit),
+      credit: Number(line.debit),
+      description: linkageTag,
+    }));
+
+    // Validate balance: reversal MUST be balanced
+    const totalDebitMinor = reversalLines.reduce(
+      (sum, line) => sum + toMinorUnits(line.debit),
+      0
+    );
+    const totalCreditMinor = reversalLines.reduce(
+      (sum, line) => sum + toMinorUnits(line.credit),
+      0
+    );
+    if (totalDebitMinor !== totalCreditMinor) {
+      throw new Error(`POS_SALE_REVERSAL_UNBALANCED:${originalBatchId}`);
+    }
+
+    // Insert reversal batch via production repository
+    const reversalRepo = new PosSyncPushPostingRepository(db, params.correctionPostedAt);
+    const reversalRequest: PostingRequest = {
+      doc_type: POS_SALE_REVERSAL_DOC_TYPE,
+      doc_id: params.originalPosTransactionId,
+      company_id: params.companyId,
+      outlet_id: params.outletId,
+    };
+    const reversalBatch = await reversalRepo.createJournalBatch(reversalRequest);
+    const reversalBatchId = reversalBatch.journal_batch_id;
+    lastReversalBatchId = reversalBatchId;
+
+    // Insert reversal lines via production repository
+    const journalLines: JournalLine[] = reversalLines.map((line) => ({
+      account_id: line.account_id,
+      debit: line.debit,
+      credit: line.credit,
+      description: line.description,
+    }));
+    await reversalRepo.insertJournalLines(reversalBatchId, reversalRequest, journalLines);
+  }
+
+  return { reversalBatchId: lastReversalBatchId! };
+}
+
+// =============================================================================
 // Public API Functions
 // =============================================================================
 
@@ -431,6 +655,15 @@ async function runActivePostingHook(
   context: SyncPushPostingContext
 ): Promise<SyncPushPostingHookResult> {
   if (context.status !== "COMPLETED") {
+    // Handle reversal for VOID/REFUND corrections
+    if (
+      (context.status === "VOID" || context.status === "REFUND") &&
+      context.originalPosTransactionId !== undefined
+    ) {
+      return await runActiveReversalHook(db, executor, context);
+    }
+
+    // No original transaction ID — cannot reverse
     return {
       mode: "active",
       journalBatchId: null,
@@ -462,6 +695,45 @@ async function runActivePostingHook(
   return {
     mode: "active",
     journalBatchId: Number(postingResult.journal_batch_id),
+    balanceOk: true,
+    reason: null
+  };
+}
+
+async function runActiveReversalHook(
+  db: KyselySchema,
+  executor: SyncPushPostingExecutor,
+  context: SyncPushPostingContext
+): Promise<SyncPushPostingHookResult> {
+  // Ensure fiscal year is open for the correction date
+  await executor.ensureDateWithinOpenFiscalYear(
+    db,
+    context.companyId,
+    fromUtcIso.dateOnly(context.trxAt)
+  );
+
+  const reversalResult = await createPosSaleReversalJournalsForCorrection(db, {
+    companyId: context.companyId,
+    outletId: context.outletId,
+    status: context.status as "VOID" | "REFUND",
+    originalPosTransactionId: context.originalPosTransactionId!,
+    correctionPosTransactionId: context.posTransactionId,
+    correctionPostedAt: fromUtcIso.mysql(toUtcIso.dateLike(context.trxAt) as string),
+    clientTxId: context.clientTxId,
+  });
+
+  if (reversalResult === null) {
+    return {
+      mode: "active",
+      journalBatchId: null,
+      balanceOk: null,
+      reason: "NO_POS_SALE_JOURNAL_TO_REVERSE"
+    };
+  }
+
+  return {
+    mode: "active",
+    journalBatchId: reversalResult.reversalBatchId,
     balanceOk: true,
     reason: null
   };
