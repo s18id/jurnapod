@@ -1,4 +1,4 @@
-last_updated: 2026-05-08T00:00:00Z
+last_updated: 2026-05-09T22:00:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -692,4 +692,16 @@ development_status:
   61-4-ap-invoice-payment-lifecycle-period-close: done
   61-5-deferred-debt-closure-epic-55-60: done
   61-6-sales-purchasing-gl-reconciliation-gate: done
+  epic-61-retrospective: done
+
+  # Epic 62: Projection Correctness Hardening
+  epic-62: ready-for-dev
+  62-1-projection-source-of-truth-boundary-map-ar-ap-accuracy: ready-for-dev
+  62-2-inventory-cogs-projection-accuracy: ready-for-dev
+  62-3-treasury-sales-revenue-projection-accuracy: ready-for-dev
+  62-4-projection-read-only-boundary-acl-enforcement: ready-for-dev
+  62-5-reporting-code-migration-to-packages: ready-for-dev
+  62-6-gate-validation-automation-exit-evidence: ready-for-dev
+  62-7-deferred-debt-closure-final-cleanup: ready-for-dev
+
   epic-61-retrospective: done
