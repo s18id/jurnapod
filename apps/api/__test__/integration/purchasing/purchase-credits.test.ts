@@ -203,7 +203,7 @@ describe("purchasing.purchase-credits", { timeout: 30000 }, () => {
 
     expect(res.status).toBe(201);
     const body = await res.json();
-    expect(body.data.status).toBe(10); // DRAFT
+    expect(body.data.status).toBe("DRAFT");
     expect(body.data.total_credit_amount).toBe("35.0000");
     expect(body.data.applied_amount).toBe("0.0000");
     expect(body.data.remaining_amount).toBe("35.0000");
@@ -298,7 +298,7 @@ describe("purchasing.purchase-credits", { timeout: 30000 }, () => {
     const getRes = await getJson(`/api/purchasing/credits/${creditId}`, ownerToken);
     expect(getRes.status).toBe(200);
     const getBody = await getRes.json();
-    expect(getBody.data.status).toBe(20); // PARTIAL
+    expect(getBody.data.status).toBe("PARTIAL");
     expect(getBody.data.applied_amount).toBe("200.0000");
     expect(getBody.data.remaining_amount).toBe("300.0000");
     expect(getBody.data.applications.length).toBe(1);
@@ -406,7 +406,7 @@ describe("purchasing.purchase-credits", { timeout: 30000 }, () => {
     const getRes = await getJson(`/api/purchasing/credits/${creditId}`, ownerToken);
     expect(getRes.status).toBe(200);
     const getBody = await getRes.json();
-    expect(getBody.data.status).toBe(90); // VOID
+    expect(getBody.data.status).toBe("VOID");
 
     const batchCount = await sql<{ count: string }>`
       SELECT COUNT(*) as count

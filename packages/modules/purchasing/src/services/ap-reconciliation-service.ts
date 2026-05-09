@@ -70,7 +70,11 @@ export const fromScaled4 = unscaled;
 export function computeBaseAmount(originalAmount: string, exchangeRate: string): bigint {
   const originalScaled = toScaled(originalAmount, 4);
   const rateScaled = toScaled(exchangeRate, 8);
-  return scaledDiv(originalScaled, rateScaled, 8);
+  // base = original * exchange_rate
+  // (original * 10^4) * (rate * 10^8) / 10^8 = original * rate * 10^4
+  const product = originalScaled * rateScaled;
+  const scaleBack = 10n ** 8n;
+  return (product + scaleBack / 2n) / scaleBack; // half-up rounding
 }
 
 // =============================================================================

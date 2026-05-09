@@ -447,6 +447,7 @@ export class PurchaseCreditService {
     const remaining = sub(totalCredit, applied);
     return {
       ...(h as any),
+      status: toPurchaseCreditStatusLabel(h.status),
       remaining_amount: gt(remaining, "0.0000") ? remaining : "0.0000",
       journal_batch_id: h.journal_batch_id,
       posted_at: toUtcIso.dateLike(h.posted_at, { nullable: true }) as string,

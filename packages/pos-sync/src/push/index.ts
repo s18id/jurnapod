@@ -614,14 +614,10 @@ async function processTransaction(
 
     const finalizedIdentityMatch = await findMatchingFinalizedTransactionByBusinessIdentity(db, tx);
     if (finalizedIdentityMatch && finalizedIdentityMatch.status === "COMPLETED") {
-      if (tx.status === "COMPLETED") {
-        return {
-          client_tx_id: tx.client_tx_id,
-          result: "ERROR",
-          message: "FINALIZED_TRANSACTION_MUTATION_REQUIRES_VOID_OR_REFUND",
-        };
-      }
-      if (tx.status !== "VOID" && tx.status !== "REFUND") {
+      // Guard ONLY blocks genuine mutations: COMPLETED→VOID, COMPLETED→REFUND, etc.
+      // Do NOT block COMPLETED→COMPLETED — a different client_tx_id means a new independent
+      // submission, not a mutation. filterNewTransactions handles client_tx_id dedup.
+      if (tx.status !== "COMPLETED") {
         return {
           client_tx_id: tx.client_tx_id,
           result: "ERROR",

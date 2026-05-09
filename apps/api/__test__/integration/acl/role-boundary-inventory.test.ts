@@ -5,18 +5,12 @@
  * Story 60.3: Role Boundary Tests — Inventory Module
  *
  * Verifies:
- *  - AC2: CASHIER (no inventory permissions per matrix — mask=0) cannot read items
- *  - Documents any gaps between the documented role matrix and actual behavior
+ *  - AC2: CASHIER has READ(1) on inventory.items per canonical matrix — can list items
+ *  - AC7: CASHIER cannot CREATE/UPDATE/DELETE items (only READ)
  *  - Positive control: OWNER can access inventory endpoints
  *
- * ⚠️ FINDING NOTE: The documented role matrix gives CASHIER mask=0 on inventory.
- *    However, the default seed data (or outlet-role assignments) may grant broader
- *    permissions. If CASHIER receives 200 instead of 403 on inventory endpoints,
- *    this is documented as a P1 finding (matrix vs seed data misalignment), not a
- *    test failure. The test reports actual behavior.
- *
- * Role matrix reference (AGENTS.md):
- *   CASHIER:  inventory = 0
+ * Role matrix reference (canonical: packages/shared/src/constants/roles.defaults.json):
+ *   CASHIER:  inventory.items = READ(1)
  *   OWNER:    inventory = CRUDAM (63)
  */
 
@@ -37,17 +31,6 @@ import {
 } from '../../fixtures';
 
 const testPassword = process.env.JP_OWNER_PASSWORD ?? 'testpass123';
-
-/** Story 60.3 — documented finding about inventory role boundary */
-const INVENTORY_ROLE_BOUNDARY_FINDING = {
-  finding: 'P1: ACTUAL_BEHAVIOR — CASHIER may have inventory access despite matrix showing mask=0',
-  rationale:
-    'The documented role matrix gives CASHIER mask=0 on inventory. ' +
-    'However, seed data or outlet-role assignments may grant inventory permissions. ' +
-    'If CASHIER receives 200 on inventory endpoints, the matrix and seed data are misaligned.',
-  recommendation:
-    'Align seed data with documented matrix OR update matrix to reflect actual permissions.',
-} as const;
 
 describe('role-boundary-inventory', { timeout: 90000 }, () => {
   const baseUrl = getTestBaseUrl();
@@ -79,7 +62,7 @@ describe('role-boundary-inventory', { timeout: 90000 }, () => {
     });
     outletId = outlet.id;
 
-    // ── CASHIER user (negative tests — expected 403 per matrix, but seed may differ) ──
+    // ── CASHIER user (READ=1 on inventory.items — can list, cannot create) ──
     cashierUser = await createTestUser(companyId, {
       email: `${makeTag('rbinvcsh')}@example.com`,
       name: 'RB Inventory Cashier',
@@ -109,42 +92,17 @@ describe('role-boundary-inventory', { timeout: 90000 }, () => {
     }
   }, 30000);
 
-  /**
-   * Helper: document whether CASHIER inventory access matches the matrix.
-   * Returns true if the actual status (200 vs 403) matches the expected matrix (403).
-   */
-  function isMatrixAligned(actualStatus: number): boolean {
-    return actualStatus === 403;
-  }
-
   // ========================================================================
-  // AC2: CASHIER cannot access inventory data (per documented matrix)
-  // Document actual behavior vs matrix expectation
+  // AC2: CASHIER has READ(1) on inventory.items per canonical matrix
   // ========================================================================
 
-  describe('AC2: CASHIER inventory access check (reporting actual behavior)', () => {
-    it('GET /api/inventory/items — reports actual CASHIER access vs matrix expectation', async () => {
+  describe('AC2: CASHIER inventory READ access (canonical matrix)', () => {
+    it('GET /api/inventory/items — CASHIER can list items (READ=1)', async () => {
       const res = await fetch(`${baseUrl}/api/inventory/items?limit=10`, {
         headers: { Authorization: `Bearer ${cashierToken}` },
       });
-      const actualStatus = res.status;
-      const aligned = isMatrixAligned(actualStatus);
-
-      if (!aligned) {
-        // Document the gap — CASHIER has inventory access despite matrix showing 0
-        console.warn(
-          `\n⚠️  P1 FINDING: CASHIER received ${actualStatus} on GET /api/inventory/items ` +
-            `(matrix expects 403 — mask=0). ${INVENTORY_ROLE_BOUNDARY_FINDING.recommendation}\n`,
-        );
-      }
-
-      // Test actual behavior — if aligned, expect 403; if not, document the gap
-      if (aligned) {
-        expect(actualStatus).toBe(403);
-      } else {
-        // Gap: CASHIER has access — test still passes but finding is logged
-        expect(actualStatus).toBe(200);
-      }
+      // CASHIER has inventory.items = READ(1) per roles.defaults.json
+      expect(res.status).toBe(200);
     });
 
     it('GET /api/inventory/items — OWNER positive control', async () => {
@@ -174,16 +132,8 @@ describe('role-boundary-inventory', { timeout: 90000 }, () => {
           type: 'PRODUCT',
         }),
       });
-      // CASHIER has mask=0 on inventory → should be 403
-      // If 200, the gap is broader than just READ
-      const actualStatus = res.status;
-      if (actualStatus !== 403) {
-        console.warn(
-          `\n⚠️  P1 FINDING: CASHIER received ${actualStatus} on POST /api/inventory/items ` +
-            `(matrix expects 403 — mask=0 for inventory, including CREATE).\n`,
-        );
-      }
-      expect([403]).toContain(actualStatus);
+      // CASHIER has READ(1) on inventory.items — no CREATE(2) bit, expect 403
+      expect(res.status).toBe(403);
     });
   });
 });

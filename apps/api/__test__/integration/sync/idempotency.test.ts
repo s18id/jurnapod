@@ -66,7 +66,6 @@ describe('sync.idempotency', { timeout: 30000 }, () => {
 
   // Deterministic constant for trx_at — MUST be Z-only per Epic 53 datetime rules.
   const FIXTURE_TRX_AT = '2024-01-15T03:30:00Z';
-  const FIXTURE_TRX_AT_2 = '2024-01-15T03:30:01Z'; // +1s to avoid business-identity collision with finalized-immutability guard
 
   it('accepts first transaction', async () => {
     const res = await fetch(`${baseUrl}/api/sync/push`, {
@@ -98,7 +97,7 @@ describe('sync.idempotency', { timeout: 30000 }, () => {
   it('returns DUPLICATE for same client_tx_id', async () => {
     // Use same fixed client_tx_id and trx_at for duplicate detection
     const clientTxId = dupClientTxId;
-    const trxAt = FIXTURE_TRX_AT_2; // different second to avoid finalized-immutability guard collision
+    const trxAt = FIXTURE_TRX_AT;
     
     // First submission must succeed before duplicate replay assertion.
     const firstRes = await fetch(`${baseUrl}/api/sync/push`, {

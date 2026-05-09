@@ -10,13 +10,14 @@
  *  - Each test uses outlet-scoped CASHIER tokens from Company A trying to
  *    access Company B's outlets/data
  *
- * ⚠️ NOTE: For modules where CASHIER has mask=0 (accounting, treasury, purchasing,
- *    sales), the 403 response could be due to EITHER role boundary OR tenant scoping.
- *    For modules where CASHIER HAS permissions (reservations), a 403 on cross-company
- *    access proves tenant isolation specifically.
+ * ⚠️ NOTE: For modules where CASHIER has mask=0 (accounting, treasury transactions,
+ *    purchasing), the 403 response could be due to EITHER role boundary OR tenant scoping.
+ *    For modules where CASHIER HAS permissions (sales=CRUDA(31), inventory.items=READ(1),
+ *    reservations=CRUDA(31)), a 403 on cross-company access proves tenant isolation.
  *
- * Role matrix reference (AGENTS.md):
- *   CASHIER:  pos=CRUDA(31), reservations=CRUDA(31), all others=0
+ * Role matrix reference (canonical: packages/shared/src/constants/roles.defaults.json):
+ *   CASHIER:  pos=CRUDA(31), reservations=CRUDA(31), sales=CRUDA(31),
+ *             inventory.items=READ(1), treasury.accounts=READ(1)
  *
  * Two-company setup: Company A + Company B, each with own outlet and CASHIER user.
  */
@@ -151,35 +152,27 @@ describe('cross-tenant-all-modules', { timeout: 90000 }, () => {
   });
 
   // ========================================================================
-  // Inventory — CASHIER mask=0 per matrix (but seed data grants access)
+  // Inventory — CASHIER inventory.items=READ(1) per canonical matrix
   //
-  // ⚠️ P1 FINDING: CASHIER gets 200 on /api/inventory/items despite the
-  // documented role matrix showing mask=0 on inventory. The seed data
-  // grants inventory READ to CASHIER at the company level.
+  // CASHIER is allowed to list inventory items (needed at POS).
+  // Cross-tenant isolation: Company A CASHIER cannot access Company B's items.
   // ========================================================================
 
   describe('AC6: Inventory — Company A cannot access Company B', () => {
-    it('Company A CASHIER → /api/inventory/items: reports actual behavior', async () => {
+    it('Company A CASHIER → /api/inventory/items: allowed (READ=1)', async () => {
       const res = await crossTenantGet('/api/inventory/items?limit=10', cashierTokenA);
-      const actualStatus = res.status;
-      if (actualStatus === 200) {
-        console.warn(
-          '⚠️  P1 FINDING: CASHIER has inventory access (200) despite matrix showing mask=0.\n' +
-          'Seed data grants broader inventory permissions to CASHIER than documented.',
-        );
-      }
-      // Accept actual behavior — 200 is a gap, 403 is compliant
-      expect([200, 403]).toContain(actualStatus);
+      // CASHIER has inventory.items=READ(1) per roles.defaults.json
+      expect(res.status).toBe(200);
     });
 
-    it('Company B CASHIER → /api/inventory/items: reports actual behavior', async () => {
+    it('Company B CASHIER → /api/inventory/items: allowed (READ=1)', async () => {
       const res = await crossTenantGet('/api/inventory/items?limit=10', cashierTokenB);
-      expect([200, 403]).toContain(res.status);
+      expect(res.status).toBe(200);
     });
   });
 
   // ========================================================================
-  // Treasury — CASHIER mask=0
+  // Treasury — CASHIER treasury.transactions=0 (mask=0 on transactions)
   // ========================================================================
 
   describe('AC6: Treasury — Company A cannot access Company B', () => {
@@ -195,38 +188,32 @@ describe('cross-tenant-all-modules', { timeout: 90000 }, () => {
   });
 
   // ========================================================================
-  // Sales — CASHIER mask=0 per matrix (but seed data grants access)
+  // Sales — CASHIER sales=CRUDA(31) per canonical matrix
   //
-  // ⚠️ P1 FINDING: CASHIER gets 200 on /api/sales/orders, /api/sales/invoices,
-  // and /api/sales/payments despite the documented role matrix showing mask=0
-  // on sales. The seed data grants broader sales permissions to CASHIER.
+  // CASHIER has full sales CRUDA access (customer inquiries at POS).
+  // Cross-tenant isolation ensures Company A cannot access Company B's sales data.
   // ========================================================================
 
   describe('AC6: Sales — Company A cannot access Company B', () => {
-    it('Company A CASHIER → /api/sales/orders: reports actual behavior', async () => {
+    it('Company A CASHIER → /api/sales/orders: allowed (CRUDA=31)', async () => {
       const res = await crossTenantGet('/api/sales/orders', cashierTokenA);
-      const actualStatus = res.status;
-      if (actualStatus === 200) {
-        console.warn(
-          '⚠️  P1 FINDING: CASHIER has sales/orders access (200) despite matrix showing mask=0.',
-        );
-      }
-      expect([200, 403]).toContain(actualStatus);
+      // CASHIER has sales.orders=CRUDA(31) per roles.defaults.json
+      expect(res.status).toBe(200);
     });
 
-    it('Company B CASHIER → /api/sales/orders: reports actual behavior', async () => {
+    it('Company B CASHIER → /api/sales/orders: allowed (CRUDA=31)', async () => {
       const res = await crossTenantGet('/api/sales/orders', cashierTokenB);
-      expect([200, 403]).toContain(res.status);
+      expect(res.status).toBe(200);
     });
 
-    it('Company A CASHIER → /api/sales/invoices: reports actual behavior', async () => {
+    it('Company A CASHIER → /api/sales/invoices: allowed (CRUDA=31)', async () => {
       const res = await crossTenantGet('/api/sales/invoices', cashierTokenA);
-      expect([200, 403]).toContain(res.status);
+      expect(res.status).toBe(200);
     });
 
-    it('Company A CASHIER → /api/sales/payments: reports actual behavior', async () => {
+    it('Company A CASHIER → /api/sales/payments: allowed (CRUDA=31)', async () => {
       const res = await crossTenantGet('/api/sales/payments', cashierTokenA);
-      expect([200, 403]).toContain(res.status);
+      expect(res.status).toBe(200);
     });
   });
 

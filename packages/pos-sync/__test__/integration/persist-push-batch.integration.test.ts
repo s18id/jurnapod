@@ -502,6 +502,151 @@ describe('persistPushBatch Integration', () => {
     });
   });
 
+  describe('finalized-immutability guard (Story 59.1-followup)', () => {
+    test('AC1: allows COMPLETED→COMPLETED with different client_tx_id (not a mutation)', async () => {
+      const trxAt = '2024-01-15T18:00:00Z';
+      const items = [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Guard Test Item' }];
+      const payments = [{ method: 'CASH', amount: 15000 }];
+      const originalClientTxId = 'test-int-guard-ac1-original';
+      const differentClientTxId = 'test-int-guard-ac1-different';
+
+      const originalResults = await persistPushBatch(
+        fixtures.db,
+        [{
+          client_tx_id: originalClientTxId,
+          company_id: fixtures.testCompanyId,
+          outlet_id: fixtures.testOutletId,
+          cashier_user_id: fixtures.cashierUserId,
+          status: 'COMPLETED',
+          service_type: 'TAKEAWAY',
+          trx_at: trxAt,
+          items,
+          payments,
+        }],
+        fixtures.testCompanyId,
+        fixtures.testOutletId,
+        'test-correlation'
+      );
+      expect(originalResults[0].result).toBe('OK');
+
+      // Push a different client_tx_id with identical business identity — MUST pass through
+      const differentResults = await persistPushBatch(
+        fixtures.db,
+        [{
+          client_tx_id: differentClientTxId,
+          company_id: fixtures.testCompanyId,
+          outlet_id: fixtures.testOutletId,
+          cashier_user_id: fixtures.cashierUserId,
+          status: 'COMPLETED',
+          service_type: 'TAKEAWAY',
+          trx_at: trxAt,
+          items,
+          payments,
+        }],
+        fixtures.testCompanyId,
+        fixtures.testOutletId,
+        'test-correlation'
+      );
+      expect(differentResults[0].result).toBe('OK');
+    });
+
+    test('AC2: blocks COMPLETED→VOID with different client_tx_id (mutation)', async () => {
+      const trxAt = '2024-01-15T18:00:00Z';
+      const items = [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Guard Test Item' }];
+      const payments = [{ method: 'CASH', amount: 15000 }];
+      const completedClientTxId = 'test-int-guard-ac2-completed';
+      const voidClientTxId = 'test-int-guard-ac2-void-attempt';
+
+      // Seed a completed transaction
+      const completedResults = await persistPushBatch(
+        fixtures.db,
+        [{
+          client_tx_id: completedClientTxId,
+          company_id: fixtures.testCompanyId,
+          outlet_id: fixtures.testOutletId,
+          cashier_user_id: fixtures.cashierUserId,
+          status: 'COMPLETED',
+          service_type: 'TAKEAWAY',
+          trx_at: trxAt,
+          items,
+          payments,
+        }],
+        fixtures.testCompanyId,
+        fixtures.testOutletId,
+        'test-correlation'
+      );
+      expect(completedResults[0].result).toBe('OK');
+
+      // Attempt to push VOID with same business identity but different client_tx_id — MUST be blocked
+      const voidResults = await persistPushBatch(
+        fixtures.db,
+        [{
+          client_tx_id: voidClientTxId,
+          company_id: fixtures.testCompanyId,
+          outlet_id: fixtures.testOutletId,
+          cashier_user_id: fixtures.cashierUserId,
+          status: 'VOID',
+          service_type: 'TAKEAWAY',
+          trx_at: trxAt,
+          items,
+          payments,
+        }],
+        fixtures.testCompanyId,
+        fixtures.testOutletId,
+        'test-correlation'
+      );
+      expect(voidResults[0].result).toBe('ERROR');
+      expect(voidResults[0].message).toBe('FINALIZED_TRANSACTION_MUTATION_REQUIRES_VOID_OR_REFUND');
+    });
+
+    test('AC3: returns DUPLICATE for COMPLETED→COMPLETED with same client_tx_id', async () => {
+      const trxAt = '2024-01-15T18:00:00Z';
+      const items = [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Guard Test Item' }];
+      const payments = [{ method: 'CASH', amount: 15000 }];
+      const duplicateClientTxId = 'test-int-guard-ac3-dup';
+
+      // First push — should succeed
+      const firstResults = await persistPushBatch(
+        fixtures.db,
+        [{
+          client_tx_id: duplicateClientTxId,
+          company_id: fixtures.testCompanyId,
+          outlet_id: fixtures.testOutletId,
+          cashier_user_id: fixtures.cashierUserId,
+          status: 'COMPLETED',
+          service_type: 'TAKEAWAY',
+          trx_at: trxAt,
+          items,
+          payments,
+        }],
+        fixtures.testCompanyId,
+        fixtures.testOutletId,
+        'test-correlation'
+      );
+      expect(firstResults[0].result).toBe('OK');
+
+      // Second push with same client_tx_id — should return DUPLICATE via idempotency
+      const secondResults = await persistPushBatch(
+        fixtures.db,
+        [{
+          client_tx_id: duplicateClientTxId,
+          company_id: fixtures.testCompanyId,
+          outlet_id: fixtures.testOutletId,
+          cashier_user_id: fixtures.cashierUserId,
+          status: 'COMPLETED',
+          service_type: 'TAKEAWAY',
+          trx_at: trxAt,
+          items,
+          payments,
+        }],
+        fixtures.testCompanyId,
+        fixtures.testOutletId,
+        'test-correlation'
+      );
+      expect(secondResults[0].result).toBe('DUPLICATE');
+    });
+  });
+
   describe('error handling', () => {
     test('should handle individual transaction failures gracefully', async () => {
       // Send one valid transaction and one with invalid data (missing items)
