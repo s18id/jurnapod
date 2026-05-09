@@ -665,6 +665,7 @@ development_status:
 
   # Epic 59: POS Core Correctness Consolidation
   epic-59: done
+  epic-59-retrospective: done
   59-3-push-pull-sync-transactional-cursor-correctness: done
   59-1-pos-transaction-lifecycle-correctness: done
   59-2-sync-idempotency-contract-correctness: done
@@ -675,8 +676,8 @@ development_status:
   59-8-pos-sale-reversal-journal-correctness: done
 
   # Epic 60: Tenant + ACL Correctness Hardening
-  epic-60: backlog
-  60-1-tenant-isolation-outlet-scoping-audit: backlog
-  60-2-acl-resource-level-enforcement-audit: backlog
-  60-3-role-boundary-tenant-leakage-negative-tests: backlog
-  60-4-audit-log-filter-correctness: backlog
+  epic-60: in-progress
+  60-1-tenant-isolation-outlet-scoping-audit: ready-for-dev
+  60-2-acl-resource-level-enforcement-audit: ready-for-dev
+  60-3-role-boundary-tenant-leakage-negative-tests: ready-for-dev
+  60-4-audit-log-filter-correctness: ready-for-dev
