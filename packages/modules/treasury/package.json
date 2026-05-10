@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./test-fixtures": {
+      "types": "./dist/test-fixtures/cash-bank-fixtures.d.ts",
+      "default": "./dist/test-fixtures/cash-bank-fixtures.js"
     }
   },
   "files": ["dist", "README.md"],

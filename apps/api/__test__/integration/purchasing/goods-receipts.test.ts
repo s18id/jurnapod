@@ -18,11 +18,8 @@ import {
   createTestSupplier,
 } from '../../fixtures';
 
-// Deterministic code generator for constrained fields (max 20 chars)
-function makeTag(prefix: string, counter: number): string {
-  const worker = process.env.VITEST_POOL_ID ?? '0';
-  return `${prefix}${worker}${String(counter).padStart(4, '0')}`.slice(0, 20);
-}
+import { makeTag } from "../../helpers/tags";
+import { createSentPurchaseOrder } from "../../helpers/purchasing-flows";
 
 let baseUrl: string;
 let ownerToken: string;
@@ -30,7 +27,6 @@ let cashierToken: string;
 let cashierCompanyId: number;
 let testSupplierId: number;
 let testItemId: number;
-let grTagCounter = 0;
 const createdGRIds: number[] = [];
 const createdPOIds: number[] = [];
 const GOODS_RECEIPTS_SUITE_LOCK = 'jp_goods_receipts_suite_lock';
@@ -81,7 +77,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     cashierToken = cashier.accessToken;
 
     const supplier = await createTestSupplier(cashierCompanyId, {
-      code: makeTag('SUPBASE', ++grTagCounter),
+      code: makeTag('SUPBASE'),
       name: 'GR Test Supplier Base',
       currency: 'IDR',
     });
@@ -111,44 +107,6 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     await closeTestDb();
     await releaseReadLock();
   });
-
-  // -------------------------------------------------------------------------
-  // Helper: create a PO in SENT status with lines for GR testing
-  // -------------------------------------------------------------------------
-  async function createSentPO(supplierId: number, lines: Array<{ item_id?: number; qty: string; unit_price: string; tax_rate?: string }>) {
-    // Create PO
-    const poRes = await fetch(`${baseUrl}/api/purchasing/orders`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        supplier_id: supplierId,
-        order_date: '2026-04-01',
-        lines
-      })
-    });
-    expect(poRes.status).toBe(201);
-    const po = await poRes.json();
-    expect(po.data.status).toBe('DRAFT');
-    const poId = po.data.id;
-    createdPOIds.push(poId);
-
-    // Transition to SENT
-    const statusRes = await fetch(`${baseUrl}/api/purchasing/orders/${poId}/status`, {
-      method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'SENT' })
-    });
-    expect(statusRes.status).toBe(200);
-    const updatedPo = await statusRes.json();
-    expect(updatedPo.data.status).toBe('SENT');
-
-    // Return poId, original line IDs, and order_id (same as poId)
-    return {
-      poId,
-      lineIds: po.data.lines.map((l: any) => l.id),
-      orderId: poId
-    };
-  }
 
   // -------------------------------------------------------------------------
   // AC: 401 without authentication
@@ -215,14 +173,14 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
   it('filters goods receipts by supplier_id', async () => {
     // Create GR first
     const supplierId = testSupplierId;
-    const po = await createSentPO(supplierId, [{ qty: '10', unit_price: '1000.00' }]);
+    const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId, lines: [{ qty: '10', unit_price: '1000.00' }], createdPOIds });
 
     const grCreateRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: supplierId,
-        reference_number: makeTag('GRSF', ++grTagCounter),
+        reference_number: makeTag('GRSF'),
         receipt_date: '2026-04-19',
         lines: [{ po_line_id: po.lineIds[0], qty: '5' }]
       })
@@ -247,14 +205,14 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('gets a goods receipt by ID', async () => {
     const supplierId = testSupplierId;
-    const po = await createSentPO(supplierId, [{ qty: '10', unit_price: '1000.00' }]);
+    const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId, lines: [{ qty: '10', unit_price: '1000.00' }], createdPOIds });
 
     const createRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: supplierId,
-        reference_number: makeTag('GRGT', ++grTagCounter),
+        reference_number: makeTag('GRGT'),
         receipt_date: '2026-04-19',
         lines: [{ po_line_id: po.lineIds[0], qty: '3', unit: 'pcs' }]
       })
@@ -290,17 +248,16 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('creates a GR against a PO line and updates received_qty', async () => {
     const supplierId = testSupplierId;
-    const po = await createSentPO(supplierId, [
+    const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId, lines: [
       { qty: '10', unit_price: '5000.00', tax_rate: '0' },
       { qty: '5', unit_price: '3000.00', tax_rate: '0' }
-    ]);
-
+    ], createdPOIds });
     const res = await fetch(`${baseUrl}/api/purchasing/receipts`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: supplierId,
-        reference_number: makeTag('GRCR', ++grTagCounter),
+        reference_number: makeTag('GRCR'),
         receipt_date: '2026-04-19',
         lines: [
           { po_line_id: po.lineIds[0], qty: '6', unit: 'pcs' },
@@ -332,9 +289,9 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
 
   it('replays duplicate GR create by idempotency_key, keeps single receipt, and replays warnings', async () => {
     const supplierId = testSupplierId;
-    const po = await createSentPO(supplierId, [{ qty: '8', unit_price: '4000.00', tax_rate: '0' }]);
-    const idempotencyKey = makeTag('GRIDEM', ++grTagCounter);
-    const referenceNumber = makeTag('GRIDREF', ++grTagCounter);
+    const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId, lines: [{ qty: '8', unit_price: '4000.00', tax_rate: '0' }], createdPOIds });
+    const idempotencyKey = makeTag('GRIDEM');
+    const referenceNumber = makeTag('GRIDREF');
 
     const payload = {
       supplier_id: supplierId,
@@ -391,7 +348,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: supplierId,
-        reference_number: makeTag('GRIT', ++grTagCounter),
+        reference_number: makeTag('GRIT'),
         receipt_date: '2026-04-19',
         lines: [{ item_id: testItemId, qty: '5', unit: 'box', description: 'Misc items' }]
       })
@@ -412,17 +369,16 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('auto-transitions PO to PARTIAL_RECEIVED when some lines partially received', async () => {
     const supplierId = testSupplierId;
-    const po = await createSentPO(supplierId, [
+    const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId, lines: [
       { qty: '10', unit_price: '1000.00' }
-    ]);
-
+    ], createdPOIds });
     // Partial receipt - not all qty received
     const res = await fetch(`${baseUrl}/api/purchasing/receipts`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: supplierId,
-        reference_number: makeTag('GRPT', ++grTagCounter),
+        reference_number: makeTag('GRPT'),
         receipt_date: '2026-04-19',
         lines: [{ po_line_id: po.lineIds[0], qty: '5' }]
       })
@@ -444,17 +400,16 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
 
   it('auto-transitions PO to RECEIVED when all lines fully received', async () => {
     const supplierId = testSupplierId;
-    const po = await createSentPO(supplierId, [
+    const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId, lines: [
       { qty: '10', unit_price: '1000.00' }
-    ]);
-
+    ], createdPOIds });
     // Full receipt
     const res = await fetch(`${baseUrl}/api/purchasing/receipts`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: supplierId,
-        reference_number: makeTag('GRFL', ++grTagCounter),
+        reference_number: makeTag('GRFL'),
         receipt_date: '2026-04-19',
         lines: [{ po_line_id: po.lineIds[0], qty: '10' }]
       })
@@ -478,16 +433,15 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('issues warning for over-receipt but allows it', async () => {
     const supplierId = testSupplierId;
-    const po = await createSentPO(supplierId, [
+    const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId, lines: [
       { qty: '5', unit_price: '1000.00' }
-    ]);
-
+    ], createdPOIds });
     const res = await fetch(`${baseUrl}/api/purchasing/receipts`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: supplierId,
-        reference_number: makeTag('GROV', ++grTagCounter),
+        reference_number: makeTag('GROV'),
         receipt_date: '2026-04-19',
         lines: [{ po_line_id: po.lineIds[0], qty: '8' }] // 8 > 5 (over-receipt)
       })
@@ -512,17 +466,16 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
 
   it('sets PO to PARTIAL_RECEIVED when one line full and another zero', async () => {
     const supplierId = testSupplierId;
-    const po = await createSentPO(supplierId, [
+    const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId, lines: [
       { qty: '10', unit_price: '1000.00' },
       { qty: '4', unit_price: '1000.00' }
-    ]);
-
+    ], createdPOIds });
     const res = await fetch(`${baseUrl}/api/purchasing/receipts`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: supplierId,
-        reference_number: makeTag('GRMP', ++grTagCounter),
+        reference_number: makeTag('GRMP'),
         receipt_date: '2026-04-19',
         lines: [{ po_line_id: po.lineIds[0], qty: '10' }]
       })
@@ -542,16 +495,15 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
 
   it('updates PO received_qty correctly when first GR line has no po_line_id', async () => {
     const supplierId = testSupplierId;
-    const po = await createSentPO(supplierId, [
+    const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId, lines: [
       { qty: '10', unit_price: '1000.00' }
-    ]);
-
+    ], createdPOIds });
     const res = await fetch(`${baseUrl}/api/purchasing/receipts`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: supplierId,
-        reference_number: makeTag('GRML', ++grTagCounter),
+        reference_number: makeTag('GRML'),
         receipt_date: '2026-04-19',
         lines: [
           { item_id: testItemId, qty: '1', description: 'Non-PO line' },
@@ -578,7 +530,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: 99999999,
-        reference_number: makeTag('GRNF', ++grTagCounter),
+        reference_number: makeTag('GRNF'),
         receipt_date: '2026-04-19',
         lines: [{ item_id: testItemId, qty: '1' }]
       })
@@ -613,7 +565,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: supplierId,
-        reference_number: makeTag('GRDR', ++grTagCounter),
+        reference_number: makeTag('GRDR'),
         receipt_date: '2026-04-19',
         lines: [{ po_line_id: po.data.lines[0].id, qty: '5' }]
       })
@@ -647,7 +599,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
 
     // Try to create GR with a different supplier id
     const supplier2 = await createTestSupplier(cashierCompanyId, {
-      code: makeTag('SUP', ++grTagCounter),
+      code: makeTag('SUP'),
       name: 'Test Supplier 2',
       currency: 'IDR',
     });
@@ -658,7 +610,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: supplier2Id,
-        reference_number: makeTag('GRSM', ++grTagCounter),
+        reference_number: makeTag('GRSM'),
         receipt_date: '2026-04-19',
         lines: [{ po_line_id: po1.data.lines[0].id, qty: '5' }]
       })
@@ -674,7 +626,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        reference_number: makeTag('GRPF', ++grTagCounter),
+        reference_number: makeTag('GRPF'),
         receipt_date: '2026-04-19',
         lines: [{ po_line_id: 99999999, qty: '5' }]
       })
@@ -715,7 +667,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: supplierId,
-        reference_number: makeTag('GRIM', ++grTagCounter),
+        reference_number: makeTag('GRIM'),
         receipt_date: '2026-04-19',
         lines: [{ po_line_id: po.data.lines[0].id, item_id: item2.id, qty: '5' }]
       })

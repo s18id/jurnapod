@@ -29,6 +29,8 @@ import {
 import { getDb } from "@/lib/db";
 import { sql } from "kysely";
 import { makeTag } from "../../helpers/tags";
+import { createSupplierFixture, createTestPurchaseInvoice } from "@jurnapod/modules-purchasing/test-fixtures";
+import { PurchaseInvoiceService } from "@jurnapod/modules-purchasing";
 
 describe("ap-subledger-reconciliation", { timeout: 60000 }, () => {
   let baseUrl: string;
@@ -228,33 +230,36 @@ describe("ap-subledger-reconciliation", { timeout: 60000 }, () => {
 
         const tag = makeTag("APII");
 
-        // Insert a supplier record for the invoice FK
-        const supplierResult = await sql<{ insertId: number }>`
-          INSERT INTO suppliers (company_id, name, code, currency, is_active, created_at, updated_at)
-          -- CHAR(3) column — use 3-letter ISO code
-          VALUES (${isolatedCompanyId}, ${`Test Supplier ${tag}`}, ${`SUP-${tag}`.slice(0, 20)}, 'IDR', 1, NOW(), NOW())
-        `.execute(db);
-        const supplierId = Number(supplierResult.insertId);
+        // Create supplier via canonical fixture
+        const supplier = await createSupplierFixture(db, {
+          companyId: isolatedCompanyId,
+          code: `SUP-${tag}`.slice(0, 20),
+          name: `Test Supplier ${tag}`,
+          currency: 'IDR',
+        });
+        const supplierId = supplier.id;
 
-        // Insert a POSTED purchase invoice (exchange_rate = 1 for base currency)
-        const invoiceResult = await sql<{ insertId: number }>`
-          INSERT INTO purchase_invoices (company_id, supplier_id, invoice_no, invoice_date, status, grand_total, subtotal, tax_amount, exchange_rate, currency_code, created_at, updated_at)
-          VALUES (${isolatedCompanyId}, ${supplierId}, ${`PINV-${tag}`}, ${FIXED_AS_OF_DATE}, 2, ${INVOICE_AMOUNT}, ${INVOICE_AMOUNT}, 0,           1.00000000, 'IDR', NOW(), NOW())
-        `.execute(db);
-        const invoiceId = Number(invoiceResult.insertId);
+        // Create purchase invoice via canonical fixture (draft)
+        const invoice = await createTestPurchaseInvoice(db, {
+          companyId: isolatedCompanyId,
+          userId: user.id,
+          supplierId,
+          invoiceNo: `PINV-${tag}`,
+          invoiceDate: new Date(FIXED_AS_OF_DATE),
+          currencyCode: 'IDR',
+          lines: [{ description: 'AP reconciliation test', qty: '1', unitPrice: `${INVOICE_AMOUNT}.0000` }],
+        });
+        const invoiceId = invoice.id;
 
-        // Insert matching GL journal batch (doc_type=PURCHASE_INVOICE, posted within cutoff)
-        const batchResult = await sql<{ insertId: number }>`
-          INSERT INTO journal_batches (company_id, doc_type, doc_id, posted_at, created_at, updated_at)
-          VALUES (${isolatedCompanyId}, 'PURCHASE_INVOICE', ${invoiceId}, ${`${FIXED_AS_OF_DATE} 12:00:00`}, NOW(), NOW())
-        `.execute(db);
-        const batchId = Number(batchResult.insertId);
-
-        // AP credit line: credit the AP account (liability — credit is positive)
-        await sql`
-          INSERT INTO journal_lines (company_id, journal_batch_id, account_id, line_date, debit, credit, description, created_at, updated_at)
-          VALUES (${isolatedCompanyId}, ${batchId}, ${isolatedApAccountId}, ${FIXED_AS_OF_DATE}, 0, ${INVOICE_AMOUNT}, 'AP reconciliation test', NOW(), NOW())
-        `.execute(db);
+        // Post the invoice via production service (creates journal_batch + journal_lines)
+        const piService = new PurchaseInvoiceService(db);
+        await piService.postPI({
+          companyId: isolatedCompanyId,
+          userId: user.id,
+          piId: invoiceId,
+          guardrailDecision: null,
+          validOverrideReason: null,
+        });
       });
 
       it("AP subledger correctly reflects posted invoice balance", async () => {

@@ -38,3 +38,37 @@ export interface PurchasingSettingsFixture {
   ap_account_id: number;
   expense_account_id: number;
 }
+
+/**
+ * Purchase invoice fixture type — mirrors production PurchaseInvoice entity shape.
+ */
+export interface PurchaseInvoiceFixture {
+  id: number;
+  company_id: number;
+  supplier_id: number;
+  supplier_name: string | null;
+  invoice_no: string;
+  invoice_date: string;
+  due_date: string | null;
+  status: string;
+  currency_code: string;
+  exchange_rate: string;
+  grand_total: string;
+  subtotal: string;
+  tax_amount: string;
+}
+
+/**
+ * AP payment fixture type — mirrors production ApPayment entity shape.
+ */
+export interface ApPaymentFixture {
+  id: number;
+  company_id: number;
+  payment_no: string;
+  payment_date: string;
+  bank_account_id: number;
+  supplier_id: number;
+  supplier_name: string | null;
+  description: string | null;
+  status: string;
+}

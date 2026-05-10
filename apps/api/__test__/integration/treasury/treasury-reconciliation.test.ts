@@ -28,6 +28,7 @@ import {
   createTestFiscalPeriod,
 } from '../../fixtures';
 import { buildPermissionMask } from '@jurnapod/auth';
+import { createPostedInvoice as sharedCreatePostedInvoice, createAndPostPayment as sharedCreateAndPostPayment } from '../../helpers/sales-flows';
 
 let baseUrl: string;
 let tokenA: string;
@@ -105,30 +106,14 @@ describe('treasury.treasury-reconciliation - Story 57.4', { timeout: 90000 }, ()
     return createTestCustomerForCompany(baseUrl, tokenA, companyAId, code, 'TRE 57.4 Customer');
   }
 
-  // Helper: create POSTED invoice via API
+  // Helper: create POSTED invoice via API (delegates to shared helper)
   async function createPostedInvoice(amount: number, invoiceDate = '2026-05-20'): Promise<{ id: number; invoice_no: string }> {
     const customerId = await createCustomerA();
     const invoiceNo = treTag('INV');
-    const res = await fetch(`${baseUrl}/api/sales/invoices`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${tokenA}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        outlet_id: outletAId,
-        customer_id: customerId,
-        client_ref: crypto.randomUUID(),
-        invoice_no: invoiceNo,
-        invoice_date: invoiceDate,
-        lines: [{ description: 'TRE57.4 Invoice', qty: 1, unit_price: amount }],
-      }),
+    return sharedCreatePostedInvoice({
+      baseUrl, token: tokenA, outletId: outletAId, customerId, amount,
+      invoiceDate, invoiceNo, description: 'TRE57.4 Invoice',
     });
-
-    if (res.status !== 201) {
-      throw new Error(`createPostedInvoice expected 201, got ${res.status}: ${await res.text()}`);
-    }
-    const body = await res.json() as { success: boolean; data: { id: number; status: string } };
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe('POSTED');
-    return { id: body.data.id, invoice_no: invoiceNo };
   }
 
   // Helper: create bank account (BANK type, active by default)
@@ -190,16 +175,18 @@ describe('treasury.treasury-reconciliation - Story 57.4', { timeout: 90000 }, ()
     expect(postBody.data.status).toBe('POSTED');
   }
 
-  // Helper: create + post payment
+  // Helper: create + post payment (delegates to shared helper)
   async function createAndPostPayment(
     invoiceId: number,
     accountId: number,
     amount: number,
     paymentDate = '2026-05-21'
   ): Promise<{ id: number; payment_no: string }> {
-    const draft = await createDraftPayment(invoiceId, accountId, amount, paymentDate);
-    await postPayment(draft.id);
-    return draft;
+    return sharedCreateAndPostPayment({
+      baseUrl, token: tokenA, outletId: outletAId,
+      invoiceId, accountId, amount,
+      paymentAt: paymentDate + 'T10:00:00Z',
+    });
   }
 
   // Query treasury sum for a given account

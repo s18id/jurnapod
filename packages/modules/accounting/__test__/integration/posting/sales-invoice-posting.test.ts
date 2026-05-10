@@ -40,6 +40,7 @@ import { createPostingIdGenerator } from "./id-utils.js";
 // -----------------------------------------------------------------------------
 import { createTestCompanyMinimal } from "@jurnapod/modules-platform";
 import { createTestOutletMinimal } from "@jurnapod/modules-platform";
+import { createTestAccount } from "../../../src/test-fixtures/account-fixtures.js";
 
 // -----------------------------------------------------------------------------
 // Test context — unique company+outlet per describe block
@@ -181,107 +182,6 @@ describe("SalesInvoicePosting", () => {
     `.execute(db);
   });
 
-  // -----------------------------------------------------------------------------
-  // Helper: ensure tax account exists for the given company.
-  // Rerun-safe: unique code per call; duplicate key → fetch existing.
-  // GAP: No canonical account fixture exists in the platform package yet.
-  // -----------------------------------------------------------------------------
-  async function getOrCreateTaxAccount(
-    companyId: number,
-    name: string
-  ): Promise<number> {
-    const code = `TAX11-${nextTestId()}`;
-    // First ensure the LIABILITY account_type exists for this company
-    await sql`
-      INSERT IGNORE INTO account_types (company_id, name, category, normal_balance)
-      VALUES (${companyId}, 'LIABILITY', 'LIABILITY', 'C')
-    `.execute(db);
-
-    const typeRow = await sql`
-      SELECT id FROM account_types WHERE company_id = ${companyId} AND name = 'LIABILITY' LIMIT 1
-    `.execute(db);
-    const accountTypeId = Number((typeRow.rows[0] as { id: number }).id);
-
-    try {
-      await sql`
-        INSERT INTO accounts (company_id, code, name, account_type_id, is_active, is_payable, created_at, updated_at)
-        VALUES (${companyId}, ${code}, ${name}, ${accountTypeId}, 1, 0, NOW(), NOW())
-      `.execute(db);
-    } catch (err) {
-      const mysqlErr = err as { code?: string };
-      if (!mysqlErr?.code || (mysqlErr.code !== 'ER_DUP_ENTRY' && mysqlErr.code !== 'ER_DUP_KEY')) {
-        throw err;
-      }
-    }
-
-    const row = await sql`
-      SELECT id FROM accounts WHERE company_id = ${companyId} AND code = ${code} LIMIT 1
-    `.execute(db);
-    if (!row.rows[0]) throw new Error(`Tax account not found after insert: ${code}`);
-    return Number((row.rows[0] as { id: number }).id);
-  }
-
-  // -------------------------------------------------------------------------
-  // Helper: create dedicated AR and Revenue accounts for test isolation.
-  // Rerun-safe via unique codes; duplicate key → fetch existing.
-  // GAP: No canonical account fixture exists in the platform package yet.
-  // -------------------------------------------------------------------------
-  async function createDedicatedAccounts(companyId: number): Promise<{ arId: number; revId: number }> {
-    const arCode = `AR-TEST-${nextTestId()}`;
-    const revCode = `REV-TEST-${nextTestId()}`;
-
-    // Ensure account types exist for this company
-    for (const [typeName, category, normal] of [
-      ['ASSET', 'ASSET', 'D'],
-      ['REVENUE', 'REVENUE', 'C'],
-    ] as [string, string, string][]) {
-      await sql`
-        INSERT IGNORE INTO account_types (company_id, name, category, normal_balance)
-        VALUES (${companyId}, ${typeName}, ${category}, ${normal})
-      `.execute(db);
-    }
-
-    const typeRows = await sql`
-      SELECT name, id FROM account_types WHERE company_id = ${companyId} AND name IN ('ASSET', 'REVENUE')
-    `.execute(db);
-    const typeMap = new Map<string, number>();
-    for (const r of typeRows.rows as { name: string; id: number }[]) {
-      typeMap.set(r.name, r.id);
-    }
-
-    const arTypeId = typeMap.get('ASSET') ?? 1;
-    const revTypeId = typeMap.get('REVENUE') ?? 5;
-
-    for (const [code, acctName, typeId] of [
-      [arCode, 'Test AR', arTypeId],
-      [revCode, 'Test Revenue', revTypeId],
-    ] as [string, string, number][]) {
-      try {
-        await sql`
-          INSERT INTO accounts (company_id, code, name, account_type_id, is_active, is_payable, created_at, updated_at)
-          VALUES (${companyId}, ${code}, ${acctName}, ${typeId}, 1, 0, NOW(), NOW())
-        `.execute(db);
-      } catch (err) {
-        const mysqlErr = err as { code?: string };
-        if (!mysqlErr?.code || (mysqlErr.code !== 'ER_DUP_ENTRY' && mysqlErr.code !== 'ER_DUP_KEY')) {
-          throw err;
-        }
-      }
-    }
-
-    const arRow = await sql`SELECT id FROM accounts WHERE company_id = ${companyId} AND code = ${arCode} LIMIT 1`.execute(db);
-    const revRow = await sql`SELECT id FROM accounts WHERE company_id = ${companyId} AND code = ${revCode} LIMIT 1`.execute(db);
-
-    if (!arRow.rows[0] || !revRow.rows[0]) {
-      throw new Error(`Dedicated accounts not found after insert: AR=${arCode}, REV=${revCode}`);
-    }
-
-    return {
-      arId: Number((arRow.rows[0] as { id: number }).id),
-      revId: Number((revRow.rows[0] as { id: number }).id),
-    };
-  }
-
   function makeInvoiceData(overrides: Partial<SalesInvoicePostingData> = {}): SalesInvoicePostingData {
     // tax_rate_id resolved per-company via canonical fixture (not hardcoded constant 1)
     const taxRateId = ctx.canonicalTaxRateId;
@@ -368,7 +268,7 @@ describe("SalesInvoicePosting", () => {
       outletId: ctx.outletId,
     });
 
-    const taxAccountId = await getOrCreateTaxAccount(ctx.companyId, "Tax 11%");
+    const { id: taxAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: `TAX11-${nextTestId()}`, name: "Tax 11%", typeName: "LIABILITY" });
 
     const taxAccounts = new Map<number, { account_id: number | null; code: string }>();
     taxAccounts.set(1, { account_id: taxAccountId, code: "TAX11" });
@@ -447,7 +347,10 @@ describe("SalesInvoicePosting", () => {
   // Test 4: maps accounts correctly from dedicated test accounts
   // -------------------------------------------------------------------------
   it("maps accounts correctly from outlet mapping", async () => {
-    const { arId, revId } = await createDedicatedAccounts(ctx.companyId);
+    const ar = await createTestAccount(db, { companyId: ctx.companyId, code: `AR-TEST-${nextTestId()}`, name: "Test AR", typeName: "ASSET" });
+    const rev = await createTestAccount(db, { companyId: ctx.companyId, code: `REV-TEST-${nextTestId()}`, name: "Test Revenue", typeName: "REVENUE" });
+    const arId = ar.id;
+    const revId = rev.id;
 
     const executor = createMockExecutor(arId, revId, new Map());
 

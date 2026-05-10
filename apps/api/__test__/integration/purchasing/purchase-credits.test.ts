@@ -19,11 +19,7 @@ import {
   getOrCreateTestCashierForPermission,
 } from "../../fixtures";
 
-// Deterministic code generator for constrained fields
-function makeTag(prefix: string, counter: number): string {
-  const worker = process.env.VITEST_POOL_ID ?? '0';
-  return `${prefix}${worker}${String(counter).padStart(4, '0')}`.slice(0, 32);
-}
+import { makeTag } from "../../helpers/tags";
 
 let baseUrl: string;
 let testCompanyId: number;
@@ -114,7 +110,7 @@ describe("purchasing.purchase-credits", { timeout: 30000 }, () => {
     await createTestPurchasingAccounts(testCompanyId);
 
     const supplier = await createTestSupplier(testCompanyId, {
-      code: makeTag('PCSUP', ++pcTagCounter),
+      code: makeTag('PCSUP', 32),
       name: "Purchase Credit Test Supplier",
       currency: "IDR",
     });
@@ -192,7 +188,7 @@ describe("purchasing.purchase-credits", { timeout: 30000 }, () => {
   it("creates a draft purchase credit and computes total_credit_amount", async () => {
     const res = await postJson("/api/purchasing/credits", ownerToken, {
       supplier_id: supplierId,
-      credit_no: makeTag('PCDR', ++pcTagCounter),
+      credit_no: makeTag('PCDR', 32),
       credit_date: "2026-04-19",
       description: "Draft credit note",
       lines: [
@@ -213,13 +209,13 @@ describe("purchasing.purchase-credits", { timeout: 30000 }, () => {
 
   it("replays concurrent duplicate credit create by idempotency_key without creating duplicates", async () => {
     const invoiceId = await createAndPostInvoice({
-      invoiceNo: makeTag('PCPICONC', ++pcTagCounter),
+      invoiceNo: makeTag('PCPICONC', 32),
       invoiceDate: '2026-04-21',
       amount: '95.0000',
     });
 
-    const idempotencyKey = makeTag('PCCONCIDEM', ++pcTagCounter);
-    const creditNo = makeTag('PCCONCNO', ++pcTagCounter);
+    const idempotencyKey = makeTag('PCCONCIDEM', 32);
+    const creditNo = makeTag('PCCONCNO', 32);
 
     const payload = {
       supplier_id: supplierId,
@@ -265,14 +261,14 @@ describe("purchasing.purchase-credits", { timeout: 30000 }, () => {
 
   it("applies a referenced credit partially when PI open amount is smaller", async () => {
     const invoiceId = await createAndPostInvoice({
-      invoiceNo: makeTag('PCPIPART', ++pcTagCounter),
+      invoiceNo: makeTag('PCPIPART', 32),
       invoiceDate: "2026-04-01",
       amount: "200.0000",
     });
 
     const createRes = await postJson("/api/purchasing/credits", ownerToken, {
       supplier_id: supplierId,
-      credit_no: makeTag('PCPART', ++pcTagCounter),
+      credit_no: makeTag('PCPART', 32),
       credit_date: "2026-04-19",
       lines: [
         {
@@ -323,20 +319,20 @@ describe("purchasing.purchase-credits", { timeout: 30000 }, () => {
 
   it("applies unreferenced credit using FIFO oldest open invoices", async () => {
     const firstInvoiceId = await createAndPostInvoice({
-      invoiceNo: makeTag('PCPIFIFOA', ++pcTagCounter),
+      invoiceNo: makeTag('PCPIFIFOA', 32),
       invoiceDate: "2026-04-02",
       amount: "100.0000",
     });
 
     const secondInvoiceId = await createAndPostInvoice({
-      invoiceNo: makeTag('PCPIFIFOB', ++pcTagCounter),
+      invoiceNo: makeTag('PCPIFIFOB', 32),
       invoiceDate: "2026-04-03",
       amount: "150.0000",
     });
 
     const createRes = await postJson("/api/purchasing/credits", ownerToken, {
       supplier_id: supplierId,
-      credit_no: makeTag('PCFIFO', ++pcTagCounter),
+      credit_no: makeTag('PCFIFO', 32),
       credit_date: "2026-04-19",
       lines: [
         {
@@ -371,14 +367,14 @@ describe("purchasing.purchase-credits", { timeout: 30000 }, () => {
 
   it("voids an applied purchase credit and creates reversal journal", async () => {
     const invoiceId = await createAndPostInvoice({
-      invoiceNo: makeTag('PCPIVOID', ++pcTagCounter),
+      invoiceNo: makeTag('PCPIVOID', 32),
       invoiceDate: "2026-04-04",
       amount: "70.0000",
     });
 
     const createRes = await postJson("/api/purchasing/credits", ownerToken, {
       supplier_id: supplierId,
-      credit_no: makeTag('PCVOID', ++pcTagCounter),
+      credit_no: makeTag('PCVOID', 32),
       credit_date: "2026-04-19",
       lines: [
         {
@@ -421,15 +417,15 @@ describe("purchasing.purchase-credits", { timeout: 30000 }, () => {
 
   it("returns OK when voiding an already voided purchase credit (idempotent replay)", async () => {
     const invoiceId = await createAndPostInvoice({
-      invoiceNo: makeTag('PCPIIDEM', ++pcTagCounter),
+      invoiceNo: makeTag('PCPIIDEM', 32),
       invoiceDate: '2026-04-05',
       amount: '55.0000',
     });
 
     const createRes = await postJson('/api/purchasing/credits', ownerToken, {
       supplier_id: supplierId,
-      idempotency_key: makeTag('PCIDEM', ++pcTagCounter),
-      credit_no: makeTag('PCVOID2', ++pcTagCounter),
+      idempotency_key: makeTag('PCIDEM', 32),
+      credit_no: makeTag('PCVOID2', 32),
       credit_date: '2026-04-20',
       lines: [
         {

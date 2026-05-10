@@ -29,6 +29,7 @@ import {
 import { getDb } from "@/lib/db";
 import { sql } from "kysely";
 import { makeTag } from "../../helpers/tags";
+import { createTestSalesInvoice } from "@jurnapod/modules-sales/test-fixtures";
 
 describe("ar-subledger-reconciliation", { timeout: 60000 }, () => {
   let baseUrl: string;
@@ -233,14 +234,14 @@ describe("ar-subledger-reconciliation", { timeout: 60000 }, () => {
         });
         expect(settingsRes.status).toBe(200);
 
-        const tag = makeTag("ARII");
-
         // Insert a POSTED invoice directly (bypasses API to avoid numbering template dependency)
-        const invoiceResult = await sql<{ insertId: number }>`
-          INSERT INTO sales_invoices (company_id, outlet_id, invoice_no, invoice_date, status, payment_status, subtotal, tax_amount, grand_total, paid_total, created_at, updated_at)
-          VALUES (${isolatedCompanyId}, ${isolatedOutletId}, ${`INV-${tag}`}, ${FIXED_AS_OF_DATE}, 'POSTED', 'UNPAID', ${INVOICE_AMOUNT}, 0, ${INVOICE_AMOUNT}, 0, NOW(), NOW())
-        `.execute(db);
-        const invoiceId = Number(invoiceResult.insertId);
+        const { id: invoiceId } = await createTestSalesInvoice(db, {
+          companyId: isolatedCompanyId,
+          outletId: isolatedOutletId,
+          invoiceDate: FIXED_AS_OF_DATE,
+          dueDate: "2020-01-01",
+          totalAmount: INVOICE_AMOUNT,
+        });
 
         // Insert matching GL journal batch (doc_type=SALES_INVOICE, posted within cutoff).
         // posted_at uses noon UTC on the as_of_date — safely before the end-of-day UTC boundary

@@ -13,6 +13,8 @@ export type {
   SupplierFixture,
   PurchasingAccountsFixture,
   PurchasingSettingsFixture,
+  PurchaseInvoiceFixture,
+  ApPaymentFixture,
 } from "./types.js";
 
 // Supplier fixtures
@@ -26,3 +28,9 @@ export {
   createPurchasingSettingsFixture,
   setPurchasingDefaultApAccountFixture,
 } from "./purchasing-settings.js";
+
+// Purchase invoice fixtures
+export { createTestPurchaseInvoice } from "./purchase-invoice-fixtures.js";
+
+// AP payment fixtures
+export { createTestApPayment } from "./ap-payment-fixtures.js";

@@ -77,34 +77,6 @@ describe("inventory posting gate evidence", { timeout: 60000 }, () => {
       name: "Inventory Asset",
     });
 
-    // Fixture-created accounts lack account_type_id; the COGS posting
-    // validation joins accounts -> account_types via account_type_id.
-    // Set the missing FK so the validation can resolve the account type.
-    // Use global account_types lookup (no company_id filter) since the
-    // isolated company has no account_types of its own — this matches the
-    // pattern used by ensureSystemAccounts in company bootstrap.
-    await sql`
-      UPDATE accounts a
-      SET a.account_type_id = (
-        SELECT at2.id FROM account_types at2
-        WHERE at2.name = 'EXPENSE'
-        LIMIT 1
-      )
-      WHERE a.id = ${cogsAccount.id} AND a.company_id = ${companyId}
-        AND a.account_type_id IS NULL
-    `.execute(getTestDb());
-
-    await sql`
-      UPDATE accounts a
-      SET a.account_type_id = (
-        SELECT at2.id FROM account_types at2
-        WHERE at2.name = 'ASSET'
-        LIMIT 1
-      )
-      WHERE a.id = ${invAssetAccount.id} AND a.company_id = ${companyId}
-        AND a.account_type_id IS NULL
-    `.execute(getTestDb());
-
     // Map accounts for COGS posting (outlet_id IS NULL = company-wide defaults)
     await sql`
       INSERT INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id)

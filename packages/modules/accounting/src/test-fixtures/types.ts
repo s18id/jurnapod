@@ -35,4 +35,5 @@ export type AccountingAccountFixture = {
   code: string;
   name: string;
   typeName: string;
+  accountTypeId: number;
 };

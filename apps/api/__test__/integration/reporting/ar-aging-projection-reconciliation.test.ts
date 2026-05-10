@@ -29,6 +29,7 @@ import {
 import { getDb } from "@/lib/db";
 import { sql } from "kysely";
 import { makeTag } from "../../helpers/tags";
+import { createTestCustomer, createTestSalesInvoice } from "@jurnapod/modules-sales/test-fixtures";
 
 describe("ar-aging-projection-reconciliation", { timeout: 60000 }, () => {
   let baseUrl: string;
@@ -156,22 +157,23 @@ describe("ar-aging-projection-reconciliation", { timeout: 60000 }, () => {
         await assignUserOutletRole(user.id, roleId, outlet.id);
         isolatedToken = await loginForTest(baseUrl, company.code, email, "TestPassword123!");
 
-        const tag = makeTag("ARII");
-
         // Insert a customer record for the invoice FK
-        const customerResult = await sql<{ insertId: number }>`
-          INSERT INTO customers (company_id, code, display_name, type, is_active, created_at, updated_at)
-          VALUES (${isolatedCompanyId}, ${`CUST-${tag}`.slice(0, 20)}, ${`Test Customer ${tag}`}, 1, 1, NOW(), NOW())
-        `.execute(db);
-        const customerId = Number(customerResult.insertId);
+        const { id: customerId } = await createTestCustomer(db, {
+          companyId: isolatedCompanyId,
+          code: `CUST-${makeTag("ARII")}`,
+          name: `Test Customer ARII`,
+        });
 
         // Insert a POSTED sales invoice with known grand_total, zero paid_total
         // due_date set to 2020-01-01 to place it firmly in the over_90_days bucket
-        const invoiceResult = await sql<{ insertId: number }>`
-          INSERT INTO sales_invoices (company_id, outlet_id, invoice_no, invoice_date, due_date, customer_id, status, payment_status, grand_total, subtotal, tax_amount, paid_total, created_at, updated_at)
-          VALUES (${isolatedCompanyId}, ${isolatedOutletId}, ${`SINV-${tag}`}, ${FIXED_AS_OF_DATE}, '2020-01-01', ${customerId}, 'POSTED', 'UNPAID', ${SEEDED_GRAND_TOTAL}, ${SEEDED_GRAND_TOTAL}, 0, 0, NOW(), NOW())
-        `.execute(db);
-        const invoiceId = Number(invoiceResult.insertId);
+        const { id: invoiceId } = await createTestSalesInvoice(db, {
+          companyId: isolatedCompanyId,
+          outletId: isolatedOutletId,
+          customerId,
+          invoiceDate: FIXED_AS_OF_DATE,
+          dueDate: "2020-01-01",
+          totalAmount: SEEDED_GRAND_TOTAL,
+        });
         void invoiceId; // silence unused warning — ID is captured for traceability
       });
 
@@ -418,17 +420,20 @@ describe("ar-aging-projection-reconciliation", { timeout: 60000 }, () => {
       const tokenA = await loginForTest(baseUrl, companyA.code, emailA, "TestPassword123!");
 
       // Seed invoice in company A
-      const tagA = makeTag("TIA");
-      const custA = await sql<{ insertId: number }>`
-        INSERT INTO customers (company_id, code, display_name, type, is_active, created_at, updated_at)
-        VALUES (${companyA.id}, ${`CA-${tagA}`.slice(0, 20)}, ${`CompanyA Customer ${tagA}`}, 1, 1, NOW(), NOW())
-      `.execute(db);
-      const customerIdA = Number(custA.insertId);
+      const { id: customerIdA } = await createTestCustomer(db, {
+        companyId: companyA.id,
+        code: `CA-${makeTag("TIA")}`,
+        name: `CompanyA Customer TIA`,
+      });
 
-      await sql`
-        INSERT INTO sales_invoices (company_id, outlet_id, invoice_no, invoice_date, due_date, customer_id, status, payment_status, grand_total, subtotal, tax_amount, paid_total, created_at, updated_at)
-        VALUES (${companyA.id}, ${outletA.id}, ${`SINVA-${tagA}`}, ${FIXED_AS_OF_DATE}, '2020-01-01', ${customerIdA}, 'POSTED', 'UNPAID', 500000, 500000, 0, 0, NOW(), NOW())
-      `.execute(db);
+      await createTestSalesInvoice(db, {
+        companyId: companyA.id,
+        outletId: outletA.id,
+        customerId: customerIdA,
+        invoiceDate: FIXED_AS_OF_DATE,
+        dueDate: "2020-01-01",
+        totalAmount: 500000,
+      });
 
       // Create company B with OWNER user (no invoices)
       const companyB = await createTestCompanyMinimal();

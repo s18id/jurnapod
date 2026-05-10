@@ -81,35 +81,7 @@ describe("cogs-projection-reconciliation", { timeout: 60000 }, () => {
       name: "Inventory Asset",
     });
 
-    // 6. Set account_type_id on both accounts (COGS→EXPENSE, INV_ASSET→ASSET)
-    // Fixture-created accounts lack account_type_id; the COGS posting
-    // validation joins accounts -> account_types via account_type_id.
-    // Use global account_types lookup (no company_id filter) since the
-    // isolated company has no account_types of its own — this matches the
-    // pattern used by ensureSystemAccounts in company bootstrap.
-    await sql`
-      UPDATE accounts a
-      SET a.account_type_id = (
-        SELECT at2.id FROM account_types at2
-        WHERE at2.name = 'EXPENSE'
-        LIMIT 1
-      )
-      WHERE a.id = ${cogsAccount.id} AND a.company_id = ${companyId}
-        AND a.account_type_id IS NULL
-    `.execute(getTestDb());
-
-    await sql`
-      UPDATE accounts a
-      SET a.account_type_id = (
-        SELECT at2.id FROM account_types at2
-        WHERE at2.name = 'ASSET'
-        LIMIT 1
-      )
-      WHERE a.id = ${invAssetAccount.id} AND a.company_id = ${companyId}
-        AND a.account_type_id IS NULL
-    `.execute(getTestDb());
-
-    // 7. Create account_mappings for COGS_DEFAULT (mapping_type_id=7)
+    // 6. Create account_mappings for COGS_DEFAULT (mapping_type_id=7)
     //    and INVENTORY_ASSET_DEFAULT (mapping_type_id=8)
     await sql`
       INSERT INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id)

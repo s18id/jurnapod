@@ -26,8 +26,8 @@ import {
   getOrCreateTestCashierForPermission,
 } from '../../fixtures';
 import { makeTag } from '../../helpers/tags';
-import { sql } from 'kysely';
 import { getDb } from '@/lib/db';
+import { createTestCustomer, createTestSalesInvoice } from '@jurnapod/modules-sales/test-fixtures';
 
 // Deterministic future dates — beyond any real transaction
 const FIXED_AS_OF_DATE = '2099-12-31';
@@ -143,15 +143,19 @@ describe('tenant-isolation-projection', { timeout: 60000 }, () => {
     it('AR aging: Company A OWNER does not see Company B data', async () => {
       // Seed an invoice in Company A only
       const db = getDb();
-      const tag = makeTag('TENISO');
-      const custResult = await sql<{ insertId: number }>`
-        INSERT INTO customers (company_id, code, display_name, type, is_active, created_at, updated_at)
-        VALUES (${companyAId}, ${`CA-${tag}`.slice(0, 20)}, ${`Tenant Customer ${tag}`}, 1, 1, NOW(), NOW())
-      `.execute(db);
-      await sql`
-        INSERT INTO sales_invoices (company_id, outlet_id, invoice_no, invoice_date, due_date, customer_id, status, payment_status, grand_total, subtotal, tax_amount, paid_total, created_at, updated_at)
-        VALUES (${companyAId}, ${outletAId}, ${`SIA-${tag}`}, ${FIXED_AS_OF_DATE}, '2020-01-01', ${Number(custResult.insertId)}, 'POSTED', 'UNPAID', 500000, 500000, 0, 0, NOW(), NOW())
-      `.execute(db);
+      const { id: custId } = await createTestCustomer(db, {
+        companyId: companyAId,
+        code: `CA-${makeTag('TENISO')}`,
+        name: 'Tenant Customer TENISO',
+      });
+      await createTestSalesInvoice(db, {
+        companyId: companyAId,
+        outletId: outletAId,
+        customerId: custId,
+        invoiceDate: FIXED_AS_OF_DATE,
+        dueDate: '2020-01-01',
+        totalAmount: 500000,
+      });
 
       const resA = await getJson(`/api/reports/receivables-ageing?as_of_date=${FIXED_AS_OF_DATE}`, ownerTokenA);
       expect(resA.status).toBe(200);

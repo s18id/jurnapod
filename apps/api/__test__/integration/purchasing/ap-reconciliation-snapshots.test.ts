@@ -3,6 +3,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "kysely";
+import { scaled, unscaled } from "@jurnapod/shared";
 import type { KyselySchema } from "@jurnapod/db";
 import { closeTestDb, getTestDb } from "../../helpers/db";
 import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
@@ -1021,16 +1022,12 @@ describe("purchasing.ap-reconciliation-snapshots", { timeout: 90000 }, () => {
     expect(csvGet("variance", v2Parsed)).toBeTruthy();
 
     // AC4: For a company with no AP transactions, subledger == GL == 0 → variance = 0
-    const parseDecimal = (s: string): bigint => {
-      const [whole, frac = ""] = s.split(".");
-      return BigInt(whole) * 10000n + BigInt(frac.padEnd(4, "0").slice(0, 4));
-    };
-    const v1Ap = parseDecimal(csvGet("ap_subledger_balance", v1Parsed));
-    const v1Gl = parseDecimal(csvGet("gl_control_balance", v1Parsed));
-    const v1Var = parseDecimal(csvGet("variance", v1Parsed));
-    const v2Ap = parseDecimal(csvGet("ap_subledger_balance", v2Parsed));
-    const v2Gl = parseDecimal(csvGet("gl_control_balance", v2Parsed));
-    const v2Var = parseDecimal(csvGet("variance", v2Parsed));
+    const v1Ap = scaled(csvGet("ap_subledger_balance", v1Parsed));
+    const v1Gl = scaled(csvGet("gl_control_balance", v1Parsed));
+    const v1Var = scaled(csvGet("variance", v1Parsed));
+    const v2Ap = scaled(csvGet("ap_subledger_balance", v2Parsed));
+    const v2Gl = scaled(csvGet("gl_control_balance", v2Parsed));
+    const v2Var = scaled(csvGet("variance", v2Parsed));
 
     // Internal consistency: variance = gl - ap
     expect(v1Ap).toBe(v1Gl);

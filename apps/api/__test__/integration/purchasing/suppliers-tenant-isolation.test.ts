@@ -20,12 +20,7 @@ import {
   setModulePermission,
 } from '../../fixtures';
 
-// Deterministic code generator for constrained fields (max 20 chars)
-function makeTag(prefix: string, counter: number): string {
-  const worker = process.env.VITEST_POOL_ID ?? '0';
-  const pidTag = String(process.pid % 10000).padStart(4, '0');
-  return `${prefix}${worker}${String(counter).padStart(4, '0')}${pidTag}`;
-}
+import { makeTag } from "../../helpers/tags";
 
 let baseUrl: string;
 let ownerToken: string;
@@ -39,7 +34,7 @@ describe('purchasing.suppliers.tenant-isolation', { timeout: 60000 }, () => {
     baseUrl = getTestBaseUrl();
 
     const ownerCompany = await createTestCompanyMinimal({
-      code: makeTag('COMPISOA', ++isoTagCounter).toUpperCase(),
+      code: makeTag('COMPISOA').toUpperCase(),
       name: 'Company A Isolation Test',
     });
     ownerCompanyId = ownerCompany.id;
@@ -87,7 +82,7 @@ describe('purchasing.suppliers.tenant-isolation', { timeout: 60000 }, () => {
   it('company A cannot GET company B supplier by id (true cross-company)', async () => {
     // Step 1: Create Company B (minimal - no settings bootstrap needed)
     const companyB = await createTestCompanyMinimal({
-      code: makeTag('COMPISOB', ++isoTagCounter).toUpperCase(),
+      code: makeTag('COMPISOB').toUpperCase(),
       name: 'Company B Isolation Test'
     });
     createdCompanyIds.push(companyB.id);
@@ -111,7 +106,7 @@ describe('purchasing.suppliers.tenant-isolation', { timeout: 60000 }, () => {
     );
 
     // Step 4: Create a supplier in Company B using Company B's token
-    const supplierCodeB = makeTag('SUPISOB', ++isoTagCounter);
+    const supplierCodeB = makeTag('SUPISOB');
     const createB = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${tokenB}`, 'Content-Type': 'application/json' },
@@ -127,7 +122,7 @@ describe('purchasing.suppliers.tenant-isolation', { timeout: 60000 }, () => {
     const supplierBId = supplierB.data.id;
 
     // Step 5: Create a supplier in Company A (owner token)
-    const supplierCodeA = makeTag('SUPISOA', ++isoTagCounter);
+    const supplierCodeA = makeTag('SUPISOA');
     const createA = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -163,7 +158,7 @@ describe('purchasing.suppliers.tenant-isolation', { timeout: 60000 }, () => {
   it('company A cannot UPDATE company B supplier by id (true cross-company)', async () => {
     // Create Company C (minimal - no settings bootstrap needed)
     const companyC = await createTestCompanyMinimal({
-      code: makeTag('COMPISOC', ++isoTagCounter).toUpperCase(),
+      code: makeTag('COMPISOC').toUpperCase(),
       name: 'Company C Isolation Test'
     });
     createdCompanyIds.push(companyC.id);
@@ -186,7 +181,7 @@ describe('purchasing.suppliers.tenant-isolation', { timeout: 60000 }, () => {
     );
 
     // Create supplier in Company C
-    const supplierCodeC = makeTag('SUPISOC', ++isoTagCounter);
+    const supplierCodeC = makeTag('SUPISOC');
     const createC = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${tokenC}`, 'Content-Type': 'application/json' },
@@ -214,7 +209,7 @@ describe('purchasing.suppliers.tenant-isolation', { timeout: 60000 }, () => {
   it('company A cannot DELETE company B supplier by id (true cross-company)', async () => {
     // Create Company D (minimal - no settings bootstrap needed)
     const companyD = await createTestCompanyMinimal({
-      code: makeTag('COMPISOD', ++isoTagCounter).toUpperCase(),
+      code: makeTag('COMPISOD').toUpperCase(),
       name: 'Company D Isolation Test'
     });
     createdCompanyIds.push(companyD.id);
@@ -237,7 +232,7 @@ describe('purchasing.suppliers.tenant-isolation', { timeout: 60000 }, () => {
     );
 
     // Create supplier in Company D
-    const supplierCodeD = makeTag('SUPISOD', ++isoTagCounter);
+    const supplierCodeD = makeTag('SUPISOD');
     const createD = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${tokenD}`, 'Content-Type': 'application/json' },
@@ -262,7 +257,7 @@ describe('purchasing.suppliers.tenant-isolation', { timeout: 60000 }, () => {
   });
 
   it('supplier code is unique only within company', async () => {
-    const uniqueCode = makeTag('SUPUNI', ++isoTagCounter);
+    const uniqueCode = makeTag('SUPUNI');
 
     // Create supplier with code in Company A
     const createA = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
@@ -293,7 +288,7 @@ describe('purchasing.suppliers.tenant-isolation', { timeout: 60000 }, () => {
 
   it('company A list only shows company A suppliers', async () => {
     // Create a supplier in company A (the seeded company)
-    const codeA = makeTag('SUPISOLIST', ++isoTagCounter);
+    const codeA = makeTag('SUPISOLIST');
     const createA = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },

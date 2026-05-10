@@ -28,6 +28,7 @@ import {
   createTestFiscalPeriod,
 } from "../../fixtures";
 import { buildPermissionMask } from "@jurnapod/auth";
+import { createPostedInvoice as sharedCreatePostedInvoice } from "../../helpers/sales-flows";
 
 let baseUrl: string;
 let tokenA: string;
@@ -98,24 +99,11 @@ describe("sales.ar-credit-void-refund - Story 57.3", { timeout: 90000 }, () => {
 
   async function createPostedInvoice(amount: number, invoiceDate = "2026-05-20"): Promise<number> {
     const customerId = await createCustomerA();
-    const res = await fetch(`${baseUrl}/api/sales/invoices`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${tokenA}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        outlet_id: outletAId,
-        customer_id: customerId,
-        client_ref: crypto.randomUUID(),
-        invoice_no: arTag("ARINV"),
-        invoice_date: invoiceDate,
-        lines: [{ description: "AR57.3 Invoice", qty: 1, unit_price: amount }],
-      }),
+    const result = await sharedCreatePostedInvoice({
+      baseUrl, token: tokenA, outletId: outletAId, customerId, amount,
+      invoiceDate, invoiceNo: arTag("ARINV"), description: "AR57.3 Invoice",
     });
-
-    expect(res.status).toBe(201);
-    const body = await res.json() as { success: boolean; data: { id: number; status: string } };
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe("POSTED");
-    return body.data.id;
+    return result.id;
   }
 
   async function createPostedPayment(amount = 200000): Promise<number> {

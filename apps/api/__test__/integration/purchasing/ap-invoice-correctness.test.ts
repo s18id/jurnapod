@@ -40,10 +40,7 @@ import { createTaxRate } from '../../../src/lib/tax-rates.js';
 // Helpers
 // =============================================================================
 
-function makeTag(prefix: string, counter: number): string {
-  const worker = process.env.VITEST_POOL_ID ?? '0';
-  return `${prefix}${worker}${String(counter).padStart(4, '0')}`.slice(0, 32);
-}
+import { makeTag } from "../../helpers/tags";
 
 // =============================================================================
 // Suite State
@@ -118,7 +115,7 @@ describe('purchasing.ap-invoice-correctness', { timeout: 30000 }, () => {
 
     // Supplier
     const supplier = await createTestSupplier(testCompany.id, {
-      code: makeTag('PICORR', ++piTagCounter),
+      code: makeTag('PICORR', 32),
       name: 'PI Correctness Supplier',
       currency: 'IDR',
     });
@@ -155,8 +152,8 @@ describe('purchasing.ap-invoice-correctness', { timeout: 30000 }, () => {
   // AC2: Invoice create idempotency proven
   // ---------------------------------------------------------------------------
   it('create idempotent — same PI, no duplicate, no journal batch', async () => {
-    const idempotencyKey = makeTag('PIIDEM', ++piTagCounter);
-    const invoiceNo = makeTag('PIIDNO', ++piTagCounter);
+    const idempotencyKey = makeTag('PIIDEM', 32);
+    const invoiceNo = makeTag('PIIDNO', 32);
 
     const payload = {
       supplier_id: testSupplierId,
@@ -206,7 +203,7 @@ describe('purchasing.ap-invoice-correctness', { timeout: 30000 }, () => {
   // AC3: Invoice post produces correct GL entries
   // ---------------------------------------------------------------------------
   it('post creates correct journal entries — debit expense, debit tax, credit AP', async () => {
-    const invoiceNo = makeTag('PIJNL', ++piTagCounter);
+    const invoiceNo = makeTag('PIJNL', 32);
 
     // Create invoice: $1000 expense + $100 tax (10%) = $1100 AP
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
@@ -284,7 +281,7 @@ describe('purchasing.ap-invoice-correctness', { timeout: 30000 }, () => {
   // AC4: Invoice void reverses GL entries correctly
   // ---------------------------------------------------------------------------
   it('void creates correct reversal journal — credit expense, credit tax, debit AP', async () => {
-    const invoiceNo = makeTag('PIVOID', ++piTagCounter);
+    const invoiceNo = makeTag('PIVOID', 32);
 
     // Create and post: $1000 expense + $100 tax = $1100 AP
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
@@ -387,7 +384,7 @@ describe('purchasing.ap-invoice-correctness', { timeout: 30000 }, () => {
     });
     expect(fxRes.status).toBe(201);
 
-    const invoiceNo = makeTag('PIFX', ++piTagCounter);
+    const invoiceNo = makeTag('PIFX', 32);
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -450,7 +447,7 @@ describe('purchasing.ap-invoice-correctness', { timeout: 30000 }, () => {
   // AC6: Concurrent invoice post with same ID is safe
   // ---------------------------------------------------------------------------
   it('concurrent post safe — exactly 1 journal batch, 1 success + 1 conflict', async () => {
-    const invoiceNo = makeTag('PIRACE', ++piTagCounter);
+    const invoiceNo = makeTag('PIRACE', 32);
 
     // Create draft
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
@@ -500,7 +497,7 @@ describe('purchasing.ap-invoice-correctness', { timeout: 30000 }, () => {
   // Concurrent void safe — exactly 1 reversal batch, 1 success + 1 conflict
   // ---------------------------------------------------------------------------
   it('concurrent void safe — exactly 1 reversal batch, 1 success + 1 conflict', async () => {
-    const invoiceNo = makeTag('PIVRACE', ++piTagCounter);
+    const invoiceNo = makeTag('PIVRACE', 32);
 
     // Create and post invoice
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
@@ -581,7 +578,7 @@ describe('purchasing.ap-invoice-correctness', { timeout: 30000 }, () => {
     // DO NOT create purchasing accounts — leave AP account unconfigured
 
     const noConfigSupplier = await createTestSupplier(noConfigCompany.id, {
-      code: makeTag('PINOCFG', ++piTagCounter),
+      code: makeTag('PINOCFG', 32),
       name: 'PI No Config Supplier',
       currency: 'IDR',
     });
@@ -594,7 +591,7 @@ describe('purchasing.ap-invoice-correctness', { timeout: 30000 }, () => {
       headers: { 'Authorization': `Bearer ${noConfigToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: noConfigSupplier.id,
-        invoice_no: makeTag('PINOPOST', ++piTagCounter),
+        invoice_no: makeTag('PINOPOST', 32),
         invoice_date: '2026-04-10',
         currency_code: 'IDR',
         lines: [{ description: 'No config test', qty: '1', unit_price: '100.00', line_type: 'SERVICE' }]
@@ -619,7 +616,7 @@ describe('purchasing.ap-invoice-correctness', { timeout: 30000 }, () => {
   // Error: Post already-posted PI → 400 INVALID_STATUS_TRANSITION
   // ---------------------------------------------------------------------------
   it('returns 400 when posting an already posted PI', async () => {
-    const invoiceNo = makeTag('PIDP', ++piTagCounter);
+    const invoiceNo = makeTag('PIDP', 32);
 
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
@@ -658,7 +655,7 @@ describe('purchasing.ap-invoice-correctness', { timeout: 30000 }, () => {
   // Error: Void draft PI → 400 INVALID_STATUS_TRANSITION
   // ---------------------------------------------------------------------------
   it('returns 400 when trying to void a draft PI', async () => {
-    const invoiceNo = makeTag('PIVDFT', ++piTagCounter);
+    const invoiceNo = makeTag('PIVDFT', 32);
 
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',

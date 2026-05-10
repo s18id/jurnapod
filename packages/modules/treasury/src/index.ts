@@ -114,3 +114,12 @@ export { CashBankPostingMapper, type TreasuryPostingRepository } from "./posting
 // -----------------------------------------------------------------------------
 
 export { CashBankService, type CashBankServiceOptions } from "./cash-bank-service.js";
+
+// -----------------------------------------------------------------------------
+// Test fixtures (Story 63.8)
+// -----------------------------------------------------------------------------
+
+export {
+  createTestCashBankTransaction,
+  type CreateTestCashBankTransactionOptions,
+} from "./test-fixtures/cash-bank-fixtures.js";

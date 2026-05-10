@@ -64,15 +64,8 @@ import {
   createTestBankAccount,
 } from '../../fixtures';
 
-// =============================================================================
-// Deterministic Tag Generator
-// =============================================================================
-
-function makeTag(prefix: string, counter: number): string {
-  const worker = process.env.VITEST_POOL_ID ?? '0';
-  const pidTag = String(process.pid % 10000).padStart(4, '0');
-  return `${prefix}${worker}${pidTag}${String(counter).padStart(4, '0')}`;
-}
+import { makeTag } from "../../helpers/tags";
+import { createSentPurchaseOrder } from "../../helpers/purchasing-flows";
 
 // =============================================================================
 // Status Constants (from @jurnapod/shared)
@@ -109,7 +102,7 @@ describe('purchasing.ap-state-machine', { timeout: 30000 }, () => {
     baseUrl = getTestBaseUrl();
 
     const testCompany = await createTestCompanyMinimal({
-      code: makeTag('APSM', ++smTagCounter).toUpperCase(),
+      code: makeTag('APSM').toUpperCase(),
       name: `AP State Machine Company ${process.pid}`,
     });
     testCompanyId = testCompany.id;
@@ -139,7 +132,7 @@ describe('purchasing.ap-state-machine', { timeout: 30000 }, () => {
 
     // Supplier
     const supplier = await createTestSupplier(testCompanyId, {
-      code: makeTag('APSMSUP', ++smTagCounter),
+      code: makeTag('APSMSUP'),
       name: 'AP State Machine Supplier',
       currency: 'IDR',
     });
@@ -190,7 +183,7 @@ describe('purchasing.ap-state-machine', { timeout: 30000 }, () => {
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        reference_number: makeTag('GRAC3', ++smTagCounter),
+        reference_number: makeTag('GRAC3'),
         receipt_date: '2026-04-19',
         lines: [{ po_line_id: ac3PoLineId, qty: '10', unit: 'pcs' }]
       })
@@ -229,44 +222,25 @@ describe('purchasing.ap-state-machine', { timeout: 30000 }, () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Helper: Create PO in SENT status
-  // ---------------------------------------------------------------------------
-  async function createSentPO(qty: string = '10', unitPrice: string = '5000.00'): Promise<{ poId: number; lineId: number }> {
-    const poRes = await fetch(`${baseUrl}/api/purchasing/orders`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        supplier_id: testSupplierId,
-        order_date: '2026-04-01',
-        lines: [{ qty, unit_price: unitPrice, tax_rate: '0' }]
-      })
-    });
-    expect(poRes.status).toBe(201);
-    const po = await poRes.json();
-
-    await fetch(`${baseUrl}/api/purchasing/orders/${po.data.id}/status`, {
-      method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'SENT' })
-    });
-
-    return { poId: po.data.id, lineId: po.data.lines[0].id };
-  }
-
-  // ---------------------------------------------------------------------------
   // Helper: Create PO + GRN with known received_qty
   // ---------------------------------------------------------------------------
   async function createPOWithGRN(poQty: string, grnQty: string, unitPrice: string = '5000.00'): Promise<{ poId: number; poLineId: number; grnId: number }> {
-    const po = await createSentPO(poQty, unitPrice);
+    const po = await createSentPurchaseOrder({
+      baseUrl,
+      token: ownerToken,
+      supplierId: testSupplierId,
+      lines: [{ qty: poQty, unit_price: unitPrice, tax_rate: '0' }],
+      orderDate: '2026-04-01',
+    });
 
     const grnRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        reference_number: makeTag('GRPO', ++smTagCounter),
+        reference_number: makeTag('GRPO'),
         receipt_date: '2026-04-20',
-        lines: [{ po_line_id: po.lineId, qty: grnQty, unit: 'pcs' }]
+        lines: [{ po_line_id: po.lineIds[0], qty: grnQty, unit: 'pcs' }]
       })
     });
     expect(grnRes.status).toBe(201);
@@ -277,7 +251,7 @@ describe('purchasing.ap-state-machine', { timeout: 30000 }, () => {
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' }
     });
 
-    return { poId: po.poId, poLineId: po.lineId, grnId: grn.data.id };
+    return { poId: po.poId, poLineId: po.lineIds[0], grnId: grn.data.id };
   }
 
   // =============================================================================
@@ -293,7 +267,7 @@ describe('purchasing.ap-state-machine', { timeout: 30000 }, () => {
         headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           supplier_id: testSupplierId,
-          invoice_no: makeTag('AC2A_PI', ++smTagCounter),
+          invoice_no: makeTag('AC2A_PI'),
           invoice_date: '2026-04-01',
           currency_code: 'IDR',
           lines: [{ description: 'PI for AC2a', qty: '1', unit_price: '10000.00', line_type: 'SERVICE' }]
@@ -350,7 +324,7 @@ describe('purchasing.ap-state-machine', { timeout: 30000 }, () => {
         headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           supplier_id: testSupplierId,
-          invoice_no: makeTag('AC2B_PI', ++smTagCounter),
+          invoice_no: makeTag('AC2B_PI'),
           invoice_date: '2026-04-01',
           currency_code: 'IDR',
           lines: [{ description: 'PI for AC2b', qty: '1', unit_price: '10000.00', line_type: 'SERVICE' }]
@@ -396,7 +370,7 @@ describe('purchasing.ap-state-machine', { timeout: 30000 }, () => {
         headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           supplier_id: testSupplierId,
-          invoice_no: makeTag('AC2C_PI', ++smTagCounter),
+          invoice_no: makeTag('AC2C_PI'),
           invoice_date: '2026-04-01',
           currency_code: 'IDR',
           lines: [{ description: 'PI for AC2c', qty: '1', unit_price: '10000.00', line_type: 'SERVICE' }]
@@ -433,7 +407,7 @@ describe('purchasing.ap-state-machine', { timeout: 30000 }, () => {
         headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           supplier_id: testSupplierId,
-          invoice_no: makeTag('AC2D_PI', ++smTagCounter),
+          invoice_no: makeTag('AC2D_PI'),
           invoice_date: '2026-04-01',
           currency_code: 'IDR',
           lines: [{ description: 'PI for AC2d', qty: '1', unit_price: '10000.00', line_type: 'SERVICE' }]
@@ -459,7 +433,7 @@ describe('purchasing.ap-state-machine', { timeout: 30000 }, () => {
         headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           supplier_id: testSupplierId,
-          invoice_no: makeTag('AC2E_PI', ++smTagCounter),
+          invoice_no: makeTag('AC2E_PI'),
           invoice_date: '2026-04-01',
           currency_code: 'IDR',
           lines: [{ description: 'PI for AC2e', qty: '1', unit_price: '10000.00', line_type: 'SERVICE' }]
@@ -516,7 +490,7 @@ describe('purchasing.ap-state-machine', { timeout: 30000 }, () => {
         headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           supplier_id: testSupplierId,
-          invoice_no: makeTag('AC3_PI', ++smTagCounter),
+          invoice_no: makeTag('AC3_PI'),
           invoice_date: '2026-04-21',
           currency_code: 'IDR',
           lines: [
@@ -574,7 +548,7 @@ describe('purchasing.ap-state-machine', { timeout: 30000 }, () => {
         headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           supplier_id: testSupplierId,
-          invoice_no: makeTag('AC3B_PI', ++smTagCounter),
+          invoice_no: makeTag('AC3B_PI'),
           invoice_date: '2026-04-22',
           currency_code: 'IDR',
           lines: [
@@ -618,7 +592,7 @@ describe('purchasing.ap-state-machine', { timeout: 30000 }, () => {
         headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           supplier_id: testSupplierId,
-          invoice_no: makeTag('AC4_PI', ++smTagCounter),
+          invoice_no: makeTag('AC4_PI'),
           invoice_date: '2026-04-01',
           currency_code: 'IDR',
           lines: [{ description: 'PI for AC4', qty: '1', unit_price: '10000.00', line_type: 'SERVICE' }]

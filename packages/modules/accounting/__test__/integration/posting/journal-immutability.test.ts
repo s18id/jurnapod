@@ -34,6 +34,7 @@ import {
 } from "../../../src/posting/sales.js";
 import { createTestCompanyMinimal } from "@jurnapod/modules-platform";
 import { createTestOutletMinimal } from "@jurnapod/modules-platform";
+import { createTestAccount } from "../../../src/test-fixtures/account-fixtures.js";
 import { createPostingIdGenerator } from "./id-utils.js";
 
 // -----------------------------------------------------------------------------
@@ -94,59 +95,6 @@ function createMockExecutor(
   };
 }
 
-// -----------------------------------------------------------------------------
-// GAP HELPER: ensure tax account exists for company.
-// Fully robust: fetch-first pattern handles all race/re-run scenarios.
-// - beforeEach cleanup is removed (accounts use unique codes per call, accumulation is safe)
-// - fetch-first avoids relying on cleanup timing or INSERT success
-// GAP: No canonical account fixture exists in the platform package yet.
-// -----------------------------------------------------------------------------
-async function getOrCreateTaxAccount(
-  db: KyselySchema,
-  companyId: number,
-  name: string
-): Promise<number> {
-  const code = ids.nextCode("SKT-IMMUT");
-
-  // Ensure LIABILITY account_type exists for this company
-  await sql`
-    INSERT IGNORE INTO account_types (company_id, name, category, normal_balance)
-    VALUES (${companyId}, 'LIABILITY', 'LIABILITY', 'C')
-  `.execute(db);
-
-  const typeRow = await sql`
-    SELECT id FROM account_types WHERE company_id = ${companyId} AND name = 'LIABILITY' LIMIT 1
-  `.execute(db);
-  const accountTypeId = Number((typeRow.rows[0] as { id: number }).id);
-
-  // Fetch-first: check if already exists before inserting
-  const existing = await sql`
-    SELECT id FROM accounts WHERE company_id = ${companyId} AND code = ${code} LIMIT 1
-  `.execute(db);
-  if (existing.rows[0]) {
-    return Number((existing.rows[0] as { id: number }).id);
-  }
-
-  // Not found — insert with ignore as safety net for concurrent creation
-  try {
-    await sql`
-      INSERT INTO accounts (company_id, code, name, account_type_id, is_active, is_payable, created_at, updated_at)
-      VALUES (${companyId}, ${code}, ${name}, ${accountTypeId}, 1, 0, NOW(), NOW())
-    `.execute(db);
-  } catch (err) {
-    const mysqlErr = err as { code?: string };
-    if (!mysqlErr?.code || (mysqlErr.code !== 'ER_DUP_ENTRY' && mysqlErr.code !== 'ER_DUP_KEY')) {
-      throw err;
-    }
-    // Concurrent insert — another caller got it first; proceed to fetch
-  }
-
-  const row = await sql`
-    SELECT id FROM accounts WHERE company_id = ${companyId} AND code = ${code} LIMIT 1
-  `.execute(db);
-  if (!row.rows[0]) throw new Error(`Tax account not found after insert: ${code}`);
-  return Number((row.rows[0] as { id: number }).id);
-}
 
 let db: KyselySchema;
 
@@ -233,7 +181,7 @@ describe("JournalImmutability", () => {
       outletId: ctx.outletId,
     });
 
-    const taxAccountId = await getOrCreateTaxAccount(db, ctx.companyId, "Test Tax Imm Batch Upd");
+    const { id: taxAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: ids.nextCode("SKT-IMMUT"), name: "Test Tax Imm Batch Upd", typeName: "LIABILITY" });
 
     const taxAccounts = new Map<number, { account_id: number | null; code: string }>();
     taxAccounts.set(ctx.canonicalTaxRateId, { account_id: taxAccountId, code: "TAX11" });
@@ -268,7 +216,7 @@ describe("JournalImmutability", () => {
       outletId: ctx.outletId,
     });
 
-    const taxAccountId = await getOrCreateTaxAccount(db, ctx.companyId, "Test Tax Imm Batch Del");
+    const { id: taxAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: ids.nextCode("SKT-IMMUT"), name: "Test Tax Imm Batch Del", typeName: "LIABILITY" });
 
     const taxAccounts = new Map<number, { account_id: number | null; code: string }>();
     taxAccounts.set(ctx.canonicalTaxRateId, { account_id: taxAccountId, code: "TAX11" });

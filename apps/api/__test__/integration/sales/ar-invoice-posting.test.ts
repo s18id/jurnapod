@@ -29,6 +29,7 @@ import {
   createTestFiscalPeriod,
 } from '../../fixtures';
 import { buildPermissionMask } from '@jurnapod/auth';
+import { createPostedInvoice as sharedCreatePostedInvoice } from '../../helpers/sales-flows';
 import { sql } from 'kysely';
 import { getTestDb } from '../../helpers/db';
 

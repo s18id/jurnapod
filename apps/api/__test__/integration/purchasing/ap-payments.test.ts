@@ -9,6 +9,7 @@ import { getTestBaseUrl } from '../../helpers/env';
 import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { closeTestDb, getTestDb } from '../../helpers/db';
 import { sql } from 'kysely';
+import { scaled, unscaled } from "@jurnapod/shared";
 import {
   cleanupTestFixtures,
   createTestCompanyMinimal,
@@ -26,12 +27,7 @@ import {
   setTestPurchasingDefaultApAccount,
 } from '../../fixtures';
 
-// Deterministic code generator for constrained fields
-function makeTag(prefix: string, counter: number): string {
-  const worker = process.env.VITEST_POOL_ID ?? '0';
-  const pidTag = String(process.pid % 10000).padStart(4, '0');
-  return `${prefix}${worker}${pidTag}${String(counter).padStart(4, '0')}`;
-}
+import { makeTag } from "../../helpers/tags";
 
 let baseUrl: string;
 let ownerToken: string;
@@ -53,7 +49,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
 
     // Create test company with ACL seeded for purchasing.payments
     const testCompany = await createTestCompanyMinimal({
-      code: makeTag('APCO', ++apTagCounter).toUpperCase(),
+      code: makeTag('APCO').toUpperCase(),
       name: `AP Payments Company ${process.pid}`,
     });
     testCompanyId = testCompany.id;
@@ -83,7 +79,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
 
     // Create a supplier for this test company
     const supplier = await createTestSupplier(testCompanyId, {
-      code: makeTag('APPSUP', ++apTagCounter),
+      code: makeTag('APPSUP'),
       name: 'AP Payment Test Supplier',
       currency: 'IDR',
     });
@@ -118,7 +114,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: makeTag('APIPI1', ++apTagCounter),
+        invoice_no: makeTag('APIPI1'),
         invoice_date: '2026-04-01',
         currency_code: 'IDR',
         notes: 'PI for partial payment test',
@@ -149,7 +145,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: makeTag('APIPI2', ++apTagCounter),
+        invoice_no: makeTag('APIPI2'),
         invoice_date: '2026-04-02',
         currency_code: 'IDR',
         notes: 'PI for full payment test',
@@ -180,7 +176,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: makeTag('APIPI3', ++apTagCounter),
+        invoice_no: makeTag('APIPI3'),
         invoice_date: '2026-04-03',
         currency_code: 'IDR',
         notes: 'PI for multi-line payment test',
@@ -314,7 +310,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
   });
 
   it('replays duplicate payment create by idempotency_key and keeps single payment + journal', async () => {
-    const idempotencyKey = makeTag('APPIDEM', ++apTagCounter);
+    const idempotencyKey = makeTag('APPIDEM');
 
     const payload = {
       idempotency_key: idempotencyKey,
@@ -394,7 +390,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: makeTag('APPIREP', ++apTagCounter),
+        invoice_no: makeTag('APPIREP'),
         invoice_date: '2026-05-01',
         currency_code: 'IDR',
         lines: [{ description: 'PI for idempotent re-post test', qty: '1', unit_price: '50000.0000', line_type: 'SERVICE' }]
@@ -415,7 +411,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
     expect(piPostRes.status).toBe(200);
 
     // Create a draft payment
-    const idempotencyKey = makeTag('APPIREPKEY', ++apTagCounter);
+    const idempotencyKey = makeTag('APPIREPKEY');
     const createPayload = {
       idempotency_key: idempotencyKey,
       payment_date: '2026-05-02',
@@ -475,7 +471,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
   });
 
   it('replays concurrent duplicate payment create by idempotency_key without duplicate-line errors', async () => {
-    const idempotencyKey = makeTag('APPIDEMCONC', ++apTagCounter);
+    const idempotencyKey = makeTag('APPIDEMCONC');
 
     const payload = {
       idempotency_key: idempotencyKey,
@@ -545,7 +541,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: makeTag('APICONCUR', ++apTagCounter),
+        invoice_no: makeTag('APICONCUR'),
         invoice_date: '2026-04-05',
         currency_code: 'IDR',
         lines: [
@@ -748,9 +744,8 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
     let totalDebits = 0n;
     let totalCredits = 0n;
     for (const line of journalLines.rows as Array<{ debit: string; credit: string }>) {
-      // Parse DECIMAL(19,4) string to bigint (multiply by 10000)
-      const debitBigInt = BigInt(Math.round(parseFloat(line.debit) * 10000));
-      const creditBigInt = BigInt(Math.round(parseFloat(line.credit) * 10000));
+      const debitBigInt = scaled(line.debit);
+      const creditBigInt = scaled(line.credit);
       totalDebits += debitBigInt;
       totalCredits += creditBigInt;
     }
@@ -770,7 +765,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: makeTag('APIPARTIAL', ++apTagCounter),
+        invoice_no: makeTag('APIPARTIAL'),
         invoice_date: '2026-04-10',
         currency_code: 'IDR',
         lines: [
@@ -925,7 +920,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: makeTag('APIML1', ++apTagCounter),
+        invoice_no: makeTag('APIML1'),
         invoice_date: '2026-04-11',
         currency_code: 'IDR',
         lines: [
@@ -954,7 +949,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: makeTag('APIML2', ++apTagCounter),
+        invoice_no: makeTag('APIML2'),
         invoice_date: '2026-04-12',
         currency_code: 'IDR',
         lines: [
@@ -1143,7 +1138,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: makeTag('APIOVER', ++apTagCounter),
+        invoice_no: makeTag('APIOVER'),
         invoice_date: '2026-04-13',
         currency_code: 'IDR',
         lines: [
@@ -1211,7 +1206,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: makeTag('APIFX', ++apTagCounter),
+        invoice_no: makeTag('APIFX'),
         invoice_date: '2026-04-26',
         currency_code: 'USD',
         exchange_rate: '15000.00000000',
@@ -1275,8 +1270,8 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
     let totalDr = 0n;
     let totalCr = 0n;
     for (const row of overpayJournal.rows) {
-      totalDr += BigInt(Math.round(Number(row.debit) * 10000));
-      totalCr += BigInt(Math.round(Number(row.credit) * 10000));
+      totalDr += scaled(row.debit);
+      totalCr += scaled(row.credit);
     }
     expect(totalDr).toBe(totalCr);
 
@@ -1289,7 +1284,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: makeTag('APIFX2', ++apTagCounter),
+        invoice_no: makeTag('APIFX2'),
         invoice_date: '2026-04-26',
         currency_code: 'USD',
         exchange_rate: '15000.00000000',
@@ -1349,7 +1344,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: makeTag('APIDUPLINE', ++apTagCounter),
+        invoice_no: makeTag('APIDUPLINE'),
         invoice_date: '2026-04-13',
         currency_code: 'IDR',
         lines: [
@@ -1394,7 +1389,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
 
   it('rejects payment when invoice supplier does not match payment supplier', async () => {
     const otherSupplier = await createTestSupplier(testCompanyId, {
-      code: makeTag('APPOTH', ++apTagCounter),
+      code: makeTag('APPOTH'),
       name: 'AP Payment Other Supplier',
       currency: 'IDR',
     });
@@ -1407,7 +1402,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: otherSupplier.id,
-        invoice_no: makeTag('APISUPMM', ++apTagCounter),
+        invoice_no: makeTag('APISUPMM'),
         invoice_date: '2026-04-13',
         currency_code: 'IDR',
         lines: [
@@ -1451,7 +1446,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
 
   it('returns 400 when creating payment with inactive supplier', async () => {
     const inactiveSupplier = await createTestSupplier(testCompanyId, {
-      code: makeTag('APPINACT', ++apTagCounter),
+      code: makeTag('APPINACT'),
       name: 'Inactive Supplier',
       currency: 'IDR',
       isActive: false,
@@ -1480,7 +1475,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
 
   it('returns 400 on post when supplier is deactivated after draft creation', async () => {
     const supplier = await createTestSupplier(testCompanyId, {
-      code: makeTag('APPDEACT', ++apTagCounter),
+      code: makeTag('APPDEACT'),
       name: 'Supplier Deactivated Before Post',
       currency: 'IDR',
       isActive: true,
@@ -1494,7 +1489,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: supplier.id,
-        invoice_no: makeTag('APISUPDEACT', ++apTagCounter),
+        invoice_no: makeTag('APISUPDEACT'),
         invoice_date: '2026-04-22',
         currency_code: 'IDR',
         lines: [
@@ -1638,7 +1633,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: makeTag('APIVOID', ++apTagCounter),
+        invoice_no: makeTag('APIVOID'),
         invoice_date: '2026-04-14',
         currency_code: 'IDR',
         lines: [
@@ -1745,7 +1740,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: makeTag('API2VOID', ++apTagCounter),
+        invoice_no: makeTag('API2VOID'),
         invoice_date: '2026-04-15',
         currency_code: 'IDR',
         lines: [
@@ -1831,7 +1826,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         supplier_id: testSupplierId,
-        invoice_no: makeTag('APIPOSTREJ', ++apTagCounter),
+        invoice_no: makeTag('APIPOSTREJ'),
         invoice_date: '2026-04-25',
         currency_code: 'IDR',
         lines: [

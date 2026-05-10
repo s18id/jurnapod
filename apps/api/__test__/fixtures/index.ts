@@ -73,6 +73,8 @@ import {
   setTestCompanyStringSetting as pkgSetTestCompanyStringSetting,
   createTestInventoryGLAccount as pkgCreateTestInventoryGLAccount,
   createTestVarianceAccount as pkgCreateTestVarianceAccount,
+  createTestAccount as pkgCreateTestAccount,
+  type CreateTestAccountOpts as PkgCreateTestAccountOpts,
   type AccountingAccountFixture as AccountingAccountFixtureType,
   type FiscalYearFixture as AccountingFiscalYearFixture,
   type FiscalPeriodFixture as AccountingFiscalPeriodFixture,
@@ -217,6 +219,12 @@ export async function createTestVarianceAccount(
   options: { code: string; name?: string }
 ): Promise<AccountingAccountFixtureType> {
   return pkgCreateTestVarianceAccount(getTestDb(), companyId, options);
+}
+
+export async function createTestAccount(
+  opts: PkgCreateTestAccountOpts
+): Promise<AccountingAccountFixtureType> {
+  return pkgCreateTestAccount(getTestDb(), opts);
 }
 
 export type CompanyFixture = PlatformCompanyFixture;

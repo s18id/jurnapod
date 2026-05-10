@@ -20,11 +20,7 @@ import {
   getOrCreateTestCashierForPermission,
 } from "../../fixtures";
 
-// Deterministic code generator for constrained fields
-function makeTag(prefix: string, counter: number): string {
-  const worker = process.env.VITEST_POOL_ID ?? '0';
-  return `${prefix}${worker}${String(counter).padStart(4, '0')}`.slice(0, 20);
-}
+import { makeTag } from "../../helpers/tags";
 
 let baseUrl: string;
 let testCompanyId: number;
@@ -110,7 +106,7 @@ describe("purchasing.ap-aging-report", { timeout: 40000 }, () => {
     bankAccountId = await createTestBankAccount(testCompanyId, { typeName: "BANK", isActive: true });
 
     const supplier = await createTestSupplier(testCompanyId, {
-      code: makeTag('APASUP', ++apaTagCounter),
+      code: makeTag('APASUP'),
       name: "AP Aging Supplier",
       currency: "IDR",
       paymentTermsDays: 30,
@@ -176,11 +172,11 @@ describe("purchasing.ap-aging-report", { timeout: 40000 }, () => {
   });
 
   it("computes AP aging buckets with payment and credit reductions", async () => {
-    const invCurrentId = await createAndPostInvoice(makeTag('APACUR', ++apaTagCounter), "2026-03-25", "100.0000");
-    const inv1to30Id = await createAndPostInvoice(makeTag('APA130', ++apaTagCounter), "2026-03-11", "100.0000");
-    const inv31to60Id = await createAndPostInvoice(makeTag('APA3160', ++apaTagCounter), "2026-02-13", "100.0000");
-    const inv61to90Id = await createAndPostInvoice(makeTag('APA6190', ++apaTagCounter), "2026-01-11", "100.0000");
-    const invOver90Id = await createAndPostInvoice(makeTag('APA90P', ++apaTagCounter), "2025-12-11", "100.0000");
+    const invCurrentId = await createAndPostInvoice(makeTag('APACUR'), "2026-03-25", "100.0000");
+    const inv1to30Id = await createAndPostInvoice(makeTag('APA130'), "2026-03-11", "100.0000");
+    const inv31to60Id = await createAndPostInvoice(makeTag('APA3160'), "2026-02-13", "100.0000");
+    const inv61to90Id = await createAndPostInvoice(makeTag('APA6190'), "2026-01-11", "100.0000");
+    const invOver90Id = await createAndPostInvoice(makeTag('APA90P'), "2025-12-11", "100.0000");
 
     const paymentCreate = await postJson("/api/purchasing/payments", ownerToken, {
       payment_date: "2026-04-18",
@@ -197,7 +193,7 @@ describe("purchasing.ap-aging-report", { timeout: 40000 }, () => {
 
     const creditCreate = await postJson("/api/purchasing/credits", ownerToken, {
       supplier_id: supplierId,
-      credit_no: makeTag('APACR', ++apaTagCounter),
+      credit_no: makeTag('APACR'),
       credit_date: "2026-04-18",
       lines: [
         {
@@ -268,7 +264,7 @@ describe("purchasing.ap-aging-report", { timeout: 40000 }, () => {
 
   it("uses stored due_date when present for bucket assignment", async () => {
     const invoiceId = await createAndPostInvoice(
-      makeTag('APADUE', ++apaTagCounter),
+      makeTag('APADUE'),
       "2026-03-20",
       "50.0000",
       "2026-04-25",

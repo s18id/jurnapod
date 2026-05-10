@@ -13,6 +13,8 @@ export type {
   SupplierFixture,
   PurchasingAccountsFixture,
   PurchasingSettingsFixture,
+  PurchaseInvoiceFixture,
+  ApPaymentFixture,
 } from "./test-fixtures/index.js";
 
 // Re-export error classes
@@ -41,3 +43,4 @@ export { ApReconciliationService, fromScaled4, toScaled, computeBaseAmount } fro
 export { ApReconciliationDrilldownService, buildDrilldownAttribution, generateDrilldownCSV } from "./services/ap-reconciliation-drilldown-service.js";
 export { ApReconciliationSnapshotService } from "./services/ap-reconciliation-snapshot-service.js";
 export { SupplierStatementService } from "./services/supplier-statement-service.js";
+export { computePurchaseInvoiceOpenAmount } from "./services/purchase-invoice-open-amount.js";

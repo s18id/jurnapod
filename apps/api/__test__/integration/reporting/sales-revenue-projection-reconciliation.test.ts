@@ -27,6 +27,7 @@ import {
   setModulePermission,
   loginForTest,
   cleanupTestFixtures,
+  createTestAccount,
 } from "../../fixtures";
 import { makeTag } from "../../helpers/tags";
 import { getTestBaseUrl } from "../../helpers/env";
@@ -172,22 +173,15 @@ describe("sales-revenue-projection-reconciliation", { timeout: 60000 }, () => {
         VALUES (${isolatedCompanyId}, ${(`FY-${tag}`).slice(0, 32)}, ${`Fiscal Year ${tag}`}, ${FIXED_DATE_FROM}, ${FIXED_DATE_TO}, 'OPEN')
       `.execute(db);
 
-      // Create REVENUE account (type_name='REVENUE', report_group='PL')
+      // Create REVENUE account (now uses canonical fixture that sets account_type_id at creation)
       const accountCode = `REV-${tag}`.slice(0, 32);
-      const accountResult = await sql<{ insertId: number }>`
-        INSERT INTO accounts (company_id, code, name, type_name, normal_balance, report_group, is_active, is_group)
-        VALUES (${isolatedCompanyId}, ${accountCode}, ${`Test Revenue ${tag}`}, 'REVENUE', NULL, 'PL', 1, 0)
-      `.execute(db);
-      revenueAccountId = Number(accountResult.insertId);
-
-      // Set account_type_id using global account_types table (no company_id filter)
-      await sql`
-        UPDATE accounts
-        SET account_type_id = (SELECT id FROM account_types WHERE name = 'REVENUE' LIMIT 1)
-        WHERE id = ${revenueAccountId}
-          AND company_id = ${isolatedCompanyId}
-          AND account_type_id IS NULL
-      `.execute(db);
+      const revenueAccount = await createTestAccount({
+        companyId: isolatedCompanyId,
+        code: accountCode,
+        name: `Test Revenue ${tag}`,
+        typeName: "REVENUE",
+      });
+      revenueAccountId = revenueAccount.id;
 
       // Create journal batch
       const batchResult = await sql<{ insertId: number }>`

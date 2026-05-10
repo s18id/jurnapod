@@ -25,6 +25,7 @@ import {
   assignUserOutletRole,
   cleanupTestFixtures,
 } from "../../fixtures";
+import { createTestCashBankTransaction } from "@jurnapod/modules-treasury";
 import { makeTag } from "../../helpers/tags";
 
 describe("treasury-balance-projection-reconciliation", { timeout: 60000 }, () => {
@@ -116,16 +117,30 @@ describe("treasury-balance-projection-reconciliation", { timeout: 60000 }, () =>
     // Seed 2 POSTED transactions:
     // - TOP_UP: funds flow from bankAccountId1 → bankAccountId2 (500000)
     // - WITHDRAWAL: funds flow from bankAccountId2 → bankAccountId1 (200000)
-    await sql`
-      INSERT INTO cash_bank_transactions
-        (company_id, outlet_id, transaction_type, transaction_date, reference, description,
-         source_account_id, destination_account_id, amount, status, created_at, updated_at)
-      VALUES
-        (${companyId}, ${outletId}, 'TOP_UP', ${FIXED_DATE}, ${makeTag("TREF")}, 'Test deposit',
-         ${bankAccountId1}, ${bankAccountId2}, 500000, 'POSTED', NOW(), NOW()),
-        (${companyId}, ${outletId}, 'WITHDRAWAL', ${FIXED_DATE}, ${makeTag("TREF")}, 'Test withdrawal',
-         ${bankAccountId2}, ${bankAccountId1}, 200000, 'POSTED', NOW(), NOW())
-    `.execute(getTestDb());
+    await createTestCashBankTransaction(getTestDb(), {
+      companyId,
+      outletId,
+      transactionType: "TOP_UP",
+      transactionDate: FIXED_DATE,
+      reference: makeTag("TREF"),
+      description: "Test deposit",
+      sourceAccountId: bankAccountId1,
+      destinationAccountId: bankAccountId2,
+      amount: 500000,
+      status: "POSTED",
+    });
+    await createTestCashBankTransaction(getTestDb(), {
+      companyId,
+      outletId,
+      transactionType: "WITHDRAWAL",
+      transactionDate: FIXED_DATE,
+      reference: makeTag("TREF"),
+      description: "Test withdrawal",
+      sourceAccountId: bankAccountId2,
+      destinationAccountId: bankAccountId1,
+      amount: 200000,
+      status: "POSTED",
+    });
 
     // Source-of-truth: net balance from cash_bank_transactions
     // TOP_UP contributes positively, WITHDRAWAL contributes negatively.

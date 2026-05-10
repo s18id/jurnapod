@@ -192,3 +192,18 @@ export {
 
 // Module stub for type-level marker
 export type SalesModuleStub = "sales";
+
+// =============================================================================
+// Test Fixtures (re-exported for consumer convenience)
+// =============================================================================
+
+export {
+  createTestCustomer,
+  createTestSalesInvoice,
+} from "./test-fixtures/index.js";
+
+export type {
+  CustomerFixture,
+  SalesInvoiceFixture,
+  SalesInvoiceLineInput,
+} from "./test-fixtures/index.js";

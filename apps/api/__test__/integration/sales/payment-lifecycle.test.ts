@@ -30,6 +30,7 @@ import {
   getOrCreateTestCashierForPermission,
 } from '../../fixtures';
 import { buildPermissionMask } from '@jurnapod/auth';
+import { createAndPostPayment as sharedCreateAndPostPayment } from '../../helpers/sales-flows';
 import { makeTag } from '../../helpers/tags';
 import { initializeDefaultTemplates } from '../../../src/lib/numbering';
 import { nowUTC } from '../../../src/lib/date-helpers';

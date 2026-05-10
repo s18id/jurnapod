@@ -35,6 +35,7 @@ import {
   setModulePermission,
   cleanupTestFixtures,
 } from "../../fixtures";
+import { createTestCashBankTransaction } from "@jurnapod/modules-treasury";
 import { makeTag } from "../../helpers/tags";
 
 // Fixed future dates — beyond any real transaction, ensures deterministic isolation
@@ -102,48 +103,48 @@ describe("cash-flow-consistency-reconciliation", { timeout: 60000 }, () => {
 
     // TOP_UP 1: inflow to account1 (source=account2, dest=account1)
     const ref1 = makeTag("CFLOW");
-    await sql`
-      INSERT INTO cash_bank_transactions
-        (company_id, outlet_id, transaction_type, transaction_date, reference,
-         description, source_account_id, destination_account_id,
-         amount, status, posted_at, created_at, updated_at)
-      VALUES
-        (${isolatedCompanyId}, NULL, 'TOP_UP', ${"2099-03-15"},
-         ${ref1}, ${`Cash flow TOP_UP 1 ${ref1}`},
-         ${account2Id}, ${account1Id},
-         ${TOPUP_1_AMOUNT}, 'POSTED', ${"2099-03-15 12:00:00"},
-         NOW(), NOW())
-    `.execute(db);
+    await createTestCashBankTransaction(db, {
+      companyId: isolatedCompanyId,
+      transactionType: "TOP_UP",
+      transactionDate: "2099-03-15",
+      reference: ref1,
+      description: `Cash flow TOP_UP 1 ${ref1}`,
+      sourceAccountId: account2Id,
+      destinationAccountId: account1Id,
+      amount: TOPUP_1_AMOUNT,
+      status: "POSTED",
+      postedAt: "2099-03-15 12:00:00",
+    });
 
     // TOP_UP 2: inflow to account1 (source=account2, dest=account1)
     const ref2 = makeTag("CFLOW");
-    await sql`
-      INSERT INTO cash_bank_transactions
-        (company_id, outlet_id, transaction_type, transaction_date, reference,
-         description, source_account_id, destination_account_id,
-         amount, status, posted_at, created_at, updated_at)
-      VALUES
-        (${isolatedCompanyId}, NULL, 'TOP_UP', ${"2099-06-01"},
-         ${ref2}, ${`Cash flow TOP_UP 2 ${ref2}`},
-         ${account2Id}, ${account1Id},
-         ${TOPUP_2_AMOUNT}, 'POSTED', ${"2099-06-01 12:00:00"},
-         NOW(), NOW())
-    `.execute(db);
+    await createTestCashBankTransaction(db, {
+      companyId: isolatedCompanyId,
+      transactionType: "TOP_UP",
+      transactionDate: "2099-06-01",
+      reference: ref2,
+      description: `Cash flow TOP_UP 2 ${ref2}`,
+      sourceAccountId: account2Id,
+      destinationAccountId: account1Id,
+      amount: TOPUP_2_AMOUNT,
+      status: "POSTED",
+      postedAt: "2099-06-01 12:00:00",
+    });
 
     // WITHDRAWAL: outflow from account1 (source=account1, dest=account2)
     const ref3 = makeTag("CFLOW");
-    await sql`
-      INSERT INTO cash_bank_transactions
-        (company_id, outlet_id, transaction_type, transaction_date, reference,
-         description, source_account_id, destination_account_id,
-         amount, status, posted_at, created_at, updated_at)
-      VALUES
-        (${isolatedCompanyId}, NULL, 'WITHDRAWAL', ${"2099-09-15"},
-         ${ref3}, ${`Cash flow WITHDRAWAL ${ref3}`},
-         ${account1Id}, ${account2Id},
-         ${WITHDRAWAL_AMOUNT}, 'POSTED', ${"2099-09-15 12:00:00"},
-         NOW(), NOW())
-    `.execute(db);
+    await createTestCashBankTransaction(db, {
+      companyId: isolatedCompanyId,
+      transactionType: "WITHDRAWAL",
+      transactionDate: "2099-09-15",
+      reference: ref3,
+      description: `Cash flow WITHDRAWAL ${ref3}`,
+      sourceAccountId: account1Id,
+      destinationAccountId: account2Id,
+      amount: WITHDRAWAL_AMOUNT,
+      status: "POSTED",
+      postedAt: "2099-09-15 12:00:00",
+    });
   });
 
   afterAll(async () => {
@@ -325,18 +326,17 @@ describe("cash-flow-consistency-reconciliation", { timeout: 60000 }, () => {
 
       // Insert a VOID transaction that should NOT affect the balance
       const refVoid = makeTag("CFLOW");
-      await sql`
-        INSERT INTO cash_bank_transactions
-          (company_id, outlet_id, transaction_type, transaction_date, reference,
-           description, source_account_id, destination_account_id,
-           amount, status, posted_at, created_at, updated_at)
-        VALUES
-          (${isolatedCompanyId}, NULL, 'TOP_UP', ${FIXED_DATE_TO},
-           ${refVoid}, ${`VOID should not affect balance ${refVoid}`},
-           ${account2Id}, ${account1Id},
-           999999, 'VOID', NULL,
-           NOW(), NOW())
-      `.execute(db);
+      await createTestCashBankTransaction(db, {
+        companyId: isolatedCompanyId,
+        transactionType: "TOP_UP",
+        transactionDate: FIXED_DATE_TO,
+        reference: refVoid,
+        description: `VOID should not affect balance ${refVoid}`,
+        sourceAccountId: account2Id,
+        destinationAccountId: account1Id,
+        amount: 999999,
+        status: "VOID",
+      });
 
       // Balance should still be the same (VOID excluded)
       const balanceResult = await sql<{ balance: number | null }>`
@@ -369,18 +369,18 @@ describe("cash-flow-consistency-reconciliation", { timeout: 60000 }, () => {
       });
 
       const refOther = makeTag("CFLOW");
-      await sql`
-        INSERT INTO cash_bank_transactions
-          (company_id, outlet_id, transaction_type, transaction_date, reference,
-           description, source_account_id, destination_account_id,
-           amount, status, posted_at, created_at, updated_at)
-        VALUES
-          (${company2.id}, NULL, 'TOP_UP', ${FIXED_DATE_TO},
-           ${refOther}, ${`Other company TOP_UP ${refOther}`},
-           ${account2b}, ${account2a},
-           5000000, 'POSTED', ${`${FIXED_DATE_TO} 12:00:00`},
-           NOW(), NOW())
-      `.execute(db);
+      await createTestCashBankTransaction(db, {
+        companyId: company2.id,
+        transactionType: "TOP_UP",
+        transactionDate: FIXED_DATE_TO,
+        reference: refOther,
+        description: `Other company TOP_UP ${refOther}`,
+        sourceAccountId: account2b,
+        destinationAccountId: account2a,
+        amount: 5000000,
+        status: "POSTED",
+        postedAt: `${FIXED_DATE_TO} 12:00:00`,
+      });
 
       // Original company balance must be unchanged (tenant isolation)
       const balanceResult = await sql<{ balance: number | null }>`

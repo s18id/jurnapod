@@ -3,6 +3,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "kysely";
+import { scaled, unscaled } from "@jurnapod/shared";
 import { getTestBaseUrl } from "../../helpers/env";
 import { closeTestDb, getTestDb } from "../../helpers/db";
 import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
@@ -100,7 +101,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.success).toBe(true);
-    return toScaled4(body.data.ap_subledger_balance);
+    return scaled(body.data.ap_subledger_balance);
   };
 
   const getSummaryVariance = async (asOfDate: string): Promise<bigint> => {
@@ -108,17 +109,9 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.success).toBe(true);
-    return toScaled4(body.data.variance);
+    return scaled(body.data.variance);
   };
 
-  const toScaled4 = (value: string): bigint => {
-    const [intPart, fracPart = "0000"] = String(value).split(".");
-    const scaled = `${intPart}${(fracPart + "0000").slice(0, 4)}`;
-    return BigInt(scaled);
-  };
-
-  // Keep non-cutoff assertions deterministic across wall-clock date changes.
-  // These cases only validate reconciliation/mapping behavior, not cutoff boundaries.
   const INCLUSIVE_AS_OF_DATE = "2099-12-31";
 
   beforeAll(async () => {
@@ -1283,7 +1276,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
       const body = await res.json();
       expect(body.success).toBe(true);
 
-      const drilldownVariance = toScaled4(body.data.variance);
+      const drilldownVariance = scaled(body.data.variance);
       expect(drilldownVariance).toBe(summaryVariance);
     });
 
@@ -1303,7 +1296,7 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
       let cursor = firstPageBody.data.next_cursor as string | null;
       let totalFromAllPages = 0n;
       for (const line of firstPageBody.data.lines as Array<{ open_amount: string }>) {
-        totalFromAllPages += toScaled4(line.open_amount);
+        totalFromAllPages += scaled(line.open_amount);
       }
 
       while (cursor) {
@@ -1314,12 +1307,12 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
         expect(pageRes.status).toBe(200);
         const pageBody = await pageRes.json();
         for (const line of pageBody.data.lines as Array<{ open_amount: string }>) {
-          totalFromAllPages += toScaled4(line.open_amount);
+          totalFromAllPages += scaled(line.open_amount);
         }
         cursor = pageBody.data.next_cursor;
       }
 
-      const reportedTotal = toScaled4(firstPageBody.data.total_open_base);
+      const reportedTotal = scaled(firstPageBody.data.total_open_base);
       expect(reportedTotal).toBe(totalFromAllPages);
     });
   });
@@ -1590,8 +1583,8 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
       );
       expect(baselineRes.status).toBe(200);
       const baselineBody = await baselineRes.json();
-      const baselineSubledger = toScaled4(baselineBody.data.ap_subledger_balance);
-      const baselineGL = toScaled4(baselineBody.data.gl_control_balance);
+      const baselineSubledger = scaled(baselineBody.data.ap_subledger_balance);
+      const baselineGL = scaled(baselineBody.data.gl_control_balance);
 
       // Fire summary and invoice creation concurrently.
       // The summary's transaction isolates it from the concurrent write: regardless of
@@ -1604,9 +1597,9 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
 
       expect(summaryRes.status).toBe(200);
       const summaryBody = await summaryRes.json();
-      const summarySubledger = toScaled4(summaryBody.data.ap_subledger_balance);
-      const summaryGL = toScaled4(summaryBody.data.gl_control_balance);
-      const summaryVariance = toScaled4(summaryBody.data.variance);
+      const summarySubledger = scaled(summaryBody.data.ap_subledger_balance);
+      const summaryGL = scaled(summaryBody.data.gl_control_balance);
+      const summaryVariance = scaled(summaryBody.data.variance);
 
       // CRITICAL INVARIANT: any single summary result must show subledger == GL (variance = 0).
       // This proves the transaction isolation fix works — both balance queries see the same DB state.
@@ -1622,9 +1615,9 @@ describe("purchasing.ap-reconciliation", { timeout: 40000 }, () => {
       );
       expect(repeatRes.status).toBe(200);
       const repeatBody = await repeatRes.json();
-      const repeatSubledger = toScaled4(repeatBody.data.ap_subledger_balance);
-      const repeatGL = toScaled4(repeatBody.data.gl_control_balance);
-      const repeatVariance = toScaled4(repeatBody.data.variance);
+      const repeatSubledger = scaled(repeatBody.data.ap_subledger_balance);
+      const repeatGL = scaled(repeatBody.data.gl_control_balance);
+      const repeatVariance = scaled(repeatBody.data.variance);
 
       expect(repeatSubledger).toBe(repeatGL);
       expect(repeatVariance).toBe(0n);

@@ -35,6 +35,7 @@ import {
   getOrCreateTestCashierForPermission,
   getSeedSyncContext,
 } from '../../fixtures';
+import { createSentPurchaseOrder } from '../../helpers/purchasing-flows';
 
 // =============================================================================
 // Helpers
@@ -142,45 +143,6 @@ describe('purchasing.document-chain', { timeout: 60000 }, () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Helper: Create a PO in SENT status with lines
-  // ---------------------------------------------------------------------------
-  async function createSentPO(
-    supplierId: number,
-    lines: Array<{ item_id?: number; qty: string; unit_price: string; tax_rate?: string }>
-  ) {
-    const poRes = await fetch(`${baseUrl}/api/purchasing/orders`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        supplier_id: supplierId,
-        order_date: '2026-05-01',
-        lines,
-      }),
-    });
-    expect(poRes.status).toBe(201);
-    const po = await poRes.json();
-    expect(po.data.status).toBe('DRAFT');
-
-    const poId = po.data.id;
-
-    // Transition to SENT
-    const statusRes = await fetch(`${baseUrl}/api/purchasing/orders/${poId}/status`, {
-      method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'SENT' }),
-    });
-    expect(statusRes.status).toBe(200);
-    const updatedPo = await statusRes.json();
-    expect(updatedPo.data.status).toBe('SENT');
-
-    return {
-      poId,
-      lineIds: po.data.lines.map((l: any) => l.id),
-      orderId: poId,
-    };
-  }
-
-  // ---------------------------------------------------------------------------
   // Helper: Create a service-only purchase invoice (no PO line references needed)
   // ---------------------------------------------------------------------------
   async function createDraftPI(invoiceNo: string, lines: Array<any>) {
@@ -203,10 +165,10 @@ describe('purchasing.document-chain', { timeout: 60000 }, () => {
   // ===========================================================================
   describe('AC1: PO→receipt quantity validation', () => {
     it('creates GR against PO and updates PO status to PARTIAL_RECEIVED', async () => {
-      const po = await createSentPO(testSupplierId, [
+      const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId: testSupplierId, lines: [
         { qty: '20', unit_price: '5000.00' },
         { qty: '10', unit_price: '3000.00' },
-      ]);
+      ]});
 
       // Receive partial quantities
       const grRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {
@@ -246,9 +208,9 @@ describe('purchasing.document-chain', { timeout: 60000 }, () => {
     });
 
     it('transitions PO to FULLY_RECEIVED when all lines received', async () => {
-      const po = await createSentPO(testSupplierId, [
+      const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId: testSupplierId, lines: [
         { qty: '5', unit_price: '10000.00' },
-      ]);
+      ]});
 
       // Receive full quantity
       const grRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {
@@ -280,9 +242,9 @@ describe('purchasing.document-chain', { timeout: 60000 }, () => {
     it('accepts over-receipt with warnings (business tolerance)', async () => {
       // AC1 note: received quantity MUST NOT exceed ordered — this is validated with
       // over_receipt_allowed warning mechanism. Business may tolerate over-receipt.
-      const po = await createSentPO(testSupplierId, [
+      const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId: testSupplierId, lines: [
         { qty: '8', unit_price: '4000.00' },
-      ]);
+      ]});
 
       const grRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {
         method: 'POST',
@@ -318,9 +280,9 @@ describe('purchasing.document-chain', { timeout: 60000 }, () => {
   describe('AC2: Invoice→receipt integrity', () => {
     it('creates and posts PI referencing PO line — full chain PO→GR→PI', async () => {
       // 1. Create PO with qty 15
-      const po = await createSentPO(testSupplierId, [
+      const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId: testSupplierId, lines: [
         { qty: '15', unit_price: '2000.00' },
-      ]);
+      ]});
 
       // 2. Receive full quantity
       const grRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {
@@ -391,9 +353,9 @@ describe('purchasing.document-chain', { timeout: 60000 }, () => {
 
     it('rejects PI post when invoiced qty exceeds received qty', async () => {
       // 1. Create PO with qty 5, receive only 3
-      const po = await createSentPO(testSupplierId, [
+      const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId: testSupplierId, lines: [
         { qty: '5', unit_price: '5000.00' },
-      ]);
+      ]});
 
       // Receive partial qty
       const grRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {
@@ -451,9 +413,9 @@ describe('purchasing.document-chain', { timeout: 60000 }, () => {
 
     it('rejects PI post when PO line has zero received qty', async () => {
       // 1. Create PO, do NOT receive any goods
-      const po = await createSentPO(testSupplierId, [
+      const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId: testSupplierId, lines: [
         { qty: '10', unit_price: '3000.00' },
-      ]);
+      ]});
 
       // 2. Create PI referencing PO line with zero received qty
       const invoiceNo = makeTag('AC2ZR', ++chainTagCounter);
@@ -492,9 +454,9 @@ describe('purchasing.document-chain', { timeout: 60000 }, () => {
   // ===========================================================================
   describe('AC3: Atomic transitions', () => {
     it('PO status auto-update is atomic within GR creation transaction', async () => {
-      const po = await createSentPO(testSupplierId, [
+      const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId: testSupplierId, lines: [
         { qty: '10', unit_price: '5000.00' },
-      ]);
+      ]});
 
       // Create GR → PO status should auto-transition atomically
       const grRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {
@@ -523,9 +485,9 @@ describe('purchasing.document-chain', { timeout: 60000 }, () => {
     });
 
     it('failed PI post does not update invoiced_qty (atomic rollback)', async () => {
-      const po = await createSentPO(testSupplierId, [
+      const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId: testSupplierId, lines: [
         { qty: '3', unit_price: '5000.00' },
-      ]);
+      ]});
 
       // Receive 3
       const grRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {
@@ -642,9 +604,9 @@ describe('purchasing.document-chain', { timeout: 60000 }, () => {
   describe('AC5: Tenant isolation', () => {
     it('all purchasing queries scope by company_id', async () => {
       // 1. Create PO and GR to verify company-scoped data
-      const po = await createSentPO(testSupplierId, [
+      const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId: testSupplierId, lines: [
         { qty: '10', unit_price: '5000.00' },
-      ]);
+      ]});
 
       // Verify PO is scoped to test company
       const db = getTestDb();
@@ -770,9 +732,9 @@ describe('purchasing.document-chain', { timeout: 60000 }, () => {
   describe('Full document chain', () => {
     it('PO→GR→PI→post→void chain is consistent end-to-end', async () => {
       // 1. Create PO
-      const po = await createSentPO(testSupplierId, [
+      const po = await createSentPurchaseOrder({ baseUrl, token: ownerToken, supplierId: testSupplierId, lines: [
         { qty: '10', unit_price: '2500.00' },
-      ]);
+      ]});
 
       // 2. Receive goods
       const grRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {

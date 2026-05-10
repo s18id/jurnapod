@@ -16,17 +16,12 @@ import {
   getOrCreateTestCashierForPermission,
 } from '../../fixtures';
 
-// Deterministic code generator for constrained fields (max 20 chars)
-function makeTag(prefix: string, counter: number): string {
-  const worker = process.env.VITEST_POOL_ID ?? '0';
-  return `${prefix}${worker}${String(counter).padStart(4, '0')}`.slice(0, 20);
-}
+import { makeTag } from "../../helpers/tags";
 
 let baseUrl: string;
 let ownerToken: string;
 let cashierToken: string;
 let cashierCompanyId: number;
-let supTagCounter = 0;
 
 describe('purchasing.suppliers', { timeout: 30000 }, () => {
   beforeAll(async () => {
@@ -95,7 +90,7 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         company_id: cashierCompanyId,
-        code: makeTag('SUP', ++supTagCounter),
+        code: makeTag('SUP'),
         name: 'Should not create',
         currency: 'USD'
       })
@@ -107,7 +102,7 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
   // AC: POST creates supplier
   // -------------------------------------------------------------------------
   it('creates a supplier with minimal fields', async () => {
-    const code = makeTag('SUPMIN', ++supTagCounter);
+    const code = makeTag('SUPMIN');
     const payload = {
       company_id: cashierCompanyId,
       code,
@@ -136,7 +131,7 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
   });
 
   it('creates a supplier with all fields', async () => {
-    const code = makeTag('SUPALL', ++supTagCounter);
+    const code = makeTag('SUPALL');
     const payload = {
       company_id: cashierCompanyId,
       code,
@@ -185,7 +180,7 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
   // AC: Code uniqueness within company
   // -------------------------------------------------------------------------
   it('rejects duplicate code within the same company', async () => {
-    const uniqueCode = makeTag('SUPDUP', ++supTagCounter);
+    const uniqueCode = makeTag('SUPDUP');
     const payload = {
       company_id: cashierCompanyId,
       code: uniqueCode,
@@ -233,7 +228,7 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
 
   it('filters by is_active', async () => {
     // Create a supplier
-    const code = makeTag('SUPACT', ++supTagCounter);
+    const code = makeTag('SUPACT');
     const create = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -279,7 +274,7 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
 
   it('gets supplier by id with contacts', async () => {
     // Create a supplier
-    const code = makeTag('SUPGET', ++supTagCounter);
+    const code = makeTag('SUPGET');
     const create = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -312,7 +307,7 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('updates supplier fields via PATCH', async () => {
     // Create a supplier to update
-    const code = makeTag('SUPUPD', ++supTagCounter);
+    const code = makeTag('SUPUPD');
     const createRes = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -370,7 +365,7 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('soft-deletes supplier via DELETE', async () => {
     // Create a supplier to delete
-    const code = makeTag('SUPDEL', ++supTagCounter);
+    const code = makeTag('SUPDEL');
     const createRes = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -415,7 +410,7 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
       },
       body: JSON.stringify({
         company_id: 99998,  // different company
-        code: makeTag('SUPCROSS', ++supTagCounter),
+        code: makeTag('SUPCROSS'),
         name: 'Cross Company',
         currency: 'USD'
       })
@@ -429,7 +424,7 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('returns 403 when CASHIER tries to update a supplier', async () => {
     // Create a supplier first (as owner)
-    const code = makeTag('SUPCUPD', ++supTagCounter);
+    const code = makeTag('SUPCUPD');
     const createRes = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -460,7 +455,7 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
   });
 
   it('returns 403 when CASHIER tries to delete a supplier', async () => {
-    const code = makeTag('SUPCDEL', ++supTagCounter);
+    const code = makeTag('SUPCDEL');
     const createRes = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -503,7 +498,7 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
   // Full lifecycle
   // -------------------------------------------------------------------------
   it('full lifecycle: create → get → update → delete', async () => {
-    const code = makeTag('SUPLIFE', ++supTagCounter);
+    const code = makeTag('SUPLIFE');
 
     // 1. Create
     const createRes = await fetch(`${baseUrl}/api/purchasing/suppliers`, {

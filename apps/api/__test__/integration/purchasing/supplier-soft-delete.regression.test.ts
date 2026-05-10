@@ -15,16 +15,11 @@ import {
   getSeedSyncContext,
 } from '../../fixtures';
 
-// Deterministic code generator for constrained fields (max 20 chars)
-function makeTag(prefix: string, counter: number): string {
-  const worker = process.env.VITEST_POOL_ID ?? '0';
-  return `${prefix}${worker}${String(counter).padStart(4, '0')}`.slice(0, 20);
-}
+import { makeTag } from "../../helpers/tags";
 
 let baseUrl: string;
 let accessToken: string;
 let companyId: number;
-let softDelTagCounter = 0;
 
 describe('supplier - Regression: Soft Delete Referential Integrity', { timeout: 30000 }, () => {
   beforeAll(async () => {
@@ -56,7 +51,7 @@ describe('supplier - Regression: Soft Delete Referential Integrity', { timeout: 
         },
         body: JSON.stringify({
           company_id: companyId,
-          code: makeTag('SUPDEL', ++softDelTagCounter),
+          code: makeTag('SUPDEL'),
           name: 'Delete Test Supplier',
           currency: 'IDR'
         })
@@ -107,7 +102,7 @@ describe('supplier - Regression: Soft Delete Referential Integrity', { timeout: 
         },
         body: JSON.stringify({
           company_id: companyId,
-          code: makeTag('SUPDELOK', ++softDelTagCounter),
+          code: makeTag('SUPDELOK'),
           name: 'Safe Delete Supplier',
           currency: 'IDR'
         })
@@ -143,7 +138,7 @@ describe('supplier - Regression: Soft Delete Referential Integrity', { timeout: 
         },
         body: JSON.stringify({
           company_id: companyId,
-          code: makeTag('SUPPATCHDEL', ++softDelTagCounter),
+          code: makeTag('SUPPATCHDEL'),
           name: 'Patch Deactivate Guard Supplier',
           currency: 'IDR'
         })

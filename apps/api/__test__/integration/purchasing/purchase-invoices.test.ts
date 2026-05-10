@@ -22,12 +22,7 @@ import {
   createTestPurchasingAccounts,
 } from '../../fixtures';
 
-// Deterministic code generator for constrained fields
-// suiteTag + workerTag + counter, workerTag from VITEST_POOL_ID
-function makeTag(prefix: string, counter: number): string {
-  const worker = process.env.VITEST_POOL_ID ?? '0';
-  return `${prefix}${worker}${String(counter).padStart(4, '0')}`.slice(0, 32);
-}
+import { makeTag } from "../../helpers/tags";
 
 let baseUrl: string;
 let ownerToken: string;
@@ -70,7 +65,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
 
     // Create a supplier for this test company
     const supplier = await createTestSupplier(testCompany.id, {
-      code: makeTag('PISUP', ++piTagCounter),
+      code: makeTag('PISUP', 32),
       name: 'PI Test Supplier',
       currency: 'IDR',
     });
@@ -225,8 +220,8 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
   });
 
   it('replays duplicate PI create by idempotency_key and returns same invoice', async () => {
-    const idempotencyKey = makeTag('PIIDEM', ++piTagCounter);
-    const invoiceNo = makeTag('PIIDNO', ++piTagCounter);
+    const idempotencyKey = makeTag('PIIDEM', 32);
+    const invoiceNo = makeTag('PIIDNO', 32);
 
     const payload = {
       supplier_id: testSupplierId,
@@ -276,8 +271,8 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
   });
 
   it('replays concurrent duplicate PI create by idempotency_key without creating duplicates', async () => {
-    const idempotencyKey = makeTag('PIIDEMCONC', ++piTagCounter);
-    const invoiceNo = makeTag('PIIDCONCNO', ++piTagCounter);
+    const idempotencyKey = makeTag('PIIDEMCONC', 32);
+    const invoiceNo = makeTag('PIIDCONCNO', 32);
 
     const payload = {
       supplier_id: testSupplierId,
@@ -404,7 +399,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('posts a draft PI and returns journal_batch_id', async () => {
     // Create a PI first
-    const invoiceNo = makeTag('PIPT', ++piTagCounter);
+    const invoiceNo = makeTag('PIPT', 32);
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: {
@@ -519,7 +514,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
     expect(createRateRes.status).toBe(201);
 
     // 2. Create a PI in USD: qty=2, unit_price=100 USD -> line_total = 200 USD
-    const invoiceNo = makeTag('PIFX', ++piTagCounter);
+    const invoiceNo = makeTag('PIFX', 32);
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: {
@@ -654,7 +649,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('voids a posted PI and rejects a second void', async () => {
     // Create and post a PI
-    const invoiceNo = makeTag('PIVD', ++piTagCounter);
+    const invoiceNo = makeTag('PIVD', 32);
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: {
@@ -738,7 +733,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('returns 400 when posting an already posted PI', async () => {
     // Create and post a PI
-    const invoiceNo = makeTag('PIDP', ++piTagCounter);
+    const invoiceNo = makeTag('PIDP', 32);
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: {
@@ -791,7 +786,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
   // -------------------------------------------------------------------------
   it('returns 400 when trying to void a draft PI', async () => {
     // Create a PI (stays in draft)
-    const invoiceNo = makeTag('PIVDFT', ++piTagCounter);
+    const invoiceNo = makeTag('PIVDFT', 32);
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: {

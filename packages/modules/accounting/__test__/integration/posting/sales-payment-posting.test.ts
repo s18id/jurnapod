@@ -42,6 +42,7 @@ import { createPostingIdGenerator } from "./id-utils.js";
 // -----------------------------------------------------------------------------
 import { createTestCompanyMinimal } from "@jurnapod/modules-platform";
 import { createTestOutletMinimal } from "@jurnapod/modules-platform";
+import { createTestAccount } from "../../../src/test-fixtures/account-fixtures.js";
 
 // -----------------------------------------------------------------------------
 // Test context — unique company+outlet per describe block
@@ -112,76 +113,6 @@ afterAll(async () => {
 });
 
 // -----------------------------------------------------------------------------
-// GAP HELPER: get or create CASH/BANK account per company.
-// Rerun-safe: unique code per call; duplicate key → fetch existing.
-// GAP: No canonical account fixture exists in the platform package yet.
-// -----------------------------------------------------------------------------
-async function getOrCreateCashAccount(companyId: number, name: string): Promise<number> {
-  const code = `CASH-PAY-${nextPaymentTestId()}`;
-
-  // Ensure CASH account_type exists for this company
-  await sql`
-    INSERT IGNORE INTO account_types (company_id, name, category, normal_balance)
-    VALUES (${companyId}, 'CASH', 'ASSET', 'D')
-  `.execute(db);
-
-  const typeRow = await sql`
-    SELECT id FROM account_types WHERE company_id = ${companyId} AND name = 'CASH' LIMIT 1
-  `.execute(db);
-  const accountTypeId = typeRow.rows[0] ? Number((typeRow.rows[0] as { id: number }).id) : 1;
-
-  try {
-    await sql`
-      INSERT INTO accounts (company_id, code, name, account_type_id, is_active, is_payable, created_at, updated_at)
-      VALUES (${companyId}, ${code}, ${name}, ${accountTypeId}, 1, 0, NOW(), NOW())
-    `.execute(db);
-  } catch (err) {
-    const mysqlErr = err as { code?: string };
-    if (!mysqlErr?.code || (mysqlErr.code !== 'ER_DUP_ENTRY' && mysqlErr.code !== 'ER_DUP_KEY')) {
-      throw err;
-    }
-  }
-
-  const row = await sql`
-    SELECT id FROM accounts WHERE company_id = ${companyId} AND code = ${code} LIMIT 1
-  `.execute(db);
-  if (!row.rows[0]) throw new Error(`Cash account not found after insert: ${code}`);
-  return Number((row.rows[0] as { id: number }).id);
-}
-
-async function getOrCreateBankAccount(companyId: number, name: string): Promise<number> {
-  const code = `BANK-PAY-${nextPaymentTestId()}`;
-
-  await sql`
-    INSERT IGNORE INTO account_types (company_id, name, category, normal_balance)
-    VALUES (${companyId}, 'BANK', 'ASSET', 'D')
-  `.execute(db);
-
-  const typeRow = await sql`
-    SELECT id FROM account_types WHERE company_id = ${companyId} AND name = 'BANK' LIMIT 1
-  `.execute(db);
-  const accountTypeId = typeRow.rows[0] ? Number((typeRow.rows[0] as { id: number }).id) : 1;
-
-  try {
-    await sql`
-      INSERT INTO accounts (company_id, code, name, account_type_id, is_active, is_payable, created_at, updated_at)
-      VALUES (${companyId}, ${code}, ${name}, ${accountTypeId}, 1, 0, NOW(), NOW())
-    `.execute(db);
-  } catch (err) {
-    const mysqlErr = err as { code?: string };
-    if (!mysqlErr?.code || (mysqlErr.code !== 'ER_DUP_ENTRY' && mysqlErr.code !== 'ER_DUP_KEY')) {
-      throw err;
-    }
-  }
-
-  const row = await sql`
-    SELECT id FROM accounts WHERE company_id = ${companyId} AND code = ${code} LIMIT 1
-  `.execute(db);
-  if (!row.rows[0]) throw new Error(`Bank account not found after insert: ${code}`);
-  return Number((row.rows[0] as { id: number }).id);
-}
-
-// -----------------------------------------------------------------------------
 // Describe block — creates a unique company+outlet once, reused by all tests
 // -----------------------------------------------------------------------------
 describe("SalesPaymentPosting", () => {
@@ -226,7 +157,7 @@ describe("SalesPaymentPosting", () => {
       outletId: ctx.outletId,
     });
 
-    const cashAccountId = await getOrCreateCashAccount(ctx.companyId, "Test Cash No Var");
+    const { id: cashAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: `CASH-PAY-${nextPaymentTestId()}`, name: "Test Cash No Var", typeName: "CASH" });
 
     const executor = createMockExecutor(mappings.arAccountId, cashAccountId, { gain: null, loss: null });
 
@@ -287,7 +218,7 @@ describe("SalesPaymentPosting", () => {
       companyId: ctx.companyId,
     });
 
-    const cashAccountId = await getOrCreateCashAccount(ctx.companyId, "Test Cash Pos Delta");
+    const { id: cashAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: `CASH-PAY-${nextPaymentTestId()}`, name: "Test Cash Pos Delta", typeName: "CASH" });
 
     const executor = createMockExecutor(
       mappings.arAccountId,
@@ -346,7 +277,7 @@ describe("SalesPaymentPosting", () => {
       companyId: ctx.companyId,
     });
 
-    const cashAccountId = await getOrCreateCashAccount(ctx.companyId, "Test Cash Neg Delta");
+    const { id: cashAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: `CASH-PAY-${nextPaymentTestId()}`, name: "Test Cash Neg Delta", typeName: "CASH" });
 
     const executor = createMockExecutor(
       mappings.arAccountId,
@@ -401,7 +332,7 @@ describe("SalesPaymentPosting", () => {
       outletId: ctx.outletId,
     });
 
-    const cashAccountId = await getOrCreateCashAccount(ctx.companyId, "Test Cash No Gain");
+    const { id: cashAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: `CASH-PAY-${nextPaymentTestId()}`, name: "Test Cash No Gain", typeName: "CASH" });
     const executor = createMockExecutor(mappings.arAccountId, cashAccountId, { gain: null, loss: null });
 
     const payment = makePaymentData({
@@ -426,7 +357,7 @@ describe("SalesPaymentPosting", () => {
       outletId: ctx.outletId,
     });
 
-    const cashAccountId = await getOrCreateCashAccount(ctx.companyId, "Test Cash No Loss");
+    const { id: cashAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: `CASH-PAY-${nextPaymentTestId()}`, name: "Test Cash No Loss", typeName: "CASH" });
     const executor = createMockExecutor(mappings.arAccountId, cashAccountId, { gain: null, loss: null });
 
     const payment = makePaymentData({
@@ -450,9 +381,9 @@ describe("SalesPaymentPosting", () => {
       companyId: ctx.companyId,
       outletId: ctx.outletId,
     });
+    const { id: cashAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: `CASH-PAY-${nextPaymentTestId()}`, name: "Test Cash Split", typeName: "CASH" });
 
-    const cashAccountId = await getOrCreateCashAccount(ctx.companyId, "Test Cash Split");
-    const bankAccountId = await getOrCreateBankAccount(ctx.companyId, "Test Bank Split");
+    const { id: bankAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: `BANK-PAY-${nextPaymentTestId()}`, name: "Test Bank Split", typeName: "BANK" });
 
     const executor = createMockExecutor(mappings.arAccountId, cashAccountId, { gain: null, loss: null });
 

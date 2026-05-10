@@ -16,17 +16,12 @@ import {
   getOrCreateTestCashierForPermission,
 } from '../../fixtures';
 
-// Deterministic code generator for constrained fields (max 20 chars)
-function makeTag(prefix: string, counter: number): string {
-  const worker = process.env.VITEST_POOL_ID ?? '0';
-  return `${prefix}${worker}${String(counter).padStart(4, '0')}`.slice(0, 20);
-}
+import { makeTag } from "../../helpers/tags";
 
 let baseUrl: string;
 let ownerToken: string;
 let cashierToken: string;
 let cashierCompanyId: number;
-let scTagCounter = 0;
 
 describe('purchasing.supplier-contacts', { timeout: 30000 }, () => {
   let testSupplierId: number;
@@ -48,7 +43,7 @@ describe('purchasing.supplier-contacts', { timeout: 30000 }, () => {
     cashierToken = cashier.accessToken;
 
     // Create a supplier for contact tests
-    testSupplierCode = makeTag('SUPCT', ++scTagCounter);
+    testSupplierCode = makeTag('SUPCT');
     const createRes = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },

@@ -30,6 +30,8 @@ import {
 import { getDb } from "@/lib/db";
 import { sql } from "kysely";
 import { makeTag } from "../../helpers/tags";
+import { createSupplierFixture, createTestPurchaseInvoice, createTestApPayment } from "@jurnapod/modules-purchasing/test-fixtures";
+import { PurchaseInvoiceService, APPaymentService } from "@jurnapod/modules-purchasing";
 
 describe("ap-aging-projection-reconciliation", { timeout: 60000 }, () => {
   let baseUrl: string;
@@ -159,44 +161,36 @@ describe("ap-aging-projection-reconciliation", { timeout: 60000 }, () => {
         const tag = makeTag("APA");
         const supplierCode = `SUP-${tag}`.slice(0, 20);
 
-        // Insert a supplier record for the invoice FK
-        await sql`
-          INSERT INTO suppliers (company_id, name, code, currency, is_active, created_at, updated_at)
-          VALUES (${isolatedCompanyId}, ${`Test Supplier ${tag}`}, ${supplierCode}, 'IDR', 1, NOW(), NOW())
-        `.execute(db);
+        // Create supplier via canonical fixture
+        const supplier = await createSupplierFixture(db, {
+          companyId: isolatedCompanyId,
+          code: supplierCode,
+          name: `Test Supplier ${tag}`,
+          currency: 'IDR',
+        });
+        const supplierId = supplier.id;
 
-        const supplierResult = await sql<{ id: number }>`
-          SELECT id FROM suppliers WHERE company_id = ${isolatedCompanyId} AND code = ${supplierCode}
-        `.execute(db);
-        const supplierRow = supplierResult.rows[0];
-        expect(supplierRow, "supplier must exist after INSERT").toBeDefined();
-        const supplierId = Number(supplierRow!.id);
+        // Create purchase invoice via canonical fixture (draft)
+        const invoice = await createTestPurchaseInvoice(db, {
+          companyId: isolatedCompanyId,
+          userId: user.id,
+          supplierId,
+          invoiceNo: `PINV-${tag}`,
+          invoiceDate: new Date(FIXED_AS_OF_DATE),
+          currencyCode: 'IDR',
+          lines: [{ description: 'AP projection reconciliation test', qty: '1', unitPrice: `${INVOICE_AMOUNT}.0000` }],
+        });
+        const invoiceId = invoice.id;
 
-        // Insert a POSTED purchase invoice (exchange_rate = 1 for base currency IDR)
-        await sql`
-          INSERT INTO purchase_invoices (company_id, supplier_id, invoice_no, invoice_date, due_date, status, grand_total, subtotal, tax_amount, exchange_rate, currency_code, created_at, updated_at)
-          VALUES (${isolatedCompanyId}, ${supplierId}, ${`PINV-${tag}`}, ${FIXED_AS_OF_DATE}, NULL, 2, ${INVOICE_AMOUNT}, ${INVOICE_AMOUNT}, 0, 1.00000000, 'IDR', NOW(), NOW())
-        `.execute(db);
-
-        const invoiceResult = await sql<{ id: number }>`
-          SELECT id FROM purchase_invoices WHERE company_id = ${isolatedCompanyId} AND invoice_no = ${`PINV-${tag}`}
-        `.execute(db);
-        const invoiceRow = invoiceResult.rows[0];
-        expect(invoiceRow, "invoice must exist after INSERT").toBeDefined();
-        const invoiceId = Number(invoiceRow!.id);
-
-        // Insert matching GL journal batch
-        const batchResult = await sql<{ insertId: number }>`
-          INSERT INTO journal_batches (company_id, doc_type, doc_id, posted_at, created_at, updated_at)
-          VALUES (${isolatedCompanyId}, 'PURCHASE_INVOICE', ${invoiceId}, ${`${FIXED_AS_OF_DATE} 12:00:00`}, NOW(), NOW())
-        `.execute(db);
-        const batchId = Number(batchResult.insertId);
-
-        // AP credit line
-        await sql`
-          INSERT INTO journal_lines (company_id, journal_batch_id, account_id, line_date, debit, credit, description, created_at, updated_at)
-          VALUES (${isolatedCompanyId}, ${batchId}, ${isolatedApAccountId}, ${FIXED_AS_OF_DATE}, 0, ${INVOICE_AMOUNT}, 'AP projection reconciliation test', NOW(), NOW())
-        `.execute(db);
+        // Post the invoice via production service (creates journal_batch + journal_lines)
+        const piService = new PurchaseInvoiceService(db);
+        await piService.postPI({
+          companyId: isolatedCompanyId,
+          userId: user.id,
+          piId: invoiceId,
+          guardrailDecision: null,
+          validOverrideReason: null,
+        });
       });
 
       it("projection base_open_amount matches subledger with zero variance", async () => {
@@ -261,7 +255,7 @@ describe("ap-aging-projection-reconciliation", { timeout: 60000 }, () => {
         // Create a bank account for the ap_payment FK
         const bankAccountRes = await sql<{ insertId: number }>`
           INSERT INTO accounts (company_id, code, name, type_name, is_active, is_group)
-          VALUES (${isolatedCompanyId}, ${`BANK-${makeTag("APA")}`.slice(0, 32)}, 'Test Bank Account', 'ASSET', 1, 0)
+          VALUES (${isolatedCompanyId}, ${`BANK-${makeTag("APA")}`.slice(0, 32)}, 'Test Bank Account', 'BANK', 1, 0)
         `.execute(db);
         isolatedBankAccountId = Number(bankAccountRes.insertId);
 
@@ -280,45 +274,57 @@ describe("ap-aging-projection-reconciliation", { timeout: 60000 }, () => {
         const tag = makeTag("APA");
         const supplierCode = `SUP-${tag}`.slice(0, 20);
 
-        // Insert supplier
-        await sql`
-          INSERT INTO suppliers (company_id, name, code, currency, is_active, created_at, updated_at)
-          VALUES (${isolatedCompanyId}, ${`Test Supplier ${tag}`}, ${supplierCode}, 'IDR', 1, NOW(), NOW())
-        `.execute(db);
+        // Create supplier via canonical fixture
+        const supplier = await createSupplierFixture(db, {
+          companyId: isolatedCompanyId,
+          code: supplierCode,
+          name: `Test Supplier ${tag}`,
+          currency: 'IDR',
+        });
+        const supplierId = supplier.id;
 
-        const supplierResult = await sql<{ id: number }>`
-          SELECT id FROM suppliers WHERE company_id = ${isolatedCompanyId} AND code = ${supplierCode}
-        `.execute(db);
-        const supplierRow2 = supplierResult.rows[0];
-        expect(supplierRow2, "supplier must exist after INSERT").toBeDefined();
-        const supplierId = Number(supplierRow2!.id);
+        // Create purchase invoice via canonical fixture (draft)
+        const invoice = await createTestPurchaseInvoice(db, {
+          companyId: isolatedCompanyId,
+          userId: user.id,
+          supplierId,
+          invoiceNo: `PINV-${tag}`,
+          invoiceDate: new Date(FIXED_AS_OF_DATE),
+          currencyCode: 'IDR',
+          lines: [{ description: 'AP projection reconciliation test', qty: '1', unitPrice: `${INVOICE_AMOUNT}.0000` }],
+        });
+        const invoiceId = invoice.id;
 
-        // Insert POSTED purchase invoice
-        await sql`
-          INSERT INTO purchase_invoices (company_id, supplier_id, invoice_no, invoice_date, due_date, status, grand_total, subtotal, tax_amount, exchange_rate, currency_code, created_at, updated_at)
-          VALUES (${isolatedCompanyId}, ${supplierId}, ${`PINV-${tag}`}, ${FIXED_AS_OF_DATE}, NULL, 2, ${INVOICE_AMOUNT}, ${INVOICE_AMOUNT}, 0, 1.00000000, 'IDR', NOW(), NOW())
-        `.execute(db);
+        // Post the invoice via production service (creates journal_batch + journal_lines)
+        const piService = new PurchaseInvoiceService(db);
+        await piService.postPI({
+          companyId: isolatedCompanyId,
+          userId: user.id,
+          piId: invoiceId,
+          guardrailDecision: null,
+          validOverrideReason: null,
+        });
 
-        const invoiceResult = await sql<{ id: number }>`
-          SELECT id FROM purchase_invoices WHERE company_id = ${isolatedCompanyId} AND invoice_no = ${`PINV-${tag}`}
-        `.execute(db);
-        const invoiceRow2 = invoiceResult.rows[0];
-        expect(invoiceRow2, "invoice must exist after INSERT").toBeDefined();
-        const invoiceId = Number(invoiceRow2!.id);
+        // Create AP payment via canonical fixture (draft)
+        const payment = await createTestApPayment(db, {
+          companyId: isolatedCompanyId,
+          userId: user.id,
+          supplierId,
+          bankAccountId: isolatedBankAccountId,
+          paymentDate: new Date(FIXED_AS_OF_DATE),
+          lines: [{ purchaseInvoiceId: invoiceId, allocationAmount: String(PAYMENT_AMOUNT) }],
+        });
+        const paymentId = payment.id;
 
-        // Insert ap_payment (POSTED status = 20)
-        const paymentNo = `APPAY-${tag}`.slice(0, 32);
-        const paymentResult = await sql<{ insertId: number }>`
-          INSERT INTO ap_payments (company_id, payment_no, payment_date, bank_account_id, supplier_id, description, status, created_at, updated_at)
-          VALUES (${isolatedCompanyId}, ${paymentNo}, ${FIXED_AS_OF_DATE}, ${isolatedBankAccountId}, ${supplierId}, 'AP projection test payment', 20, NOW(), NOW())
-        `.execute(db);
-        const paymentId = Number(paymentResult.insertId);
-
-        // Insert ap_payment_line (allocation against the invoice)
-        await sql`
-          INSERT INTO ap_payment_lines (ap_payment_id, line_no, purchase_invoice_id, allocation_amount, created_at, updated_at)
-          VALUES (${paymentId}, 1, ${invoiceId}, ${PAYMENT_AMOUNT}, NOW(), NOW())
-        `.execute(db);
+        // Post the payment via production service
+        const apService = new APPaymentService(db);
+        await apService.postAPPayment({
+          companyId: isolatedCompanyId,
+          userId: user.id,
+          paymentId,
+          guardrailDecision: null,
+          validOverrideReason: null,
+        });
       });
 
       it("projection reflects partial payment and matches subledger with zero variance", async () => {

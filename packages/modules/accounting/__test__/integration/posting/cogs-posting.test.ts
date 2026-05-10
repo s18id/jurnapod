@@ -38,6 +38,7 @@ import { createPostingIdGenerator } from "./id-utils.js";
 // -----------------------------------------------------------------------------
 import { createTestCompanyMinimal } from "@jurnapod/modules-platform";
 import { createTestOutletMinimal } from "@jurnapod/modules-platform";
+import { createTestAccount } from "../../../src/test-fixtures/account-fixtures.js";
 
 // -----------------------------------------------------------------------------
 // Test context — unique company+outlet per describe block
@@ -169,33 +170,12 @@ afterAll(async () => {
 // -----------------------------------------------------------------------------
 describe("CogsPosting", () => {
   let ctx: TestContext;
-  // Company-specific account type IDs (resolved once after company is known)
-  let _expenseTypeId: number;
-  let _assetTypeId: number;
 
   beforeAll(async () => {
     // Use canonical company fixture from @jurnapod/modules-platform
     const company = await createTestCompanyMinimal(db);
     const outlet = await createTestOutletMinimal(db, company.id);
     ctx = { companyId: company.id, outletId: outlet.id };
-
-    // Seed company-specific account types (required by schema: company_id IS NOT NULL)
-    // GAP: No package-level fixture exists for account_types seeding.
-    // This raw SQL is the minimum gap-filler until a canonical account-type fixture exists.
-    await sql`
-      INSERT IGNORE INTO account_types (company_id, name, category, normal_balance)
-      VALUES
-        (${ctx.companyId}, 'EXPENSE', 'EXPENSE', 'D'),
-        (${ctx.companyId}, 'ASSET',   'ASSET',   'D')
-    `.execute(db);
-
-    const typeRows = await sql`
-      SELECT id, name FROM account_types WHERE company_id = ${ctx.companyId}
-    `.execute(db);
-    for (const row of typeRows.rows as { id: number; name: string }[]) {
-      if (row.name === 'EXPENSE') _expenseTypeId = row.id;
-      if (row.name === 'ASSET')   _assetTypeId   = row.id;
-    }
   });
 
   // Per-run cleanup: remove test items and child rows created by previous runs.
@@ -220,43 +200,6 @@ describe("CogsPosting", () => {
     // Accounts are NOT deleted here — they may be referenced by journal_lines from this run.
     // They use unique codes so they won't conflict with future runs.
   });
-
-  // -------------------------------------------------------------------------
-  // GAP DOCUMENTATION:
-  // No package-level fixture exists for accounts (COGS, inventory asset).
-  // Raw SQL INSERT is used here as a gap-filler pending a canonical account fixture.
-  // This is the minimum feasible SQL: creates an account row with the required
-  // fields and proper account_type linkage for EXPENSE/ASSET classification.
-  // Uses company-specific account_type IDs resolved in beforeAll.
-  // Duplicate-key handling: INSERT IGNORE + fetch fallback pattern matches
-  // getOrCreateTaxAccount (journal-immutability) and prevents failures from
-  // re-run cleanup having deleted but not yet re-created accounts.
-  // -------------------------------------------------------------------------
-  async function createTestAccount(
-    companyId: number,
-    code: string,
-    name: string,
-    typeName: "ASSET" | "EXPENSE"
-  ): Promise<number> {
-    const accountTypeId = typeName === 'EXPENSE' ? _expenseTypeId : _assetTypeId;
-
-    try {
-      await sql`
-        INSERT INTO accounts (company_id, code, name, account_type_id, is_active, is_payable, created_at, updated_at)
-        VALUES (${companyId}, ${code}, ${name}, ${accountTypeId}, 1, 0, NOW(), NOW())
-      `.execute(db);
-    } catch (err) {
-      const mysqlErr = err as { code?: string };
-      if (!mysqlErr?.code || (mysqlErr.code !== 'ER_DUP_ENTRY' && mysqlErr.code !== 'ER_DUP_KEY')) {
-        throw err;
-      }
-      // Duplicate key — row already exists from a prior run/cleanup cycle; fetch it.
-    }
-
-    const result = await sql`SELECT id FROM accounts WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
-    if (!result.rows[0]) throw new Error(`Account not found after insert: ${code}`);
-    return Number((result.rows[0] as { id: number }).id);
-  }
 
   // -------------------------------------------------------------------------
   // GAP DOCUMENTATION:
@@ -321,9 +264,9 @@ describe("CogsPosting", () => {
   // Test 1: COGS posting balanced journal (COGS debit, Inventory Asset credit)
   // -------------------------------------------------------------------------
   it("posts COGS with balanced journal (COGS debit, Inventory Asset credit)", async () => {
-    const cogsAccountId = await createTestAccount(ctx.companyId, ids.nextCode("COGS-TEST"), "Test COGS", "EXPENSE");
-    const invAssetAccountId = await createTestAccount(ctx.companyId, ids.nextCode("INVASSET-TEST"), "Test Inv Asset", "ASSET");
+    const { id: cogsAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: ids.nextCode("COGS-TEST"), name: "Test COGS", typeName: "EXPENSE" });
 
+    const { id: invAssetAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: ids.nextCode("INVASSET-TEST"), name: "Test Inv Asset", typeName: "ASSET" });
     const item1Sku = ids.nextCode("ITM-COGS");
     const item2Sku = ids.nextCode("ITM-COGS");
     const item1Id = await createTestItem(ctx.companyId, item1Sku, "Test Item 101", cogsAccountId, invAssetAccountId);
@@ -408,9 +351,9 @@ describe("CogsPosting", () => {
   // Test 2: COGS with pre-calculated deduction costs (stockTxId linkage)
   // -------------------------------------------------------------------------
   it("posts COGS with pre-calculated deduction costs (stockTxId linkage)", async () => {
-    const cogsAccountId = await createTestAccount(ctx.companyId, ids.nextCode("COGS-TEST"), "Test COGS 2", "EXPENSE");
-    const invAssetAccountId = await createTestAccount(ctx.companyId, ids.nextCode("INVASSET-TEST"), "Test Inv Asset 2", "ASSET");
+    const { id: cogsAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: ids.nextCode("COGS-TEST"), name: "Test COGS 2", typeName: "EXPENSE" });
 
+    const { id: invAssetAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: ids.nextCode("INVASSET-TEST"), name: "Test Inv Asset 2", typeName: "ASSET" });
     const itemSku = ids.nextCode("ITM-COGS");
     const itemId = await createTestItem(ctx.companyId, itemSku, "Test Item 201", cogsAccountId, invAssetAccountId);
 
@@ -461,7 +404,7 @@ describe("CogsPosting", () => {
   // Test 3: Error when item has no COGS account configured
   // -------------------------------------------------------------------------
   it("throws CogsAccountConfigError when item has no COGS account", async () => {
-    const invAssetAccountId = await createTestAccount(ctx.companyId, ids.nextCode("INVASSET-TEST"), "Test Inv Asset 3", "ASSET");
+    const { id: invAssetAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: ids.nextCode("INVASSET-TEST"), name: "Test Inv Asset 3", typeName: "ASSET" });
 
     // Item missing COGS account (cogs_account_id = NULL)
     const itemSku = ids.nextCode("ITM-COGS");
@@ -504,7 +447,7 @@ describe("CogsPosting", () => {
   // Test 4: Error when item has no inventory asset account configured
   // -------------------------------------------------------------------------
   it("throws CogsAccountConfigError when item has no inventory asset account", async () => {
-    const cogsAccountId = await createTestAccount(ctx.companyId, ids.nextCode("COGS-TEST"), "Test COGS 4", "EXPENSE");
+    const { id: cogsAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: ids.nextCode("COGS-TEST"), name: "Test COGS 4", typeName: "EXPENSE" });
 
     // Item missing inventory asset account (inventory_asset_account_id = NULL)
     const itemSku = ids.nextCode("ITM-COGS");
@@ -544,9 +487,9 @@ describe("CogsPosting", () => {
   // Test 5: COGS journal lines use correct account directions
   // -------------------------------------------------------------------------
   it("COGS journal lines use correct account directions (COGS DEBIT, Inventory CREDIT)", async () => {
-    const cogsAccountId = await createTestAccount(ctx.companyId, ids.nextCode("COGS-TEST"), "Test COGS 5", "EXPENSE");
-    const invAssetAccountId = await createTestAccount(ctx.companyId, ids.nextCode("INVASSET-TEST"), "Test Inv Asset 5", "ASSET");
+    const { id: cogsAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: ids.nextCode("COGS-TEST"), name: "Test COGS 5", typeName: "EXPENSE" });
 
+    const { id: invAssetAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: ids.nextCode("INVASSET-TEST"), name: "Test Inv Asset 5", typeName: "ASSET" });
     const itemSku = ids.nextCode("ITM-COGS");
     const itemId = await createTestItem(ctx.companyId, itemSku, "Test Item 501", cogsAccountId, invAssetAccountId);
 

@@ -695,7 +695,7 @@ development_status:
   epic-61-retrospective: done
 
   # Epic 62: Projection Correctness Hardening
-  epic-62: ready-for-dev
+  epic-62: done
   62-1-projection-source-of-truth-boundary-map-ar-ap-accuracy: done
   62-2-inventory-cogs-projection-accuracy: done
   62-3-treasury-sales-revenue-projection-accuracy: done
@@ -704,4 +704,18 @@ development_status:
   62-6-gate-validation-automation-exit-evidence: done
   62-7-deferred-debt-closure-final-cleanup: done
 
-  epic-61-retrospective: done
+  # Epic 63: Test Production-Code Hardening
+  epic-63: ready-for-dev
+  63-1-fix-sync-modules-lifecycle-mock: done
+  63-2-replace-inline-scaled-shared: done
+  63-3-replace-wrong-getinvoiceopenamount: done
+  63-4-replace-raw-sql-journal-seeding: ready-for-dev
+  63-5-create-testaccount-fixture: done
+  63-6-create-sales-test-fixtures: done
+  63-7-create-purchasing-test-fixtures: done
+  63-8-create-treasury-test-fixture: done
+  63-9-create-reconciliation-seeded-fixtures: ready-for-dev
+  63-10-replace-duplicate-maketag-purchasing: done
+  63-11-consolidate-duplicate-flow-helpers: done
+  63-12-update-remaining-test-files: ready-for-dev
+  63-13-full-validation-gate: ready-for-dev

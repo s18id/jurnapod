@@ -19,6 +19,7 @@ import { getTestBaseUrl } from '../../helpers/env';
 import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { closeTestDb, getTestDb } from '../../helpers/db';
 import { sql } from 'kysely';
+import { scaled, unscaled } from "@jurnapod/shared";
 import {
   cleanupTestFixtures,
   createTestCompanyMinimal,
@@ -32,21 +33,7 @@ import {
   createTestBankAccount,
 } from '../../fixtures';
 
-// Deterministic code generator for constrained fields
-function makeTag(prefix: string, counter: number): string {
-  const worker = process.env.VITEST_POOL_ID ?? '0';
-  const pidTag = String(process.pid % 10000).padStart(4, '0');
-  return `${prefix}${worker}${pidTag}${String(counter).padStart(4, '0')}`;
-}
-
-// Helper: convert DECIMAL(19,4) string to scaled bigint (×10,000)
-function toScaledBigInt(val: string): bigint {
-  const [whole, frac = ''] = val.split('.');
-  const paddedFrac = (frac + '0000').slice(0, 4);
-  const sign = whole.startsWith('-') ? -1n : 1n;
-  const absWhole = whole.replace('-', '');
-  return sign * (BigInt(absWhole) * 10000n + BigInt(paddedFrac));
-}
+import { makeTag } from "../../helpers/tags";
 
 // AP payment status constants
 const AP_PAYMENT_STATUS_POSTED = 20;
@@ -65,7 +52,7 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
     baseUrl = getTestBaseUrl();
 
     const testCompany = await createTestCompanyMinimal({
-      code: makeTag('FXCO', ++fxTagCounter).toUpperCase(),
+      code: makeTag('FXCO').toUpperCase(),
       name: `FX Correctness Company ${process.pid}`,
     });
     testCompanyId = testCompany.id;
@@ -92,7 +79,7 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
     }
 
     const supplier = await createTestSupplier(testCompanyId, {
-      code: makeTag('FXSUP', ++fxTagCounter),
+      code: makeTag('FXSUP'),
       name: 'FX Correctness Supplier',
       currency: 'USD',
     });
@@ -158,7 +145,7 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
     expect(fx2Res.status).toBe(201);
 
     // Create invoice dated 2026-01-20
-    const invoiceNo = makeTag('FXAC1', ++fxTagCounter);
+    const invoiceNo = makeTag('FXAC1');
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -214,7 +201,7 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
     expect(fxRes.status).toBe(201);
 
     // Create invoice with $100.5555
-    const invoiceNo = makeTag('FXAC2', ++fxTagCounter);
+    const invoiceNo = makeTag('FXAC2');
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -253,12 +240,12 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
     let totalDebits = 0n;
     let totalCredits = 0n;
     for (const line of journalLines.rows) {
-      totalDebits += toScaledBigInt(line.debit);
-      totalCredits += toScaledBigInt(line.credit);
+      totalDebits += scaled(line.debit, { signed: true });
+      totalCredits += scaled(line.credit, { signed: true });
     }
 
     // 100.5555 × 15,000 = 1,508,332.5000 exact (no float drift)
-    const expectedBase = toScaledBigInt('1508332.5000');
+    const expectedBase = scaled('1508332.5000', { signed: true });
     expect(totalDebits).toBe(expectedBase);
     expect(totalCredits).toBe(expectedBase);
   });
@@ -292,7 +279,7 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
     });
     expect(fxNew.status).toBe(201);
 
-    const invoiceNo = makeTag('FXAC5', ++fxTagCounter);
+    const invoiceNo = makeTag('FXAC5');
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -334,12 +321,12 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
       WHERE journal_batch_id = ${batchId} AND company_id = ${testCompanyId}
     `.execute(db);
 
-    const expectedBase = toScaledBigInt('15001.6200'); // canonical posting output at scale-4 in current PI flow
+    const expectedBase = scaled('15001.6200', { signed: true }); // canonical posting output at scale-4 in current PI flow
     let totalDebits = 0n;
     let totalCredits = 0n;
     for (const line of journalLines.rows) {
-      totalDebits += toScaledBigInt(line.debit);
-      totalCredits += toScaledBigInt(line.credit);
+      totalDebits += scaled(line.debit, { signed: true });
+      totalCredits += scaled(line.credit, { signed: true });
     }
 
     expect(totalDebits).toBe(expectedBase);
@@ -366,7 +353,7 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
     expect(fxRes.status).toBe(201);
 
     // Create USD invoice: $100 → base = 1,500,000 IDR
-    const invoiceNo = makeTag('FXAC3', ++fxTagCounter);
+    const invoiceNo = makeTag('FXAC3');
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -463,7 +450,7 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
     expect(fx2Res.status).toBe(201);
 
     // Create USD invoice at 15,000: $100 → base = 1,500,000 IDR
-    const invoiceNo = makeTag('FXAC4L', ++fxTagCounter);
+    const invoiceNo = makeTag('FXAC4L');
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -534,8 +521,8 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
     let bankCredit = 0n;
 
     for (const line of journalLines.rows) {
-      const debit = toScaledBigInt(line.debit);
-      const credit = toScaledBigInt(line.credit);
+      const debit = scaled(line.debit, { signed: true });
+      const credit = scaled(line.credit, { signed: true });
       totalDebits += debit;
       totalCredits += credit;
 
@@ -552,13 +539,13 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
     expect(totalDebits).toBe(totalCredits);
 
     // AP debit = invoice open amount = 1,500,000
-    expect(apDebit).toBe(toScaledBigInt('1500000.0000'));
+    expect(apDebit).toBe(scaled('1500000.0000', { signed: true }));
 
     // FX loss = 50,000 (excess payment due to rate change)
-    expect(fxLossDebit).toBe(toScaledBigInt('50000.0000'));
+    expect(fxLossDebit).toBe(scaled('50000.0000', { signed: true }));
 
     // Bank credit = total cash paid = 1,550,000
-    expect(bankCredit).toBe(toScaledBigInt('1550000.0000'));
+    expect(bankCredit).toBe(scaled('1550000.0000', { signed: true }));
 
     // Verify payment status is POSTED
     const paymentStatus = await sql<{ status: number; journal_batch_id: number | null }>`
@@ -601,7 +588,7 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
     expect(fx2Res.status).toBe(201);
 
     // Create USD invoice at 15,500: $100 → base = 1,550,000 IDR
-    const invoiceNo = makeTag('FXAC4G', ++fxTagCounter);
+    const invoiceNo = makeTag('FXAC4G');
     const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
@@ -672,8 +659,8 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
     let bankCredit = 0n;
 
     for (const line of journalLines.rows) {
-      const debit = toScaledBigInt(line.debit);
-      const credit = toScaledBigInt(line.credit);
+      const debit = scaled(line.debit, { signed: true });
+      const credit = scaled(line.credit, { signed: true });
       totalDebits += debit;
       totalCredits += credit;
 
@@ -690,13 +677,13 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
     expect(totalDebits).toBe(totalCredits);
 
     // AP debit = invoice open amount = 1,550,000
-    expect(apDebit).toBe(toScaledBigInt('1550000.0000'));
+    expect(apDebit).toBe(scaled('1550000.0000', { signed: true }));
 
     // FX gain = 50,000 (saved due to rate decrease)
-    expect(fxGainCredit).toBe(toScaledBigInt('50000.0000'));
+    expect(fxGainCredit).toBe(scaled('50000.0000', { signed: true }));
 
     // Bank credit = actual cash paid = 1,500,000
-    expect(bankCredit).toBe(toScaledBigInt('1500000.0000'));
+    expect(bankCredit).toBe(scaled('1500000.0000', { signed: true }));
 
     // Verify payment status is POSTED
     const paymentStatus = await sql<{ status: number }>`

@@ -29,6 +29,7 @@ import {
   type PosSaleReversalParams,
 } from "../../../src/posting/sync-push.js";
 import { createPosSaleJournalFixture } from "../../../src/test-fixtures/pos-sale-journal-fixtures.js";
+import { createTestAccount } from "../../../src/test-fixtures/account-fixtures.js";
 import { createPostingIdGenerator } from "./id-utils.js";
 
 // =============================================================================
@@ -94,18 +95,22 @@ afterAll(async () => {
 
 async function createTestAccounts(ctx: TestContext): Promise<void> {
   // Create AR account (ASSET, normal balance DEBIT)
-  const arResult = await sql`
-    INSERT INTO accounts (company_id, code, name, type_name, normal_balance, report_group, is_active)
-    VALUES (${ctx.companyId}, ${"AR-" + ids.nextId()}, 'Accounts Receivable Test', 'ASSET', 'D', 'NRC', 1)
-  `.execute(db);
-  ctx.arAccountId = Number(arResult.insertId);
+  const ar = await createTestAccount(db, {
+    companyId: ctx.companyId,
+    code: "AR-" + ids.nextId(),
+    name: "Accounts Receivable Test",
+    typeName: "ASSET",
+  });
+  ctx.arAccountId = ar.id;
 
   // Create SALES_REVENUE account (INCOME, normal balance CREDIT)
-  const revResult = await sql`
-    INSERT INTO accounts (company_id, code, name, type_name, normal_balance, report_group, is_active)
-    VALUES (${ctx.companyId}, ${"REV-" + ids.nextId()}, 'Sales Revenue Test', 'INCOME', 'C', 'PL', 1)
-  `.execute(db);
-  ctx.revenueAccountId = Number(revResult.insertId);
+  const rev = await createTestAccount(db, {
+    companyId: ctx.companyId,
+    code: "REV-" + ids.nextId(),
+    name: "Sales Revenue Test",
+    typeName: "REVENUE",
+  });
+  ctx.revenueAccountId = rev.id;
 }
 
 async function createPosSaleBatch(

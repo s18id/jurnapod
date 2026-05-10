@@ -30,35 +30,13 @@ import {
   createTestPurchasingAccounts,
   createTestBankAccount,
 } from '../../fixtures';
+import { computePurchaseInvoiceOpenAmount } from '@jurnapod/modules-purchasing';
 
-// Deterministic code generator for constrained fields
-function makeTag(prefix: string, counter: number): string {
-  const worker = process.env.VITEST_POOL_ID ?? '0';
-  const pidTag = String(process.pid % 10000).padStart(4, '0');
-  return `${prefix}${worker}${pidTag}${String(counter).padStart(4, '0')}`;
-}
+import { makeTag } from "../../helpers/tags";
+import { createPostedPurchaseInvoice } from "../../helpers/purchasing-flows";
 
 // AP payment status constants (mirrors AP_PAYMENT_STATUS.POSTED from @jurnapod/shared)
 const AP_PAYMENT_STATUS_POSTED = 40;
-
-// Helper: compute invoice open amount via direct SQL
-// Matches computePurchaseInvoiceOpenAmount logic:
-//   open_amount = grand_total - SUM(posted payment allocations) - SUM(applied credits)
-async function getInvoiceOpenAmount(db: ReturnType<typeof getTestDb>, invoiceId: number): Promise<number> {
-  const result = await sql<{ open_amount: string }>`
-    SELECT (pi.grand_total - COALESCE(SUM(apl.allocation_amount), 0)) AS open_amount
-    FROM purchase_invoices pi
-    LEFT JOIN ap_payment_lines apl ON apl.purchase_invoice_id = pi.id
-    LEFT JOIN ap_payments ap ON ap.id = apl.ap_payment_id AND ap.status = ${AP_PAYMENT_STATUS_POSTED}
-    WHERE pi.id = ${invoiceId}
-    GROUP BY pi.id, pi.grand_total
-  `.execute(db);
-  if (result.rows.length === 0) {
-    throw new Error(`Invoice ${invoiceId} not found when computing open amount`);
-  }
-  // Returns DECIMAL(19,4) as string like "70000.0000" — convert to number
-  return Number(result.rows[0].open_amount);
-}
 
 let baseUrl: string;
 let ownerToken: string;
@@ -89,7 +67,7 @@ describe('purchasing.ap-payment-correctness', { timeout: 30000 }, () => {
     baseUrl = getTestBaseUrl();
 
     const testCompany = await createTestCompanyMinimal({
-      code: makeTag('APCO', ++apTagCounter).toUpperCase(),
+      code: makeTag('APCO').toUpperCase(),
       name: `AP Payment Correctness Company ${process.pid}`,
     });
     testCompanyId = testCompany.id;
@@ -116,7 +94,7 @@ describe('purchasing.ap-payment-correctness', { timeout: 30000 }, () => {
     }
 
     const supplier = await createTestSupplier(testCompanyId, {
-      code: makeTag('APPSUP', ++apTagCounter),
+      code: makeTag('APPSUP'),
       name: 'AP Payment Correctness Supplier',
       currency: 'IDR',
     });
@@ -129,57 +107,35 @@ describe('purchasing.ap-payment-correctness', { timeout: 30000 }, () => {
     bankAccountId = await createTestBankAccount(testCompanyId, { typeName: 'BANK', isActive: true });
     ownerToken = await loginForTest(baseUrl, testCompany.code, testEmail, 'TestPassword123!');
 
-    // Helper to create and post a purchase invoice
+    // Convenience wrapper for creating posted PIs with a service line
     async function createPostedPi(unitPrice: string, tag: string): Promise<number> {
-      const piRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${ownerToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          supplier_id: testSupplierId,
-          invoice_no: tag,
-          invoice_date: '2026-04-01',
-          currency_code: 'IDR',
-          notes: `PI for correctness test`,
-          lines: [
-            { description: 'Service line', qty: '1', unit_price: unitPrice, line_type: 'SERVICE' },
-          ],
-        }),
+      return createPostedPurchaseInvoice({
+        baseUrl,
+        token: ownerToken,
+        supplierId: testSupplierId,
+        invoiceNo: tag,
+        lines: [{ description: 'Service line', qty: '1', unit_price: unitPrice, line_type: 'SERVICE' }],
+        notes: 'PI for correctness test',
       });
-      expect(piRes.status).toBe(201);
-      const pi = await piRes.json();
-      const piId = pi.data.id;
-
-      const postRes = await fetch(`${baseUrl}/api/purchasing/invoices/${piId}/post`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${ownerToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
-      expect(postRes.status).toBe(200);
-      return piId;
     }
 
     // PI-1: $1000 — AC2 (GL correctness), AC7 (concurrent post)
-    postedPi1Id = await createPostedPi('100000.0000', makeTag('APIPI1', ++apTagCounter));
+    postedPi1Id = await createPostedPi('100000.0000', makeTag('APIPI1'));
 
     // PI-2: $300 — AC5 (overpayment test)
-    postedPi2Id = await createPostedPi('30000.0000', makeTag('APIPI2', ++apTagCounter));
+    postedPi2Id = await createPostedPi('30000.0000', makeTag('APIPI2'));
 
     // PI-3: $700 — AC6 (multi-invoice)
-    postedPi3Id = await createPostedPi('70000.0000', makeTag('APIPI3', ++apTagCounter));
+    postedPi3Id = await createPostedPi('70000.0000', makeTag('APIPI3'));
 
     // PI-4: $300 — AC6 (multi-invoice)
-    postedPi4Id = await createPostedPi('30000.0000', makeTag('APIPI4', ++apTagCounter));
+    postedPi4Id = await createPostedPi('30000.0000', makeTag('APIPI4'));
 
     // PI-5: $1000 — AC3 (partial payment)
-    postedPi5Id = await createPostedPi('100000.0000', makeTag('APIPI5', ++apTagCounter));
+    postedPi5Id = await createPostedPi('100000.0000', makeTag('APIPI5'));
 
     // PI-6: $1000 — AC4 (full payment)
-    postedPi6Id = await createPostedPi('100000.0000', makeTag('APIPI6', ++apTagCounter));
+    postedPi6Id = await createPostedPi('100000.0000', makeTag('APIPI6'));
   });
 
   // Cleanup only removes app-level records we created (payments, invoices).
@@ -206,7 +162,7 @@ describe('purchasing.ap-payment-correctness', { timeout: 30000 }, () => {
   // AC1a: Sequential idempotent create
   // ========================================================================
   it('AC1a: sequential duplicate create with same idempotency_key returns same payment', async () => {
-    const idempotencyKey = makeTag('APPIDEMSEQ', ++apTagCounter);
+    const idempotencyKey = makeTag('APPIDEMSEQ');
     const payload = {
       payment_date: '2026-04-15',
       bank_account_id: bankAccountId,
@@ -257,7 +213,7 @@ describe('purchasing.ap-payment-correctness', { timeout: 30000 }, () => {
   //   -> Production is safe for this path; continue with AC2-AC7.
   // ========================================================================
   it('AC1b: concurrent duplicate create with same idempotency_key returns same payment and creates 1 row', async () => {
-    const idempotencyKey = makeTag('APPIDEMCONC', ++apTagCounter);
+    const idempotencyKey = makeTag('APPIDEMCONC');
     const payload = {
       payment_date: '2026-04-15',
       bank_account_id: bankAccountId,
@@ -383,7 +339,7 @@ describe('purchasing.ap-payment-correctness', { timeout: 30000 }, () => {
     const db = getTestDb();
     // PI-5 grand_total = 100000.0000 ($1000); payment = 30000.0000 ($300)
     // open_amount should be 70000.0000 ($700)
-    const openAfter = await getInvoiceOpenAmount(db, postedPi5Id);
+    const openAfter = Number(await computePurchaseInvoiceOpenAmount(db, testCompanyId, postedPi5Id));
     expect(openAfter).toBe(70000);
 
     // Verify invoice status remains POSTED (not PAID)
@@ -421,7 +377,7 @@ describe('purchasing.ap-payment-correctness', { timeout: 30000 }, () => {
 
     const db = getTestDb();
     // Full payment: open_amount should be 0.0000
-    const openAfter = await getInvoiceOpenAmount(db, postedPi6Id);
+    const openAfter = Number(await computePurchaseInvoiceOpenAmount(db, testCompanyId, postedPi6Id));
     expect(openAfter).toBe(0);
 
     const pi = await sql<{ status: number }>`
@@ -496,11 +452,11 @@ describe('purchasing.ap-payment-correctness', { timeout: 30000 }, () => {
     expect(Number(lines.rows[1].amount)).toBe(30000);      // $300
 
     // PI-4: $300 original - $200 payment = $100 remaining
-    const openPi4 = await getInvoiceOpenAmount(db, postedPi4Id);
+    const openPi4 = Number(await computePurchaseInvoiceOpenAmount(db, testCompanyId, postedPi4Id));
     expect(openPi4).toBe(10000);  // $100
 
     // PI-3: $700 original - $300 payment = $400 remaining
-    const openPi3 = await getInvoiceOpenAmount(db, postedPi3Id);
+    const openPi3 = Number(await computePurchaseInvoiceOpenAmount(db, testCompanyId, postedPi3Id));
     expect(openPi3).toBe(40000);  // $400
   });
 

@@ -48,6 +48,8 @@ export type {
 } from "./pos-sale-journal-fixtures.js";
 
 export {
+  createTestAccount,
   createTestInventoryGLAccount,
   createTestVarianceAccount,
 } from "./account-fixtures.js";
+export type { CreateTestAccountOpts } from "./account-fixtures.js";
