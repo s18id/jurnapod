@@ -38,15 +38,32 @@ export async function acquireReadLock(): Promise<void> {
   if (_release !== null) return; // already acquired
 
   const properLockfile = await import("proper-lockfile");
-  // proper-lockfile exports a callable interface; use the lock named export for clarity
+  // Increased retry budget for 209-file parallel suite (4 workers).
+  // 30 retries with 5s max was too short — E48 contention caused intermittent
+  // "Lock file is already being held" and hook timeouts on slow workers.
   _release = await properLockfile.lock(LOCK_FILE, {
     retries: {
-      retries: 30,
+      retries: 60,
       minTimeout: 100,
-      maxTimeout: 5000,
+      maxTimeout: 10000,
       factor: 1.5,
     },
   });
+
+  // Wait for the test HTTP server to be ready (up to 5s)
+  // Prevents "expected 500 to be 201" races where the lock was acquired
+  // but the server hasn't finished binding the port yet.
+  const baseUrl = getTestBaseUrl();
+  const maxWaitMs = 5000;
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const res = await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(1000) });
+      if (res.ok || res.status === 401 || res.status === 404) break; // server responding
+    } catch {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
 }
 
 export async function releaseReadLock(): Promise<void> {
