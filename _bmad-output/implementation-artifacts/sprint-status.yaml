@@ -696,7 +696,7 @@ development_status:
 
   # Epic 62: Projection Correctness Hardening
   epic-62: ready-for-dev
-  62-1-projection-source-of-truth-boundary-map-ar-ap-accuracy: ready-for-dev
+  62-1-projection-source-of-truth-boundary-map-ar-ap-accuracy: in-progress
   62-2-inventory-cogs-projection-accuracy: ready-for-dev
   62-3-treasury-sales-revenue-projection-accuracy: ready-for-dev
   62-4-projection-read-only-boundary-acl-enforcement: ready-for-dev
