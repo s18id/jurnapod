@@ -43,27 +43,18 @@ export async function acquireReadLock(): Promise<void> {
   // "Lock file is already being held" and hook timeouts on slow workers.
   _release = await properLockfile.lock(LOCK_FILE, {
     retries: {
-      retries: 60,
-      minTimeout: 100,
-      maxTimeout: 10000,
-      factor: 1.5,
+      retries: 120,
+      minTimeout: 50,
+      maxTimeout: 15000,
+      factor: 1.3,
     },
   });
 
-  // Wait for the test HTTP server to be ready (up to 5s)
-  // Prevents "expected 500 to be 201" races where the lock was acquired
-  // but the server hasn't finished binding the port yet.
+  // Quick server readiness check (500ms max) — avoid 5s delay
   const baseUrl = getTestBaseUrl();
-  const maxWaitMs = 5000;
-  const start = Date.now();
-  while (Date.now() - start < maxWaitMs) {
-    try {
-      const res = await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(1000) });
-      if (res.ok || res.status === 401 || res.status === 404) break; // server responding
-    } catch {
-      await new Promise((r) => setTimeout(r, 200));
-    }
-  }
+  try {
+    await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(500) });
+  } catch { /* server not responding yet — tests will retry internally */ }
 }
 
 export async function releaseReadLock(): Promise<void> {

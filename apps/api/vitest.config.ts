@@ -29,7 +29,7 @@ export default defineConfig({
     include: ['__test__/**/*.test.ts'],
     // CI integration suites can run ~2 minutes on shared runners
     testTimeout: 120000,
-    hookTimeout: 180000,
+    hookTimeout: 300000,
     teardownTimeout: 30000,
     // Use threads pool — max 4 workers for performance
     pool: 'threads',

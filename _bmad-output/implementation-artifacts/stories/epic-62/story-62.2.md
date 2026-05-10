@@ -1,6 +1,6 @@
 # Story 62.2: Inventory & COGS Projection Accuracy
 
-**Status:** ready-for-dev
+**Status:** review
 
 > **Sprint-Status Append-Only Rule (E45-A1 / E46-A1) — MANDATORY:**
 > - **REQUIRED**: `npx tsx scripts/update-sprint-status.ts --epic 62 --story 62-2 --title inventory-cogs-projection-accuracy --status done`
@@ -46,18 +46,18 @@ so that **inventory-related financial reporting is provably accurate**.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Inventory valuation reconciliation test (AC: 1, 3, 4)
-  - [ ] 1.1 Create `apps/api/__test__/integration/reporting/inventory-valuation-projection-reconciliation.test.ts`
-  - [ ] 1.2 Implement zero-state test: variance == 0 with no items
-  - [ ] 1.3 Implement seeded data test: items + cost layers → `getAllItemsCostSummary` matches raw SQL
-  - [ ] 1.4 Emit `__EPIC62_GATE__` JSON evidence
-  - [ ] 1.5 Verify deterministic output across repeated calls
-- [ ] Task 2: COGS projection reconciliation test (AC: 2, 3, 4)
-  - [ ] 2.1 Create `apps/api/__test__/integration/reporting/cogs-projection-reconciliation.test.ts`
-  - [ ] 2.2 Post COGS via `postCogsForSale` with known item costs
-  - [ ] 2.3 Verify journal batch total matches posting result
-  - [ ] 2.4 Emit `__EPIC62_GATE__` JSON evidence
-  - [ ] 2.5 Verify deterministic output
+- [x] Task 1: Inventory valuation reconciliation test (AC: 1, 3, 4) — 5/5 pass
+  - [x] 1.1 Create `apps/api/__test__/integration/reporting/inventory-valuation-projection-reconciliation.test.ts`
+  - [x] 1.2 Implement zero-state test: variance == 0 with no items
+  - [x] 1.3 Implement seeded data test: items + cost layers → `getAllItemsCostSummary` matches raw SQL
+  - [x] 1.4 Emit `__EPIC62_GATE__` JSON evidence
+  - [x] 1.5 Verify deterministic output across repeated calls
+- [x] Task 2: COGS projection reconciliation test (AC: 2, 3, 4) — 5/5 pass
+  - [x] 2.1 Create `apps/api/__test__/integration/reporting/cogs-projection-reconciliation.test.ts`
+  - [x] 2.2 Post COGS via `postCogsForSale` with known item costs
+  - [x] 2.3 Verify journal batch total matches posting result
+  - [x] 2.4 Emit `__EPIC62_GATE__` JSON evidence
+  - [x] 2.5 Verify deterministic output
 
 ## Files to Create
 

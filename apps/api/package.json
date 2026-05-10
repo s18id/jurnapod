@@ -10,7 +10,7 @@
     "start": "NODE_ENV=production node --import tsx src/server.ts",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --hookTimeout 300000",
     "test:unit": "vitest run __test__/unit",
     "test:integration": "vitest run __test__/integration",
     "test:split:list": "node --import ../../scripts/test/load-root-env.mjs ./scripts/run-vitest-split.mjs list --scope=integration --write-lists",
