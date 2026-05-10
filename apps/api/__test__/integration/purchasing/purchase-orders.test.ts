@@ -24,6 +24,7 @@ let cashierToken: string;
 let cashierCompanyId: number;
 let testSupplierId: number;
 let poTagCounter = 0;
+const createdPOIds: number[] = [];
 const PURCHASE_ORDERS_SUITE_LOCK = 'jp_purchase_orders_suite_lock';
 
 async function acquirePurchaseOrdersSuiteLock() {
@@ -61,13 +62,14 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    // Clean up purchase orders created by this test
+    // Clean up purchase orders created by this test (targeted by ID to avoid gap locks)
     try {
       const db = getTestDb();
-      // @fixture-teardown-allowed rationale="cleanup only"
-      // Delete lines first (FK cascade should handle but be safe)
-      await sql`DELETE FROM purchase_order_lines WHERE company_id = ${cashierCompanyId}`.execute(db);
-      await sql`DELETE FROM purchase_orders WHERE company_id = ${cashierCompanyId}`.execute(db);
+      if (createdPOIds.length > 0) {
+        // Delete lines first, then headers
+        await sql`DELETE FROM purchase_order_lines WHERE purchase_order_id IN (${sql.join(createdPOIds)})`.execute(db);
+        await sql`DELETE FROM purchase_orders WHERE id IN (${sql.join(createdPOIds)})`.execute(db);
+      }
     } catch (e) {
       // ignore cleanup errors
     }
@@ -181,6 +183,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(body.data.lines).toHaveLength(2);
     // total = (10 * 10000 * 1.1) + (5 * 20000 * 1.1) = 110000 + 110000 = 220000
     expect(body.data.total_amount).toBe('220000.0000');
+    createdPOIds.push(body.data.id);
   });
 
   it('replays duplicate PO create by idempotency_key and returns same record', async () => {
@@ -221,6 +224,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
 
     expect(firstBody.data.id).toBe(secondBody.data.id);
     expect(firstBody.data.order_no).toBe(secondBody.data.order_no);
+    createdPOIds.push(firstBody.data.id);
 
     const db = getTestDb();
     const idemCount = await sql<{ c: string }>`
@@ -253,6 +257,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(body.success).toBe(true);
     expect(body.data.status).toBe('DRAFT');
     expect(body.data.lines).toHaveLength(1);
+    createdPOIds.push(body.data.id);
   });
 
   it('returns 400 for purchase order without lines', async () => {
@@ -365,6 +370,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const orderId = created.data.id;
+    createdPOIds.push(orderId);
 
     const res = await fetch(`${baseUrl}/api/purchasing/orders/${orderId}`, {
       method: 'GET',
@@ -412,6 +418,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const orderId = created.data.id;
+    createdPOIds.push(orderId);
 
     const res = await fetch(`${baseUrl}/api/purchasing/orders/${orderId}`, {
       method: 'PATCH',
@@ -445,6 +452,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const orderId = created.data.id;
+    createdPOIds.push(orderId);
 
     const res = await fetch(`${baseUrl}/api/purchasing/orders/${orderId}`, {
       method: 'PATCH',
@@ -475,6 +483,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const orderId = created.data.id;
+    createdPOIds.push(orderId);
     expect(created.data.total_amount).toBe('2000.0000');
 
     const patchRes = await fetch(`${baseUrl}/api/purchasing/orders/${orderId}`, {
@@ -514,6 +523,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const orderId = created.data.id;
+    createdPOIds.push(orderId);
 
     const res = await fetch(`${baseUrl}/api/purchasing/orders/${orderId}`, {
       method: 'PATCH',
@@ -543,6 +553,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const orderId = created.data.id;
+    createdPOIds.push(orderId);
 
     const res = await fetch(`${baseUrl}/api/purchasing/orders/${orderId}`, {
       method: 'PATCH',
@@ -577,6 +588,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const orderId = created.data.id;
+    createdPOIds.push(orderId);
 
     const res = await fetch(`${baseUrl}/api/purchasing/orders/${orderId}/status`, {
       method: 'PATCH',
@@ -608,6 +620,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const orderId = created.data.id;
+    createdPOIds.push(orderId);
 
     // Try invalid transition: DRAFT -> RECEIVED (must go through SENT first)
     const res = await fetch(`${baseUrl}/api/purchasing/orders/${orderId}/status`, {
@@ -682,6 +695,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const orderId = created.data.id;
+    createdPOIds.push(orderId);
 
     // Send the PO
     await fetch(`${baseUrl}/api/purchasing/orders/${orderId}/status`, {
@@ -724,8 +738,9 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const orderId = created.data.id;
+    createdPOIds.push(orderId);
 
-    // Send and mark partial received
+    // Send the PO
     await fetch(`${baseUrl}/api/purchasing/orders/${orderId}/status`, {
       method: 'PATCH',
       headers: {
@@ -773,6 +788,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     const orderId = created.data.id;
+    createdPOIds.push(orderId);
 
     // Cancel directly from DRAFT
     const res = await fetch(`${baseUrl}/api/purchasing/orders/${orderId}/status`, {
@@ -810,6 +826,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     const body = await res.json();
     expect(body.data.lines[0].line_total).toBe('1100.0000');
     expect(body.data.total_amount).toBe('1100.0000');
+    createdPOIds.push(body.data.id);
   });
 
   it('computes multiple line totals correctly', async () => {
@@ -832,6 +849,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     const body = await res.json();
     expect(body.data.lines).toHaveLength(2);
     expect(body.data.total_amount).toBe('2100.0000');
+    createdPOIds.push(body.data.id);
   });
 
   // -------------------------------------------------------------------------
@@ -853,5 +871,6 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body.data.currency_code).toBe('IDR');
+    createdPOIds.push(body.data.id);
   });
 });

@@ -31,6 +31,8 @@ let cashierCompanyId: number;
 let testSupplierId: number;
 let testItemId: number;
 let grTagCounter = 0;
+const createdGRIds: number[] = [];
+const createdPOIds: number[] = [];
 const GOODS_RECEIPTS_SUITE_LOCK = 'jp_goods_receipts_suite_lock';
 
 async function acquireGoodsReceiptsSuiteLock() {
@@ -71,15 +73,17 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    // Clean up goods receipts and PO lines created by this test
+    // Clean up goods receipts and purchase orders created by this test (targeted by ID to avoid gap locks)
     try {
       const db = getTestDb();
-      // @fixture-teardown-allowed rationale="cleanup only"
-      await sql`DELETE FROM goods_receipt_lines WHERE company_id = ${cashierCompanyId}`.execute(db);
-      await sql`DELETE FROM goods_receipts WHERE company_id = ${cashierCompanyId}`.execute(db);
-      // @fixture-teardown-allowed rationale="cleanup only"
-      await sql`DELETE FROM purchase_order_lines WHERE company_id = ${cashierCompanyId}`.execute(db);
-      await sql`DELETE FROM purchase_orders WHERE company_id = ${cashierCompanyId}`.execute(db);
+      if (createdGRIds.length > 0) {
+        await sql`DELETE FROM goods_receipt_lines WHERE goods_receipt_id IN (${sql.join(createdGRIds)})`.execute(db);
+        await sql`DELETE FROM goods_receipts WHERE id IN (${sql.join(createdGRIds)})`.execute(db);
+      }
+      if (createdPOIds.length > 0) {
+        await sql`DELETE FROM purchase_order_lines WHERE purchase_order_id IN (${sql.join(createdPOIds)})`.execute(db);
+        await sql`DELETE FROM purchase_orders WHERE id IN (${sql.join(createdPOIds)})`.execute(db);
+      }
     } catch (e) {
       // ignore cleanup errors
     }
@@ -107,6 +111,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     const po = await poRes.json();
     expect(po.data.status).toBe('DRAFT');
     const poId = po.data.id;
+    createdPOIds.push(poId);
 
     // Transition to SENT
     const statusRes = await fetch(`${baseUrl}/api/purchasing/orders/${poId}/status`, {
@@ -193,7 +198,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     const supplierId = testSupplierId;
     const po = await createSentPO(supplierId, [{ qty: '10', unit_price: '1000.00' }]);
 
-    await fetch(`${baseUrl}/api/purchasing/receipts`, {
+    const grCreateRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -203,6 +208,11 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
         lines: [{ po_line_id: po.lineIds[0], qty: '5' }]
       })
     });
+    // Track GR ID for cleanup
+    if (grCreateRes.status === 201) {
+      const grBody = await grCreateRes.json();
+      createdGRIds.push(grBody.data.id);
+    }
 
     const res = await fetch(`${baseUrl}/api/purchasing/receipts?supplier_id=${supplierId}`, {
       method: 'GET',
@@ -233,6 +243,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
     expect(created.data.status).toBe('RECEIVED');
+    createdGRIds.push(created.data.id);
 
     const getRes = await fetch(`${baseUrl}/api/purchasing/receipts/${created.data.id}`, {
       method: 'GET',
@@ -286,6 +297,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     expect(body.data.lines).toHaveLength(2);
     expect(body.data.lines[0].over_receipt_allowed).toBe(false);
     expect(body.data.lines[1].over_receipt_allowed).toBe(false);
+    createdGRIds.push(body.data.id);
 
     // Verify PO received_qty was updated
     const poCheck = await fetch(`${baseUrl}/api/purchasing/orders/${po.orderId}`, {
@@ -331,6 +343,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
 
     expect(firstBody.data.id).toBe(secondBody.data.id);
     expect(firstBody.data.reference_number).toBe(secondBody.data.reference_number);
+    createdGRIds.push(firstBody.data.id);
     expect(firstBody.data.warnings).toBeDefined();
     expect(Array.isArray(firstBody.data.warnings)).toBe(true);
     expect(firstBody.data.warnings.length).toBeGreaterThan(0);
@@ -372,6 +385,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     expect(body.data.lines[0].item_id).toBe(testItemId);
     expect(body.data.lines[0].po_line_id).toBeNull();
     expect(body.data.po_reference).toBeNull();
+    createdGRIds.push(body.data.id);
   });
 
   // -------------------------------------------------------------------------
@@ -398,6 +412,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body.data.status).toBe('RECEIVED'); // GR itself is always RECEIVED
+    createdGRIds.push(body.data.id);
 
     // Check PO status auto-transitioned to PARTIAL_RECEIVED
     const poCheck = await fetch(`${baseUrl}/api/purchasing/orders/${po.orderId}`, {
@@ -427,6 +442,8 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     });
 
     expect(res.status).toBe(201);
+    const grBody = await res.json();
+    createdGRIds.push(grBody.data.id);
 
     const poCheck = await fetch(`${baseUrl}/api/purchasing/orders/${po.orderId}`, {
       method: 'GET',
@@ -463,6 +480,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     expect(body.data.warnings.length).toBeGreaterThan(0);
     expect(body.data.warnings[0]).toContain('exceeds remaining PO qty');
     expect(body.data.lines[0].over_receipt_allowed).toBe(true);
+    createdGRIds.push(body.data.id);
 
     // Verify PO received_qty was updated (8 > 5 remaining)
     const poCheck = await fetch(`${baseUrl}/api/purchasing/orders/${po.orderId}`, {
@@ -492,6 +510,8 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     });
 
     expect(res.status).toBe(201);
+    const grBody = await res.json();
+    createdGRIds.push(grBody.data.id);
 
     const poCheck = await fetch(`${baseUrl}/api/purchasing/orders/${po.orderId}`, {
       method: 'GET',
@@ -522,6 +542,8 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     });
 
     expect(res.status).toBe(201);
+    const grBody = await res.json();
+    createdGRIds.push(grBody.data.id);
 
     const poCheck = await fetch(`${baseUrl}/api/purchasing/orders/${po.orderId}`, {
       method: 'GET',
@@ -564,6 +586,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     expect(poRes.status).toBe(201);
     const po = await poRes.json();
     expect(po.data.status).toBe('DRAFT');
+    createdPOIds.push(po.data.id);
 
     // Try to create GR against DRAFT PO
     const grRes = await fetch(`${baseUrl}/api/purchasing/receipts`, {
@@ -594,6 +617,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     });
     const po1 = await po1Res.json();
     expect(po1.data.status).toBe('DRAFT');
+    createdPOIds.push(po1.data.id);
 
     // Transition to SENT
     await fetch(`${baseUrl}/api/purchasing/orders/${po1.data.id}/status`, {
@@ -654,6 +678,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
       })
     });
     const po = await poRes.json();
+    createdPOIds.push(po.data.id);
 
     // Transition to SENT
     await fetch(`${baseUrl}/api/purchasing/orders/${po.data.id}/status`, {
