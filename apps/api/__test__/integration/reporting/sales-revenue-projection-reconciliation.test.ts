@@ -233,6 +233,17 @@ describe("sales-revenue-projection-reconciliation", { timeout: 60000 }, () => {
       const variance = glRevenue - glAltRevenue;
       expect(variance).toBe(0);
       expect(glRevenue).toBe(CREDIT_AMOUNT);
+
+      // EPIC62 GATE evidence
+      console.log(JSON.stringify({
+        gate: "__EPIC62_GATE__",
+        test: expect.getState().currentTestName,
+        projection: "sales-revenue",
+        gl_revenue: glRevenue,
+        gl_alt_revenue: glAltRevenue,
+        variance: variance.toFixed(4),
+        timestamp: new Date().toISOString(),
+      }));
     });
 
     // ---------------------------------------------------------------------------

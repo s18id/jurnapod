@@ -701,7 +701,7 @@ development_status:
   62-3-treasury-sales-revenue-projection-accuracy: review
   62-4-projection-read-only-boundary-acl-enforcement: review
   62-5-reporting-code-migration-to-packages: review
-  62-6-gate-validation-automation-exit-evidence: ready-for-dev
+  62-6-gate-validation-automation-exit-evidence: review
   62-7-deferred-debt-closure-final-cleanup: ready-for-dev
 
   epic-61-retrospective: done
