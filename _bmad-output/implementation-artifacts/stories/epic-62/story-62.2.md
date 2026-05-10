@@ -1,6 +1,6 @@
 # Story 62.2: Inventory & COGS Projection Accuracy
 
-**Status:** review
+**Status:** done
 
 > **Sprint-Status Append-Only Rule (E45-A1 / E46-A1) — MANDATORY:**
 > - **REQUIRED**: `npx tsx scripts/update-sprint-status.ts --epic 62 --story 62-2 --title inventory-cogs-projection-accuracy --status done`

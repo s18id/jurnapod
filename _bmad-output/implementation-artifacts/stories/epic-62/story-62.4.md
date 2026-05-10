@@ -1,6 +1,6 @@
 # Story 62.4: Projection READ-Only Boundary + ACL Enforcement
 
-**Status:** review
+**Status:** done
 
 > **Sprint-Status Append-Only Rule (E45-A1 / E46-A1) — MANDATORY:**
 > - **REQUIRED**: `npx tsx scripts/update-sprint-status.ts --epic 62 --story 62-4 --title projection-read-only-boundary-acl-enforcement --status done`

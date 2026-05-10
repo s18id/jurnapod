@@ -1,6 +1,6 @@
 # Story 62.3: Treasury & Sales Revenue Projection Accuracy
 
-**Status:** review
+**Status:** done
 
 > **Sprint-Status Append-Only Rule (E45-A1 / E46-A1) — MANDATORY:**
 > - **REQUIRED**: `npx tsx scripts/update-sprint-status.ts --epic 62 --story 62-3 --title treasury-sales-revenue-projection-accuracy --status done`

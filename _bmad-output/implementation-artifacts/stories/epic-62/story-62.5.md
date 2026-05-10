@@ -1,6 +1,6 @@
 # Story 62.5: Reporting Code Migration to Packages
 
-**Status:** review
+**Status:** done
 
 > **Sprint-Status Append-Only Rule (E45-A1 / E46-A1) — MANDATORY:**
 > - **REQUIRED**: `npx tsx scripts/update-sprint-status.ts --epic 62 --story 62-5 --title reporting-code-migration-to-packages --status done`

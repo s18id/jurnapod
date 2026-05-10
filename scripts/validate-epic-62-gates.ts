@@ -72,7 +72,7 @@ async function main(): Promise<number> {
     const filePath = inputArg.slice('--input='.length);
     if (!fs.existsSync(filePath)) {
       console.error(`Error: File not found: ${filePath}`);
-      return 2;
+      return 1;
     }
     input = fs.readFileSync(filePath, 'utf-8');
   } else {
@@ -92,7 +92,7 @@ async function main(): Promise<number> {
   if (gates.length === 0) {
     console.error('FAIL: No __EPIC62_GATE__ evidence found in input.');
     console.error('Expected projections:', [...EXPECTED_PROJECTIONS].join(', '));
-    return 2;
+    return 1;
   }
 
   // ── Check all expected projections are present ─────────────────────────
@@ -137,5 +137,5 @@ main()
   .then((code) => process.exit(code))
   .catch((err) => {
     console.error('Fatal error:', err);
-    process.exit(2);
+    process.exit(1);
   });

@@ -168,7 +168,9 @@ describe("ap-aging-projection-reconciliation", { timeout: 60000 }, () => {
         const supplierResult = await sql<{ id: number }>`
           SELECT id FROM suppliers WHERE company_id = ${isolatedCompanyId} AND code = ${supplierCode}
         `.execute(db);
-        const supplierId = Number(supplierResult.rows[0]!.id);
+        const supplierRow = supplierResult.rows[0];
+        expect(supplierRow, "supplier must exist after INSERT").toBeDefined();
+        const supplierId = Number(supplierRow!.id);
 
         // Insert a POSTED purchase invoice (exchange_rate = 1 for base currency IDR)
         await sql`
@@ -179,7 +181,9 @@ describe("ap-aging-projection-reconciliation", { timeout: 60000 }, () => {
         const invoiceResult = await sql<{ id: number }>`
           SELECT id FROM purchase_invoices WHERE company_id = ${isolatedCompanyId} AND invoice_no = ${`PINV-${tag}`}
         `.execute(db);
-        const invoiceId = Number(invoiceResult.rows[0]!.id);
+        const invoiceRow = invoiceResult.rows[0];
+        expect(invoiceRow, "invoice must exist after INSERT").toBeDefined();
+        const invoiceId = Number(invoiceRow!.id);
 
         // Insert matching GL journal batch
         const batchResult = await sql<{ insertId: number }>`
@@ -285,7 +289,9 @@ describe("ap-aging-projection-reconciliation", { timeout: 60000 }, () => {
         const supplierResult = await sql<{ id: number }>`
           SELECT id FROM suppliers WHERE company_id = ${isolatedCompanyId} AND code = ${supplierCode}
         `.execute(db);
-        const supplierId = Number(supplierResult.rows[0]!.id);
+        const supplierRow2 = supplierResult.rows[0];
+        expect(supplierRow2, "supplier must exist after INSERT").toBeDefined();
+        const supplierId = Number(supplierRow2!.id);
 
         // Insert POSTED purchase invoice
         await sql`
@@ -296,7 +302,9 @@ describe("ap-aging-projection-reconciliation", { timeout: 60000 }, () => {
         const invoiceResult = await sql<{ id: number }>`
           SELECT id FROM purchase_invoices WHERE company_id = ${isolatedCompanyId} AND invoice_no = ${`PINV-${tag}`}
         `.execute(db);
-        const invoiceId = Number(invoiceResult.rows[0]!.id);
+        const invoiceRow2 = invoiceResult.rows[0];
+        expect(invoiceRow2, "invoice must exist after INSERT").toBeDefined();
+        const invoiceId = Number(invoiceRow2!.id);
 
         // Insert ap_payment (POSTED status = 20)
         const paymentNo = `APPAY-${tag}`.slice(0, 32);

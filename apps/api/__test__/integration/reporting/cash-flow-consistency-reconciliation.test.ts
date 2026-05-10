@@ -24,7 +24,6 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "kysely";
 import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
 import { closeTestDb, getTestDb } from "../../helpers/db";
-import { getTestBaseUrl } from "../../helpers/env";
 import {
   createTestCompanyMinimal,
   createTestOutletMinimal,
@@ -34,7 +33,6 @@ import {
   assignUserGlobalRole,
   assignUserOutletRole,
   setModulePermission,
-  loginForTest,
   cleanupTestFixtures,
 } from "../../fixtures";
 import { makeTag } from "../../helpers/tags";
@@ -87,10 +85,6 @@ describe("cash-flow-consistency-reconciliation", { timeout: 60000 }, () => {
       allowSystemRoleMutation: true,
     });
     await assignUserOutletRole(user.id, roleId, outlet.id);
-
-    // Login for auth consistency with other reconciliation tests
-    const baseUrl = getTestBaseUrl();
-    void await loginForTest(baseUrl, company.code, email, "TestPassword123!");
 
     // Create two bank accounts for source/destination on transactions
     // (check constraint: source_account_id <> destination_account_id)

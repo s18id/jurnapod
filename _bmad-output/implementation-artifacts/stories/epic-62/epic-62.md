@@ -1,6 +1,6 @@
 # Epic 62: Projection Correctness Hardening
 
-**Status:** ready-for-dev
+**Status:** done
 **Sprint:** 62
 **Theme:** Prove read-model projections produce zero material variance against source-of-truth (GL, inventory, AR/AP, treasury, sales). Enforce READ-only boundary. Migrate remaining reporting code to canonical packages.
 **Primary Modules:** `apps/api`, `packages/modules/reporting`, `packages/telemetry`, `packages/shared`
@@ -9,7 +9,25 @@
 
 ---
 
-## 0) Predecessor Unblock
+## 8) Code Review Findings
+
+### Decision-Needed (resolved)
+- [x] Sales revenue AC2: GL self-consistency check accepted. Daily-sales reads `pos_transactions` not `journal_lines` — GL test is valid cross-query verification.
+- [x] Inventory valuation: Library-level test accepted. No HTTP endpoint for `getAllItemsCostSummary()` — direct call is appropriate for pure computation.
+- [x] FR5 spec deviation: `report-context.ts`, `error-handler.ts`, `telemetry.ts` kept in `lib/reports/` subdirectory (not packages). Hono-dependent code belongs in API layer per `lib/accounting/` pattern.
+
+### Patch Fixes Applied
+- [x] Gate script exit codes: Changed `return 2` → `return 1` (Unix convention consistency)
+- [x] Cash-flow test: Removed unused `loginForTest` and `getTestBaseUrl` imports (unnecessary HTTP call, token discarded)
+
+### Deferred (pre-existing, not caused by this epic)
+- [x] Test timeout 60s may not cover lock contention worst case — pre-existing pattern
+- [x] ER_DUP_ENTRY fix at 3 layers (route/service/test) — pre-existing DRY violation
+- [x] `/api/health` polling race — mitigated with 500ms single-attempt
+- [x] `Number()` on DECIMAL strings without rounding — pre-existing pattern across all tests
+- [x] `makeTag` uniqueness under concurrent runs — pre-existing, slice(0,20) collisions possible  
+
+---
 
 Epic 62 MUST NOT begin before Epic 61 action items are complete.
 

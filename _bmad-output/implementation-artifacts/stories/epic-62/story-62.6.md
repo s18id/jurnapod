@@ -1,6 +1,6 @@
 # Story 62.6: Gate Validation Automation + Exit Evidence
 
-**Status:** review
+**Status:** done
 
 > **Sprint-Status Append-Only Rule (E45-A1 / E46-A1) — MANDATORY:**
 > - **REQUIRED**: `npx tsx scripts/update-sprint-status.ts --epic 62 --story 62-6 --title gate-validation-automation-exit-evidence --status done`
