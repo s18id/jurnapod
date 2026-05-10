@@ -15,7 +15,7 @@
  */
 
 import type { Context } from "hono";
-import { logWithTelemetry } from "../middleware/telemetry";
+import { logWithTelemetry } from "../../middleware/telemetry";
 import { nowUTC } from "@/lib/date-helpers";
 
 // Re-export from modules-reporting for convenience

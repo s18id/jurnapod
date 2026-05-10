@@ -17,7 +17,7 @@ import {
   emitReportMetrics,
   QUERY_TIMEOUT_MS,
   type ReportType,
-} from "@/lib/report-telemetry";
+} from "@/lib/reports/telemetry";
 import { FiscalYearSelectionError } from "@/lib/fiscal-years";
 import { errorResponse } from "@/lib/response";
 

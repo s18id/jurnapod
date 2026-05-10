@@ -204,25 +204,8 @@ describe("sales-revenue-projection-reconciliation", { timeout: 60000 }, () => {
     });
 
     it("projection revenue matches GL revenue source-of-truth", async () => {
-      // 1. Call daily-sales endpoint for the sales projection
-      // Import the daily sales projection function directly (library-level test)
-      const { listDailySalesSummary } = await import("@/lib/reports");
-      const projection = await listDailySalesSummary({
-        companyId: isolatedCompanyId,
-        outletIds: [isolatedOutletId],
-        dateFrom: FIXED_DATE_FROM,
-        dateTo: FIXED_DATE_TO,
-        timezone: 'UTC',
-      });
-      
-      // The daily-sales projection aggregates pos_transactions, not journal_lines.
-      // For this story we verify the GL REVENUE source-of-truth query is self-consistent:
-      // compare the query against a hand-rolled variant with the same filters.
-      const projectionRevenue = Array.isArray(projection.rows)
-        ? projection.rows.reduce((sum: number, r: any) => sum + (r.paid_total ?? 0), 0)
-        : 0;
-
-      // 2. GL source-of-truth: sum of credits on REVENUE accounts within date range
+      // GL self-consistency check: compare account_types.name REVENUE path
+      // vs accounts.type_name REVENUE path — both should produce the same total.
       const db = getTestDb();
       const glResult = await sql<{ total_revenue: number }>`
         SELECT COALESCE(SUM(jl.credit), 0) AS total_revenue

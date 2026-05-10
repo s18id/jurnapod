@@ -38,23 +38,37 @@ import {
   getGeneralLedgerDetail,
   getReceivablesAgeingReport,
   getTrialBalanceWorksheet,
-  customerExistsInCompany,
-} from "@/lib/reports";
+} from "@jurnapod/modules-reporting";
 import {
   reportQuerySchema,
   reportPaginationSchema,
   buildReportContext,
   parseReportQuery,
-} from "@/lib/report-context";
+} from "@/lib/reports/context";
 import {
   executeReport,
   emitReportSuccess,
   handleReportError,
-} from "@/lib/report-error-handler";
+} from "@/lib/reports/error-handler";
 import { getCompanyService } from "@/lib/companies";
 import type { AuthContext } from "@/lib/auth-guard";
-import type { ReportType } from "@/lib/report-telemetry";
+import type { ReportType } from "@/lib/reports/telemetry";
+import { getDb } from "@/lib/db";
 import { UtcIsoSchema, nowUTC, fromUtcIso } from "@/lib/date-helpers";
+
+/**
+ * Verify customer belongs to company (thin DB helper, inlined from former lib/reports.ts)
+ */
+async function customerExistsInCompany(companyId: number, customerId: number): Promise<boolean> {
+  const db = getDb();
+  const customer = await db
+    .selectFrom("customers")
+    .select(["id"])
+    .where("company_id", "=", companyId)
+    .where("id", "=", customerId)
+    .executeTakeFirst();
+  return Boolean(customer);
+}
 
 const reportRoutes = new Hono();
 
