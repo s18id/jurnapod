@@ -39,7 +39,14 @@ export async function acquireReadLock(): Promise<void> {
 
   const properLockfile = await import("proper-lockfile");
   // proper-lockfile exports a callable interface; use the lock named export for clarity
-  _release = await properLockfile.lock(LOCK_FILE, { retries: 10 });
+  _release = await properLockfile.lock(LOCK_FILE, {
+    retries: {
+      retries: 30,
+      minTimeout: 100,
+      maxTimeout: 5000,
+      factor: 1.5,
+    },
+  });
 }
 
 export async function releaseReadLock(): Promise<void> {

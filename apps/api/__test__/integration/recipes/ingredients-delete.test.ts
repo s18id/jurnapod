@@ -19,7 +19,7 @@ import { makeTag } from '../../helpers/tags';
 let baseUrl: string;
 let accessToken: string;
 
-describe('inventory.recipes.ingredients.delete', { timeout: 30000 }, () => {
+describe('inventory.recipes.ingredients.delete', { timeout: 60000 }, () => {
   let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
   const getSeedSyncContext = async () => seedCtx;
 

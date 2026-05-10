@@ -22,7 +22,7 @@ let accessToken: string;
 let authTestIngredientItemId: number;
 let authTestRecipeId: number;
 
-describe('inventory.recipes.ingredients.create', { timeout: 30000 }, () => {
+describe('inventory.recipes.ingredients.create', { timeout: 60000 }, () => {
   let seedCtx: Awaited<ReturnType<typeof loadSeedSyncContext>>;
   const getSeedSyncContext = async () => seedCtx;
 
