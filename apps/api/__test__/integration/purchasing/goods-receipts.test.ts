@@ -54,6 +54,25 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     const context = await getSeedSyncContext();
     cashierCompanyId = context.companyId;
 
+    // Pre-clean orphaned GRs and POs from previous crashed runs (Fix C).
+    // Without this, ER_DUP_ENTRY recovery (Fix B) returns the stale GR, whose
+    // PO line IDs do not match newly-created POs, leaving received_qty at 0.
+    try {
+      const db = getTestDb();
+      await sql`DELETE grl FROM goods_receipt_lines grl
+        INNER JOIN goods_receipts gr ON grl.receipt_id = gr.id
+        WHERE gr.company_id = ${cashierCompanyId}`.execute(db);
+      await sql`DELETE FROM goods_receipts
+        WHERE company_id = ${cashierCompanyId}`.execute(db);
+      await sql`DELETE pol FROM purchase_order_lines pol
+        INNER JOIN purchase_orders po ON pol.order_id = po.id
+        WHERE po.company_id = ${cashierCompanyId}`.execute(db);
+      await sql`DELETE FROM purchase_orders
+        WHERE company_id = ${cashierCompanyId}`.execute(db);
+    } catch (_e) {
+      // best-effort; ignore if tables don't exist yet
+    }
+
     const cashier = await getOrCreateTestCashierForPermission(
       cashierCompanyId,
       process.env.JP_COMPANY_CODE ?? 'JP',

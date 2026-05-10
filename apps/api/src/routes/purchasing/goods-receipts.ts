@@ -206,6 +206,11 @@ receiptRoutes.post("/", async (c) => {
       if (["INVALID_PO_STATUS", "SUPPLIER_MISMATCH", "ITEM_MISMATCH"].includes(err.code)) {
         return errorResponse("INVALID_REQUEST", err.message ?? "Invalid operation", 400);
       }
+      const mysqlErr = error as { code: string; errno?: number };
+      if (mysqlErr.code === "ER_DUP_ENTRY" || mysqlErr.errno === 1062) {
+        return errorResponse("DUPLICATE_REFERENCE",
+          "A goods receipt with this reference number already exists", 409);
+      }
     }
     console.error("POST /purchasing/receipts failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to create goods receipt", 500);

@@ -445,23 +445,44 @@ export class GoodsReceiptService {
       return { insertedId, overReceiptWarnings };
       });
     } catch (error: unknown) {
-      if (input.idempotency_key && typeof error === "object" && error !== null) {
+      if (typeof error === "object" && error !== null) {
         const mysqlErr = error as { errno?: number; code?: string };
         const isDuplicate = mysqlErr.errno === 1062 || mysqlErr.code === "ER_DUP_ENTRY";
         if (isDuplicate) {
-          const existingByIdempotency = await this.db
+          // Try idempotency_key lookup first
+          if (input.idempotency_key) {
+            const existingByIdempotency = await this.db
+              .selectFrom("goods_receipts")
+              .where("company_id", "=", companyId)
+              .where("idempotency_key", "=", input.idempotency_key)
+              .select(["id", "idempotency_warnings_json"])
+              .executeTakeFirst();
+
+            if (existingByIdempotency) {
+              const existingReceipt = await this.getGoodsReceiptById(companyId, Number(existingByIdempotency.id));
+              if (existingReceipt) {
+                return {
+                  receipt: existingReceipt,
+                  warnings: parseIdempotencyWarningsJson(existingByIdempotency.idempotency_warnings_json),
+                };
+              }
+            }
+          }
+
+          // Fallback: lookup by reference_number when collision is on the unique reference_number
+          const existingByRef = await this.db
             .selectFrom("goods_receipts")
             .where("company_id", "=", companyId)
-            .where("idempotency_key", "=", input.idempotency_key)
+            .where("reference_number", "=", input.reference_number)
             .select(["id", "idempotency_warnings_json"])
             .executeTakeFirst();
 
-          if (existingByIdempotency) {
-            const existingReceipt = await this.getGoodsReceiptById(companyId, Number(existingByIdempotency.id));
+          if (existingByRef) {
+            const existingReceipt = await this.getGoodsReceiptById(companyId, Number(existingByRef.id));
             if (existingReceipt) {
               return {
                 receipt: existingReceipt,
-                warnings: parseIdempotencyWarningsJson(existingByIdempotency.idempotency_warnings_json),
+                warnings: parseIdempotencyWarningsJson(existingByRef.idempotency_warnings_json),
               };
             }
           }
