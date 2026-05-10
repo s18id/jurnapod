@@ -698,7 +698,7 @@ development_status:
   epic-62: ready-for-dev
   62-1-projection-source-of-truth-boundary-map-ar-ap-accuracy: review
   62-2-inventory-cogs-projection-accuracy: review
-  62-3-treasury-sales-revenue-projection-accuracy: ready-for-dev
+  62-3-treasury-sales-revenue-projection-accuracy: review
   62-4-projection-read-only-boundary-acl-enforcement: ready-for-dev
   62-5-reporting-code-migration-to-packages: ready-for-dev
   62-6-gate-validation-automation-exit-evidence: ready-for-dev
