@@ -23,3 +23,4 @@ export * from "./test-fixtures/index.js";
 
 // Standalone DB functions (reusable by test fixtures)
 export { insertCustomer } from "./services/platform-db.js";
+export { insertOutlet } from "./outlet-db.js";

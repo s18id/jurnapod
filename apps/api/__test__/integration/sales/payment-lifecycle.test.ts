@@ -30,6 +30,7 @@ import {
   getOrCreateTestCashierForPermission,
 } from '../../fixtures';
 import { buildPermissionMask } from '@jurnapod/auth';
+import { JournalsService } from '@jurnapod/modules-accounting';
 import { createAndPostPayment as sharedCreateAndPostPayment } from '../../helpers/sales-flows';
 import { makeTag } from '../../helpers/tags';
 import { initializeDefaultTemplates } from '../../../src/lib/numbering';
@@ -310,26 +311,24 @@ describe('sales.payment-lifecycle - Story 61.2', { timeout: 60000 }, () => {
     return { status: res.status, body };
   }
 
+  function getJournalsService(): JournalsService {
+    return new JournalsService(getTestDb());
+  }
+
   async function getJournalBatchesForPayment(paymentId: number): Promise<any[]> {
-    const db = getTestDb();
-    return db
-      .selectFrom('journal_batches as jb')
-      .innerJoin('journal_lines as jl', 'jl.journal_batch_id', 'jb.id')
-      .select([
-        'jb.id',
-        'jb.doc_type',
-        'jb.posted_at',
-        'jb.doc_id',
-      ])
-      .select(({ fn }) => [
-        fn.sum('jl.debit').as('total_debit'),
-        fn.sum('jl.credit').as('total_credit'),
-      ])
-      .where('jb.doc_id', '=', paymentId)
-      .where('jb.doc_type', 'in', ['SALES_PAYMENT_IN', 'SALES_PAYMENT_VOID'])
-      .groupBy(['jb.id', 'jb.doc_type', 'jb.posted_at', 'jb.doc_id'])
-      .orderBy('jb.id')
-      .execute();
+    const svc = getJournalsService();
+    const batches = await svc.listJournalBatches({ company_id: companyId, limit: 1000, offset: 0 });
+    return batches
+      .filter(b => b.doc_id === paymentId && ['SALES_PAYMENT_IN', 'SALES_PAYMENT_VOID'].includes(b.doc_type))
+      .map(b => ({
+        id: b.id,
+        doc_type: b.doc_type,
+        posted_at: b.posted_at,
+        doc_id: b.doc_id,
+        total_debit: b.lines.reduce((sum: number, l: any) => sum + l.debit, 0),
+        total_credit: b.lines.reduce((sum: number, l: any) => sum + l.credit, 0),
+      }))
+      .sort((a, b) => a.id - b.id);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

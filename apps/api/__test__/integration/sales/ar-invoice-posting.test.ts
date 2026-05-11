@@ -30,7 +30,7 @@ import {
 } from '../../fixtures';
 import { buildPermissionMask } from '@jurnapod/auth';
 import { createPostedInvoice as sharedCreatePostedInvoice } from '../../helpers/sales-flows';
-import { sql } from 'kysely';
+import { JournalsService } from '@jurnapod/modules-accounting';
 import { getTestDb } from '../../helpers/db';
 
 let baseUrl: string;
@@ -135,30 +135,30 @@ describe('sales.ar-invoice-posting - Story 57.2', { timeout: 60000 }, () => {
     });
   }
 
+  function getJournalsService(): JournalsService {
+    return new JournalsService(getTestDb());
+  }
+
   async function getJournalBatchForRef(companyId: number, referenceType: string, referenceId: number) {
-    const db = getTestDb();
-    // journal_batches links to source docs via (doc_type, doc_id) — doc_type = referenceType
-    const rows = await sql`
-      SELECT id, doc_type, doc_id, company_id
-      FROM journal_batches
-      WHERE company_id = ${companyId}
-        AND doc_type = ${referenceType}
-        AND doc_id = ${referenceId}
-      ORDER BY id DESC
-      LIMIT 1
-    `.execute(db);
-    return rows.rows[0] as {
-      id: number; doc_type: string; doc_id: number; company_id: number;
-    } | undefined;
+    const svc = getJournalsService();
+    const batches = await svc.listJournalBatches({
+      company_id: companyId,
+      doc_type: referenceType,
+      limit: 1000,
+      offset: 0,
+    });
+    return batches.find(b => b.doc_id === referenceId);
   }
 
   async function countJournalBatchesForRef(companyId: number, docType: string, docId: number): Promise<number> {
-    const db = getTestDb();
-    const rows = await sql`
-      SELECT COUNT(*) as cnt FROM journal_batches
-      WHERE company_id = ${companyId} AND doc_type = ${docType} AND doc_id = ${docId}
-    `.execute(db);
-    return Number((rows.rows[0] as { cnt: number }).cnt);
+    const svc = getJournalsService();
+    const batches = await svc.listJournalBatches({
+      company_id: companyId,
+      doc_type: docType,
+      limit: 1000,
+      offset: 0,
+    });
+    return batches.filter(b => b.doc_id === docId).length;
   }
 
   // ─── AC1 ─────────────────────────────────────────────────────────────────────
@@ -194,32 +194,25 @@ describe('sales.ar-invoice-posting - Story 57.2', { timeout: 60000 }, () => {
     const batch = await getJournalBatchForRef(companyAId, 'SALES_INVOICE', invoiceId);
     expect(batch).toBeDefined();
 
-    const db = getTestDb();
-    const lines = await sql`
-      SELECT account_id, debit, credit
-      FROM journal_lines
-      WHERE journal_batch_id = ${batch!.id}
-      ORDER BY id
-    `.execute(db);
-    expect(lines.rows.length).toBeGreaterThanOrEqual(2);
+    const lines = batch!.lines;
+    expect(lines.length).toBeGreaterThanOrEqual(2);
 
-    // Calculate totals from lines (journal_batches has no total_debit/total_credit)
+    // Calculate totals from lines
     let totalDebit = 0;
     let totalCredit = 0;
-    for (const line of lines.rows) {
-      const l = line as { debit: string; credit: string };
-      totalDebit += Number(l.debit);
-      totalCredit += Number(l.credit);
+    for (const line of lines) {
+      totalDebit += line.debit;
+      totalCredit += line.credit;
     }
     expect(totalDebit).toBe(1500000);
     expect(totalDebit).toBe(totalCredit);
 
-    const debitLine = lines.rows.find(l => Number((l as { debit: string }).debit) > 0);
-    const creditLine = lines.rows.find(l => Number((l as { credit: string }).credit) > 0);
+    const debitLine = lines.find(l => l.debit > 0);
+    const creditLine = lines.find(l => l.credit > 0);
     expect(debitLine).toBeDefined();
     expect(creditLine).toBeDefined();
-    expect(Number((debitLine as { debit: string }).debit)).toBe(1500000);
-    expect(Number((creditLine as { credit: string }).credit)).toBe(1500000);
+    expect(debitLine!.debit).toBe(1500000);
+    expect(creditLine!.credit).toBe(1500000);
   });
 
   // ─── AC2 ─────────────────────────────────────────────────────────────────────
@@ -336,31 +329,24 @@ describe('sales.ar-invoice-posting - Story 57.2', { timeout: 60000 }, () => {
     const batch = await getJournalBatchForRef(companyAId, 'SALES_PAYMENT_IN', paymentId);
     expect(batch).toBeDefined();
 
-    const db = getTestDb();
-    const lines = await sql`
-      SELECT account_id, debit, credit
-      FROM journal_lines
-      WHERE journal_batch_id = ${batch!.id}
-      ORDER BY id
-    `.execute(db);
-    expect(lines.rows.length).toBeGreaterThanOrEqual(2);
+    const lines = batch!.lines;
+    expect(lines.length).toBeGreaterThanOrEqual(2);
 
     let totalDebit = 0;
     let totalCredit = 0;
-    for (const line of lines.rows) {
-      const l = line as { debit: string; credit: string };
-      totalDebit += Number(l.debit);
-      totalCredit += Number(l.credit);
+    for (const line of lines) {
+      totalDebit += line.debit;
+      totalCredit += line.credit;
     }
     expect(totalDebit).toBe(500000);
     expect(totalDebit).toBe(totalCredit);
 
-    const debitLine = lines.rows.find(l => Number((l as { debit: string }).debit) > 0);
-    const creditLine = lines.rows.find(l => Number((l as { credit: string }).credit) > 0);
+    const debitLine = lines.find(l => l.debit > 0);
+    const creditLine = lines.find(l => l.credit > 0);
     expect(debitLine).toBeDefined();
     expect(creditLine).toBeDefined();
-    expect(Number((debitLine as { debit: string }).debit)).toBe(500000);
-    expect(Number((creditLine as { credit: string }).credit)).toBe(500000);
+    expect(debitLine!.debit).toBe(500000);
+    expect(creditLine!.credit).toBe(500000);
   });
 
   // ─── AC4 ─────────────────────────────────────────────────────────────────────

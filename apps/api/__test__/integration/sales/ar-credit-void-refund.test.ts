@@ -7,6 +7,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "kysely";
+import { JournalsService } from "@jurnapod/modules-accounting";
 import { getTestBaseUrl } from "../../helpers/env";
 import { closeTestDb, getTestDb } from "../../helpers/db";
 import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
@@ -145,27 +146,30 @@ describe("sales.ar-credit-void-refund - Story 57.3", { timeout: 90000 }, () => {
     return payBody.data.id;
   }
 
+  function getJournalsService(): JournalsService {
+    return new JournalsService(getTestDb());
+  }
+
   async function getJournalBatchForRef(companyId: number, docType: string, docId: number) {
-    const db = getTestDb();
-    const rows = await sql`
-      SELECT id, doc_type, doc_id
-      FROM journal_batches
-      WHERE company_id = ${companyId}
-        AND doc_type = ${docType}
-        AND doc_id = ${docId}
-      ORDER BY id DESC
-      LIMIT 1
-    `.execute(db);
-    return rows.rows[0] as { id: number; doc_type: string; doc_id: number } | undefined;
+    const svc = getJournalsService();
+    const batches = await svc.listJournalBatches({
+      company_id: companyId,
+      doc_type: docType,
+      limit: 1000,
+      offset: 0,
+    });
+    return batches.find(b => b.doc_id === docId);
   }
 
   async function countJournalBatchesForRef(companyId: number, docType: string, docId: number): Promise<number> {
-    const db = getTestDb();
-    const rows = await sql`
-      SELECT COUNT(*) as cnt FROM journal_batches
-      WHERE company_id = ${companyId} AND doc_type = ${docType} AND doc_id = ${docId}
-    `.execute(db);
-    return Number((rows.rows[0] as { cnt: number }).cnt);
+    const svc = getJournalsService();
+    const batches = await svc.listJournalBatches({
+      company_id: companyId,
+      doc_type: docType,
+      limit: 1000,
+      offset: 0,
+    });
+    return batches.filter(b => b.doc_id === docId).length;
   }
 
   // AC1
@@ -207,21 +211,14 @@ describe("sales.ar-credit-void-refund - Story 57.3", { timeout: 90000 }, () => {
     const creditBatch = await getJournalBatchForRef(companyAId, "SALES_CREDIT_NOTE", createBody.data.id);
     expect(creditBatch).toBeDefined();
 
-    const db = getTestDb();
-    const lines = await sql`
-      SELECT debit, credit
-      FROM journal_lines
-      WHERE journal_batch_id = ${creditBatch!.id}
-      ORDER BY id
-    `.execute(db);
-    expect(lines.rows.length).toBeGreaterThanOrEqual(2);
+    const lines = creditBatch!.lines;
+    expect(lines.length).toBeGreaterThanOrEqual(2);
 
     let totalDebit = 0;
     let totalCredit = 0;
-    for (const line of lines.rows) {
-      const l = line as { debit: string; credit: string };
-      totalDebit += Number(l.debit);
-      totalCredit += Number(l.credit);
+    for (const line of lines) {
+      totalDebit += line.debit;
+      totalCredit += line.credit;
     }
     expect(totalDebit).toBe(200000);
     expect(totalDebit).toBe(totalCredit);
