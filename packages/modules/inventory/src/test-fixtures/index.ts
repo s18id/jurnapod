@@ -13,9 +13,11 @@ export {
   createTestIngredient,
   createTestService,
   createTestRecipe,
+  createTestVariant,
   getItemById,
   isStockTrackedType,
   type ItemFixture,
+  type VariantFixture,
   type CreateTestInventoryItemOptions,
 } from "./inventory-item-fixtures.js";
 

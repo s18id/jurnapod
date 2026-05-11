@@ -72,9 +72,7 @@ import { hashPassword } from "./password-hash";
 import { createCompany, CompanyCodeExistsError } from "./companies";
 import { createUserBasic, UserEmailExistsError } from "./users";
 import { createItem } from "./items/index.js";
-import { itemPricesAdapter } from "./item-prices/adapter.js";
 import { DatabaseConflictError } from "./master-data-errors.js";
-import { createVariantAttribute } from "./item-variants";
 import { adjustStock } from "./stock.js";
 import { MODULE_PERMISSION_BITS, buildPermissionMask, type ModulePermission } from "@jurnapod/auth";
 import {
@@ -94,6 +92,7 @@ import {
   createTestOutletMinimal as pkgCreateTestOutletMinimal,
   createTestOutletWithoutTimezone as pkgCreateTestOutletWithoutTimezone,
 } from "@jurnapod/modules-platform/test-fixtures";
+import { insertCustomer } from "@jurnapod/modules-platform";
 import {
   createTestFiscalYear as pkgCreateTestFiscalYear,
   createTestFiscalPeriod as pkgCreateTestFiscalPeriod,
@@ -101,7 +100,14 @@ import {
   createTestAPReconciliationSettings as pkgCreateTestAPReconciliationSettings,
   clearTestAPReconciliationSettings as pkgClearTestAPReconciliationSettings,
   setTestCompanyStringSetting as pkgSetTestCompanyStringSetting,
+  createTestAccount as pkgCreateTestAccount,
 } from "@jurnapod/modules-accounting/test-fixtures";
+import {
+  createTestInventoryItem as pkgCreateTestInventoryItem,
+  createTestVariant as pkgCreateTestVariant,
+  createTestItemPrice as pkgCreateTestItemPrice,
+} from "@jurnapod/modules-inventory/test-fixtures";
+import { StockServiceImpl, upsertInventoryStock } from "@jurnapod/modules-inventory";
 
 
 // ============================================================================
@@ -461,15 +467,17 @@ export async function createTestCompany(
   } catch (error: unknown) {
     if (error instanceof CompanyCodeExistsError) {
       // Company with this code already exists - fetch it instead
-      const result = await sql`SELECT id, code, name FROM companies WHERE code = ${code} LIMIT 1`.execute(db);
-      if (result.rows.length > 0) {
-        const row = result.rows[0] as { id: number; code: string; name: string };
-        const existing = {
+      const row = await db
+        .selectFrom("companies")
+        .where("code", "=", code)
+        .select(["id", "code", "name"])
+        .executeTakeFirst();
+      if (row) {
+        return {
           id: Number(row.id),
           code: row.code,
-          name: row.name
+          name: row.name,
         };
-        return existing;
       }
     }
     throw error;
@@ -573,9 +581,15 @@ export async function createTestUser(
     });
     
     // Get the full user record including password_hash for tests that need it
-    const result = await sql`SELECT id, company_id, email, password_hash FROM users WHERE id = ${user.id} LIMIT 1`.execute(db);
-    
-    const row = result.rows[0] as { id: number; company_id: number; email: string; password_hash: string | null };
+    const row = await db
+      .selectFrom("users")
+      .select(["id", "company_id", "email", "password_hash"])
+      .where("id", "=", user.id)
+      .executeTakeFirst();
+
+    if (!row) {
+      throw new Error(`User ${user.id} not found after creation`);
+    }
     const fullUser: UserFixture = {
       id: Number(row.id),
       company_id: Number(row.company_id),
@@ -588,14 +602,18 @@ export async function createTestUser(
   } catch (error: unknown) {
     if (error instanceof UserEmailExistsError) {
       // User with this email already exists - fetch it instead
-      const result = await sql`SELECT id, company_id, email, password_hash FROM users WHERE company_id = ${companyId} AND email = ${email.toLowerCase()} LIMIT 1`.execute(db);
-      if (result.rows.length > 0) {
-        const row = result.rows[0] as { id: number; company_id: number; email: string; password_hash: string | null };
+      const existingRow = await db
+        .selectFrom("users")
+        .select(["id", "company_id", "email", "password_hash"])
+        .where("company_id", "=", companyId)
+        .where("email", "=", email.toLowerCase())
+        .executeTakeFirst();
+      if (existingRow) {
         const existing: UserFixture = {
-          id: Number(row.id),
-          company_id: Number(row.company_id),
-          email: row.email,
-          password_hash: row.password_hash ?? undefined
+          id: Number(existingRow.id),
+          company_id: Number(existingRow.company_id),
+          email: existingRow.email,
+          password_hash: existingRow.password_hash ?? undefined
         };
         return existing;
       }
@@ -603,14 +621,18 @@ export async function createTestUser(
     // Handle MySQL duplicate key error (e.g., concurrent fixture creation across test files)
     const mysqlErr = error as { code?: string };
     if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
-      const result = await sql`SELECT id, company_id, email, password_hash FROM users WHERE company_id = ${companyId} AND email = ${email.toLowerCase()} LIMIT 1`.execute(db);
-      if (result.rows.length > 0) {
-        const row = result.rows[0] as { id: number; company_id: number; email: string; password_hash: string | null };
+      const dupRow = await db
+        .selectFrom("users")
+        .select(["id", "company_id", "email", "password_hash"])
+        .where("company_id", "=", companyId)
+        .where("email", "=", email.toLowerCase())
+        .executeTakeFirst();
+      if (dupRow) {
         return {
-          id: Number(row.id),
-          company_id: Number(row.company_id),
-          email: row.email,
-          password_hash: row.password_hash ?? undefined
+          id: Number(dupRow.id),
+          company_id: Number(dupRow.company_id),
+          email: dupRow.email,
+          password_hash: dupRow.password_hash ?? undefined
         };
       }
     }
@@ -623,11 +645,11 @@ export async function createTestUser(
 // ============================================================================
 
 /**
- * Create a test customer via API.
- * Uses the platform/customers endpoint so ACL and validation are respected.
+ * Create a test customer via the canonical package insertCustomer() function.
+ * Delegates to @jurnapod/modules-platform insertCustomer() for DB-level creation.
  *
- * @param baseUrl - The base URL of the test server
- * @param accessToken - Valid access token for authentication
+ * @param baseUrl - (unused, kept for backward compatibility)
+ * @param accessToken - (unused, kept for backward compatibility)
  * @param companyId - Company ID for the customer
  * @param code - Unique customer code (will be truncated to 32 chars)
  * @param displayName - Display name for the customer
@@ -638,8 +660,8 @@ export async function createTestUser(
  * @returns Customer ID
  */
 export async function createTestCustomer(
-  baseUrl: string,
-  accessToken: string,
+  _baseUrl: string,
+  _accessToken: string,
   companyId: number,
   code: string,
   displayName: string,
@@ -651,40 +673,24 @@ export async function createTestCustomer(
     taxId: string;
   }>
 ): Promise<number> {
+  const db = getDb();
   const normalizedCode = code.slice(0, 32);
-
-  const res = await fetch(`${baseUrl}/api/platform/customers`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${accessToken}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      company_id: companyId,
-      code: normalizedCode,
-      type: options?.type ?? "PERSON",
-      display_name: displayName,
-      email: options?.email ?? null,
-      phone: options?.phone ?? null,
-      company_name: options?.companyName ?? null,
-      tax_id: options?.taxId ?? null
-    })
+  return insertCustomer(db, {
+    companyId,
+    code: normalizedCode,
+    type: options?.type === "BUSINESS" ? 2 : 1,
+    displayName,
+    email: options?.email ?? null,
+    isActive: 1,
   });
-
-  if (!res.ok) {
-    throw new Error(`Failed to create customer: ${res.status} ${await res.text()}`);
-  }
-
-  const result = await res.json();
-  return result.data.id;
 }
 
 /**
  * Create a test customer in a specific company for cross-company scenarios.
- * Uses canonical fixture-library setup so test files avoid ad-hoc SQL.
+ * Delegates to @jurnapod/modules-platform insertCustomer().
  *
- * @param baseUrl - The base URL of the test server
- * @param accessToken - Valid access token (for the target company)
+ * @param baseUrl - (unused, kept for backward compatibility)
+ * @param accessToken - (unused, kept for backward compatibility)
  * @param companyId - Company ID for the customer
  * @param code - Unique customer code
  * @param displayName - Display name for the customer
@@ -703,38 +709,16 @@ export async function createTestCustomerForCompany(
     phone: string;
   }>
 ): Promise<number> {
-  // Deterministic cross-company fixture path: create directly through canonical test fixture library
-  // (tests should not do raw SQL themselves; fixture library centralizes setup invariants).
   const db = getDb();
   const normalizedCode = code.slice(0, 32);
-  const now = new Date();
-
-  const result = await db
-    .insertInto("customers")
-    .values({
-      company_id: companyId,
-      code: normalizedCode,
-      type: options?.type === "BUSINESS" ? 2 : 1,
-      display_name: displayName,
-      company_name: null,
-      tax_id: null,
-      phone: options?.phone ?? null,
-      email: options?.email ?? null,
-      address_line1: null,
-      address_line2: null,
-      city: null,
-      postal_code: null,
-      notes: null,
-      deleted_at: null,
-      is_active: 1,
-      created_by_user_id: null,
-      updated_by_user_id: null,
-      created_at: now,
-      updated_at: now,
-    })
-    .executeTakeFirst();
-
-  return Number(result.insertId);
+  return insertCustomer(db, {
+    companyId,
+    code: normalizedCode,
+    type: options?.type === "BUSINESS" ? 2 : 1,
+    displayName,
+    email: options?.email ?? null,
+    isActive: 1,
+  });
 }
 
 // ============================================================================
@@ -871,17 +855,17 @@ export async function createTestBankAccount(
   const runId = makeRunId();
   const code = options?.code ?? `TEST-BA-${runId}`.slice(0, 20).toUpperCase();
   const name = options?.name ?? `Test ${options?.typeName ?? "BANK"} Account ${runId}`;
+  const typeName = (options?.typeName ?? "BANK") as "BANK" | "CASH";
 
-  const result = await sql`
-    INSERT INTO accounts (company_id, code, name, type_name, is_active, is_payable, created_at, updated_at)
-    VALUES (${companyId}, ${code}, ${name}, ${options?.typeName ?? "BANK"}, ${options?.isActive ?? true ? 1 : 0}, ${options?.isPayable ?? false ? 1 : 0}, NOW(), NOW())
-  `.execute(db);
+  const account = await pkgCreateTestAccount(db, {
+    companyId,
+    code,
+    name,
+    typeName,
+    isActive: options?.isActive ?? true,
+  });
 
-  const accountId = Number((result as { insertId?: number }).insertId ?? 0);
-  if (!accountId) {
-    throw new Error("Failed to create test bank account");
-  }
-  return accountId;
+  return account.id;
 }
 
 /**
@@ -906,11 +890,15 @@ export async function setTestBankAccountActive(
   isActive: boolean
 ): Promise<void> {
   const db = getDb();
-  await sql`
-    UPDATE accounts
-    SET is_active = ${isActive ? 1 : 0}, updated_at = NOW()
-    WHERE id = ${accountId} AND company_id = ${companyId}
-  `.execute(db);
+  await db
+    .updateTable("accounts")
+    .set({
+      is_active: isActive ? 1 : 0,
+      updated_at: sql`NOW()`,
+    })
+    .where("id", "=", accountId)
+    .where("company_id", "=", companyId)
+    .execute();
 }
 
 /**
@@ -1000,41 +988,43 @@ export async function createTestItem(
     trackStock: boolean;
   }>
 ): Promise<ItemFixture> {
-  const db = getDb();
   const runId = makeRunId();
+  const type = options?.type ?? "PRODUCT";
 
-  // Always append a unique suffix to SKU to prevent cross-test pollution.
-  // Even when caller provides an explicit SKU, append a run-unique suffix
-  // so that each test gets its own item with isolated stock.
+  // Append unique suffix to SKU for cross-test isolation
   const sku = options?.sku
     ? `${options.sku}-${runId}`.slice(0, 30)
-    : `TEST-SKU-${runId}`.slice(0, 30);
+    : undefined;
   const name = options?.name ?? `Test Item ${runId}`;
-  const type = options?.type ?? "PRODUCT";
-  
+
   try {
-    const item = await createItem(companyId, {
+    const item = await pkgCreateTestInventoryItem(companyId, {
       sku,
       name,
       type,
       is_active: options?.isActive ?? true,
-      track_stock: options?.trackStock ?? true
+      track_stock: options?.trackStock ?? (type === "PRODUCT" || type === "INGREDIENT"),
     });
-    
+
     createdFixtures.items.push(item);
     return item;
   } catch (error: unknown) {
-    if (error instanceof DatabaseConflictError) {
-      // Item with this SKU already exists - fetch it instead
-      const result = await sql`SELECT id, company_id, sku, name, item_type FROM items WHERE company_id = ${companyId} AND sku = ${sku} LIMIT 1`.execute(db);
-      if (result.rows.length > 0) {
-        const row = result.rows[0] as { id: number; company_id: number; sku: string | null; name: string; item_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE" };
+    // Idempotent fetch on duplicate SKU
+    if (sku) {
+      const db = getDb();
+      const result = await db
+        .selectFrom("items")
+        .where("company_id", "=", companyId)
+        .where("sku", "=", sku)
+        .select(["id", "company_id", "sku", "name", "item_type"])
+        .executeTakeFirst();
+      if (result) {
         const existing: ItemFixture = {
-          id: Number(row.id),
-          company_id: Number(row.company_id),
-          sku: row.sku,
-          name: row.name,
-          type: row.item_type
+          id: Number(result.id),
+          company_id: Number(result.company_id),
+          sku: result.sku,
+          name: result.name,
+          type: result.item_type as ItemFixture["type"],
         };
         return existing;
       }
@@ -1074,17 +1064,20 @@ export async function createTestItemExactSku(
   } catch (error: unknown) {
     if (error instanceof DatabaseConflictError) {
       const db = getDb();
-      const result = await sql`SELECT id, company_id, sku, name, item_type FROM items WHERE company_id = ${companyId} AND sku = ${options.sku} LIMIT 1`.execute(db);
-      if (result.rows.length > 0) {
-        const row = result.rows[0] as { id: number; company_id: number; sku: string | null; name: string; item_type: "SERVICE" | "PRODUCT" | "INGREDIENT" | "RECIPE" };
-        const existing: ItemFixture = {
+      const row = await db
+        .selectFrom("items")
+        .where("company_id", "=", companyId)
+        .where("sku", "=", options.sku)
+        .select(["id", "company_id", "sku", "name", "item_type"])
+        .executeTakeFirst();
+      if (row) {
+        return {
           id: Number(row.id),
           company_id: Number(row.company_id),
           sku: row.sku,
           name: row.name,
-          type: row.item_type,
+          type: row.item_type as ItemFixture["type"],
         };
-        return existing;
       }
     }
     throw error;
@@ -1109,47 +1102,11 @@ export async function createTestVariant(
     attributeValues: string[];
   }>
 ): Promise<VariantFixture> {
-  const db = getDb();
-  
-  const attributeName = options?.attributeName ?? "Size";
-  const attributeValues = options?.attributeValues ?? ["Default"];
-  
-  // Get company_id from item
-  const itemResult = await sql`SELECT company_id FROM items WHERE id = ${itemId} LIMIT 1`.execute(db);
-  
-  if (itemResult.rows.length === 0) {
-    throw new Error(`Item ${itemId} not found`);
-  }
-  
-  const itemRow = itemResult.rows[0] as { company_id: number };
-  const companyId = Number(itemRow.company_id);
-  
-  // Create variant attribute (this generates the variant)
-  await createVariantAttribute(companyId, itemId, {
-    attribute_name: attributeName,
-    values: attributeValues
+  const variant = await pkgCreateTestVariant(itemId, {
+    attributeName: options?.attributeName,
+    attributeValues: options?.attributeValues,
   });
-  
-  // Get the created variant
-  const variantResult = await sql`SELECT id, item_id, company_id, sku, variant_name 
-     FROM item_variants 
-     WHERE item_id = ${itemId} 
-     ORDER BY id ASC 
-     LIMIT 1`.execute(db);
-  
-  if (variantResult.rows.length === 0) {
-    throw new Error(`Variant not found after creating attribute for item ${itemId}`);
-  }
-  
-  const row = variantResult.rows[0] as { id: number; item_id: number; company_id: number; sku: string; variant_name: string };
-  const variant: VariantFixture = {
-    id: Number(row.id),
-    item_id: Number(row.item_id),
-    company_id: Number(row.company_id),
-    sku: row.sku,
-    variant_name: row.variant_name
-  };
-  
+
   createdFixtures.variants.push(variant);
   return variant;
 }
@@ -1182,43 +1139,50 @@ export async function createTestPrice(
   const isActive = options?.isActive ?? true;
 
   // Idempotent check: find existing price for same item+outlet+variant
-  const existing = await sql`
-    SELECT id, item_id, outlet_id, variant_id, price, is_active
-    FROM item_prices
-    WHERE item_id = ${itemId}
-      AND outlet_id ${outletId === null ? sql`IS NULL` : sql`= ${outletId}`}
-      AND variant_id ${variantId === null ? sql`IS NULL` : sql`= ${variantId}`}
-    LIMIT 1
-  `.execute(db);
+  const existing = await db
+    .selectFrom("item_prices")
+    .where("item_id", "=", itemId)
+    .$if(outletId === null, (qb) => qb.where("outlet_id", "is", null))
+    .$if(outletId !== null, (qb) => qb.where("outlet_id", "=", outletId))
+    .$if(variantId === null, (qb) => qb.where("variant_id", "is", null))
+    .$if(variantId !== null, (qb) => qb.where("variant_id", "=", variantId))
+    .select(["id", "item_id", "outlet_id", "variant_id", "price", "is_active"])
+    .executeTakeFirst();
 
-  if (existing.rows.length > 0) {
-    const row = existing.rows[0] as { id: number; item_id: number; outlet_id: number | null; variant_id: number | null; price: string; is_active: number };
+  if (existing) {
     const fixture: PriceFixture = {
-      id: Number(row.id),
-      item_id: Number(row.item_id),
-      outlet_id: row.outlet_id !== null ? Number(row.outlet_id) : null,
-      variant_id: row.variant_id !== null ? Number(row.variant_id) : null,
-      price: Number(row.price),
-      is_active: Boolean(row.is_active),
+      id: Number(existing.id),
+      item_id: Number(existing.item_id),
+      outlet_id: existing.outlet_id !== null ? Number(existing.outlet_id) : null,
+      variant_id: existing.variant_id !== null ? Number(existing.variant_id) : null,
+      price: Number(existing.price),
+      is_active: Boolean(existing.is_active),
     };
-    // Track existing price to prevent orphaned cleanup
     createdFixtures.prices.push(fixture);
     return fixture;
   }
 
-  // Create new price via canonical path
-  const actor = { userId, canManageCompanyDefaults: true };
+  // Create new price via owner package fixture (production path)
+  const priceId = await pkgCreateTestItemPrice(db, {
+    companyId,
+    itemId,
+    outletId,
+    price: priceValue,
+    isActive,
+    variantId,
+  });
 
-  const price = await itemPricesAdapter.createItemPrice(companyId, {
+  const fixture: PriceFixture = {
+    id: priceId,
     item_id: itemId,
     outlet_id: outletId,
     variant_id: variantId,
     price: priceValue,
     is_active: isActive,
-  }, actor);
+  };
 
-  createdFixtures.prices.push(price);
-  return price;
+  createdFixtures.prices.push(fixture);
+  return fixture;
 }
 
 /**
@@ -1242,14 +1206,20 @@ export async function createTestStock(
   quantity: number,
   userId: number
 ): Promise<StockFixture> {
-  const result = await adjustStock({
-    company_id: companyId,
-    outlet_id: outletId,
-    product_id: itemId,
-    adjustment_quantity: quantity,
-    reason: "TEST_SETUP",
-    user_id: userId,
-  });
+  const db = getDb();
+  const stockService = new StockServiceImpl(db);
+
+  const result = await stockService.adjustStock(
+    {
+      company_id: companyId,
+      outlet_id: outletId,
+      product_id: itemId,
+      adjustment_quantity: quantity,
+      reason: "TEST_SETUP",
+      user_id: userId,
+    },
+    db
+  );
 
   if (!result.success) {
     throw new Error(`Failed to create test stock for item ${itemId}`);
@@ -1264,14 +1234,17 @@ export async function createTestStock(
 
   // Register cleanup: reset stock to 0 before item deletion cascades
   registerFixtureCleanup(`stock_${itemId}_${outletId ?? 'global'}`, async () => {
-    await adjustStock({
-      company_id: companyId,
-      outlet_id: outletId,
-      product_id: itemId,
-      adjustment_quantity: -quantity,
-      reason: "TEST_TEARDOWN",
-      user_id: userId,
-    });
+    await stockService.adjustStock(
+      {
+        company_id: companyId,
+        outlet_id: outletId,
+        product_id: itemId,
+        adjustment_quantity: -quantity,
+        reason: "TEST_TEARDOWN",
+        user_id: userId,
+      },
+      db
+    );
   });
 
   return fixture;
@@ -1323,54 +1296,16 @@ export async function createTestInventoryStock(
   const reservedQty = options?.reservedQuantity ?? 0;
   const availableQty = quantity - reservedQty;
 
-  // Idempotent: check for existing row and update-or-insert
-  const existing = await sql`
-    SELECT id, quantity, reserved_quantity, available_quantity
-    FROM inventory_stock
-    WHERE company_id = ${companyId}
-      AND variant_id = ${variantId}
-      AND outlet_id ${outletId === null ? sql`IS NULL` : sql`= ${outletId}`}
-    LIMIT 1
-  `.execute(db);
-
-  if (existing.rows.length > 0) {
-    // Update existing row instead of duplicate insert
-    await sql`
-      UPDATE inventory_stock
-      SET quantity = ${quantity},
-          reserved_quantity = ${reservedQty},
-          available_quantity = ${availableQty},
-          updated_at = CURRENT_TIMESTAMP
-      WHERE company_id = ${companyId}
-        AND variant_id = ${variantId}
-        AND outlet_id ${outletId === null ? sql`IS NULL` : sql`= ${outletId}`}
-    `.execute(db);
-  } else {
-    await sql`
-      INSERT INTO inventory_stock (
-        company_id,
-        outlet_id,
-        product_id,
-        variant_id,
-        quantity,
-        reserved_quantity,
-        available_quantity,
-        created_at,
-        updated_at
-      )
-      VALUES (
-        ${companyId},
-        ${outletId},
-        ${itemId},
-        ${variantId},
-        ${quantity},
-        ${reservedQty},
-        ${availableQty},
-        CURRENT_TIMESTAMP,
-        CURRENT_TIMESTAMP
-      )
-    `.execute(db);
-  }
+  // Delegate to canonical upsertInventoryStock in @jurnapod/modules-inventory
+  await upsertInventoryStock(db, {
+    companyId,
+    outletId,
+    productId: itemId,
+    variantId,
+    quantity,
+    reservedQuantity: reservedQty,
+    availableQuantity: availableQty,
+  });
 
   registerFixtureCleanup(`inv-stock-${variantId}-${outletId ?? 'global'}`, async () => {
     await sql`DELETE FROM inventory_stock WHERE company_id = ${companyId} AND variant_id = ${variantId} AND outlet_id ${outletId === null ? sql`IS NULL` : sql`= ${outletId}`}`.execute(db);
@@ -1426,26 +1361,12 @@ export async function createTestInventoryTransaction(
     user_id: userId,
   });
 
-  if (!ok.success) {
+  if (!ok.success || ok.transactionId == null) {
     throw new Error(`Failed to create inventory transaction for item ${itemId}`);
   }
 
-  // Retrieve the transaction ID using the deterministic reference_id
-  const result = await sql`
-    SELECT id FROM inventory_transactions
-    WHERE company_id = ${companyId}
-      AND product_id = ${itemId}
-      AND reference_id = ${refId}
-      AND transaction_type = ${TransactionType.ADJUSTMENT}
-    LIMIT 1
-  `.execute(db);
-
-  if (result.rows.length === 0) {
-    throw new Error(`Failed to retrieve transaction ID for reference ${refId}`);
-  }
-
   return {
-    transactionId: Number((result.rows[0] as { id: number }).id),
+    transactionId: ok.transactionId,
     referenceId: refId,
   };
 }
@@ -1722,6 +1643,7 @@ export async function createTestSupplierStatement(
     statementDate: string;
     closingBalance: string;
     currencyCode: string;
+    createdByUserId: number;
   }>
 ): Promise<SupplierStatementFixture> {
   const db = getDb();
@@ -1743,25 +1665,25 @@ export async function createTestSupplierStatement(
   const currencyCode = options?.currencyCode ?? "IDR";
 
   try {
-    await sql`
-      INSERT INTO supplier_statements (company_id, supplier_id, statement_date, closing_balance, currency_code, created_at, updated_at)
-      VALUES (${companyId}, ${supplierId}, ${statementDate}, ${closingBalance}, ${currencyCode}, NOW(), NOW())
-    `.execute(db);
+    // Full Fixture Mode — go through canonical production SupplierStatementService.
+    // Enforces: supplier ownership, active status, currency match, exchange rate existence.
+    const { SupplierStatementService } = await import("@jurnapod/modules-purchasing");
+    const userId = options?.createdByUserId ?? 1; // fallback to seed admin
+    const service = new SupplierStatementService(db);
+    const statement = await service.createSupplierStatement({
+      companyId,
+      userId,
+      input: { supplierId, statementDate, closingBalance, currencyCode },
+    });
 
-    const result = await sql`SELECT id, company_id, supplier_id, statement_date, closing_balance, currency_code FROM supplier_statements WHERE company_id = ${companyId} AND supplier_id = ${supplierId} ORDER BY id DESC LIMIT 1`.execute(db);
-    if (result.rows.length === 0) {
-      throw new Error(`Failed to create supplier statement for supplier ${supplierId}`);
-    }
-    const row = result.rows[0] as { id: number; company_id: number; supplier_id: number; statement_date: Date; closing_balance: string; currency_code: string };
-    const fixture: SupplierStatementFixture = {
-      id: Number(row.id),
-      companyId: Number(row.company_id),
-      supplierId: Number(row.supplier_id),
-          statementDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.statement_date) as string),
-      closingBalance: String(row.closing_balance),
-      currencyCode: String(row.currency_code),
+    return {
+      id: statement.id,
+      companyId: statement.companyId,
+      supplierId: statement.supplierId,
+      statementDate: statement.statementDate,
+      closingBalance: statement.closingBalance,
+      currencyCode: statement.currencyCode,
     };
-    return fixture;
   } catch (error: unknown) {
     const mysqlErr = error as { code?: string };
     if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
@@ -1772,7 +1694,7 @@ export async function createTestSupplierStatement(
           id: Number(row.id),
           companyId: Number(row.company_id),
           supplierId: Number(row.supplier_id),
-      statementDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.statement_date) as string),
+          statementDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.statement_date) as string),
           closingBalance: String(row.closing_balance),
           currencyCode: String(row.currency_code),
         };
@@ -1781,6 +1703,7 @@ export async function createTestSupplierStatement(
     throw error;
   }
 }
+
 
 // ============================================================================
 // AP Exception Fixtures (Epic 47.4)
@@ -1896,74 +1819,49 @@ export async function createTestAPException(
   }
 
   try {
-    await sql`
-      INSERT INTO ap_exceptions (
-        company_id, exception_key, type, source_type, source_id, supplier_id,
-        variance_amount, currency_code, due_date, status, created_at, updated_at
-      )
-      VALUES (
-        ${companyId}, ${exceptionKey}, ${type}, ${sourceType}, ${sourceId}, ${supplierId},
-        ${varianceAmount}, ${currencyCode}, ${dueDate}, ${status}, NOW(), NOW()
-      )
-    `.execute(db);
-
-    const result = await sql`
-      SELECT id, company_id, exception_key, type, source_type, source_id, supplier_id,
-             variance_amount, currency_code, detected_at, due_date,
-             assigned_to_user_id, assigned_at, status, resolved_at, resolved_by_user_id, resolution_note
-      FROM ap_exceptions
-      WHERE company_id = ${companyId} AND exception_key = ${exceptionKey}
-      LIMIT 1
-    `.execute(db);
-
-    if (result.rows.length === 0) {
-      throw new Error(`Failed to create AP exception for company ${companyId} with key ${exceptionKey}`);
-    }
-
-    const row = result.rows[0] as {
-      id: number; company_id: number; exception_key: string; type: number;
-      source_type: string; source_id: number; supplier_id: number | null;
-      variance_amount: string; currency_code: string; detected_at: Date;
-      due_date: Date | null; assigned_to_user_id: number | null; assigned_at: Date | null;
-      status: number; resolved_at: Date | null; resolved_by_user_id: number | null; resolution_note: string | null;
-    };
+    // Full Fixture Mode — go through canonical production upsertException().
+    // upsertException() is idempotent (ON DUPLICATE KEY UPDATE) and enforces
+    // production invariants: status always OPEN, RESOLVED/DISMISSED rows immutable.
+    const { upsertException } = await import("@/lib/accounting/ap-exceptions.js");
+    const prodException = await upsertException(companyId, {
+      exceptionKey,
+      type,
+      sourceType,
+      sourceId,
+      supplierId,
+      varianceAmount,
+      currencyCode,
+      dueDate,
+    });
 
     const fixture: APExceptionFixture = {
-      id: Number(row.id),
-      companyId: Number(row.company_id),
-      exceptionKey: row.exception_key,
-      type: row.type as APExceptionTypeValue,
-      sourceType: row.source_type,
-      sourceId: Number(row.source_id),
-      supplierId: row.supplier_id !== null ? Number(row.supplier_id) : null,
-      varianceAmount: String(row.variance_amount),
-      currencyCode: String(row.currency_code),
-      detectedAt: toUtcIso.dateLike(row.detected_at) as string,
-      dueDate: row.due_date
-        ? fromUtcIso.dateOnly(toUtcIso.dateLike(row.due_date) as string)
-        : null,
-      assignedToUserId: row.assigned_to_user_id !== null ? Number(row.assigned_to_user_id) : null,
-      assignedAt: row.assigned_at
-        ? (toUtcIso.dateLike(row.assigned_at) as string)
-        : null,
-      status: row.status as APExceptionStatusValue,
-      resolvedAt: row.resolved_at
-        ? (toUtcIso.dateLike(row.resolved_at) as string)
-        : null,
-      resolvedByUserId: row.resolved_by_user_id !== null ? Number(row.resolved_by_user_id) : null,
-      resolutionNote: row.resolution_note ?? null,
+      id: prodException.id,
+      companyId: prodException.companyId,
+      exceptionKey: prodException.exceptionKey,
+      type: prodException.type as APExceptionTypeValue,
+      sourceType: prodException.sourceType,
+      sourceId: prodException.sourceId,
+      supplierId: prodException.supplierId,
+      varianceAmount: prodException.varianceAmount ?? "0.0000",
+      currencyCode: prodException.currencyCode ?? "IDR",
+      detectedAt: prodException.detectedAt,
+      dueDate: prodException.dueDate,
+      assignedToUserId: prodException.assignedToUserId,
+      assignedAt: prodException.assignedAt,
+      status: prodException.status as APExceptionStatusValue,
+      resolvedAt: prodException.resolvedAt,
+      resolvedByUserId: prodException.resolvedByUserId,
+      resolutionNote: prodException.resolutionNote,
     };
 
     return fixture;
   } catch (error: unknown) {
     const mysqlErr = error as { code?: string };
     if (mysqlErr?.code === 'ER_DUP_ENTRY' || mysqlErr?.code === 'ER_DUP_KEY') {
-      // Idempotent: fetch existing row for the same exception_key
+      // upsertException is idempotent; this shouldn't happen, but fall back to fetch.
+      // (upsertException already handles this with ON DUPLICATE KEY UPDATE)
       const result = await sql`
-        SELECT id, company_id, exception_key, type, source_type, source_id, supplier_id,
-               variance_amount, currency_code, detected_at, due_date,
-               assigned_to_user_id, assigned_at, status, resolved_at, resolved_by_user_id, resolution_note
-        FROM ap_exceptions
+        SELECT * FROM ap_exceptions
         WHERE company_id = ${companyId} AND exception_key = ${exceptionKey}
         LIMIT 1
       `.execute(db);
@@ -2210,11 +2108,14 @@ export async function createFullTestFixtureSet(options?: {
  */
 export async function getRoleIdByCode(roleCode: string): Promise<number> {
   const db = getDb();
-  const result = await sql`SELECT id FROM roles WHERE code = ${roleCode} LIMIT 1`.execute(db);
-  if (result.rows.length === 0) {
+  const row = await db
+    .selectFrom("roles")
+    .where("code", "=", roleCode)
+    .select(["id"])
+    .executeTakeFirst();
+  if (!row) {
     throw new Error(`Role '${roleCode}' not found in database`);
   }
-  const row = result.rows[0] as { id: number };
   return Number(row.id);
 }
 
@@ -2231,13 +2132,26 @@ export async function assignUserGlobalRole(
 ): Promise<void> {
   const db = getDb();
   // Get company_id from the user
-  const userResult = await sql`SELECT company_id FROM users WHERE id = ${userId} LIMIT 1`.execute(db);
-  if (userResult.rows.length === 0) {
+  const userRow = await db
+    .selectFrom("users")
+    .where("id", "=", userId)
+    .select(["company_id"])
+    .executeTakeFirst();
+  if (!userRow) {
     throw new Error(`User ${userId} not found`);
   }
-  const companyId = Number((userResult.rows[0] as { company_id: number }).company_id);
+  const companyId = Number(userRow.company_id);
   // Use INSERT IGNORE for idempotency in tests
-  await sql`INSERT IGNORE INTO user_role_assignments (company_id, user_id, role_id, outlet_id) VALUES (${companyId}, ${userId}, ${roleId}, NULL)`.execute(db);
+  await db
+    .insertInto("user_role_assignments")
+    .values({
+      company_id: companyId,
+      user_id: userId,
+      role_id: roleId,
+      outlet_id: null,
+    })
+    .ignore()
+    .execute();
 }
 
 /**
@@ -2255,13 +2169,26 @@ export async function assignUserOutletRole(
 ): Promise<void> {
   const db = getDb();
   // Get company_id from the outlet
-  const outletResult = await sql`SELECT company_id FROM outlets WHERE id = ${outletId} LIMIT 1`.execute(db);
-  if (outletResult.rows.length === 0) {
+  const outletRow = await db
+    .selectFrom("outlets")
+    .where("id", "=", outletId)
+    .select(["company_id"])
+    .executeTakeFirst();
+  if (!outletRow) {
     throw new Error(`Outlet ${outletId} not found`);
   }
-  const companyId = Number((outletResult.rows[0] as { company_id: number }).company_id);
+  const companyId = Number(outletRow.company_id);
   // Use INSERT IGNORE for idempotency in tests
-  await sql`INSERT IGNORE INTO user_role_assignments (company_id, user_id, role_id, outlet_id) VALUES (${companyId}, ${userId}, ${roleId}, ${outletId})`.execute(db);
+  await db
+    .insertInto("user_role_assignments")
+    .values({
+      company_id: companyId,
+      user_id: userId,
+      role_id: roleId,
+      outlet_id: outletId,
+    })
+    .ignore()
+    .execute();
 }
 
 /**
@@ -2299,9 +2226,12 @@ export async function setModulePermission(
   // Guardrail: prevent mutation of canonical system roles in integration tests.
   // Tests should use custom roles for ACL mutation scenarios.
   if (!options?.allowSystemRoleMutation) {
-    const roleResult = await sql`SELECT code, company_id FROM roles WHERE id = ${roleId} LIMIT 1`.execute(db);
-    if (roleResult.rows.length > 0) {
-      const roleRow = roleResult.rows[0] as { code: string; company_id: number | null };
+    const roleRow = await db
+      .selectFrom("roles")
+      .where("id", "=", roleId)
+      .select(["code", "company_id"])
+      .executeTakeFirst();
+    if (roleRow) {
       const CANONICAL_SYSTEM_ROLE_CODES = ['SUPER_ADMIN', 'OWNER', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CASHIER'] as const;
       if (CANONICAL_SYSTEM_ROLE_CODES.includes(roleRow.code as typeof CANONICAL_SYSTEM_ROLE_CODES[number])) {
         throw new Error(
@@ -2315,7 +2245,17 @@ export async function setModulePermission(
   }
 
   // Use INSERT ... ON DUPLICATE KEY UPDATE for idempotency in tests
-  await sql`INSERT INTO module_roles (company_id, role_id, module, resource, permission_mask) VALUES (${companyId}, ${roleId}, ${module}, ${trimmedResource}, ${permissionMask}) ON DUPLICATE KEY UPDATE permission_mask = ${permissionMask}`.execute(db);
+  await db
+    .insertInto("module_roles")
+    .values({
+      company_id: companyId,
+      role_id: roleId,
+      module,
+      resource: trimmedResource,
+      permission_mask: permissionMask,
+    })
+    .onDuplicateKeyUpdate({ permission_mask: permissionMask })
+    .execute();
 }
 
 // ============================================================================

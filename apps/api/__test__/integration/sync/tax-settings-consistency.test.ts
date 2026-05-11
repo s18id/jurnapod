@@ -94,8 +94,8 @@ describe('tax/settings consistency in POS flows', { timeout: 90000 }, () => {
     seedOutletId = seedCtx.outletId;
     cashierUserId = seedCtx.cashierUserId;
 
-    // Create a second outlet for cascade tests
-    const outlet2 = await createTestOutletMinimal(companyId, { code: 'TAX_TEST', name: 'Tax Test Outlet' });
+    // Create a second outlet for cascade tests (use timestamp suffix to avoid duplicate-key collisions with prior runs)
+    const outlet2 = await createTestOutletMinimal(companyId, { code: `TAX_${Date.now()}`.slice(0, 20), name: 'Tax Test Outlet' });
     secondOutletId = outlet2.id;
 
     // Create test item (no stock tracking)
@@ -164,6 +164,14 @@ describe('tax/settings consistency in POS flows', { timeout: 90000 }, () => {
       try { await deleteSetting({ companyId, key: 'tax.default_rate' }); } catch { /* ignore if not set */ }
       try { await deleteSetting({ companyId, key: 'tax.default_rate', outletId: seedOutletId }); } catch { /* ignore */ }
       try { await deleteSetting({ companyId, key: 'tax.default_rate', outletId: secondOutletId }); } catch { /* ignore */ }
+
+      // Clean up test-created tax rates (by idempotent delete based on code pattern)
+      try { await db.deleteFrom('tax_rates').where('company_id', '=', companyId).where('code', 'like', 'CONSIST_%').execute(); } catch { /* best-effort */ }
+
+      // Clean up test-created outlet (registered in fixture registry but resetFixtureRegistry skips DB deletes)
+      if (secondOutletId > 0) {
+        try { await db.deleteFrom('outlets').where('id', '=', secondOutletId).execute(); } catch { /* best-effort */ }
+      }
     } catch {
       // Best-effort teardown
     }

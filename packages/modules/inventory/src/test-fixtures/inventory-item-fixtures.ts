@@ -10,6 +10,7 @@
 
 import { sql } from "kysely";
 import { ItemServiceImpl, type ItemType } from "../services/item-service.js";
+import { ItemVariantServiceImpl } from "../services/item-variant-service.js";
 import { getInventoryDb } from "../db.js";
 
 export type ItemFixture = {
@@ -173,4 +174,70 @@ export async function getItemById(
  */
 export function isStockTrackedType(type: ItemType): boolean {
   return type === "PRODUCT" || type === "INGREDIENT";
+}
+
+// ============================================================================
+// Variant Fixtures
+// ============================================================================
+
+export type VariantFixture = {
+  id: number;
+  item_id: number;
+  company_id: number;
+  sku: string;
+  variant_name: string;
+};
+
+/**
+ * Create a test variant by creating a variant attribute and returning the first variant.
+ *
+ * Uses the production ItemVariantService for attribute/variant creation,
+ * ensuring invariants are identical between test and production paths.
+ *
+ * @param itemId - Parent item ID
+ * @param opts - Partial variant options
+ * @returns Variant fixture with id, item_id, company_id, sku, variant_name
+ */
+export async function createTestVariant(
+  itemId: number,
+  opts?: {
+    attributeName?: string;
+    attributeValues?: string[];
+  }
+): Promise<VariantFixture> {
+  const db = getInventoryDb();
+  const variantService = new ItemVariantServiceImpl();
+
+  // Get company_id from item (necessary because caller doesn't provide it)
+  const itemRow = await db
+    .selectFrom("items")
+    .where("id", "=", itemId)
+    .select(["company_id"])
+    .executeTakeFirst();
+
+  if (!itemRow) {
+    throw new Error(`Item ${itemId} not found`);
+  }
+  const companyId = Number(itemRow.company_id);
+
+  // Create variant attribute via production service (generates variants)
+  await variantService.createVariantAttribute(companyId, itemId, {
+    attribute_name: opts?.attributeName ?? "Size",
+    values: opts?.attributeValues ?? ["Default"],
+  });
+
+  // Get the created variant via production service
+  const variants = await variantService.getItemVariants(companyId, itemId);
+  if (variants.length === 0) {
+    throw new Error(`Variant not found after creating attribute for item ${itemId}`);
+  }
+
+  const v = variants[0]; // First variant
+  return {
+    id: v.id,
+    item_id: v.item_id,
+    company_id: companyId,
+    sku: v.sku,
+    variant_name: v.variant_name,
+  };
 }

@@ -122,13 +122,15 @@ describe('purchasing.period-close - Story 61.4', { timeout: 60000 }, () => {
 
     it('rejects AP invoice posting when fiscal period is CLOSED (409)', async () => {
       // Create draft while period is still OPEN
+      // NOTE: invoice_date must fall within the created fiscal period (2026-01-01 to 2026-01-31)
+      // so that the period-close guardrail detects the closed period.
       const res = await fetch(`${baseUrl}/api/purchasing/invoices`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           supplier_id: supplierId,
           invoice_no: tag('PI-CLOSED'),
-          invoice_date: '2026-05-15',
+          invoice_date: '2026-01-15',
           currency_code: 'IDR',
           lines: [{ description: 'Blocked item', qty: '5', unit_price: '3000.00' }],
         }),

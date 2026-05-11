@@ -556,7 +556,9 @@ export class SupplierStatementService {
   }
 }
 
-// Export error classes
+// =============================================================================
+// Error class re-exports
+// =============================================================================
 export {
   SupplierStatementError,
   SupplierStatementNotFoundError,

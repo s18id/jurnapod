@@ -1511,3 +1511,80 @@ export class FiscalYearService {
     return closingEntries;
   }
 }
+
+// =============================================================================
+// Standalone period/year lookup functions — used by period-close guardrail.
+// =============================================================================
+
+export interface FiscalPeriodLookup {
+  found: true;
+  id: number;
+  status: number;
+  periodNo: number;
+}
+
+export interface FiscalYearLookup {
+  found: true;
+  id: number;
+  status: "OPEN" | "CLOSED";
+  year: number;
+}
+
+/**
+ * Find a fiscal period by company_id + inclusive date window.
+ * Returns null if no period covers the given date.
+ */
+export async function findFiscalPeriodByDate(
+  db: KyselySchema,
+  companyId: number,
+  transactionDate: string
+): Promise<FiscalPeriodLookup | null> {
+  const date = new Date(transactionDate);
+  const row = await db
+    .selectFrom("fiscal_periods")
+    .select(["id", "status", "period_no"])
+    .where("company_id", "=", companyId)
+    .where("start_date", "<=", date)
+    .where("end_date", ">=", date)
+    .limit(1)
+    .executeTakeFirst();
+
+  if (!row) return null;
+
+  return {
+    found: true,
+    id: Number(row.id),
+    status: Number(row.status),
+    periodNo: Number(row.period_no),
+  };
+}
+
+/**
+ * Find a fiscal year by company_id + inclusive date window.
+ * Returns null if no year covers the given date.
+ */
+export async function findFiscalYearByDate(
+  db: KyselySchema,
+  companyId: number,
+  transactionDate: string
+): Promise<FiscalYearLookup | null> {
+  const date = new Date(transactionDate);
+  const row = await db
+    .selectFrom("fiscal_years")
+    .select(["id", "status", "start_date"])
+    .where("company_id", "=", companyId)
+    .where("start_date", "<=", date)
+    .where("end_date", ">=", date)
+    .limit(1)
+    .executeTakeFirst();
+
+  if (!row) return null;
+
+  const rawStatus = String(row.status).toUpperCase();
+  return {
+    found: true,
+    id: Number(row.id),
+    status: rawStatus === "CLOSED" ? "CLOSED" : "OPEN",
+    year: Number(String(row.start_date).slice(0, 4)),
+  };
+}

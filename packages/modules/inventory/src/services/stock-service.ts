@@ -1349,6 +1349,71 @@ export async function insertInventoryTransaction(
   return Number(result.insertId ?? 0);
 }
 
+export interface UpsertInventoryStockInput {
+  companyId: number;
+  outletId: number | null;
+  productId: number;
+  variantId: number;
+  quantity: number;
+  reservedQuantity: number;
+  availableQuantity: number;
+}
+
+/**
+ * Upsert an inventory_stock row for variant-level stock.
+ *
+ * Idempotent: if a row exists for (company_id, variant_id, outlet_id),
+ * updates quantity/reserved_quantity/available_quantity. Otherwise inserts
+ * a new row.
+ *
+ * Extracted from createTestInventoryStock in apps/api/src/lib/test-fixtures.ts
+ * to provide a canonical production path for variant-level stock setup.
+ *
+ * @param db - KyselySchema database instance
+ * @param input - Stock row data
+ */
+export async function upsertInventoryStock(
+  db: KyselySchema,
+  input: UpsertInventoryStockInput
+): Promise<void> {
+  const { companyId, outletId, productId, variantId, quantity, reservedQuantity, availableQuantity } = input;
+
+  const existing = await sql`
+    SELECT id, quantity, reserved_quantity, available_quantity
+    FROM inventory_stock
+    WHERE company_id = ${companyId}
+      AND variant_id = ${variantId}
+      AND outlet_id ${outletId === null ? sql`IS NULL` : sql`= ${outletId}`}
+    LIMIT 1
+  `.execute(db);
+
+  if (existing.rows.length > 0) {
+    await sql`
+      UPDATE inventory_stock
+      SET quantity = ${quantity},
+          reserved_quantity = ${reservedQuantity},
+          available_quantity = ${availableQuantity},
+          updated_at = CURRENT_TIMESTAMP
+      WHERE company_id = ${companyId}
+        AND variant_id = ${variantId}
+        AND outlet_id ${outletId === null ? sql`IS NULL` : sql`= ${outletId}`}
+    `.execute(db);
+  } else {
+    await sql`
+      INSERT INTO inventory_stock (
+        company_id, outlet_id, product_id, variant_id,
+        quantity, reserved_quantity, available_quantity,
+        created_at, updated_at
+      )
+      VALUES (
+        ${companyId}, ${outletId}, ${productId}, ${variantId},
+        ${quantity}, ${reservedQuantity}, ${availableQuantity},
+        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      )
+    `.execute(db);
+  }
+}
+
 // Default singleton instance
 let stockServiceInstance: StockServiceImpl | null = null;
 let stockServiceDb: KyselySchema | undefined = undefined;

@@ -50,3 +50,16 @@ export {
   upsertPurchasingModuleSettings,
   getPurchasingModuleId,
 } from "./services/purchasing-settings-db.js";
+export {
+  SupplierStatementError,
+  SupplierStatementNotFoundError,
+  SupplierStatementSupplierNotOwnedError,
+  SupplierStatementSupplierNotActiveError,
+  SupplierStatementAlreadyReconciledError,
+  SupplierStatementDuplicateError,
+  SupplierStatementCurrencyMismatchError,
+  SupplierStatementExchangeRateMissingError,
+  SupplierStatementInvalidToleranceError,
+  DEFAULT_VARIANCE_TOLERANCE,
+  SUPPLIER_STATEMENT_STATUS,
+} from "./types/supplier-statements.js";

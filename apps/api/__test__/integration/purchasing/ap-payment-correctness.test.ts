@@ -138,9 +138,8 @@ describe('purchasing.ap-payment-correctness', { timeout: 30000 }, () => {
     postedPi6Id = await createPostedPi('100000.0000', makeTag('APIPI6'));
   });
 
-  // Cleanup only removes app-level records we created (payments, invoices).
+  // Cleanup removes app-level records created during this test run.
   // journal_lines/batches are immutable by DB trigger (migration 0114) — intentionally skipped.
-  // accounts, suppliers are shared setup data — left for next test run.
   afterAll(async () => {
     try {
       const db = getTestDb();
@@ -150,6 +149,8 @@ describe('purchasing.ap-payment-correctness', { timeout: 30000 }, () => {
       await sql`DELETE FROM ap_payments WHERE company_id = ${testCompanyId}`.execute(db);
       await sql`DELETE FROM purchase_invoice_lines WHERE company_id = ${testCompanyId}`.execute(db);
       await sql`DELETE FROM purchase_invoices WHERE company_id = ${testCompanyId}`.execute(db);
+      await sql`DELETE FROM exchange_rates WHERE company_id = ${testCompanyId}`.execute(db);
+      await sql`DELETE FROM suppliers WHERE company_id = ${testCompanyId}`.execute(db);
       await sql`DELETE FROM company_modules WHERE company_id = ${testCompanyId}`.execute(db);
       await cleanupTestFixtures();
       await closeTestDb();

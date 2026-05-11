@@ -40,6 +40,16 @@ export async function createSupplierFixture(
       payment_terms_days: options.paymentTermsDays ?? null,
     },
   });
+
+  // Handle inactive supplier: create active first, then update
+  if (options.isActive === false) {
+    await service.updateSupplier({
+      companyId: options.companyId,
+      userId: options.userId ?? 0,
+      supplierId: result.id,
+      payload: { is_active: false },
+    });
+  }
   return {
     id: result.id,
     company_id: result.company_id,

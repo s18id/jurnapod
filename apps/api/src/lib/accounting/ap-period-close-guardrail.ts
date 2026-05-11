@@ -24,7 +24,12 @@ import { sql } from "kysely";
 import { getDb } from "@/lib/db.js";
 import { checkUserAccess } from "@/lib/auth.js";
 import type { AuthContext } from "@/lib/auth-guard.js";
-import type { KyselySchema, Transaction } from "@jurnapod/db";
+import type { Transaction } from "@jurnapod/db";
+import {
+  findFiscalPeriodByDate,
+  findFiscalYearByDate,
+} from "@jurnapod/modules-accounting/fiscal-year";
+import { KyselySettingsAdapter } from "@jurnapod/modules-platform/settings";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -206,7 +211,6 @@ export class PeriodOverrideInvalidPeriodIdError extends PeriodCloseError {
 // Setting Key Constants
 // ---------------------------------------------------------------------------
 
-const SETTING_KEY_GUARDRAIL = "accounting.ap_period_close_guardrail";
 const DEFAULT_GUARDRAIL_STRICTNESS: GuardrailStrictness = "strict";
 
 // ---------------------------------------------------------------------------
@@ -228,18 +232,21 @@ export async function checkPeriodCloseGuardrail(
 ): Promise<GuardrailDecision> {
   const db = getDb();
 
-  // 1. Read guardrail strictness setting (default: strict)
-  const strictness = await readGuardrailStrictness(db, companyId);
+  // 1. Read guardrail strictness setting (default: strict) via production SettingsPort
+  const settings = new KyselySettingsAdapter(db);
+  const strictnessValue = await settings.get("accounting.ap_period_close_guardrail", companyId);
+  const strictness: GuardrailStrictness =
+    strictnessValue === "override_allowed" ? "override_allowed" : DEFAULT_GUARDRAIL_STRICTNESS;
 
-  // 2. Primary check: fiscal_periods lookup
-  const periodResult = await lookupFiscalPeriod(db, companyId, transactionDate);
+  // 2. Primary check: fiscal_periods lookup via production findFiscalPeriodByDate
+  const periodRow = await findFiscalPeriodByDate(db, companyId, transactionDate);
 
-  if (periodResult.found) {
-    if (periodResult.status === PERIOD_STATUS_OPEN) {
+  if (periodRow) {
+    if (periodRow.status === PERIOD_STATUS_OPEN) {
       return {
         allowed: true,
         overrideRequired: false,
-        periodId: periodResult.id,
+        periodId: periodRow.id,
         fiscalYearId: null,
         blockReason: null,
         blockCode: null,
@@ -251,66 +258,60 @@ export async function checkPeriodCloseGuardrail(
       return {
         allowed: false,
         overrideRequired: false,
-        periodId: periodResult.id,
+        periodId: periodRow.id,
         fiscalYearId: null,
-        blockReason: `Transaction date ${transactionDate} falls within closed fiscal period ${periodResult.periodNo}. Contact your administrator to reopen the period.`,
+        blockReason: `Transaction date ${transactionDate} falls within closed fiscal period ${periodRow.periodNo}. Contact your administrator to reopen the period.`,
         blockCode: "PERIOD_CLOSED",
       };
     }
 
-    // override_allowed — caller must provide override reason and have ACL
     return {
       allowed: false,
       overrideRequired: true,
-      periodId: periodResult.id,
+      periodId: periodRow.id,
       fiscalYearId: null,
-      blockReason: `Transaction date ${transactionDate} falls within closed fiscal period ${periodResult.periodNo}. An override reason is required.`,
+      blockReason: `Transaction date ${transactionDate} falls within closed fiscal period ${periodRow.periodNo}. An override reason is required.`,
       blockCode: "PERIOD_CLOSED",
     };
   }
 
-  // 3. Fallback check: fiscal_years lookup
-  const yearResult = await lookupFiscalYear(db, companyId, transactionDate);
+  // 3. Fallback check: fiscal_years lookup via production findFiscalYearByDate
+  const yearRow = await findFiscalYearByDate(db, companyId, transactionDate);
 
-  if (yearResult.found) {
-    if (yearResult.status === "OPEN") {
+  if (yearRow) {
+    if (yearRow.status === "OPEN") {
       return {
         allowed: true,
         overrideRequired: false,
         periodId: null,
-        fiscalYearId: yearResult.id,
+        fiscalYearId: yearRow.id,
         blockReason: null,
         blockCode: null,
       };
     }
 
-    // Fiscal year is closed
     if (strictness === "strict") {
       return {
         allowed: false,
         overrideRequired: false,
         periodId: null,
-        fiscalYearId: yearResult.id,
-        blockReason: `Transaction date ${transactionDate} falls within closed fiscal year ${yearResult.year}. Contact your administrator to reopen the fiscal year.`,
+        fiscalYearId: yearRow.id,
+        blockReason: `Transaction date ${transactionDate} falls within closed fiscal year ${yearRow.year}. Contact your administrator to reopen the fiscal year.`,
         blockCode: "FISCAL_YEAR_CLOSED",
       };
     }
 
-    // override_allowed
     return {
       allowed: false,
       overrideRequired: true,
       periodId: null,
-      fiscalYearId: yearResult.id,
-      blockReason: `Transaction date ${transactionDate} falls within closed fiscal year ${yearResult.year}. An override reason is required.`,
+      fiscalYearId: yearRow.id,
+      blockReason: `Transaction date ${transactionDate} falls within closed fiscal year ${yearRow.year}. An override reason is required.`,
       blockCode: "FISCAL_YEAR_CLOSED",
     };
   }
 
-  // FIX(47.5-compat): No period or year found — return allow for backward compatibility.
-  // Blocking on PERIOD_NOT_FOUND breaks purchasing integration suites when no fiscal
-  // periods/years exist yet for a company/date. We only block when a matching
-  // period/year IS found and is CLOSED. Override path for CLOSED + override_allowed unchanged.
+  // No period or year found — allow (backward compatibility)
   return {
     allowed: true,
     overrideRequired: false,
@@ -468,112 +469,3 @@ export async function insertPeriodCloseOverride(
   `.execute(trx);
 }
 
-// ---------------------------------------------------------------------------
-// Internal Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Read guardrail strictness setting for a company.
- * Falls back to default "strict" if not set.
- */
-async function readGuardrailStrictness(
-  db: KyselySchema,
-  companyId: number
-): Promise<GuardrailStrictness> {
-  const row = await sql<{ setting_value: string | null }>`
-    SELECT setting_value
-    FROM settings_strings
-    WHERE company_id = ${companyId}
-      AND outlet_id IS NULL
-      AND setting_key = ${SETTING_KEY_GUARDRAIL}
-    LIMIT 1
-  `.execute(db);
-
-  if (!row.rows.length || !row.rows[0].setting_value) {
-    return DEFAULT_GUARDRAIL_STRICTNESS;
-  }
-
-  const value = row.rows[0].setting_value.trim().toLowerCase();
-  if (value === "override_allowed") {
-    return "override_allowed";
-  }
-  return DEFAULT_GUARDRAIL_STRICTNESS;
-}
-
-type PeriodLookupResult =
-  | { found: false }
-  | { found: true; id: number; status: number; periodNo: number };
-
-/**
- * Look up a fiscal period by company_id + inclusive date window.
- * A period matches if: period.start_date <= transactionDate <= period.end_date
- */
-async function lookupFiscalPeriod(
-  db: KyselySchema,
-  companyId: number,
-  transactionDate: string
-): Promise<PeriodLookupResult> {
-  const row = await sql<{
-    id: number;
-    status: number;
-    period_no: number;
-  }>`
-    SELECT fp.id, fp.status, fp.period_no
-    FROM fiscal_periods fp
-    WHERE fp.company_id = ${companyId}
-      AND fp.start_date <= ${transactionDate}
-      AND fp.end_date >= ${transactionDate}
-    LIMIT 1
-  `.execute(db);
-
-  if (!row.rows.length) {
-    return { found: false };
-  }
-
-  return {
-    found: true,
-    id: Number(row.rows[0].id),
-    status: Number(row.rows[0].status),
-    periodNo: Number(row.rows[0].period_no),
-  };
-}
-
-type YearLookupResult =
-  | { found: false }
-  | { found: true; id: number; status: "OPEN" | "CLOSED"; year: number };
-
-/**
- * Look up a fiscal year by company_id + inclusive date window.
- * A year matches if: fiscal_year.start_date <= transactionDate <= fiscal_year.end_date
- */
-async function lookupFiscalYear(
-  db: KyselySchema,
-  companyId: number,
-  transactionDate: string
-): Promise<YearLookupResult> {
-  const row = await sql<{
-    id: number;
-    status: string;
-    start_date: Date;
-    end_date: Date;
-  }>`
-    SELECT fy.id, fy.status, fy.start_date, fy.end_date
-    FROM fiscal_years fy
-    WHERE fy.company_id = ${companyId}
-      AND fy.start_date <= ${transactionDate}
-      AND fy.end_date >= ${transactionDate}
-    LIMIT 1
-  `.execute(db);
-
-  if (!row.rows.length) {
-    return { found: false };
-  }
-
-  const rawStatus = String(row.rows[0].status).toUpperCase();
-  return {
-    found: true,
-    id: Number(row.rows[0].id),
-    status: rawStatus === "CLOSED" ? "CLOSED" : "OPEN",
-    year: row.rows[0].start_date.getFullYear(),
-  };
-}
