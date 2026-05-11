@@ -11,6 +11,101 @@ import { normalizeJournalDocType, toUtcIso, fromUtcIso } from "@jurnapod/shared"
 import { sql } from "kysely";
 import { withTransactionRetry, type KyselySchema } from "@jurnapod/db";
 
+// =============================================================================
+// Reusable production functions (used by both production services and fixtures)
+// =============================================================================
+
+/**
+ * Options for inserting a journal batch row.
+ * Used by both JournalsService.executeManualEntryInsert() and test fixtures.
+ */
+export interface InsertJournalBatchOpts {
+  companyId: number;
+  outletId?: number | null;
+  docType: string;
+  docId: number;
+  postedAt: string;    // YYYY-MM-DD entry date
+  clientRef?: string | null;
+}
+
+/**
+ * Insert a journal batch row into the journal_batches table.
+ *
+ * Used by: JournalsService, createTestFiscalCloseBalanceFixture
+ *
+ * @returns The newly inserted batch ID
+ */
+export async function insertJournalBatch(
+  db: KyselySchema,
+  opts: InsertJournalBatchOpts,
+): Promise<number> {
+  const result = await sql`
+    INSERT INTO journal_batches (
+      company_id, outlet_id, doc_type, doc_id, posted_at, client_ref, created_at, updated_at
+    )
+    VALUES (
+      ${opts.companyId},
+      ${opts.outletId ?? null},
+      ${opts.docType},
+      ${opts.docId},
+      ${opts.postedAt},
+      ${opts.clientRef ?? null},
+      NOW(),
+      NOW()
+    )
+  `.execute(db);
+
+  return Number(result.insertId);
+}
+
+/**
+ * A single journal line to be inserted.
+ */
+export interface JournalLineInput {
+  companyId: number;
+  outletId?: number | null;
+  accountId: number;
+  lineDate: string;    // YYYY-MM-DD
+  debit: string;        // DECIMAL
+  credit: string;       // DECIMAL
+  description: string;
+}
+
+/**
+ * Insert journal line rows into the journal_lines table.
+ *
+ * Used by: JournalsService, createTestFiscalCloseBalanceFixture
+ *
+ * @param batchId - The parent journal_batch ID
+ * @param lines - Array of journal line inputs
+ */
+export async function insertJournalLines(
+  db: KyselySchema,
+  batchId: number,
+  lines: JournalLineInput[],
+): Promise<void> {
+  for (const line of lines) {
+    await sql`
+      INSERT INTO journal_lines (
+        journal_batch_id, company_id, outlet_id, account_id,
+        line_date, debit, credit, description, created_at, updated_at
+      )
+      VALUES (
+        ${batchId},
+        ${line.companyId},
+        ${line.outletId ?? null},
+        ${line.accountId},
+        ${line.lineDate},
+        ${line.debit},
+        ${line.credit},
+        ${line.description},
+        NOW(),
+        NOW()
+      )
+    `.execute(db);
+  }
+}
+
 /**
  * Database client interface for dependency injection
  */
@@ -156,45 +251,26 @@ export class JournalsService {
     totalCredit: number,
     userId?: number
   ): Promise<number> {
-    const batchResult = await sql`
-      INSERT INTO journal_batches (
-        company_id, outlet_id, doc_type, doc_id, client_ref, posted_at, created_at, updated_at
-      )
-      VALUES (
-        ${data.company_id},
-        ${data.outlet_id ?? null},
-        ${docType},
-        ${docId},
-        ${data.client_ref ?? null},
-        ${data.entry_date},
-        NOW(),
-        NOW()
-      )
-    `.execute(trx);
+    // Use canonical insertJournalBatch() — shared with test fixtures
+    const newBatchId = await insertJournalBatch(trx, {
+      companyId: data.company_id,
+      outletId: data.outlet_id ?? null,
+      docType,
+      docId,
+      postedAt: data.entry_date,
+      clientRef: data.client_ref ?? null,
+    });
 
-    const newBatchId = Number(batchResult.insertId);
-
-    // Create journal lines
-    for (const line of data.lines) {
-      await sql`
-        INSERT INTO journal_lines (
-          journal_batch_id, company_id, outlet_id, account_id, 
-          line_date, debit, credit, description, created_at, updated_at
-        )
-        VALUES (
-          ${newBatchId},
-          ${data.company_id},
-          ${data.outlet_id ?? null},
-          ${line.account_id},
-          ${data.entry_date},
-          ${line.debit},
-          ${line.credit},
-          ${line.description},
-          NOW(),
-          NOW()
-        )
-      `.execute(trx);
-    }
+    // Use canonical insertJournalLines() — shared with test fixtures
+    await insertJournalLines(trx, newBatchId, data.lines.map((line) => ({
+      companyId: data.company_id,
+      outletId: data.outlet_id ?? null,
+      accountId: line.account_id,
+      lineDate: data.entry_date,
+      debit: String(line.debit),
+      credit: String(line.credit),
+      description: line.description,
+    })));
 
     // Audit log (inside transaction)
     if (this.auditService && userId) {

@@ -304,7 +304,7 @@ export class ARReconciliationService {
    *              - SUM(amount for posted credit notes)
    *              - SUM(amount for posted payments)
    */
-  private async getARSubledgerBalance(companyId: number, asOfDate: string, paymentCutoff: string): Promise<bigint> {
+  async getARSubledgerBalance(companyId: number, asOfDate: string, paymentCutoff: string): Promise<bigint> {
     // Use raw invoice grand_totals, NOT grand_total - paid_total.
     // paid_total is a denormalized field updated by both payments and credit notes,
     // so using it would cause double-counting when we also subtract payment/credit note totals.

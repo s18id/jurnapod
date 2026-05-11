@@ -83,6 +83,33 @@ function computeBaseAmount(originalAmount: string, exchangeRate: string): bigint
 }
 
 // =============================================================================
+// Reusable production functions (used by both production services and fixtures)
+// =============================================================================
+
+/**
+ * Upsert a string setting at company level (outlet_id = NULL).
+ *
+ * Uses INSERT ... ON DUPLICATE KEY UPDATE for idempotency.
+ * This is the canonical production path for writing to settings_strings.
+ *
+ * Used by: APReconciliationService.saveAPReconciliationSettings(),
+ *          createTestAPReconciliationSettings fixture,
+ *          setTestCompanyStringSetting fixture
+ */
+export async function upsertCompanyStringSetting(
+  db: KyselySchema,
+  companyId: number,
+  settingKey: string,
+  settingValue: string,
+): Promise<void> {
+  await sql`
+    INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value, created_at, updated_at)
+    VALUES (${companyId}, NULL, ${settingKey}, ${settingValue}, NOW(), NOW())
+    ON DUPLICATE KEY UPDATE setting_value = ${settingValue}, updated_at = NOW()
+  `.execute(db);
+}
+
+// =============================================================================
 // Service
 // =============================================================================
 
@@ -251,11 +278,8 @@ export class APReconciliationService {
     const { companyId, accountIds } = params;
     await this.validateAPReconciliationAccountIds({ companyId, accountIds });
     const settingValue = JSON.stringify(accountIds);
-    await sql`
-      INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value, created_at, updated_at)
-      VALUES (${companyId}, NULL, ${AP_RECONCILIATION_ACCOUNT_IDS_KEY}, ${settingValue}, NOW(), NOW())
-      ON DUPLICATE KEY UPDATE setting_value = ${settingValue}, updated_at = NOW()
-    `.execute(this.db);
+    // Use canonical upsertCompanyStringSetting() — shared with test fixtures
+    await upsertCompanyStringSetting(this.db, companyId, AP_RECONCILIATION_ACCOUNT_IDS_KEY, settingValue);
   }
 
   private normalizeDate(dateStr: string, timezone: string, endOfDay: boolean): string {

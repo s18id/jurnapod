@@ -44,3 +44,9 @@ export { ApReconciliationDrilldownService, buildDrilldownAttribution, generateDr
 export { ApReconciliationSnapshotService } from "./services/ap-reconciliation-snapshot-service.js";
 export { SupplierStatementService } from "./services/supplier-statement-service.js";
 export { computePurchaseInvoiceOpenAmount } from "./services/purchase-invoice-open-amount.js";
+
+// Standalone DB functions (reusable by test fixtures)
+export {
+  upsertPurchasingModuleSettings,
+  getPurchasingModuleId,
+} from "./services/purchasing-settings-db.js";

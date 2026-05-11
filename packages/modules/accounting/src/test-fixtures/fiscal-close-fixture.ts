@@ -1,8 +1,10 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
+import { insertAccount } from "../accounts-service.js";
+import { insertJournalBatch, insertJournalLines } from "../journals-service.js";
+import type { JournalLineInput } from "../journals-service.js";
 
 // Deterministic run ID for fixture code/name generation (matches API fixture behavior)
 // Uses process identity + pool ID to reduce cross-worker collisions
@@ -31,7 +33,8 @@ export type FiscalCloseBalanceResult = {
  * - Retained earnings-like account (name contains "Retained")
  * - P&L account with non-zero current balance (ensures closing entries are generated)
  *
- * This helper prevents ad-hoc SQL setup from being duplicated across test suites.
+ * Uses canonical production functions insertAccount(), insertJournalBatch(),
+ * and insertJournalLines() from accounts-service.ts and journals-service.ts.
  *
  * @param db - KyselySchema database instance
  * @param companyId - Company ID
@@ -58,37 +61,16 @@ export async function createTestFiscalCloseBalanceFixture(
 
   const retainedEarningsName = options?.retainedEarningsName ?? `Retained Earnings ${runId}`;
   const retainedCode = `TEST-RE-${runId}`.slice(0, 20).toUpperCase();
-  const retainedInsert = await sql`
-    INSERT INTO accounts (
-      company_id,
-      code,
-      name,
-      type_name,
-      is_active,
-      is_payable,
-      report_group,
-      normal_balance,
-      created_at,
-      updated_at
-    )
-    VALUES (
-      ${companyId},
-      ${retainedCode},
-      ${retainedEarningsName},
-      'EQUITY',
-      1,
-      0,
-      'EQ',
-      'K',
-      NOW(),
-      NOW()
-    )
-  `.execute(db);
 
-  const retainedEarningsAccountId = Number((retainedInsert as { insertId?: number }).insertId ?? 0);
-  if (!retainedEarningsAccountId) {
-    throw new Error("Failed to create retained earnings account for fiscal close fixture");
-  }
+  // Create retained earnings account via canonical insertAccount()
+  const retainedEarningsAccountId = await insertAccount(db, {
+    companyId,
+    code: retainedCode,
+    name: retainedEarningsName,
+    typeName: "EQUITY",
+    normalBalance: "K",
+    reportGroup: "EQ",
+  });
 
   const plCode = `TEST-PL-${runId}`.slice(0, 20).toUpperCase();
   const plAccountName = options?.plAccountName ?? `Test Revenue ${runId}`;
@@ -100,141 +82,61 @@ export async function createTestFiscalCloseBalanceFixture(
 
   // Offset account for balanced fixture journal entry.
   const offsetCode = `TEST-OFF-${runId}`.slice(0, 20).toUpperCase();
-  const offsetInsert = await sql`
-    INSERT INTO accounts (
-      company_id,
-      code,
-      name,
-      type_name,
-      is_active,
-      is_payable,
-      report_group,
-      normal_balance,
-      created_at,
-      updated_at
-    )
-    VALUES (
-      ${companyId},
-      ${offsetCode},
-      ${`Test Offset ${runId}`},
-      'ASSET',
-      1,
-      0,
-      'BS',
-      'D',
-      NOW(),
-      NOW()
-    )
-  `.execute(db);
+  const offsetAccountId = await insertAccount(db, {
+    companyId,
+    code: offsetCode,
+    name: `Test Offset ${runId}`,
+    typeName: "ASSET",
+    normalBalance: "D",
+    reportGroup: "BS",
+  });
 
-  const offsetAccountId = Number((offsetInsert as { insertId?: number }).insertId ?? 0);
-  if (!offsetAccountId) {
-    throw new Error("Failed to create offset account for fiscal close fixture");
-  }
-
-  const plAccountInsert = await sql`
-    INSERT INTO accounts (
-      company_id,
-      code,
-      name,
-      type_name,
-      is_active,
-      is_payable,
-      report_group,
-      normal_balance,
-      created_at,
-      updated_at
-    )
-    VALUES (
-      ${companyId},
-      ${plCode},
-      ${plAccountName},
-      'REVENUE',
-      1,
-      0,
-      'PL',
-      ${plNormalBalance},
-      NOW(),
-      NOW()
-    )
-  `.execute(db);
-
-  const plAccountId = Number((plAccountInsert as { insertId?: number }).insertId ?? 0);
-  if (!plAccountId) {
-    throw new Error("Failed to create test P&L account for fiscal close fixture");
-  }
+  // P&L account
+  const plAccountId = await insertAccount(db, {
+    companyId,
+    code: plCode,
+    name: plAccountName,
+    typeName: "REVENUE",
+    normalBalance: plNormalBalance,
+    reportGroup: "PL",
+  });
 
   // Seed a balanced manual journal entry in the fiscal-year window.
-  // This ensures close preview derives non-zero PL balances from journal_lines.
-  const journalBatchInsert = await sql`
-    INSERT INTO journal_batches (
-      company_id,
-      outlet_id,
-      doc_type,
-      doc_id,
-      posted_at,
-      client_ref,
-      created_at,
-      updated_at
-    )
-    VALUES (
-      ${companyId},
-      NULL,
-      'MANUAL',
-      ${fixtureDocId},
-      ${asOfDate},
-      ${`FIXTURE-FY-CLOSE-${runId}`},
-      NOW(),
-      NOW()
-    )
-  `.execute(db);
-
-  const journalBatchId = Number((journalBatchInsert as { insertId?: number }).insertId ?? 0);
-  if (!journalBatchId) {
-    throw new Error("Failed to create fixture journal batch for fiscal close fixture");
-  }
+  // Uses canonical insertJournalBatch() and insertJournalLines() from journals-service.ts
+  const journalBatchId = await insertJournalBatch(db, {
+    companyId,
+    outletId: null,
+    docType: "MANUAL",
+    docId: fixtureDocId,
+    postedAt: asOfDate,
+    clientRef: `FIXTURE-FY-CLOSE-${runId}`,
+  });
 
   const debitAccountId = plNormalBalance === "D" ? plAccountId : offsetAccountId;
   const creditAccountId = plNormalBalance === "D" ? offsetAccountId : plAccountId;
 
-  await sql`
-    INSERT INTO journal_lines (
-      company_id,
-      outlet_id,
-      journal_batch_id,
-      account_id,
-      line_date,
-      debit,
-      credit,
-      description,
-      created_at,
-      updated_at
-    )
-    VALUES (
-      ${companyId},
-      NULL,
-      ${journalBatchId},
-      ${debitAccountId},
-      ${asOfDate},
-      ${plBalance},
-      '0.0000',
-      'Fiscal close fixture debit line',
-      NOW(),
-      NOW()
-    ),
-    (
-      ${companyId},
-      NULL,
-      ${journalBatchId},
-      ${creditAccountId},
-      ${asOfDate},
-      '0.0000',
-      ${plBalance},
-      'Fiscal close fixture credit line',
-      NOW(),
-      NOW()
-    )
-  `.execute(db);
+  const lines: JournalLineInput[] = [
+    {
+      companyId,
+      outletId: null,
+      accountId: debitAccountId,
+      lineDate: asOfDate,
+      debit: plBalance,
+      credit: "0.0000",
+      description: "Fiscal close fixture debit line",
+    },
+    {
+      companyId,
+      outletId: null,
+      accountId: creditAccountId,
+      lineDate: asOfDate,
+      debit: "0.0000",
+      credit: plBalance,
+      description: "Fiscal close fixture credit line",
+    },
+  ];
+
+  await insertJournalLines(db, journalBatchId, lines);
 
   return {
     retained_earnings_account_id: retainedEarningsAccountId,

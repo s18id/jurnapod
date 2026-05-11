@@ -12,6 +12,8 @@
 
 import { PostingService, type PostingRepository, type PostingMapper } from "@jurnapod/modules-accounting";
 import type { JournalLine, PostingRequest, PostingResult } from "@jurnapod/shared";
+import { sql } from "kysely";
+import type { KyselySchema } from "@jurnapod/db";
 import type {
   CashBankTransaction,
   CashBankStatus,
@@ -355,6 +357,75 @@ export class CashBankService {
 
     const postingService = this.postingServiceFactory(this.ports.repository as unknown as PostingRepository, mappers);
     return postingService.post(request, { transactionOwner: "external" });
+  }
+
+  // ============================================
+  // Aggregation Helpers (read-only, db-injected)
+  // ============================================
+
+  /**
+   * Get net cash-bank balance for a company.
+   * Computes SUM(CASE WHEN WITHDRAWAL THEN -amount ELSE amount END).
+   */
+  static async getCashBalance(
+    db: KyselySchema,
+    companyId: number,
+    opts?: { dateTo?: string; dateToExclusive?: string; dateFrom?: string; status?: string }
+  ): Promise<number> {
+    const status = opts?.status ?? "POSTED";
+    const result = await sql<{ total: string | null }>`
+      SELECT CAST(COALESCE(SUM(
+        CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END
+      ), 0) AS DECIMAL(18,2)) AS total
+      FROM cash_bank_transactions
+      WHERE company_id = ${companyId} AND status = ${status}
+      ${opts?.dateToExclusive !== undefined ? sql`AND transaction_date < ${opts.dateToExclusive}` :
+        opts?.dateTo !== undefined ? sql`AND transaction_date <= ${opts.dateTo}` : sql``}
+      ${opts?.dateFrom !== undefined ? sql`AND transaction_date >= ${opts.dateFrom}` : sql``}
+    `.execute(db);
+    return Number(result.rows[0]?.total ?? "0");
+  }
+
+  /**
+   * Get total cash inflows (TOP_UP + MUTATION) for a date range.
+   */
+  static async getCashInflows(
+    db: KyselySchema,
+    companyId: number,
+    dateFrom: string,
+    dateTo: string
+  ): Promise<number> {
+    const result = await sql<{ inflows: string | null }>`
+      SELECT CAST(COALESCE(SUM(amount), 0) AS DECIMAL(18,2)) AS inflows
+      FROM cash_bank_transactions
+      WHERE company_id = ${companyId}
+        AND transaction_type IN ('TOP_UP', 'MUTATION')
+        AND status = 'POSTED'
+        AND transaction_date >= ${dateFrom}
+        AND transaction_date <= ${dateTo}
+    `.execute(db);
+    return Number(result.rows[0]?.inflows ?? "0");
+  }
+
+  /**
+   * Get total cash outflows (WITHDRAWAL) for a date range.
+   */
+  static async getCashOutflows(
+    db: KyselySchema,
+    companyId: number,
+    dateFrom: string,
+    dateTo: string
+  ): Promise<number> {
+    const result = await sql<{ outflows: string | null }>`
+      SELECT CAST(COALESCE(SUM(amount), 0) AS DECIMAL(18,2)) AS outflows
+      FROM cash_bank_transactions
+      WHERE company_id = ${companyId}
+        AND transaction_type = 'WITHDRAWAL'
+        AND status = 'POSTED'
+        AND transaction_date >= ${dateFrom}
+        AND transaction_date <= ${dateTo}
+    `.execute(db);
+    return Number(result.rows[0]?.outflows ?? "0");
   }
 }
 

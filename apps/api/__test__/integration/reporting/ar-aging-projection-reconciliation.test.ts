@@ -27,8 +27,8 @@ import {
   getOrCreateTestCashierForPermission,
 } from "../../fixtures";
 import { getDb } from "@/lib/db";
-import { sql } from "kysely";
 import { makeTag } from "../../helpers/tags";
+import { ARReconciliationService, fromScaled4 } from "@jurnapod/modules-accounting";
 import { createTestCustomer, createTestSalesInvoice } from "@jurnapod/modules-sales/test-fixtures";
 
 describe("ar-aging-projection-reconciliation", { timeout: 60000 }, () => {
@@ -109,14 +109,11 @@ describe("ar-aging-projection-reconciliation", { timeout: 60000 }, () => {
       );
       expect(projectedTotal).toBe(0);
 
-      // Variance with subledger should be zero
+      // Variance with subledger should be zero — use production reconciliation service
       const db = getDb();
-      const subledgerResult = await sql<{ subledger_total: number | null }>`
-        SELECT COALESCE(SUM(grand_total - paid_total), 0) AS subledger_total
-        FROM sales_invoices
-        WHERE company_id = ${mainCompanyId} AND status = 'POSTED'
-      `.execute(db);
-      const subledgerTotal = Number(subledgerResult.rows[0]?.subledger_total ?? 0);
+      const arService = new ARReconciliationService(db);
+      const arBalance = await arService.getARSubledgerBalance(mainCompanyId, FIXED_AS_OF_DATE, FIXED_AS_OF_DATE);
+      const subledgerTotal = Number(fromScaled4(arBalance));
       const variance = Math.abs(projectedTotal - subledgerTotal);
       expect(variance).toBe(0);
 
@@ -220,14 +217,11 @@ describe("ar-aging-projection-reconciliation", { timeout: 60000 }, () => {
           0
         );
 
-        // Direct DB subledger query: SUM(grand_total - paid_total) WHERE status='POSTED'
+        // Use production AR reconciliation service for subledger total
         const db = getDb();
-        const subledgerResult = await sql<{ subledger_total: number | null }>`
-          SELECT COALESCE(SUM(grand_total - paid_total), 0) AS subledger_total
-          FROM sales_invoices
-          WHERE company_id = ${isolatedCompanyId} AND status = 'POSTED'
-        `.execute(db);
-        const subledgerTotal = Number(subledgerResult.rows[0]?.subledger_total ?? 0);
+        const arService = new ARReconciliationService(db);
+        const arBalance = await arService.getARSubledgerBalance(isolatedCompanyId, FIXED_AS_OF_DATE, FIXED_AS_OF_DATE);
+        const subledgerTotal = Number(fromScaled4(arBalance));
 
         // The projection total MUST match the subledger total exactly
         expect(projectedTotal).toBe(subledgerTotal);
@@ -347,12 +341,9 @@ describe("ar-aging-projection-reconciliation", { timeout: 60000 }, () => {
       );
 
       const db = getDb();
-      const subledgerResult = await sql<{ subledger_total: number | null }>`
-        SELECT COALESCE(SUM(grand_total - paid_total), 0) AS subledger_total
-        FROM sales_invoices
-        WHERE company_id = ${mainCompanyId} AND status = 'POSTED'
-      `.execute(db);
-      const subledgerTotal = Number(subledgerResult.rows[0]?.subledger_total ?? 0);
+      const arService = new ARReconciliationService(db);
+      const arBalance = await arService.getARSubledgerBalance(mainCompanyId, FIXED_AS_OF_DATE, FIXED_AS_OF_DATE);
+      const subledgerTotal = Number(fromScaled4(arBalance));
       const variance = Math.abs(projectedTotal - subledgerTotal);
 
       // Emit exact GATE format

@@ -3,6 +3,7 @@
 
 import type { KyselySchema } from "@jurnapod/db";
 import type { CustomerFixture } from "./types.js";
+import { insertCustomer } from "@jurnapod/modules-platform";
 
 // Deterministic run ID for fixture code/name generation (matches API fixture behavior)
 const _runIdSeed = (Date.now() ^ (process.pid << 8) ^ (Number(process.env.VITEST_POOL_ID ?? 0) << 16)) & 0x7fffffff;
@@ -49,19 +50,15 @@ export async function createTestCustomer(
   const name = opts.name ?? `Test Customer ${runId}`;
 
   try {
-    const result = await db
-      .insertInto("customers")
-      .values({
-        company_id: opts.companyId,
-        code,
-        display_name: name,
-        type: 1, // PERSON
-        is_active: 1,
-        email: opts.email ?? null,
-      })
-      .executeTakeFirst();
+    const id = await insertCustomer(db, {
+      companyId: opts.companyId,
+      code,
+      displayName: name,
+      type: 1, // PERSON
+      isActive: 1,
+      email: opts.email ?? null,
+    });
 
-    const id = Number(result.insertId);
     if (!id) {
       throw new Error(`Failed to create customer with code ${code}`);
     }

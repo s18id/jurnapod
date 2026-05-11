@@ -4,19 +4,15 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import type { FiscalPeriodFixture } from "./types.js";
-import { toUtcIso, fromUtcIso } from "@jurnapod/shared";
+import { insertFiscalPeriod } from "../fiscal-year/service.js";
 
-// Status tinyint mapping (matches migration 0180 schema)
 const STATUS_OPEN_INT = 1;
-const STATUS_CLOSED_INT = 2;
 
 /**
  * Create a test fiscal period for Epic 47 (cutoff date handling, period close guardrails).
  * Story linkage: 47.1 (cutoff date handling), 47.5 (period close guardrails).
  *
- * Schema mapping:
- *  - fiscal_periods.period_no (not period_number)
- *  - status is tinyint: OPEN=1, CLOSED=2
+ * Uses canonical production function insertFiscalPeriod() from fiscal-year/service.ts.
  *
  * @param db - KyselySchema database instance
  * @param fiscalYearId - Parent fiscal year ID
@@ -50,52 +46,26 @@ export async function createTestFiscalPeriod(
   }
 
   const periodNo = options?.periodNumber ?? 1;
-  // Derive default dates from fiscal year if not provided
-  const fyResult = await sql`SELECT start_date, end_date FROM fiscal_years WHERE id = ${fiscalYearId} LIMIT 1`.execute(db);
   let startDate = options?.startDate ?? "2026-01-01";
   let endDate = options?.endDate ?? "2026-01-31";
-
-  if (fyResult.rows.length > 0) {
-    const fyRow = fyResult.rows[0] as { start_date: Date; end_date: Date };
-    if (!options?.startDate) {
-      startDate = fromUtcIso.dateOnly(toUtcIso.dateLike(fyRow.start_date) as string);
-    }
-    if (!options?.endDate) {
-      endDate = fromUtcIso.dateOnly(toUtcIso.dateLike(fyRow.end_date) as string);
-    }
-  }
-
   const statusInput = options?.status ?? "OPEN";
-  // Map label to tinyint
-  const statusInt = statusInput === "OPEN" ? STATUS_OPEN_INT : STATUS_CLOSED_INT;
 
   try {
-    // Derive company_id from parent fiscal_year_id (fiscal_periods.company_id is NOT NULL)
-    const fyCompanyResult = await sql`SELECT company_id FROM fiscal_years WHERE id = ${fiscalYearId} LIMIT 1`.execute(db);
-    if (fyCompanyResult.rows.length === 0) {
-      throw new Error(`Fiscal year ${fiscalYearId} not found — cannot derive company_id for fiscal period`);
-    }
-    const periodCompanyId = Number((fyCompanyResult.rows[0] as { company_id: number }).company_id);
+    const created = await insertFiscalPeriod(db, {
+      fiscalYearId,
+      periodNo,
+      startDate,
+      endDate,
+      status: statusInput,
+    });
 
-    // FIX(47.5-WP-B): use period_no (not period_number), status as tinyint, and company_id from parent FY
-    await sql`
-      INSERT INTO fiscal_periods (fiscal_year_id, company_id, period_no, start_date, end_date, status, created_at, updated_at)
-      VALUES (${fiscalYearId}, ${periodCompanyId}, ${periodNo}, ${startDate}, ${endDate}, ${statusInt}, NOW(), NOW())
-    `.execute(db);
-
-    const result = await sql`SELECT id, fiscal_year_id, period_no, start_date, end_date, status FROM fiscal_periods WHERE fiscal_year_id = ${fiscalYearId} AND period_no = ${periodNo} LIMIT 1`.execute(db);
-    if (result.rows.length === 0) {
-      throw new Error(`Failed to create fiscal period for fiscal_year_id ${fiscalYearId}`);
-    }
-    const row = result.rows[0] as { id: number; fiscal_year_id: number; period_no: number; start_date: Date; end_date: Date; status: number };
-    // Map status tinyint back to label for ergonomics
     const fixture: FiscalPeriodFixture = {
-      id: Number(row.id),
-      fiscalYearId: Number(row.fiscal_year_id),
-      periodNumber: Number(row.period_no),
-      startDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.start_date) as string),
-      endDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.end_date) as string),
-      status: row.status === STATUS_OPEN_INT ? "OPEN" : "CLOSED",
+      id: created.id,
+      fiscalYearId: created.fiscalYearId,
+      periodNumber: created.periodNo,
+      startDate: created.startDate,
+      endDate: created.endDate,
+      status: created.status,
     };
     return fixture;
   } catch (error: unknown) {
@@ -108,8 +78,8 @@ export async function createTestFiscalPeriod(
           id: Number(row.id),
           fiscalYearId: Number(row.fiscal_year_id),
           periodNumber: Number(row.period_no),
-          startDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.start_date) as string),
-          endDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.end_date) as string),
+          startDate: (row.start_date instanceof Date ? row.start_date.toISOString().slice(0, 10) : String(row.start_date).slice(0, 10)),
+          endDate: (row.end_date instanceof Date ? row.end_date.toISOString().slice(0, 10) : String(row.end_date).slice(0, 10)),
           status: row.status === STATUS_OPEN_INT ? "OPEN" : "CLOSED",
         };
       }

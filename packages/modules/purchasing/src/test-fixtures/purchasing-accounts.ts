@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import type { PurchasingAccountsFixture } from "./types.js";
+import { insertAccount } from "@jurnapod/modules-accounting";
+import { upsertPurchasingModuleSettings } from "../services/purchasing-settings-db.js";
 
 // Deterministic run ID for fixture code/name generation (matches API fixture behavior)
 const _runIdSeed = (Date.now() ^ (process.pid << 8) ^ (Number(process.env.VITEST_POOL_ID ?? 0) << 16)) & 0x7fffffff;
@@ -46,19 +47,7 @@ export async function createPurchasingAccountsFixture(
   const companyId = options?.companyId ?? 0;
   const runId = makeRunId();
 
-  // Find the purchasing module id — canonical Kysely query builder
-  const moduleRow = await db
-    .selectFrom("modules")
-    .where("code", "=", "purchasing")
-    .select(["id"])
-    .executeTakeFirst();
-
-  if (!moduleRow) {
-    throw new Error('Purchasing module not found');
-  }
-  const purchasingModuleId = Number(moduleRow.id);
-
-  // Create AP account (creditor/payable type) — canonical Kysely insertInto pattern
+  // Create AP account (creditor/payable type) — canonical insertAccount() function
   const apAccountName = options?.apAccountName ?? `Test AP Account ${runId}`;
 
   let apAccountId: number | null = null;
@@ -67,18 +56,14 @@ export async function createPurchasingAccountsFixture(
     const apAccountCode = `TEST-AP-${attemptRunId}`.slice(0, 20);
 
     try {
-      const apResult = await db
-        .insertInto("accounts")
-        .values({
-          company_id: companyId,
-          code: apAccountCode,
-          name: apAccountName,
-          type_name: "CREDITOR",
-          is_active: 1,
-          is_payable: 1,
-        })
-        .executeTakeFirst();
-      apAccountId = Number(apResult.insertId ?? 0);
+      apAccountId = await insertAccount(db, {
+        companyId,
+        code: apAccountCode,
+        name: apAccountName,
+        typeName: "CREDITOR",
+        isPayable: true,
+        isActive: true,
+      });
       break;
     } catch (error: unknown) {
       const mysqlError = error as { code?: string };
@@ -93,7 +78,7 @@ export async function createPurchasingAccountsFixture(
     throw new Error('Failed to create unique AP account fixture after retries');
   }
 
-  // Create Expense account — canonical Kysely insertInto pattern
+  // Create Expense account — canonical insertAccount() function
   const expenseAccountName = options?.expenseAccountName ?? `Test Expense Account ${runId}`;
 
   let expenseAccountId: number | null = null;
@@ -102,18 +87,14 @@ export async function createPurchasingAccountsFixture(
     const expenseAccountCode = `TEST-EXP-${attemptRunId}`.slice(0, 20);
 
     try {
-      const expenseResult = await db
-        .insertInto("accounts")
-        .values({
-          company_id: companyId,
-          code: expenseAccountCode,
-          name: expenseAccountName,
-          type_name: "EXPENSE",
-          is_active: 1,
-          is_payable: 0,
-        })
-        .executeTakeFirst();
-      expenseAccountId = Number(expenseResult.insertId ?? 0);
+      expenseAccountId = await insertAccount(db, {
+        companyId,
+        code: expenseAccountCode,
+        name: expenseAccountName,
+        typeName: "EXPENSE",
+        isPayable: false,
+        isActive: true,
+      });
       break;
     } catch (error: unknown) {
       const mysqlError = error as { code?: string };
@@ -128,16 +109,8 @@ export async function createPurchasingAccountsFixture(
     throw new Error('Failed to create unique expense account fixture after retries');
   }
 
-  // Upsert company_modules entry — sql`` required for purchasing_default_ap_account_id
-  // (column exists in DB via migration 0177 but not yet in auto-generated Kysely types)
-  await sql`
-    INSERT INTO company_modules (company_id, module_id, enabled, config_json, updated_at,
-      purchasing_default_ap_account_id, purchasing_default_expense_account_id)
-    VALUES (${companyId}, ${purchasingModuleId}, 1, '{}', CURRENT_TIMESTAMP, ${apAccountId}, ${expenseAccountId})
-    ON DUPLICATE KEY UPDATE
-      purchasing_default_ap_account_id = ${apAccountId},
-      purchasing_default_expense_account_id = ${expenseAccountId}
-  `.execute(db);
+  // Upsert company_modules — canonical upsertPurchasingModuleSettings() function
+  await upsertPurchasingModuleSettings(db, companyId, apAccountId, expenseAccountId);
 
   return { ap_account_id: apAccountId, expense_account_id: expenseAccountId };
 }

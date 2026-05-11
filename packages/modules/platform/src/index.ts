@@ -20,3 +20,6 @@ export type { AccessScopeChecker } from "./users/interfaces/access-scope-checker
 
 // Test fixtures (owner-package fixtures for platform domain)
 export * from "./test-fixtures/index.js";
+
+// Standalone DB functions (reusable by test fixtures)
+export { insertCustomer } from "./services/platform-db.js";

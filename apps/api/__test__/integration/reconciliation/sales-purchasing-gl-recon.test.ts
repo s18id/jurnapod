@@ -14,7 +14,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { closeTestDb, getTestDb } from '../../helpers/db';
-import { sql } from 'kysely';
+import { JournalsService, JournalNotFoundError } from '@jurnapod/modules-accounting';
 import {
   resetFixtureRegistry,
   createTestCompanyMinimal,
@@ -49,6 +49,40 @@ let fiscalYearId: number;
 
 function tag(prefix: string): string {
   return `${prefix}${Date.now()}`.slice(0, 32);
+}
+
+/**
+ * Get journal totals (debit/credit sums) for a document.
+ * Replaces inline COALESCE(SUM(...)) queries with JournalsService.getJournalBatch().
+ */
+async function getJournalTotalsForDoc(
+  companyId: number,
+  docType: string,
+  docId: number
+): Promise<{ totalDebit: number; totalCredit: number }> {
+  const db = getTestDb();
+  const batch = await db
+    .selectFrom('journal_batches')
+    .select('id')
+    .where('company_id', '=', companyId)
+    .where('doc_type', '=', docType)
+    .where('doc_id', '=', docId)
+    .executeTakeFirst();
+
+  if (!batch) return { totalDebit: 0, totalCredit: 0 };
+
+  try {
+    const service = new JournalsService(db);
+    const journalBatch = await service.getJournalBatch(batch.id, companyId);
+    const totalDebit = journalBatch.lines.reduce((sum, l) => sum + l.debit, 0);
+    const totalCredit = journalBatch.lines.reduce((sum, l) => sum + l.credit, 0);
+    return { totalDebit, totalCredit };
+  } catch (err) {
+    if (err instanceof JournalNotFoundError) {
+      return { totalDebit: 0, totalCredit: 0 };
+    }
+    throw err;
+  }
 }
 
 describe('reconciliation.sales-purchasing-gl - Story 61.6', { timeout: 60000 }, () => {
@@ -121,18 +155,9 @@ describe('reconciliation.sales-purchasing-gl - Story 61.6', { timeout: 60000 }, 
         headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       });
 
-      const db = getTestDb();
-      const lines = await sql<{ total_debit: string; total_credit: string }>`
-        SELECT COALESCE(SUM(jl.debit), 0) AS total_debit,
-               COALESCE(SUM(jl.credit), 0) AS total_credit
-        FROM journal_lines jl
-        JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-        WHERE jb.doc_type = 'SALES_INVOICE'
-          AND jb.doc_id = ${invId}
-          AND jb.company_id = ${companyId}
-      `.execute(db);
-      expect(Number(lines.rows[0]?.total_debit)).toBe(Number(lines.rows[0]?.total_credit));
-      expect(Number(lines.rows[0]?.total_debit)).toBeGreaterThan(0);
+      const totals = await getJournalTotalsForDoc(companyId, 'SALES_INVOICE', invId);
+      expect(totals.totalDebit).toBe(totals.totalCredit);
+      expect(totals.totalDebit).toBeGreaterThan(0);
     });
 
     it('AP invoice posting creates balanced journal entries', async () => {
@@ -155,18 +180,9 @@ describe('reconciliation.sales-purchasing-gl - Story 61.6', { timeout: 60000 }, 
         headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       });
 
-      const db = getTestDb();
-      const lines = await sql<{ total_debit: string; total_credit: string }>`
-        SELECT COALESCE(SUM(jl.debit), 0) AS total_debit,
-               COALESCE(SUM(jl.credit), 0) AS total_credit
-        FROM journal_lines jl
-        JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-        WHERE jb.doc_type = 'PURCHASE_INVOICE'
-          AND jb.doc_id = ${piId}
-          AND jb.company_id = ${companyId}
-      `.execute(db);
-      expect(Number(lines.rows[0]?.total_debit)).toBe(Number(lines.rows[0]?.total_credit));
-      expect(Number(lines.rows[0]?.total_debit)).toBeGreaterThan(0);
+      const totals = await getJournalTotalsForDoc(companyId, 'PURCHASE_INVOICE', piId);
+      expect(totals.totalDebit).toBe(totals.totalCredit);
+      expect(totals.totalDebit).toBeGreaterThan(0);
     });
   });
 
@@ -195,17 +211,11 @@ describe('reconciliation.sales-purchasing-gl - Story 61.6', { timeout: 60000 }, 
         headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       });
 
-      const db = getTestDb();
-      const netLines = await sql<{ net_debit: string; net_credit: string }>`
-        SELECT COALESCE(SUM(jl.debit), 0) AS net_debit,
-               COALESCE(SUM(jl.credit), 0) AS net_credit
-        FROM journal_lines jl
-        JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-        WHERE jb.doc_id = ${invId}
-          AND jb.doc_type IN ('SALES_INVOICE', 'SALES_INVOICE_VOID')
-          AND jb.company_id = ${companyId}
-      `.execute(db);
-      expect(Number(netLines.rows[0]?.net_debit)).toBe(Number(netLines.rows[0]?.net_credit));
+      const salesTotals = await getJournalTotalsForDoc(companyId, 'SALES_INVOICE', invId);
+      const voidTotals = await getJournalTotalsForDoc(companyId, 'SALES_INVOICE_VOID', invId);
+      const netDebit = salesTotals.totalDebit + voidTotals.totalDebit;
+      const netCredit = salesTotals.totalCredit + voidTotals.totalCredit;
+      expect(netDebit).toBe(netCredit);
     });
 
     it('voided AP invoice journals net to zero', async () => {
@@ -232,17 +242,11 @@ describe('reconciliation.sales-purchasing-gl - Story 61.6', { timeout: 60000 }, 
         headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
       });
 
-      const db = getTestDb();
-      const netLines = await sql<{ net_debit: string; net_credit: string }>`
-        SELECT COALESCE(SUM(jl.debit), 0) AS net_debit,
-               COALESCE(SUM(jl.credit), 0) AS net_credit
-        FROM journal_lines jl
-        JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-        WHERE jb.doc_id = ${piId}
-          AND jb.doc_type IN ('PURCHASE_INVOICE', 'PURCHASE_INVOICE_VOID')
-          AND jb.company_id = ${companyId}
-      `.execute(db);
-      expect(Number(netLines.rows[0]?.net_debit)).toBe(Number(netLines.rows[0]?.net_credit));
+      const apTotals = await getJournalTotalsForDoc(companyId, 'PURCHASE_INVOICE', piId);
+      const voidTotals = await getJournalTotalsForDoc(companyId, 'PURCHASE_INVOICE_VOID', piId);
+      const netDebit = apTotals.totalDebit + voidTotals.totalDebit;
+      const netCredit = apTotals.totalCredit + voidTotals.totalCredit;
+      expect(netDebit).toBe(netCredit);
     });
   });
 });

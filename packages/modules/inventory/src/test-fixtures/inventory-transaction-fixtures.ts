@@ -29,6 +29,7 @@
  */
 
 import type { KyselySchema } from "@jurnapod/db";
+import { insertInventoryTransaction } from "../services/stock-service.js";
 
 /**
  * Options for creating a test inventory transaction row.
@@ -58,15 +59,11 @@ export async function createTestInventoryTransaction(
   db: KyselySchema,
   opts: CreateTestInventoryTransactionOptions
 ): Promise<number> {
-  const result = await db
-    .insertInto("inventory_transactions")
-    .values({
-      company_id: opts.companyId,
-      product_id: opts.productId,
-      transaction_type: opts.transactionType ?? 1,
-      quantity_delta: opts.quantityDelta,
-      reference_id: opts.referenceId,
-    })
-    .executeTakeFirst();
-  return Number(result.insertId ?? 0);
+  return insertInventoryTransaction(db, {
+    companyId: opts.companyId,
+    productId: opts.productId,
+    quantityDelta: opts.quantityDelta,
+    referenceId: opts.referenceId,
+    transactionType: opts.transactionType ?? 1,
+  });
 }

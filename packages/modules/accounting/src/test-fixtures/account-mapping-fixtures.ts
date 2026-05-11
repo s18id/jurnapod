@@ -2,20 +2,16 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import type { KyselySchema } from "@jurnapod/db";
+import { insertAccountMapping } from "../account-mappings-service.js";
 
 /**
  * Fixture for account_mappings table (accounting domain).
  *
- * Creates an account mapping entry using the canonical Kysely query builder
- * (the same DB access pattern used by account-mappings-service.ts production code).
+ * Uses the production `insertAccountMapping()` function — the same canonical
+ * insert path used by production domain functions (`ensureSalesOutletMappings`,
+ * `ensurePaymentVarianceMappings`).
  *
- * FIXTURE MODE: Partial Fixture Mode
- * SCOPE: Single account_mappings row insertion for test seeding.
- * RATIONALE: The production `ensureSalesOutletMappings` and `ensurePaymentVarianceMappings`
- *   functions are orchestrators that create accounts AND mappings in a single flow,
- *   which is too broad for tests that need individual mapping rows. This fixture
- *   uses the canonical Kysely insertInto pattern — the same DB access used by
- *   production code — but at a decomposed level.
+ * FIXTURE MODE: Full Fixture Mode
  * OWNER: modules-accounting (owner package for account_mappings domain)
  */
 export interface AccountMappingFixture {
@@ -34,20 +30,21 @@ export async function createTestAccountMapping(
   db: KyselySchema,
   opts: CreateTestAccountMappingOpts,
 ): Promise<AccountMappingFixture> {
-  const { companyId, outletId, mappingTypeId, mappingKey, accountId } = opts;
+  await insertAccountMapping(db, {
+    companyId: opts.companyId,
+    outletId: opts.outletId ?? null,
+    mappingTypeId: opts.mappingTypeId,
+    mappingKey: opts.mappingKey,
+    accountId: opts.accountId,
+  });
 
+  // Fetch the idempotent row
   const result = await db
-    .insertInto("account_mappings")
-    .values({
-      company_id: companyId,
-      outlet_id: outletId ?? null,
-      mapping_type_id: mappingTypeId,
-      mapping_key: mappingKey,
-      account_id: accountId,
-    })
+    .selectFrom("account_mappings")
+    .select(["id"])
+    .where("company_id", "=", opts.companyId)
+    .where("mapping_key", "=", opts.mappingKey)
     .executeTakeFirst();
 
-  return {
-    id: Number(result.insertId),
-  };
+  return { id: Number(result?.id ?? 0) };
 }

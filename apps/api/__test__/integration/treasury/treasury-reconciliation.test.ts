@@ -7,6 +7,9 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { sql } from 'kysely';
+import { CashBankService } from '@jurnapod/modules-treasury';
+const { getCashBalance } = CashBankService;
+import { JournalsService } from '@jurnapod/modules-accounting';
 import { getTestBaseUrl } from '../../helpers/env';
 import { closeTestDb, getTestDb } from '../../helpers/db';
 import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
@@ -189,17 +192,14 @@ describe('treasury.treasury-reconciliation - Story 57.4', { timeout: 90000 }, ()
     });
   }
 
-  // Query treasury sum for a given account
-  async function getTreasurySum(accountId: number): Promise<number> {
+  // Query treasury net balance via production getCashBalance (scoped by date range)
+  async function getTreasurySum(dateFrom: string, dateTo: string): Promise<number> {
     const db = getTestDb();
-    const rows = await sql`
-      SELECT COALESCE(SUM(amount), 0) as total
-      FROM cash_bank_transactions
-      WHERE destination_account_id = ${accountId}
-        AND company_id = ${companyAId}
-        AND status = 'POSTED'
-    `.execute(db);
-    return Number((rows.rows[0] as { total: string }).total);
+    return getCashBalance(db, companyAId, {
+      status: 'POSTED',
+      dateFrom,
+      dateTo,
+    });
   }
 
   // Query cash_bank_transactions row by payment_no reference
@@ -273,8 +273,8 @@ describe('treasury.treasury-reconciliation - Story 57.4', { timeout: 90000 }, ()
     const { id: inv3 } = await createPostedInvoice(175000, '2026-05-25');
     await createAndPostPayment(inv3, bankAccountId, 175000, '2026-05-25');
 
-    // Query SUM from cash_bank_transactions
-    const treasurySum = await getTreasurySum(bankAccountId);
+    // Query net balance via getCashBalance (scoped by date range)
+    const treasurySum = await getTreasurySum('2026-05-23', '2026-05-25');
     expect(treasurySum).toBe(525000); // 100000 + 250000 + 175000
   });
 
@@ -347,7 +347,7 @@ describe('treasury.treasury-reconciliation - Story 57.4', { timeout: 90000 }, ()
     expect(draft1.id).not.toBe(draft2.id);
 
     // Treasury sum should equal sum of both payments
-    const treasurySum = await getTreasurySum(bankAccountId);
+    const treasurySum = await getTreasurySum('2026-05-27', '2026-05-27');
     expect(treasurySum).toBe(350000); // 150000 + 200000
   });
 
@@ -419,20 +419,23 @@ describe('treasury.treasury-reconciliation - Story 57.4', { timeout: 90000 }, ()
     await createAndPostPayment(inv2, bankAccountId, 220000, '2026-05-31');
 
     // Treasury sum
-    const treasurySum = await getTreasurySum(bankAccountId);
+    const treasurySum = await getTreasurySum('2026-05-30', '2026-05-31');
     expect(treasurySum).toBe(400000);
 
-    // GL balance: SUM of journal_lines where account_id = bankAccountId
+    // GL balance: SUM of journal debits where account_id = bankAccountId
     const db = getTestDb();
-    const glRows = await sql`
-      SELECT
-        COALESCE(SUM(CAST(debit AS DECIMAL(18,4))), 0) as gl_debit
-      FROM journal_lines
-      WHERE account_id = ${bankAccountId}
-        AND company_id = ${companyAId}
-    `.execute(db);
-
-    const glDebit = Number((glRows.rows[0] as { gl_debit: string }).gl_debit);
+    const service = new JournalsService(db);
+    const batches = await service.listJournalBatches({
+      company_id: companyAId,
+      account_id: bankAccountId,
+      limit: 500,
+      offset: 0,
+    });
+    const glDebit = batches.reduce((sum, batch) => {
+      return sum + batch.lines
+        .filter((l) => l.account_id === bankAccountId)
+        .reduce((lineSum, l) => lineSum + l.debit, 0);
+    }, 0);
 
     // Variance = 0 means treasury_sum matches GL movement on the same cash account.
     // In current posting implementation, AR payment debits cash/bank account.

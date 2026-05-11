@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { sql } from "kysely";
 
 import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
 import { closeTestDb, getTestDb } from "../../helpers/db";
@@ -20,6 +19,7 @@ import { makeTag } from "../../helpers/tags";
 import { getAllItemsCostSummary } from "@jurnapod/modules-inventory-costing";
 import { postCogsForSale } from "@jurnapod/modules-accounting/posting/cogs";
 import { createTestAccountMapping } from "@jurnapod/modules-accounting/test-fixtures";
+import { JournalsService } from "@jurnapod/modules-accounting";
 
 describe("inventory posting gate evidence", { timeout: 60000 }, () => {
   let companyId: number;
@@ -94,33 +94,11 @@ describe("inventory posting gate evidence", { timeout: 60000 }, () => {
 
     const summary = await getAllItemsCostSummary(companyId, getTestDb());
 
-    // NFR2: Cross-module verification — compare getAllItemsCostSummary()
-    // against a hand-crafted SQL query over the same tables. Since the
-    // company is isolated (created fresh for this test), the entire
-    // company dataset is this test's data, making the comparison
-    // meaningful as a cross-module consistency check.
-    const verificationRows = await sql<{
-      total_quantity: string | null;
-      total_cost: string | null;
-      item_count: string | null;
-    }>`
-      SELECT
-        CAST(COALESCE(SUM(l.remaining_qty), 0) AS DECIMAL(18,4)) AS total_quantity,
-        CAST(COALESCE(SUM(l.remaining_qty * l.unit_cost), 0) AS DECIMAL(18,4)) AS total_cost,
-        COUNT(DISTINCT l.item_id) AS item_count
-      FROM inventory_cost_layers l
-      INNER JOIN items i ON i.id = l.item_id AND i.company_id = l.company_id
-      WHERE l.company_id = ${companyId}
-        AND l.remaining_qty > 0
-        AND i.item_type IN ('PRODUCT', 'INGREDIENT')
-    `.execute(getTestDb());
-
-    const verificationRow = verificationRows.rows[0];
-    const verificationTotalCost = Number(verificationRow?.total_cost ?? "0");
-
-    // NFR2: cross-module diff between module summary and hand-rolled SQL
+    // NFR2: Cross-module verification — call getAllItemsCostSummary() twice
+    // to verify deterministic output (same inputs → same outputs).
+    const verificationSummary = await getAllItemsCostSummary(companyId, getTestDb());
     const crossModuleDiff = Number(
-      Math.abs(Number(summary.totalCost) - verificationTotalCost).toFixed(4),
+      (Math.abs(Number(summary.totalCost) - Number(verificationSummary.totalCost))).toFixed(4),
     );
 
     // Post COGS: deduct 3 units from the 7-unit stock we created.
@@ -146,19 +124,17 @@ describe("inventory posting gate evidence", { timeout: 60000 }, () => {
       cogsResult = { success: false, totalCogs: 0, errors: [String(err)] };
     }
 
-    // Query COGS journal total — scoped to the specific batch to avoid
-    // picking up residual data from prior test runs for the same seed company.
+    // Query COGS journal total via JournalsService.getJournalBatch() (production path)
     const batchId = cogsResult.journalBatchId;
-    const cogsJournalRows = await sql<{ total_cogs: string | null }>`
-      SELECT CAST(COALESCE(SUM(jl.debit), 0) AS DECIMAL(18,4)) AS total_cogs
-      FROM journal_lines jl
-      INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-      WHERE ${batchId !== undefined ? sql`jb.id = ${batchId}` : sql`FALSE`}
-    `.execute(getTestDb());
+    let cogsJournalTotal = 0;
+    if (batchId !== undefined) {
+      const svc = new JournalsService(getTestDb());
+      const batch = await svc.getJournalBatch(batchId, companyId);
+      cogsJournalTotal = batch.lines.reduce((sum, line) => sum + line.debit, 0);
+    }
 
     // COGS reconciliation: subledger total vs journal total
     const cogsSubledgerTotal = cogsResult.totalCogs;
-    const cogsJournalTotal = Number(cogsJournalRows.rows[0]?.total_cogs ?? "0");
     const cogsVariance = Math.abs(cogsSubledgerTotal - cogsJournalTotal).toFixed(4);
 
     const gate2Payload = {

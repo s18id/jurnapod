@@ -1303,6 +1303,52 @@ export class StockServiceImpl implements StockService {
   }
 }
 
+// =============================================================================
+// Standalone DB Functions — extracted from StockServiceImpl methods for reuse
+// by test fixtures and non-service consumers.
+// =============================================================================
+
+export interface InsertInventoryTransactionInput {
+  companyId: number;
+  outletId?: number | null;
+  transactionType: number;
+  referenceType?: string | null;
+  referenceId?: string | null;
+  productId: number;
+  quantityDelta: number;
+  variantId?: number | null;
+}
+
+/**
+ * Insert an inventory_transactions row directly.
+ *
+ * Extracted from StockServiceImpl's internal INSERT statements — uses the
+ * canonical Kysely `insertInto("inventory_transactions")` pattern.
+ *
+ * @param db - KyselySchema database instance
+ * @param input - Transaction data
+ * @returns Inserted transaction ID
+ */
+export async function insertInventoryTransaction(
+  db: KyselySchema,
+  input: InsertInventoryTransactionInput
+): Promise<number> {
+  const result = await db
+    .insertInto("inventory_transactions")
+    .values({
+      company_id: input.companyId,
+      outlet_id: input.outletId ?? null,
+      transaction_type: input.transactionType,
+      reference_type: input.referenceType ?? null,
+      reference_id: input.referenceId ?? null,
+      product_id: input.productId,
+      quantity_delta: input.quantityDelta,
+      variant_id: input.variantId ?? null,
+    })
+    .executeTakeFirst();
+  return Number(result.insertId ?? 0);
+}
+
 // Default singleton instance
 let stockServiceInstance: StockServiceImpl | null = null;
 let stockServiceDb: KyselySchema | undefined = undefined;

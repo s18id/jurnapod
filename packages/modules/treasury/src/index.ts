@@ -119,13 +119,6 @@ export { CashBankService, type CashBankServiceOptions } from "./cash-bank-servic
 // Aggregation query helpers (Story 64.7)
 // -----------------------------------------------------------------------------
 
-export {
-  getCashBalance,
-  getCashInflows,
-  getCashOutflows,
-  type CashBalanceOptions,
-} from "./cash-bank-queries.js";
-
 // -----------------------------------------------------------------------------
 // Test fixtures (Story 63.8)
 // -----------------------------------------------------------------------------

@@ -4,6 +4,7 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import type { SalesInvoiceFixture } from "./types.js";
+import { insertSalesInvoice } from "../services/invoice-db.js";
 
 // Deterministic run ID for fixture code/name generation
 const _runIdSeed = (Date.now() ^ (process.pid << 8) ^ (Number(process.env.VITEST_POOL_ID ?? 0) << 16)) & 0x7fffffff;
@@ -84,18 +85,22 @@ export async function createTestSalesInvoice(
   // When they are NULL, grand_total = subtotal + tax_amount (which our calculation satisfies).
 
   try {
-    await sql`
-      INSERT INTO sales_invoices
-        (company_id, outlet_id, invoice_no, invoice_date, due_date, customer_id,
-         status, payment_status, subtotal, tax_amount, grand_total, paid_total,
-         created_at, updated_at)
-      VALUES
-        (${opts.companyId}, ${opts.outletId}, ${invoiceNo}, ${invoiceDate}, ${dueDate},
-         ${opts.customerId ?? null}, ${status}, ${paymentStatus}, ${subtotal},
-         ${taxAmount}, ${grandTotal}, 0, NOW(), NOW())
-    `.execute(db);
+    const invoiceId = await insertSalesInvoice(db, {
+      companyId: opts.companyId,
+      outletId: opts.outletId,
+      invoiceNo,
+      invoiceDate,
+      dueDate,
+      status,
+      paymentStatus,
+      subtotal,
+      taxAmount,
+      grandTotal,
+      paidTotal: 0,
+      customerId: opts.customerId ?? null,
+    });
 
-    // SELECT to get the generated ID (reliable across mysql2/Kysely sql template)
+    // SELECT to get invoice_no (for return value)
     const invResult = await sql<{ id: number; invoice_no: string }>`
       SELECT id, invoice_no FROM sales_invoices
       WHERE company_id = ${opts.companyId} AND invoice_no = ${invoiceNo}
@@ -105,8 +110,6 @@ export async function createTestSalesInvoice(
     if (invResult.rows.length === 0) {
       throw new Error("Failed to create sales invoice");
     }
-
-    const invoiceId = Number(invResult.rows[0].id);
 
     // Insert invoice lines if provided
     if (opts.lines && opts.lines.length > 0) {

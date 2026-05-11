@@ -5,6 +5,7 @@ import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import type { FiscalYearFixture } from "./types.js";
 import { toUtcIso, fromUtcIso } from "@jurnapod/shared";
+import { insertFiscalYear } from "../fiscal-year/service.js";
 
 // Deterministic run ID for fixture code/name generation (matches API fixture behavior)
 // Uses process identity + pool ID to reduce cross-worker collisions
@@ -18,6 +19,8 @@ function makeRunId(): string {
 /**
  * Create a test fiscal year for Epic 47 (cutoff date handling, period close guardrails).
  * Story linkage: 47.1 (cutoff date handling), 47.5 (period close guardrails).
+ *
+ * Uses canonical production function insertFiscalYear() from fiscal-year/service.ts.
  *
  * @param db - KyselySchema database instance
  * @param companyId - Parent company ID
@@ -48,24 +51,23 @@ export async function createTestFiscalYear(
   const status = options?.status ?? "OPEN";
 
   try {
-    await sql`
-      INSERT INTO fiscal_years (company_id, code, name, start_date, end_date, status, created_at, updated_at)
-      VALUES (${companyId}, ${code}, ${name}, ${startDate}, ${endDate}, ${status}, NOW(), NOW())
-    `.execute(db);
+    const created = await insertFiscalYear(db, {
+      companyId,
+      code,
+      name,
+      startDate,
+      endDate,
+      status,
+    });
 
-    const result = await sql`SELECT id, code, name, start_date, end_date, status FROM fiscal_years WHERE company_id = ${companyId} AND code = ${code} LIMIT 1`.execute(db);
-    if (result.rows.length === 0) {
-      throw new Error(`Failed to create fiscal year with code ${code}`);
-    }
-    const row = result.rows[0] as { id: number; code: string; name: string; start_date: Date; end_date: Date; status: string };
     const fixture: FiscalYearFixture = {
-      id: Number(row.id),
+      id: created.id,
       company_id: companyId,
-      code: row.code,
+      code: created.code,
       year,
-      startDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.start_date) as string),
-      endDate: fromUtcIso.dateOnly(toUtcIso.dateLike(row.end_date) as string),
-      status: row.status as "OPEN" | "CLOSED",
+      startDate: created.start_date,
+      endDate: created.end_date,
+      status: created.status,
     };
     return fixture;
   } catch (error: unknown) {

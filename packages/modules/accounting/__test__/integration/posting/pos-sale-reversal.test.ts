@@ -24,6 +24,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "kysely";
 import { createKysely, type KyselySchema } from "@jurnapod/db";
 import { createTestCompanyMinimal, createTestOutletMinimal } from "@jurnapod/modules-platform";
+import { JournalsService, JournalNotFoundError } from "../../../src/index.js";
 import {
   createPosSaleReversalJournalsForCorrection,
   type PosSaleReversalParams,
@@ -177,18 +178,19 @@ async function assertBatchExists(
   return result.rows.length > 0 ? Number(result.rows[0].id) : 0;
 }
 
-async function assertLinesBalanced(batchId: number): Promise<{ totalDebit: number; totalCredit: number }> {
-  const result = await sql<{ total_debit: string; total_credit: string }>`
-    SELECT
-      COALESCE(SUM(debit), 0) as total_debit,
-      COALESCE(SUM(credit), 0) as total_credit
-    FROM journal_lines
-    WHERE journal_batch_id = ${batchId}
-  `.execute(db);
-
-  const totalDebit = Number(result.rows[0].total_debit);
-  const totalCredit = Number(result.rows[0].total_credit);
-  return { totalDebit, totalCredit };
+async function assertLinesBalanced(batchId: number, companyId: number): Promise<{ totalDebit: number; totalCredit: number }> {
+  try {
+    const service = new JournalsService(db);
+    const journalBatch = await service.getJournalBatch(batchId, companyId);
+    const totalDebit = journalBatch.lines.reduce((sum, l) => sum + l.debit, 0);
+    const totalCredit = journalBatch.lines.reduce((sum, l) => sum + l.credit, 0);
+    return { totalDebit, totalCredit };
+  } catch (err) {
+    if (err instanceof JournalNotFoundError) {
+      return { totalDebit: 0, totalCredit: 0 };
+    }
+    throw err;
+  }
 }
 
 async function getLinesForBatch(batchId: number): Promise<
@@ -256,7 +258,7 @@ describe("POS_SALE Reversal Journal Correctness (Story 59.8)", () => {
       expect(batchId).toBe(result!.reversalBatchId);
 
       // Verify balance
-      const { totalDebit, totalCredit } = await assertLinesBalanced(batchId);
+      const { totalDebit, totalCredit } = await assertLinesBalanced(batchId, ctx.companyId);
       expect(totalDebit).toBe(totalCredit);
       expect(totalDebit).toBeGreaterThan(0);
 
@@ -372,7 +374,7 @@ describe("POS_SALE Reversal Journal Correctness (Story 59.8)", () => {
       }
 
       // Verify balance
-      const { totalDebit, totalCredit } = await assertLinesBalanced(result!.reversalBatchId);
+      const { totalDebit, totalCredit } = await assertLinesBalanced(result!.reversalBatchId, ctx.companyId);
       expect(totalDebit).toBe(totalCredit);
     });
   });
@@ -459,7 +461,7 @@ describe("POS_SALE Reversal Journal Correctness (Story 59.8)", () => {
       const originalBatchId = await createPosSaleBatch(ctx, originalTxId);
 
       // Get original totals
-      const origBalance = await assertLinesBalanced(originalBatchId);
+      const origBalance = await assertLinesBalanced(originalBatchId, ctx.companyId);
 
       const params: PosSaleReversalParams = {
         companyId: ctx.companyId,
@@ -475,7 +477,7 @@ describe("POS_SALE Reversal Journal Correctness (Story 59.8)", () => {
       expect(result).not.toBeNull();
 
       // Get reversal totals
-      const revBalance = await assertLinesBalanced(result!.reversalBatchId);
+      const revBalance = await assertLinesBalanced(result!.reversalBatchId, ctx.companyId);
 
       // Reversal debits = original credits, reversal credits = original debits
       expect(revBalance.totalDebit).toBe(origBalance.totalCredit);

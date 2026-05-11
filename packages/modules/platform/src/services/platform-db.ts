@@ -349,3 +349,47 @@ class KyselyPlatformDbExecutor implements PlatformDbExecutor {
     return this._customerRepository;
   }
 }
+
+// =============================================================================
+// Standalone DB Functions — extracted from repository methods for reuse
+// by test fixtures and non-service consumers.
+// =============================================================================
+
+/**
+ * Insert a customer row directly using Kysely query builder.
+ *
+ * Extracted from KyselyCustomerRepository.create() — uses the same
+ * `insertInto("customers")` pattern without the full service orchestration
+ * (CreateCustomerInput mapping, actor user tracking, etc.).
+ *
+ * @param db - KyselySchema database instance
+ * @param input - Customer data
+ * @returns Inserted customer ID
+ */
+export async function insertCustomer(
+  db: KyselySchema,
+  input: {
+    companyId: number;
+    code: string;
+    type?: number;
+    displayName?: string;
+    email?: string | null;
+    isActive?: number;
+    createdByUserId?: number;
+  }
+): Promise<number> {
+  const result = await db
+    .insertInto("customers")
+    .values({
+      company_id: input.companyId,
+      code: input.code,
+      type: input.type ?? 1,
+      display_name: input.displayName ?? `Customer ${input.code}`,
+      email: input.email ?? null,
+      is_active: input.isActive ?? 1,
+      created_by_user_id: input.createdByUserId ?? null,
+      updated_by_user_id: input.createdByUserId ?? null,
+    })
+    .executeTakeFirst();
+  return Number(result.insertId);
+}

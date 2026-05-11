@@ -1,9 +1,12 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import type { AccountingAccountFixture } from "./types.js";
+import {
+  lookupOrCreateAccountType,
+  insertAccount,
+} from "../accounts-service.js";
 
 // ---------------------------------------------------------------------------
 // Public interface for createTestAccount
@@ -22,13 +25,11 @@ export interface CreateTestAccountOpts {
 // ---------------------------------------------------------------------------
 // Core fixture: createTestAccount
 //
-// Follows the same production pattern as ensureSystemAccounts() in
-// company-service.ts:
-//   1. Look up account_types by name (global lookup, no company_id filter)
-//   2. Create account_types row if not found (INSERT IGNORE, scoped to companyId)
-//   3. INSERT the account with account_type_id set AT CREATION TIME
-//      (no backfill UPDATE needed)
-//   4. Use INSERT IGNORE for idempotency (safe re-run)
+// Uses canonical production functions lookupOrCreateAccountType() and
+// insertAccount() from accounts-service.ts. This ensures the fixture
+// follows the same production invariants as AccountsService.createAccount().
+//
+// Idempotency: handles ER_DUP_ENTRY by fetching the existing row.
 // ---------------------------------------------------------------------------
 
 export async function createTestAccount(
@@ -37,52 +38,31 @@ export async function createTestAccount(
 ): Promise<AccountingAccountFixture> {
   const { companyId, code, name, typeName, isActive = true, parentId } = opts;
 
-  // 1. Look up account_type_id by name (matches production ensureSystemAccounts pattern — no company_id filter)
-  let typeRow = await db
-    .selectFrom("account_types")
-    .where("name", "=", typeName)
-    .select(["id", "name", "normal_balance", "report_group"])
-    .executeTakeFirst();
+  // 1. Resolve account type metadata via canonical production function
+  const typeMeta = await lookupOrCreateAccountType(db, companyId, typeName);
 
-  if (!typeRow) {
-    // 2. Create account_types row for this company (idempotent)
-    await sql`
-      INSERT IGNORE INTO account_types (company_id, name, category, normal_balance)
-      VALUES (${companyId}, ${typeName}, ${typeName}, 'D')
-    `.execute(db);
-
-    typeRow = await db
-      .selectFrom("account_types")
-      .where("name", "=", typeName)
-      .where("company_id", "=", companyId)
-      .select(["id", "name", "normal_balance", "report_group"])
-      .executeTakeFirst();
+  // 2. INSERT via canonical production function
+  try {
+    await insertAccount(db, {
+      companyId,
+      code,
+      name,
+      typeName,
+      normalBalance: typeMeta.normal_balance,
+      reportGroup: typeMeta.report_group,
+      parentAccountId: parentId ?? null,
+      accountTypeId: typeMeta.id,
+      isActive,
+    });
+  } catch (error: unknown) {
+    const mysqlErr = error as { code?: string };
+    if (mysqlErr?.code !== "ER_DUP_ENTRY" && mysqlErr?.code !== "ER_DUP_KEY") {
+      throw error;
+    }
+    // Duplicate — fall through to fetch existing row below
   }
 
-  if (!typeRow) {
-    throw new Error(
-      `Account type "${typeName}" not found and could not be created for company ${companyId}`,
-    );
-  }
-
-  const accountTypeId = Number(typeRow.id);
-
-  // 3. INSERT IGNORE — sets account_type_id at creation time (no backfill needed)
-  await sql`
-    INSERT IGNORE INTO accounts (
-      company_id, code, name,
-      account_type_id, type_name, normal_balance, report_group,
-      parent_account_id, is_active,
-      created_at, updated_at
-    ) VALUES (
-      ${companyId}, ${code}, ${name},
-      ${accountTypeId}, ${typeName}, ${typeRow.normal_balance}, ${typeRow.report_group},
-      ${parentId ?? null}, ${isActive ? 1 : 0},
-      NOW(), NOW()
-    )
-  `.execute(db);
-
-  // 4. Fetch the row (idempotent — may already exist from prior run)
+  // 3. Fetch the row (idempotent — may already exist from prior run)
   const accountRow = await db
     .selectFrom("accounts")
     .where("company_id", "=", companyId)

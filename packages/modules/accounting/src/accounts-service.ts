@@ -13,6 +13,129 @@ import type { KyselySchema } from "@jurnapod/db";
 import { withTransactionRetry } from "@jurnapod/db";
 import { toUtcIso } from "@jurnapod/shared";
 
+// =============================================================================
+// Reusable production functions (used by both production services and fixtures)
+// =============================================================================
+
+/**
+ * Look up an account type by name. If not found, create it idempotently.
+ * Returns resolved type metadata needed for account INSERT.
+ *
+ * Canonical lookup order (matches ensureSystemAccounts pattern):
+ *   1. Global lookup (no company_id filter) — system-wide types
+ *   2. Company-scoped lookup (if global not found but company row exists)
+ *   3. INSERT IGNORE for idempotency
+ *
+ * Used by: AccountsService.createAccount(), createTestAccount fixture
+ */
+export async function lookupOrCreateAccountType(
+  db: KyselySchema,
+  companyId: number,
+  typeName: string,
+): Promise<{ id: number; name: string; normal_balance: string | null; report_group: string | null }> {
+  // 1. Global lookup first (system-wide account types, no company_id filter)
+  let typeRow = await db
+    .selectFrom("account_types")
+    .where("name", "=", typeName)
+    .select(["id", "name", "normal_balance", "report_group"])
+    .executeTakeFirst();
+
+  if (!typeRow) {
+    // 2. Create account_types row for this company (idempotent)
+    await sql`
+      INSERT IGNORE INTO account_types (company_id, name, category, normal_balance)
+      VALUES (${companyId}, ${typeName}, ${typeName}, 'D')
+    `.execute(db);
+
+    typeRow = await db
+      .selectFrom("account_types")
+      .where("name", "=", typeName)
+      .where("company_id", "=", companyId)
+      .select(["id", "name", "normal_balance", "report_group"])
+      .executeTakeFirst();
+  }
+
+  if (!typeRow) {
+    throw new Error(
+      `Account type "${typeName}" not found and could not be created for company ${companyId}`,
+    );
+  }
+
+  return {
+    id: Number(typeRow.id),
+    name: typeRow.name,
+    normal_balance: typeRow.normal_balance,
+    report_group: typeRow.report_group,
+  };
+}
+
+/**
+ * Options for inserting an account into the accounts table.
+ * Used by both production (AccountsService) and test fixtures.
+ */
+export interface InsertAccountOpts {
+  companyId: number;
+  code: string;
+  name: string;
+  /** Account type name. If normalBalance/reportGroup not provided, looked up via account_types. */
+  typeName: string;
+  normalBalance?: string | null;
+  reportGroup?: string | null;
+  parentAccountId?: number | null;
+  accountTypeId?: number | null;
+  isGroup?: boolean;
+  isPayable?: boolean;
+  isActive?: boolean;
+}
+
+/**
+ * Insert an account row into the accounts table.
+ *
+ * If normalBalance and/or reportGroup are not provided, this function resolves
+ * them from the account_types table via lookupOrCreateAccountType().
+ *
+ * Used by: AccountsService.createAccount(), createTestAccount fixture
+ *
+ * @returns The newly inserted account ID
+ */
+export async function insertAccount(
+  db: KyselySchema,
+  opts: InsertAccountOpts,
+): Promise<number> {
+  // Resolve type metadata if not provided
+  let resolvedNormalBalance = opts.normalBalance ?? null;
+  let resolvedReportGroup = opts.reportGroup ?? null;
+
+  if (resolvedNormalBalance === null || resolvedReportGroup === null) {
+    const typeMeta = await lookupOrCreateAccountType(db, opts.companyId, opts.typeName);
+    if (resolvedNormalBalance === null) {
+      resolvedNormalBalance = typeMeta.normal_balance;
+    }
+    if (resolvedReportGroup === null) {
+      resolvedReportGroup = typeMeta.report_group;
+    }
+  }
+
+  const result = await db
+    .insertInto("accounts")
+    .values({
+      company_id: opts.companyId,
+      code: opts.code,
+      name: opts.name,
+      account_type_id: opts.accountTypeId ?? null,
+      type_name: opts.typeName,
+      normal_balance: resolvedNormalBalance,
+      report_group: resolvedReportGroup,
+      parent_account_id: opts.parentAccountId ?? null,
+      is_group: opts.isGroup ? 1 : 0,
+      is_payable: opts.isPayable ? 1 : 0,
+      is_active: opts.isActive !== false ? 1 : 0,
+    })
+    .executeTakeFirst();
+
+  return Number(result.insertId);
+}
+
 /**
  * Database client interface for dependency injection
  * Should support Kysely queries and transactions
@@ -236,24 +359,20 @@ export class AccountsService {
     }
 
     const accountId = await withTransactionRetry(this.db, async (trx) => {
-      const result = await trx
-        .insertInto('accounts')
-        .values({
-          company_id: data.company_id,
-          code: data.code,
-          name: data.name,
-          account_type_id: data.account_type_id ?? null,
-          type_name: effectiveTypeName,
-          normal_balance: effectiveNormalBalance,
-          report_group: effectiveReportGroup,
-          parent_account_id: data.parent_account_id ?? null,
-          is_group: data.is_group ? 1 : 0,
-          is_payable: data.is_payable ? 1 : 0,
-          is_active: data.is_active ? 1 : 0
-        })
-        .executeTakeFirst();
-
-      const newAccountId = Number(result.insertId);
+      // Use the reusable insertAccount() function — shared with test fixtures
+      const newAccountId = await insertAccount(trx, {
+        companyId: data.company_id,
+        code: data.code,
+        name: data.name,
+        typeName: effectiveTypeName ?? data.code,
+        normalBalance: effectiveNormalBalance,
+        reportGroup: effectiveReportGroup,
+        parentAccountId: data.parent_account_id ?? null,
+        accountTypeId: data.account_type_id ?? null,
+        isGroup: data.is_group,
+        isPayable: data.is_payable,
+        isActive: data.is_active,
+      });
 
       // Audit log (inside transaction)
       if (this.auditService && userId) {

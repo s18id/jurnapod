@@ -4,14 +4,14 @@
 import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import type { APReconciliationSettingsFixture } from "./types.js";
+import { upsertCompanyStringSetting } from "../reconciliation/subledger/ap-reconciliation-service.js";
 
 /**
  * Create AP reconciliation account settings for Epic 47.1 (configurable AP control account set).
  * Story linkage: 47.1 AC1 - configurable AP control account set (not hardcoded single account).
  *
- * Implementation uses settings_strings table with JSON array storage.
- * Key: 'ap_reconciliation_account_ids', Value: JSON array of account IDs.
- * This approach supports multiple AP control accounts as required by the story spec.
+ * Uses canonical production function upsertCompanyStringSetting()
+ * from ap-reconciliation-service.ts.
  *
  * @param db - KyselySchema database instance
  * @param companyId - Company ID
@@ -31,12 +31,8 @@ export async function createTestAPReconciliationSettings(
   const settingKey = "ap_reconciliation_account_ids";
   const settingValue = JSON.stringify(accountIds);
 
-  // Upsert into settings_strings
-  await sql`
-    INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value, created_at, updated_at)
-    VALUES (${companyId}, NULL, ${settingKey}, ${settingValue}, NOW(), NOW())
-    ON DUPLICATE KEY UPDATE setting_value = ${settingValue}, updated_at = NOW()
-  `.execute(db);
+  // Use canonical upsertCompanyStringSetting() — shared with production service
+  await upsertCompanyStringSetting(db, companyId, settingKey, settingValue);
 
   return {
     companyId,
@@ -77,7 +73,7 @@ export async function clearTestAPReconciliationSettings(
 
 /**
  * Canonical helper for company-level string settings.
- * Allows integration tests to avoid ad-hoc SQL for settings_strings rows.
+ * Uses canonical production function upsertCompanyStringSetting().
  *
  * @param db - KyselySchema database instance
  * @param companyId - Company ID
@@ -90,9 +86,6 @@ export async function setTestCompanyStringSetting(
   settingKey: string,
   settingValue: string
 ): Promise<void> {
-  await sql`
-    INSERT INTO settings_strings (company_id, outlet_id, setting_key, setting_value, created_at, updated_at)
-    VALUES (${companyId}, NULL, ${settingKey}, ${settingValue}, NOW(), NOW())
-    ON DUPLICATE KEY UPDATE setting_value = ${settingValue}, updated_at = NOW()
-  `.execute(db);
+  // Use canonical upsertCompanyStringSetting() — shared with production service
+  await upsertCompanyStringSetting(db, companyId, settingKey, settingValue);
 }

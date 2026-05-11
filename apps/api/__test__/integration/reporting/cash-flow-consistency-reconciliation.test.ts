@@ -34,12 +34,10 @@ import {
   setModulePermission,
   cleanupTestFixtures,
 } from "../../fixtures";
-import {
-  createTestCashBankTransaction,
-  getCashBalance,
-  getCashInflows,
-  getCashOutflows,
-} from "@jurnapod/modules-treasury";
+import { createTestCashBankTransaction, CashBankService } from "@jurnapod/modules-treasury";
+
+// Re-export for convenience
+const { getCashBalance, getCashInflows, getCashOutflows } = CashBankService;
 import { makeTag } from "../../helpers/tags";
 
 // Fixed future dates — beyond any real transaction, ensures deterministic isolation

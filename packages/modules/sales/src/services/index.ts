@@ -19,6 +19,11 @@ export {
 } from "./sales-db.js";
 
 export {
+  insertSalesInvoice,
+  type InsertSalesInvoiceInput
+} from "./invoice-db.js";
+
+export {
   resolveDueDate,
   type ResolveDueDateInput
 } from "./order-service.js";

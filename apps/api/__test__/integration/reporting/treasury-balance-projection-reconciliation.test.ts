@@ -26,8 +26,9 @@ import {
 } from "../../fixtures";
 import {
   createTestCashBankTransaction,
-  getCashBalance,
+  CashBankService,
 } from "@jurnapod/modules-treasury";
+const { getCashBalance } = CashBankService;
 import { makeTag } from "../../helpers/tags";
 
 describe("treasury-balance-projection-reconciliation", { timeout: 60000 }, () => {

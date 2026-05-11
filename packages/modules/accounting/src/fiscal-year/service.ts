@@ -78,6 +78,71 @@ export interface FiscalYearSettingsPort {
 const MYSQL_DUPLICATE_ERROR_CODE = 1062;
 const ALLOW_MULTIPLE_OPEN_SETTING = "accounting.allow_multiple_open_fiscal_years";
 
+// =============================================================================
+// Reusable production functions (used by both production services and fixtures)
+// =============================================================================
+
+/**
+ * Options for inserting a fiscal year row.
+ * Used by both FiscalYearService.createFiscalYear() and createTestFiscalYear fixture.
+ */
+export interface InsertFiscalYearOpts {
+  companyId: number;
+  code: string;
+  name: string;
+  startDate: string;   // YYYY-MM-DD
+  endDate: string;     // YYYY-MM-DD
+  status: string;      // 'OPEN' | 'CLOSED'
+  actorUserId?: number | null;
+}
+
+/**
+ * Insert a fiscal year row into the fiscal_years table.
+ *
+ * Returns the newly inserted fiscal year record.
+ * Throws FiscalYearCodeExistsError on duplicate code.
+ *
+ * Used by: FiscalYearService.createFiscalYear(), createTestFiscalYear fixture
+ */
+export async function insertFiscalYear(
+  db: FiscalYearDbClient,
+  opts: InsertFiscalYearOpts,
+): Promise<FiscalYear> {
+  const { companyId, code, name, startDate, endDate, status, actorUserId } = opts;
+
+  const result = await db
+    .insertInto("fiscal_years")
+    .values({
+      company_id: companyId,
+      code,
+      name,
+      start_date: parseDateOnly(startDate),
+      end_date: parseDateOnly(endDate),
+      status,
+      created_by_user_id: actorUserId ?? null,
+      updated_by_user_id: actorUserId ?? null,
+    })
+    .executeTakeFirst();
+
+  const fiscalYearId = Number(result.insertId);
+  const created = await (async () => {
+    const row = await db
+      .selectFrom("fiscal_years")
+      .where("company_id", "=", companyId)
+      .where("id", "=", fiscalYearId)
+      .limit(1)
+      .select(["id", "company_id", "code", "name", "start_date", "end_date", "status", "created_at", "updated_at"])
+      .executeTakeFirst();
+    return row ? normalizeFiscalYear(row) : null;
+  })();
+
+  if (!created) {
+    throw new FiscalYearNotFoundError("Fiscal year not found after create");
+  }
+
+  return created;
+}
+
 function formatDateOnly(value: string | Date): string {
   if (typeof value === "string") {
     return value.slice(0, 10);
@@ -143,6 +208,82 @@ function formatDateOnlyFromUnknown(value: unknown): string {
   }
   // Fallback: convert to string and slice
   return String(value).slice(0, 10);
+}
+
+/**
+ * Options for inserting a fiscal period row.
+ * Used by createTestFiscalPeriod fixture. The companyId is derived from the parent
+ * fiscal year to maintain referential integrity and tenant isolation.
+ */
+export interface InsertFiscalPeriodOpts {
+  fiscalYearId: number;
+  periodNo: number;      // 1-12
+  startDate: string;     // YYYY-MM-DD
+  endDate: string;       // YYYY-MM-DD
+  status: "OPEN" | "CLOSED";
+}
+
+/** Status tinyint mapping (matches migration 0180 schema) */
+const STATUS_OPEN_INT = 1;
+const STATUS_CLOSED_INT = 2;
+
+/**
+ * Insert a fiscal period row into the fiscal_periods table.
+ *
+ * Derives company_id from the parent fiscal_year to enforce tenant isolation.
+ * Uses the canonical production schema: period_no, status as tinyint.
+ *
+ * Used by: createTestFiscalPeriod fixture
+ *
+ * @returns The newly inserted fiscal period record
+ */
+export async function insertFiscalPeriod(
+  db: FiscalYearDbClient,
+  opts: InsertFiscalPeriodOpts,
+): Promise<{
+  id: number;
+  fiscalYearId: number;
+  periodNo: number;
+  startDate: string;
+  endDate: string;
+  status: "OPEN" | "CLOSED";
+}> {
+  const { fiscalYearId, periodNo, startDate, endDate, status } = opts;
+
+  // Derive company_id from parent fiscal year (tenant isolation)
+  const fyResult = await db
+    .selectFrom("fiscal_years")
+    .where("id", "=", fiscalYearId)
+    .select(["company_id"])
+    .executeTakeFirst();
+
+  if (!fyResult) {
+    throw new Error(`Fiscal year ${fiscalYearId} not found — cannot derive company_id for fiscal period`);
+  }
+
+  const companyId = Number(fyResult.company_id);
+  const statusInt = status === "OPEN" ? STATUS_OPEN_INT : STATUS_CLOSED_INT;
+
+  const result = await db
+    .insertInto("fiscal_periods")
+    .values({
+      fiscal_year_id: fiscalYearId,
+      company_id: companyId,
+      period_no: periodNo,
+      start_date: parseDateOnly(startDate),
+      end_date: parseDateOnly(endDate),
+      status: statusInt,
+    })
+    .executeTakeFirst();
+
+  return {
+    id: Number(result.insertId),
+    fiscalYearId,
+    periodNo,
+    startDate,
+    endDate,
+    status,
+  };
 }
 
 // =============================================================================
@@ -218,25 +359,15 @@ export class FiscalYearService {
       }
 
       try {
-        const result = await trx
-          .insertInto("fiscal_years")
-          .values({
-            company_id: input.company_id,
-            code: input.code,
-            name: input.name,
-            start_date: parseDateOnly(input.start_date),
-            end_date: parseDateOnly(input.end_date),
-            status: status,
-            created_by_user_id: actorUserId ?? null,
-            updated_by_user_id: actorUserId ?? null
-          })
-          .executeTakeFirst();
-
-        const fiscalYearId = Number(result.insertId);
-        const created = await this.getFiscalYearByIdWithExecutor(trx, input.company_id, fiscalYearId);
-        if (!created) {
-          throw new FiscalYearNotFoundError("Fiscal year not found after create");
-        }
+        const created = await insertFiscalYear(trx, {
+          companyId: input.company_id,
+          code: input.code,
+          name: input.name,
+          startDate: input.start_date,
+          endDate: input.end_date,
+          status,
+          actorUserId,
+        });
 
         return created;
       } catch (error) {

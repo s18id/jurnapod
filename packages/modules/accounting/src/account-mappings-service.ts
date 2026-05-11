@@ -2,6 +2,28 @@ import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import { ACCOUNT_MAPPING_TYPE_ID_BY_CODE } from "@jurnapod/shared";
 
+/**
+ * Insert or update an account_mappings row (idempotent: ON DUPLICATE KEY UPDATE).
+ * This is the canonical production insert path for account_mappings.
+ * Both domain-level functions and test fixtures MUST use this.
+ */
+export async function insertAccountMapping(
+  db: KyselySchema,
+  opts: {
+    companyId: number;
+    outletId?: number | null;
+    mappingTypeId: number;
+    mappingKey: string;
+    accountId: number;
+  }
+): Promise<void> {
+  await sql`
+    INSERT INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id, created_at, updated_at)
+    VALUES (${opts.companyId}, ${opts.outletId ?? null}, ${opts.mappingTypeId}, ${opts.mappingKey}, ${opts.accountId}, NOW(), NOW())
+    ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), updated_at = NOW()
+  `.execute(db);
+}
+
 async function findOrCreateAccount(
   db: KyselySchema,
   input: {
@@ -58,17 +80,21 @@ export async function ensureSalesOutletMappings(
     accountTypeName: "REVENUE"
   });
 
-  await sql`
-    INSERT INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id, created_at, updated_at)
-    VALUES (${input.companyId}, ${input.outletId}, ${ACCOUNT_MAPPING_TYPE_ID_BY_CODE.AR}, 'AR', ${arAccountId}, NOW(), NOW())
-    ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), updated_at = NOW()
-  `.execute(db);
+  await insertAccountMapping(db, {
+    companyId: input.companyId,
+    outletId: input.outletId,
+    mappingTypeId: ACCOUNT_MAPPING_TYPE_ID_BY_CODE.AR,
+    mappingKey: 'AR',
+    accountId: arAccountId,
+  });
 
-  await sql`
-    INSERT INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id, created_at, updated_at)
-    VALUES (${input.companyId}, ${input.outletId}, ${ACCOUNT_MAPPING_TYPE_ID_BY_CODE.SALES_REVENUE}, 'SALES_REVENUE', ${salesRevenueAccountId}, NOW(), NOW())
-    ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), updated_at = NOW()
-  `.execute(db);
+  await insertAccountMapping(db, {
+    companyId: input.companyId,
+    outletId: input.outletId,
+    mappingTypeId: ACCOUNT_MAPPING_TYPE_ID_BY_CODE.SALES_REVENUE,
+    mappingKey: 'SALES_REVENUE',
+    accountId: salesRevenueAccountId,
+  });
 
   return { arAccountId, salesRevenueAccountId };
 }
@@ -91,17 +117,19 @@ export async function ensurePaymentVarianceMappings(
     accountTypeName: "EXPENSE"
   });
 
-  await sql`
-    INSERT INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id, created_at, updated_at)
-    VALUES (${input.companyId}, NULL, ${ACCOUNT_MAPPING_TYPE_ID_BY_CODE.PAYMENT_VARIANCE_GAIN}, 'PAYMENT_VARIANCE_GAIN', ${gainAccountId}, NOW(), NOW())
-    ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), updated_at = NOW()
-  `.execute(db);
+  await insertAccountMapping(db, {
+    companyId: input.companyId,
+    mappingTypeId: ACCOUNT_MAPPING_TYPE_ID_BY_CODE.PAYMENT_VARIANCE_GAIN,
+    mappingKey: 'PAYMENT_VARIANCE_GAIN',
+    accountId: gainAccountId,
+  });
 
-  await sql`
-    INSERT INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id, created_at, updated_at)
-    VALUES (${input.companyId}, NULL, ${ACCOUNT_MAPPING_TYPE_ID_BY_CODE.PAYMENT_VARIANCE_LOSS}, 'PAYMENT_VARIANCE_LOSS', ${lossAccountId}, NOW(), NOW())
-    ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), updated_at = NOW()
-  `.execute(db);
+  await insertAccountMapping(db, {
+    companyId: input.companyId,
+    mappingTypeId: ACCOUNT_MAPPING_TYPE_ID_BY_CODE.PAYMENT_VARIANCE_LOSS,
+    mappingKey: 'PAYMENT_VARIANCE_LOSS',
+    accountId: lossAccountId,
+  });
 
   return { gainAccountId, lossAccountId };
 }
