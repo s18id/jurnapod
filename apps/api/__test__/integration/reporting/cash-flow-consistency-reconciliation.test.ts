@@ -91,14 +91,16 @@ describe("cash-flow-consistency-reconciliation", { timeout: 60000 }, () => {
     });
     await assignUserOutletRole(user.id, roleId, outlet.id);
 
-    // Create two bank accounts for source/destination on transactions
+    // Create CASH + BANK accounts for valid transaction directions:
+    // - TOP_UP: source=CASH → dest=BANK
+    // - WITHDRAWAL: source=BANK → dest=CASH
     // (check constraint: source_account_id <> destination_account_id)
     account1Id = await createTestBankAccount(isolatedCompanyId, {
-      typeName: "BANK",
+      typeName: "BANK",  // dest for TOP_UP, source for WITHDRAWAL
       isActive: true,
     });
     account2Id = await createTestBankAccount(isolatedCompanyId, {
-      typeName: "BANK",
+      typeName: "CASH",  // source for TOP_UP, dest for WITHDRAWAL
       isActive: true,
     });
 
@@ -291,11 +293,11 @@ describe("cash-flow-consistency-reconciliation", { timeout: 60000 }, () => {
       // Create a second isolated company with its own transactions
       const company2 = await createTestCompanyMinimal();
       const account2a = await createTestBankAccount(company2.id, {
-        typeName: "BANK",
+        typeName: "BANK",  // dest for TOP_UP
         isActive: true,
       });
       const account2b = await createTestBankAccount(company2.id, {
-        typeName: "BANK",
+        typeName: "CASH",  // source for TOP_UP
         isActive: true,
       });
 

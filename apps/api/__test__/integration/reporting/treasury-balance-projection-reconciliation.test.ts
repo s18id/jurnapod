@@ -55,19 +55,21 @@ describe("treasury-balance-projection-reconciliation", { timeout: 60000 }, () =>
     // OWNER role already has CRUDAM (63) on treasury per the Role Permission Matrix.
     // No explicit setModulePermission call needed.
 
-    // 2. Create two bank accounts for source/destination FK pairs.
+    // 2. Create CASH + BANK accounts for valid transaction directions:
+    //    - TOP_UP: source=CASH → dest=BANK
+    //    - WITHDRAWAL: source=BANK → dest=CASH
     //    cash_bank_transactions enforces source_account_id != destination_account_id
     //    via CHECK constraint, so we need two distinct accounts.
     bankAccountId1 = await createTestBankAccount(companyId, {
       code: makeTag("TBA1"),
       name: "Treasury Balance Test Account 1",
-      typeName: "BANK",
+      typeName: "CASH",  // source for TOP_UP, dest for WITHDRAWAL
       isActive: true,
     });
     bankAccountId2 = await createTestBankAccount(companyId, {
       code: makeTag("TBA2"),
       name: "Treasury Balance Test Account 2",
-      typeName: "BANK",
+      typeName: "BANK",  // dest for TOP_UP, source for WITHDRAWAL
       isActive: true,
     });
   });

@@ -4,21 +4,15 @@
 /**
  * Item Price Test Fixtures
  *
- * FIXTURE MODE: Partial Fixture Mode
- * SCOPE: Raw item_prices row creation for test seeding only.
- * RATIONALE: The production ItemPriceServiceImpl.createItemPrice enforces
- *   composite FK constraints (`fk_item_prices_company_outlet_scoped`) that
- *   fail when the outlet was created via a different DB connection pool in
- *   the test setup. Since the test subject is COGS posting (not item price
- *   validation), a Partial Fixture Mode raw INSERT is used to avoid pool-boundary
- *   FK issues while keeping the fixture in the owner package.
+ * FIXTURE MODE: Full Fixture Mode
+ * SCOPE: Creates item prices through the production ItemPriceServiceImpl.
  * OWNER: modules-inventory (owner package for item_prices domain)
  *
  * Location: packages/modules/inventory/src/test-fixtures/
  */
 
 import type { KyselySchema } from "@jurnapod/db";
-import { sql } from "kysely";
+import { ItemPriceServiceImpl } from "../services/item-price-service.js";
 
 /**
  * Options for creating a test item price.
@@ -33,41 +27,27 @@ export interface CreateTestItemPriceOptions {
 }
 
 /**
- * Creates a raw item_prices row for test seeding.
+ * Creates an item price through the production ItemPriceServiceImpl.
  *
- * This fixture is Partial Fixture Mode — it does a direct INSERT
- * rather than going through ItemPriceServiceImpl, because the production
- * service enforces composite FK constraints that fail when cross-pool
- * test fixtures provide the company/outlet.
+ * This fixture is Full Fixture Mode — it uses the production service
+ * to create item prices with full validation (item exists, outlet exists,
+ * variant belongs to item).
  *
- * @param db - Database connection
+ * @param db - Database connection (injected into the service)
  * @param opts - Price options
- * @returns The inserted row ID
+ * @returns The created item price ID
  */
 export async function createTestItemPrice(
   db: KyselySchema,
   opts: CreateTestItemPriceOptions
 ): Promise<number> {
-  const result = await sql`
-    INSERT INTO item_prices (
-      company_id,
-      item_id,
-      outlet_id,
-      variant_id,
-      price,
-      is_active,
-      created_at,
-      updated_at
-    ) VALUES (
-      ${opts.companyId},
-      ${opts.itemId},
-      ${opts.outletId},
-      ${opts.variantId ?? null},
-      ${opts.price},
-      ${opts.isActive === false ? 0 : 1},
-      NOW(),
-      NOW()
-    )
-  `.execute(db);
-  return Number((result as { insertId?: number }).insertId ?? 0);
+  const service = new ItemPriceServiceImpl(() => db);
+  const result = await service.createItemPrice(opts.companyId, {
+    item_id: opts.itemId,
+    outlet_id: opts.outletId,
+    variant_id: opts.variantId ?? null,
+    price: opts.price,
+    is_active: opts.isActive,
+  });
+  return result.id;
 }

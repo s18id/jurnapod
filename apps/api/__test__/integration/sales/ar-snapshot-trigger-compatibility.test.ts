@@ -15,7 +15,7 @@ import { closeTestDb, getTestDb } from '../../helpers/db';
 import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { resetFixtureRegistry, createTestCompanyMinimal, createTestUser, getTestAccessToken, loginForTest, assignUserGlobalRole, getRoleIdByCode } from '../../fixtures';
 import { makeTag } from '../../helpers/tags';
-import { createTestReconciliationSnapshot } from '@jurnapod/modules-purchasing/test-fixtures';
+import { createTestReconciliationSnapshot, createPurchasingAccountsFixture } from '@jurnapod/modules-purchasing/test-fixtures';
 
 let baseUrl: string;
 let db: ReturnType<typeof getTestDb>;
@@ -54,6 +54,10 @@ describe('sales.ar-snapshot-trigger-compatibility - Story 57.1', { timeout: 3000
       name: 'AR 57 Company B',
       password: 'TestPassword123!',
     });
+
+    // Set up purchasing accounts for both companies (required by snapshot production path)
+    await createPurchasingAccountsFixture(db, { companyId: companyAId });
+    await createPurchasingAccountsFixture(db, { companyId: companyBId });
   });
 
   afterAll(async () => {
@@ -80,10 +84,6 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
       companyId: companyAId,
       userId,
       asOfDate: '2026-03-31',
-      snapshotVersion: 1,
-      apSubledgerBalance: 1000000.0000,
-      glControlBalance: 1000000.0000,
-      inputsHash: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
     });
     const snapshotId = snapshot.id;
 
@@ -100,10 +100,6 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
       companyId: companyAId,
       userId,
       asOfDate: '2026-03-31',
-      snapshotVersion: 2,
-      apSubledgerBalance: 1500000.0000,
-      glControlBalance: 1500000.0000,
-      inputsHash: 'b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3',
     });
     const snapshotId = snapshot.id;
 
@@ -133,10 +129,6 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
       companyId: companyAId,
       userId,
       asOfDate: '2026-04-15',
-      snapshotVersion: 3,
-      apSubledgerBalance: 2000000.0000,
-      glControlBalance: 2000000.0000,
-      inputsHash: 'c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
     });
     const snapshotId = snapshot.id;
 
@@ -170,10 +162,6 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
       companyId: companyAId,
       userId,
       asOfDate: '2026-04-20',
-      snapshotVersion: 4,
-      apSubledgerBalance: 500000.0000,
-      glControlBalance: 500000.0000,
-      inputsHash: 'd4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5',
     });
     const snapshotId = snapshot.id;
 
@@ -203,10 +191,6 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
       companyId: companyAId,
       userId,
       asOfDate: '2026-04-25',
-      snapshotVersion: 5,
-      apSubledgerBalance: 750000.0000,
-      glControlBalance: 750000.0000,
-      inputsHash: 'e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6',
     });
     const snapshotId = snapshot.id;
 
@@ -242,10 +226,6 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
       companyId: companyAId,
       userId: userIdA,
       asOfDate,
-      snapshotVersion: 10,
-      apSubledgerBalance: 3000000.0000,
-      glControlBalance: 3000000.0000,
-      inputsHash: 'f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1',
     });
     const snapshotIdA = snapshotA.id;
 
@@ -254,10 +234,6 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
       companyId: companyBId,
       userId: userIdB,
       asOfDate,
-      snapshotVersion: 1,
-      apSubledgerBalance: 500000.0000,
-      glControlBalance: 500000.0000,
-      inputsHash: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
     });
     const snapshotIdB = snapshotB.id;
 

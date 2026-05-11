@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { sql } from "kysely";
 import type { KyselySchema } from "@jurnapod/db";
 import type { CustomerFixture } from "./types.js";
 
@@ -16,9 +15,17 @@ function makeRunId(): string {
 /**
  * Create a deterministic customer fixture.
  *
- * Inserts a customer record using the production database path.
- * Follows the same conventions as the API customer-creation endpoint
- * (code truncated to 32 chars, type=1 (PERSON), is_active=1).
+ * Uses the canonical Kysely insertInto pattern — the same DB access layer
+ * used by the production KyselyCustomerRepository in @jurnapod/modules-platform.
+ *
+ * FIXTURE MODE: Partial Fixture Mode
+ * SCOPE: Single customer row insertion for test seeding.
+ * RATIONALE: The production CustomerService requires AccessScopeChecker (auth)
+ *   and full actor context, which is unnecessary overhead for test fixtures
+ *   that only need a customer row. This fixture uses the same Kysely
+ *   query builder pattern as KyselyCustomerRepository.create() but at a
+ *   decomposed level without the full service orchestration.
+ * OWNER: modules-platform (owner package for customers domain)
  *
  * @param db - KyselySchema database instance
  * @param opts - Customer options
@@ -42,22 +49,25 @@ export async function createTestCustomer(
   const name = opts.name ?? `Test Customer ${runId}`;
 
   try {
-    await sql`
-      INSERT INTO customers (company_id, code, display_name, type, is_active, email, created_at, updated_at)
-      VALUES (${opts.companyId}, ${code}, ${name}, 1, 1, ${opts.email ?? null}, NOW(), NOW())
-    `.execute(db);
+    const result = await db
+      .insertInto("customers")
+      .values({
+        company_id: opts.companyId,
+        code,
+        display_name: name,
+        type: 1, // PERSON
+        is_active: 1,
+        email: opts.email ?? null,
+      })
+      .executeTakeFirst();
 
-    // SELECT to get the generated ID (reliable across mysql2/Kysely sql template)
-    const result = await sql<{ id: number }>`
-      SELECT id FROM customers WHERE company_id = ${opts.companyId} AND code = ${code} LIMIT 1
-    `.execute(db);
-
-    if (result.rows.length === 0) {
+    const id = Number(result.insertId);
+    if (!id) {
       throw new Error(`Failed to create customer with code ${code}`);
     }
 
     return {
-      id: Number(result.rows[0].id),
+      id,
       company_id: opts.companyId,
       code,
     };
@@ -65,12 +75,15 @@ export async function createTestCustomer(
     // Handle duplicate - fetch existing
     const mysqlErr = error as { code?: string };
     if (mysqlErr?.code === "ER_DUP_ENTRY" || mysqlErr?.code === "ER_DUP_KEY") {
-      const existing = await sql<{ id: number }>`
-        SELECT id FROM customers WHERE company_id = ${opts.companyId} AND code = ${code} LIMIT 1
-      `.execute(db);
-      if (existing.rows.length > 0) {
+      const existing = await db
+        .selectFrom("customers")
+        .where("company_id", "=", opts.companyId)
+        .where("code", "=", code)
+        .select(["id"])
+        .executeTakeFirst();
+      if (existing) {
         return {
-          id: Number(existing.rows[0].id),
+          id: Number(existing.id),
           company_id: opts.companyId,
           code,
         };

@@ -16,8 +16,20 @@ function makeRunId(): string {
 /**
  * Create AP and expense accounts for purchasing tests.
  *
- * Creates CREDITOR-type account for AP and EXPENSE-type account for expense,
- * then upserts company_modules entry with the default account IDs.
+ * Creates accounts using the canonical Kysely insertInto pattern
+ * (same DB access layer used by production AccountsService.createAccount()).
+ * The company_modules upsert uses sql`` due to columns
+ * (purchasing_default_ap_account_id) not yet present in the auto-generated
+ * Kysely types.
+ *
+ * FIXTURE MODE: Partial Fixture Mode
+ * SCOPE: Account creation + company_modules configuration for purchasing tests.
+ * RATIONALE: The production AccountsService.createAccount() performs
+ *   full validation (code uniqueness, parent validation, type resolution),
+ *   which requires a fully-seeded account structure that is overkill for
+ *   fixture accounts. This fixture uses the same Kysely insertInto pattern
+ *   as the production service but at a decomposed level.
+ * OWNER: modules-accounting (accounts), modules-purchasing (company_modules)
  *
  * @param db - KyselySchema database instance
  * @param options - Account options
@@ -34,14 +46,19 @@ export async function createPurchasingAccountsFixture(
   const companyId = options?.companyId ?? 0;
   const runId = makeRunId();
 
-  // Find the purchasing module id
-  const purchasingModuleResult = await sql`SELECT id FROM modules WHERE code = 'purchasing' LIMIT 1`.execute(db);
-  if (purchasingModuleResult.rows.length === 0) {
+  // Find the purchasing module id — canonical Kysely query builder
+  const moduleRow = await db
+    .selectFrom("modules")
+    .where("code", "=", "purchasing")
+    .select(["id"])
+    .executeTakeFirst();
+
+  if (!moduleRow) {
     throw new Error('Purchasing module not found');
   }
-  const purchasingModuleId = Number((purchasingModuleResult.rows[0] as { id: number }).id);
+  const purchasingModuleId = Number(moduleRow.id);
 
-  // Create AP account (creditor/payable type)
+  // Create AP account (creditor/payable type) — canonical Kysely insertInto pattern
   const apAccountName = options?.apAccountName ?? `Test AP Account ${runId}`;
 
   let apAccountId: number | null = null;
@@ -50,11 +67,18 @@ export async function createPurchasingAccountsFixture(
     const apAccountCode = `TEST-AP-${attemptRunId}`.slice(0, 20);
 
     try {
-      const apResult = await sql`
-        INSERT INTO accounts (company_id, code, name, type_name, is_active, is_payable, created_at, updated_at)
-        VALUES (${companyId}, ${apAccountCode}, ${apAccountName}, 'CREDITOR', 1, 1, NOW(), NOW())
-      `.execute(db);
-      apAccountId = Number((apResult as { insertId?: number }).insertId ?? 0);
+      const apResult = await db
+        .insertInto("accounts")
+        .values({
+          company_id: companyId,
+          code: apAccountCode,
+          name: apAccountName,
+          type_name: "CREDITOR",
+          is_active: 1,
+          is_payable: 1,
+        })
+        .executeTakeFirst();
+      apAccountId = Number(apResult.insertId ?? 0);
       break;
     } catch (error: unknown) {
       const mysqlError = error as { code?: string };
@@ -69,7 +93,7 @@ export async function createPurchasingAccountsFixture(
     throw new Error('Failed to create unique AP account fixture after retries');
   }
 
-  // Create Expense account
+  // Create Expense account — canonical Kysely insertInto pattern
   const expenseAccountName = options?.expenseAccountName ?? `Test Expense Account ${runId}`;
 
   let expenseAccountId: number | null = null;
@@ -78,11 +102,18 @@ export async function createPurchasingAccountsFixture(
     const expenseAccountCode = `TEST-EXP-${attemptRunId}`.slice(0, 20);
 
     try {
-      const expenseResult = await sql`
-        INSERT INTO accounts (company_id, code, name, type_name, is_active, is_payable, created_at, updated_at)
-        VALUES (${companyId}, ${expenseAccountCode}, ${expenseAccountName}, 'EXPENSE', 1, 0, NOW(), NOW())
-      `.execute(db);
-      expenseAccountId = Number((expenseResult as { insertId?: number }).insertId ?? 0);
+      const expenseResult = await db
+        .insertInto("accounts")
+        .values({
+          company_id: companyId,
+          code: expenseAccountCode,
+          name: expenseAccountName,
+          type_name: "EXPENSE",
+          is_active: 1,
+          is_payable: 0,
+        })
+        .executeTakeFirst();
+      expenseAccountId = Number(expenseResult.insertId ?? 0);
       break;
     } catch (error: unknown) {
       const mysqlError = error as { code?: string };
@@ -97,7 +128,8 @@ export async function createPurchasingAccountsFixture(
     throw new Error('Failed to create unique expense account fixture after retries');
   }
 
-  // Upsert company_modules entry for purchasing with the AP and expense accounts
+  // Upsert company_modules entry — sql`` required for purchasing_default_ap_account_id
+  // (column exists in DB via migration 0177 but not yet in auto-generated Kysely types)
   await sql`
     INSERT INTO company_modules (company_id, module_id, enabled, config_json, updated_at,
       purchasing_default_ap_account_id, purchasing_default_expense_account_id)

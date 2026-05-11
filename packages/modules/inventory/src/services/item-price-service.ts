@@ -148,6 +148,12 @@ async function findItemPriceByIdWithExecutor(
  * Item price service implementation.
  */
 export class ItemPriceServiceImpl implements ItemPriceService {
+  private getDb: () => KyselySchema;
+
+  constructor(dbFactory?: () => KyselySchema) {
+    this.getDb = dbFactory ?? getInventoryDb;
+  }
+
   async listItemPrices(
     companyId: number,
     filters?: {
@@ -159,7 +165,7 @@ export class ItemPriceServiceImpl implements ItemPriceService {
       itemId?: number;
     }
   ): Promise<ItemPrice[]> {
-    const db = getInventoryDb();
+    const db = this.getDb();
 
     let query = db
       .selectFrom("item_prices as ip")
@@ -231,7 +237,7 @@ export class ItemPriceServiceImpl implements ItemPriceService {
     outletId: number,
     filters?: { isActive?: boolean }
   ): Promise<(ItemPrice & { is_override: boolean })[]> {
-    const db = getInventoryDb();
+    const db = this.getDb();
 
     type ItemPriceRow = {
       id: number;
@@ -307,7 +313,7 @@ export class ItemPriceServiceImpl implements ItemPriceService {
   }
 
   async findItemPriceById(companyId: number, itemPriceId: number): Promise<ItemPrice | null> {
-    const db = getInventoryDb();
+    const db = this.getDb();
     return findItemPriceByIdWithExecutor(db, companyId, itemPriceId);
   }
 
@@ -322,7 +328,7 @@ export class ItemPriceServiceImpl implements ItemPriceService {
     },
     actor?: MutationAuditActor
   ): Promise<ItemPrice> {
-    const db = getInventoryDb();
+    const db = this.getDb();
     return withTransactionRetry(db, async (trx) => {
       if (input.outlet_id === null && actor && actor.canManageCompanyDefaults !== true) {
         throw new InventoryForbiddenError("Company defaults require OWNER or COMPANY_ADMIN role");
@@ -413,7 +419,7 @@ export class ItemPriceServiceImpl implements ItemPriceService {
     },
     actor?: MutationAuditActor
   ): Promise<ItemPrice | null> {
-    const db = getInventoryDb();
+    const db = this.getDb();
     const fields: Array<{ field: string; value: unknown }> = [];
 
     if (typeof input.price === "number") {
@@ -509,7 +515,7 @@ export class ItemPriceServiceImpl implements ItemPriceService {
   }
 
   async deleteItemPrice(companyId: number, itemPriceId: number, actor?: MutationAuditActor): Promise<boolean> {
-    const db = getInventoryDb();
+    const db = this.getDb();
     return withTransactionRetry(db, async (trx) => {
       const before = await findItemPriceByIdWithExecutor(trx, companyId, itemPriceId, {
         forUpdate: true
@@ -554,7 +560,7 @@ export class ItemPriceServiceImpl implements ItemPriceService {
       return [];
     }
 
-    const db = getInventoryDb();
+    const db = this.getDb();
     return withTransactionRetry(db, async (trx) => {
       // Validate all items exist first
       const itemIds = [...new Set(inputs.map(i => i.item_id))];
