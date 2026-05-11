@@ -269,7 +269,7 @@ export class APReconciliationService {
    *             - SUM(payment_line.allocation_amount) for POSTED payments ≤ asOfDate
    *             - SUM(credit_app.applied_amount) for POSTED credits ≤ asOfDate
    */
-  private async getAPSubledgerBalance(companyId: number, asOfDate: string): Promise<bigint> {
+  async getAPSubledgerBalance(companyId: number, asOfDate: string): Promise<bigint> {
     const POSTED_INVOICE = PURCHASE_INVOICE_STATUS.POSTED;
     const POSTED_PAYMENT = AP_PAYMENT_STATUS.POSTED;
     const CREDIT_PARTIAL = PURCHASE_CREDIT_STATUS.PARTIAL;

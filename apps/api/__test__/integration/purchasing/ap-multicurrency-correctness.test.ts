@@ -20,6 +20,7 @@ import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { closeTestDb, getTestDb } from '../../helpers/db';
 import { sql } from 'kysely';
 import { scaled, unscaled } from "@jurnapod/shared";
+import { computePurchaseInvoiceOpenAmount } from "@jurnapod/modules-purchasing";
 import {
   cleanupTestFixtures,
   createTestCompanyMinimal,
@@ -404,16 +405,10 @@ describe('purchasing.ap-multicurrency-correctness', { timeout: 30000 }, () => {
     expect(payPostRes.status).toBe(200);
 
     // Verify invoice is fully paid (open amount = 0)
+    // Uses canonical production function instead of inline SQL (Story 64.1)
     const db = getTestDb();
-    const openResult = await sql<{ open_amount: string }>`
-      SELECT (pi.grand_total * pi.exchange_rate - COALESCE(SUM(apl.allocation_amount), 0)) AS open_amount
-      FROM purchase_invoices pi
-      LEFT JOIN ap_payment_lines apl ON apl.purchase_invoice_id = pi.id
-      LEFT JOIN ap_payments ap ON ap.id = apl.ap_payment_id AND ap.status = ${AP_PAYMENT_STATUS_POSTED}
-      WHERE pi.id = ${piId}
-      GROUP BY pi.id, pi.grand_total, pi.exchange_rate
-    `.execute(db);
-    expect(Number(openResult.rows[0].open_amount)).toBe(0);
+    const openAmount = Number(await computePurchaseInvoiceOpenAmount(db, testCompanyId, piId));
+    expect(openAmount).toBe(0);
   });
 
   // =======================================================================

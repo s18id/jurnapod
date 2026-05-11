@@ -15,6 +15,7 @@ import {
   getTestAccessToken,
   getSeedSyncContext,
 } from '../../fixtures';
+import { createTestAuditLog } from '@jurnapod/modules-platform/test-fixtures';
 
 let baseUrl: string;
 let accessToken: string;
@@ -35,26 +36,22 @@ describe('audit.audit-log-filter', { timeout: 30000 }, () => {
     const db = getTestDb();
 
     // Insert a successful audit log entry
-    await sql`
-      INSERT INTO audit_logs (company_id, user_id, action, result, success, payload_json)
-      VALUES (${seedCompanyId}, ${seedUserId}, 'STORY_60_4_TEST', 'SUCCESS', 1, '{"test":"success"}')
-    `.execute(db);
-
-    const result1 = await sql<{ id: number }>`
-      SELECT LAST_INSERT_ID() as id
-    `.execute(db);
-    testRowIds.push(Number(result1.rows[0].id));
+    const successLog = await createTestAuditLog(db, {
+      companyId: seedCompanyId,
+      userId: seedUserId,
+      action: 'STORY_60_4_TEST',
+      success: true,
+    });
+    testRowIds.push(successLog.id);
 
     // Insert a failed audit log entry
-    await sql`
-      INSERT INTO audit_logs (company_id, user_id, action, result, success, payload_json)
-      VALUES (${seedCompanyId}, ${seedUserId}, 'STORY_60_4_TEST', 'FAIL', 0, '{"test":"fail"}')
-    `.execute(db);
-
-    const result2 = await sql<{ id: number }>`
-      SELECT LAST_INSERT_ID() as id
-    `.execute(db);
-    testRowIds.push(Number(result2.rows[0].id));
+    const failLog = await createTestAuditLog(db, {
+      companyId: seedCompanyId,
+      userId: seedUserId,
+      action: 'STORY_60_4_TEST',
+      success: false,
+    });
+    testRowIds.push(failLog.id);
   });
 
   afterAll(async () => {

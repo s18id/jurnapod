@@ -20,6 +20,7 @@ import {
   createTestCompanyMinimal,
   createTestOutletMinimal,
   createTestUser,
+  createTestAccount,
   getRoleIdByCode,
   assignUserGlobalRole,
   setModulePermission,
@@ -28,27 +29,6 @@ import {
 import { getDb } from "@/lib/db";
 import { sql } from "kysely";
 import { makeTag } from "../../helpers/tags";
-
-/**
- * Create a test inventory control account directly via DB INSERT.
- *
- * This is necessary because no canonical test-fixture helper exists for creating
- * accounts with type_name='INVENTORY'. The Test Fixture Ownership Policy requires
- * either:
- *   1. A fixture in packages/modules/accounting/src/test-fixtures/ (future extraction)
- *   2. A local helper when the package-level fixture doesn't exist yet
- *
- * TODO: Extract to createTestInventoryAccount() in modules-accounting test-fixtures.
- */
-async function createTestInventoryAccount(companyId: number): Promise<number> {
-  const db = getDb();
-  const tag = makeTag("INVACT");
-  const result = await sql<{ insertId: number }>`
-    INSERT INTO accounts (company_id, code, name, type_name, normal_balance, report_group, is_active)
-    VALUES (${companyId}, ${`INV-${companyId}-${tag}`}, ${`Inventory Test Account ${tag}`}, 'INVENTORY', 'D', 'NRC', 1)
-  `.execute(db);
-  return Number(result.insertId);
-}
 
 describe("inventory-subledger-reconciliation", { timeout: 60000 }, () => {
   let baseUrl: string;
@@ -107,8 +87,14 @@ describe("inventory-subledger-reconciliation", { timeout: 60000 }, () => {
 
     ownerToken = await loginForTest(baseUrl, company.code, ownerEmail, "TestPassword123!");
 
-    // Create an inventory control account using the local helper
-    inventoryAccountId = await createTestInventoryAccount(testCompanyId);
+    // Create an inventory control account using the canonical fixture
+    const invAccount = await createTestAccount({
+      companyId: testCompanyId,
+      code: `INV-${testCompanyId}-${makeTag("INVACT")}`.slice(0, 32),
+      name: `Inventory Test Account ${makeTag("INVACT")}`,
+      typeName: 'INVENTORY',
+    });
+    inventoryAccountId = invAccount.id;
     expect(inventoryAccountId).toBeGreaterThan(0);
   });
 

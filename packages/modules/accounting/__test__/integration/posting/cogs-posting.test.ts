@@ -14,8 +14,9 @@
  * - Error when item has no inventory asset account configured
  *
  * POLICY COMPLIANCE:
- * - Uses canonical fixtures from owner packages for company/outlet creation
- * - Uses package-level fixtures where available; gaps documented inline
+ * - Uses canonical fixtures from owner packages for company/outlet/item creation
+ * - All test data setup uses owner-package fixtures (no raw SQL INSERTs)
+ * - inventory_transactions uses Partial Fixture Mode (raw INSERT in owner package)
  * - Deterministic run IDs via hrtime (not Date.now/Math.random)
  * - Unique company fixture per describe block for isolation
  * - SKU-based cleanup for rerun safety (no reliance on DELETE order)
@@ -39,6 +40,11 @@ import { createPostingIdGenerator } from "./id-utils.js";
 import { createTestCompanyMinimal } from "@jurnapod/modules-platform";
 import { createTestOutletMinimal } from "@jurnapod/modules-platform";
 import { createTestAccount } from "../../../src/test-fixtures/account-fixtures.js";
+import {
+  createTestProduct,
+  createTestInventoryTransaction,
+  createTestItemPrice,
+} from "@jurnapod/modules-inventory";
 
 // -----------------------------------------------------------------------------
 // Test context — unique company+outlet per describe block
@@ -202,63 +208,13 @@ describe("CogsPosting", () => {
   });
 
   // -------------------------------------------------------------------------
-  // GAP DOCUMENTATION:
-  // No package-level fixture exists for items with account bindings.
-  // Raw SQL INSERT is used here as a gap-filler pending a canonical item fixture
-  // that accepts cogs_account_id and inventory_asset_account_id.
-  // The items table FK constraints are bypassed in test context (trusted seed data).
+  // Inventory item/transaction/price setup uses canonical fixtures from the
+  // owner package (@jurnapod/modules-inventory) — Story 64.8.
+  //
+  // - createTestProduct → Full Fixture Mode (ItemServiceImpl.createItem)
+  // - createTestInventoryTransaction → Partial Fixture Mode (documented in owner package)
+  // - createTestItemPrice → Full Fixture Mode (ItemPriceServiceImpl.createItemPrice)
   // -------------------------------------------------------------------------
-  async function createTestItem(
-    companyId: number,
-    sku: string,
-    name: string,
-    cogsAccountId: number,
-    invAssetAccountId: number
-  ): Promise<number> {
-    const result = await sql`
-      INSERT INTO items (company_id, sku, name, item_type, is_active, track_stock, cogs_account_id, inventory_asset_account_id, created_at, updated_at)
-      VALUES (${companyId}, ${sku}, ${name}, 'PRODUCT', 1, 1, ${cogsAccountId}, ${invAssetAccountId}, NOW(), NOW())
-    `.execute(db);
-    return Number((result as { insertId?: number }).insertId ?? 0);
-  }
-
-  // -------------------------------------------------------------------------
-  // GAP DOCUMENTATION:
-  // No package-level fixture exists for inventory_transactions (stock rows).
-  // Raw SQL INSERT is used here; the transactions table requires specific
-  // column values that no existing fixture helper provides.
-  // Schema note: inventory_transactions has no reason/updated_at; transaction_type is tinyint.
-  // -------------------------------------------------------------------------
-  async function createInventoryTransaction(
-    companyId: number,
-    productId: number,
-    quantityDelta: number,
-    referenceId: string
-  ): Promise<number> {
-    const result = await sql`
-      INSERT INTO inventory_transactions (company_id, product_id, transaction_type, quantity_delta, reference_id, created_at)
-      VALUES (${companyId}, ${productId}, 1, ${quantityDelta}, ${referenceId}, NOW())
-    `.execute(db);
-    return Number((result as { insertId?: number }).insertId ?? 0);
-  }
-
-  // -------------------------------------------------------------------------
-  // GAP DOCUMENTATION:
-  // No package-level fixture exists for item_prices.
-  // Raw SQL INSERT is used here; item_prices creation is not covered by any
-  // existing package fixture helper.
-  // Schema note: scope_key column exists but not used in test context.
-  // -------------------------------------------------------------------------
-  async function createItemPrice(
-    companyId: number,
-    itemId: number,
-    price: number
-  ): Promise<void> {
-    await sql`
-      INSERT INTO item_prices (company_id, item_id, price, is_active, created_at, updated_at)
-      VALUES (${companyId}, ${itemId}, ${price}, 1, NOW(), NOW())
-    `.execute(db);
-  }
 
   // -------------------------------------------------------------------------
   // Test 1: COGS posting balanced journal (COGS debit, Inventory Asset credit)
@@ -269,16 +225,18 @@ describe("CogsPosting", () => {
     const { id: invAssetAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: ids.nextCode("INVASSET-TEST"), name: "Test Inv Asset", typeName: "ASSET" });
     const item1Sku = ids.nextCode("ITM-COGS");
     const item2Sku = ids.nextCode("ITM-COGS");
-    const item1Id = await createTestItem(ctx.companyId, item1Sku, "Test Item 101", cogsAccountId, invAssetAccountId);
-    const item2Id = await createTestItem(ctx.companyId, item2Sku, "Test Item 102", cogsAccountId, invAssetAccountId);
+    const item1 = await createTestProduct(ctx.companyId, { sku: item1Sku, name: "Test Item 101", cogs_account_id: cogsAccountId, inventory_asset_account_id: invAssetAccountId });
+    const item2 = await createTestProduct(ctx.companyId, { sku: item2Sku, name: "Test Item 102", cogs_account_id: cogsAccountId, inventory_asset_account_id: invAssetAccountId });
+    const item1Id = item1.id;
+    const item2Id = item2.id;
 
     // Stock rows
-    await createInventoryTransaction(ctx.companyId, item1Id, 10, ids.nextCode("COGS-TEST"));
-    await createInventoryTransaction(ctx.companyId, item2Id, 10, ids.nextCode("COGS-TEST"));
+    await createTestInventoryTransaction(db, { companyId: ctx.companyId, productId: item1Id, quantityDelta: 10, referenceId: ids.nextCode("COGS-TEST") });
+    await createTestInventoryTransaction(db, { companyId: ctx.companyId, productId: item2Id, quantityDelta: 10, referenceId: ids.nextCode("COGS-TEST") });
 
     // Price fallback for calculateSaleCogs
-    await createItemPrice(ctx.companyId, item1Id, 15000);
-    await createItemPrice(ctx.companyId, item2Id, 20000);
+    await createTestItemPrice(db, { companyId: ctx.companyId, itemId: item1Id, outletId: ctx.outletId, price: 15000 });
+    await createTestItemPrice(db, { companyId: ctx.companyId, itemId: item2Id, outletId: ctx.outletId, price: 20000 });
 
     const executor = createCogsExecutor(db);
 
@@ -355,10 +313,11 @@ describe("CogsPosting", () => {
 
     const { id: invAssetAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: ids.nextCode("INVASSET-TEST"), name: "Test Inv Asset 2", typeName: "ASSET" });
     const itemSku = ids.nextCode("ITM-COGS");
-    const itemId = await createTestItem(ctx.companyId, itemSku, "Test Item 201", cogsAccountId, invAssetAccountId);
+    const item = await createTestProduct(ctx.companyId, { sku: itemSku, name: "Test Item 201", cogs_account_id: cogsAccountId, inventory_asset_account_id: invAssetAccountId });
+    const itemId = item.id;
 
     // Create inventory transaction to get stockTxId
-    const stockTxId = await createInventoryTransaction(ctx.companyId, itemId, 10, ids.nextCode("COGS-TEST"));
+    const stockTxId = await createTestInventoryTransaction(db, { companyId: ctx.companyId, productId: itemId, quantityDelta: 10, referenceId: ids.nextCode("COGS-TEST") });
 
     const executor = createCogsExecutor(db);
 
@@ -408,10 +367,8 @@ describe("CogsPosting", () => {
 
     // Item missing COGS account (cogs_account_id = NULL)
     const itemSku = ids.nextCode("ITM-COGS");
-    const itemId = await sql`
-      INSERT INTO items (company_id, sku, name, item_type, is_active, track_stock, cogs_account_id, inventory_asset_account_id, created_at, updated_at)
-      VALUES (${ctx.companyId}, ${itemSku}, 'Test Item 301', 'PRODUCT', 1, 1, NULL, ${invAssetAccountId}, NOW(), NOW())
-    `.execute(db).then(r => Number((r as { insertId?: number }).insertId ?? 0)) || 301;
+    const item = await createTestProduct(ctx.companyId, { sku: itemSku, name: "Test Item 301", cogs_account_id: null, inventory_asset_account_id: invAssetAccountId });
+    const itemId = item.id;
 
     // Override calculateSaleCogs to bypass real calculation and reach account validation.
     // getItemAccountsBatch uses real impl which will throw CogsAccountConfigError
@@ -451,10 +408,8 @@ describe("CogsPosting", () => {
 
     // Item missing inventory asset account (inventory_asset_account_id = NULL)
     const itemSku = ids.nextCode("ITM-COGS");
-    const itemId = await sql`
-      INSERT INTO items (company_id, sku, name, item_type, is_active, track_stock, cogs_account_id, inventory_asset_account_id, created_at, updated_at)
-      VALUES (${ctx.companyId}, ${itemSku}, 'Test Item 401', 'PRODUCT', 1, 1, ${cogsAccountId}, NULL, NOW(), NOW())
-    `.execute(db).then(r => Number((r as { insertId?: number }).insertId ?? 0)) || 401;
+    const item = await createTestProduct(ctx.companyId, { sku: itemSku, name: "Test Item 401", cogs_account_id: cogsAccountId, inventory_asset_account_id: null });
+    const itemId = item.id;
 
     // Override calculateSaleCogs to bypass real calculation and reach account validation.
     const executor: CogsPostingExecutor = {
@@ -491,13 +446,14 @@ describe("CogsPosting", () => {
 
     const { id: invAssetAccountId } = await createTestAccount(db, { companyId: ctx.companyId, code: ids.nextCode("INVASSET-TEST"), name: "Test Inv Asset 5", typeName: "ASSET" });
     const itemSku = ids.nextCode("ITM-COGS");
-    const itemId = await createTestItem(ctx.companyId, itemSku, "Test Item 501", cogsAccountId, invAssetAccountId);
+    const item = await createTestProduct(ctx.companyId, { sku: itemSku, name: "Test Item 501", cogs_account_id: cogsAccountId, inventory_asset_account_id: invAssetAccountId });
+    const itemId = item.id;
 
     // Seed stock
-    await createInventoryTransaction(ctx.companyId, itemId, 10, ids.nextCode("COGS-TEST"));
+    await createTestInventoryTransaction(db, { companyId: ctx.companyId, productId: itemId, quantityDelta: 10, referenceId: ids.nextCode("COGS-TEST") });
 
     // Seed item_prices so calculateSaleCogs uses price as unit cost.
-    await createItemPrice(ctx.companyId, itemId, 25000);
+    await createTestItemPrice(db, { companyId: ctx.companyId, itemId, outletId: ctx.outletId, price: 25000 });
 
     const executor = createCogsExecutor(db);
 

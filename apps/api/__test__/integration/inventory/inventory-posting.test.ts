@@ -19,6 +19,7 @@ import {
 import { makeTag } from "../../helpers/tags";
 import { getAllItemsCostSummary } from "@jurnapod/modules-inventory-costing";
 import { postCogsForSale } from "@jurnapod/modules-accounting/posting/cogs";
+import { createTestAccountMapping } from "@jurnapod/modules-accounting/test-fixtures";
 
 describe("inventory posting gate evidence", { timeout: 60000 }, () => {
   let companyId: number;
@@ -78,12 +79,18 @@ describe("inventory posting gate evidence", { timeout: 60000 }, () => {
     });
 
     // Map accounts for COGS posting (outlet_id IS NULL = company-wide defaults)
-    await sql`
-      INSERT INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id)
-      VALUES
-        (${companyId}, NULL, 7, 'COGS_DEFAULT', ${cogsAccount.id}),
-        (${companyId}, NULL, 8, 'INVENTORY_ASSET_DEFAULT', ${invAssetAccount.id})
-    `.execute(getTestDb());
+    await createTestAccountMapping(getTestDb(), {
+      companyId,
+      mappingTypeId: 7,
+      mappingKey: 'COGS_DEFAULT',
+      accountId: cogsAccount.id,
+    });
+    await createTestAccountMapping(getTestDb(), {
+      companyId,
+      mappingTypeId: 8,
+      mappingKey: 'INVENTORY_ASSET_DEFAULT',
+      accountId: invAssetAccount.id,
+    });
 
     const summary = await getAllItemsCostSummary(companyId, getTestDb());
 

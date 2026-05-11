@@ -705,17 +705,29 @@ development_status:
   62-7-deferred-debt-closure-final-cleanup: done
 
   # Epic 63: Test Production-Code Hardening
-  epic-63: ready-for-dev
+  epic-63: done
   63-1-fix-sync-modules-lifecycle-mock: done
   63-2-replace-inline-scaled-shared: done
   63-3-replace-wrong-getinvoiceopenamount: done
-  63-4-replace-raw-sql-journal-seeding: ready-for-dev
+  63-4-replace-raw-sql-journal-seeding: done
   63-5-create-testaccount-fixture: done
   63-6-create-sales-test-fixtures: done
   63-7-create-purchasing-test-fixtures: done
   63-8-create-treasury-test-fixture: done
-  63-9-create-reconciliation-seeded-fixtures: ready-for-dev
+  63-9-create-reconciliation-seeded-fixtures: done
   63-10-replace-duplicate-maketag-purchasing: done
   63-11-consolidate-duplicate-flow-helpers: done
-  63-12-update-remaining-test-files: ready-for-dev
-  63-13-full-validation-gate: ready-for-dev
+  63-12-update-remaining-test-files: done
+  63-13-full-validation-gate: done
+
+  # Epic 64: Test Production-Code Integration — Phase 2
+  epic-64: done
+  64-1-ap-multicurrency-correctness: done
+  64-2-cogs-projection-reconciliation: done
+  64-3-inventory-valuation-projection: done
+  64-4-trial-balance-service-export: done
+  64-5-ap-reconciliation-service-export: done
+  64-6-ar-reconciliation-service-export: done
+  64-7-cash-bank-service-export: done
+  64-8-cogs-posting-fixtures: done
+  64-9-full-validation-gate: done

@@ -12,7 +12,6 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { sql } from "kysely";
 import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
 import { closeTestDb, getTestDb } from "../../helpers/db";
 import {
@@ -25,7 +24,10 @@ import {
   assignUserOutletRole,
   cleanupTestFixtures,
 } from "../../fixtures";
-import { createTestCashBankTransaction } from "@jurnapod/modules-treasury";
+import {
+  createTestCashBankTransaction,
+  getCashBalance,
+} from "@jurnapod/modules-treasury";
 import { makeTag } from "../../helpers/tags";
 
 describe("treasury-balance-projection-reconciliation", { timeout: 60000 }, () => {
@@ -87,14 +89,8 @@ describe("treasury-balance-projection-reconciliation", { timeout: 60000 }, () =>
   // =============================================================================
 
   it("zero-state: no transactions → balance 0", async () => {
-    const result = await sql<{ total: string | null }>`
-      SELECT COALESCE(SUM(amount), 0) AS total
-      FROM cash_bank_transactions
-      WHERE company_id = ${companyId}
-        AND status = 'POSTED'
-    `.execute(getTestDb());
+    const total = await getCashBalance(getTestDb(), companyId);
 
-    const total = Number(result.rows[0]?.total ?? "0");
     expect(total).toBe(0);
 
     // Emit GATE evidence
@@ -144,16 +140,8 @@ describe("treasury-balance-projection-reconciliation", { timeout: 60000 }, () =>
 
     // Source-of-truth: net balance from cash_bank_transactions
     // TOP_UP contributes positively, WITHDRAWAL contributes negatively.
-    const result = await sql<{ total: string | null }>`
-      SELECT CAST(COALESCE(SUM(
-        CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END
-      ), 0) AS DECIMAL(18,2)) AS total
-      FROM cash_bank_transactions
-      WHERE company_id = ${companyId}
-        AND status = 'POSTED'
-    `.execute(getTestDb());
+    const netBalance = await getCashBalance(getTestDb(), companyId);
 
-    const netBalance = Number(result.rows[0]?.total ?? "0");
     // Expected: 500000 (TOP_UP) - 200000 (WITHDRAWAL) = 300000
     expect(netBalance).toBe(300000);
 
@@ -174,17 +162,7 @@ describe("treasury-balance-projection-reconciliation", { timeout: 60000 }, () =>
   // =============================================================================
 
   it("treasury balance query produces deterministic output", async () => {
-    const queryBalance = async () => {
-      const result = await sql<{ total: string | null }>`
-        SELECT CAST(COALESCE(SUM(
-          CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END
-        ), 0) AS DECIMAL(18,2)) AS total
-        FROM cash_bank_transactions
-        WHERE company_id = ${companyId}
-          AND status = 'POSTED'
-      `.execute(getTestDb());
-      return Number(result.rows[0]?.total ?? "0");
-    };
+    const queryBalance = () => getCashBalance(getTestDb(), companyId);
 
     const firstQuery = await queryBalance();
     const secondQuery = await queryBalance();
@@ -199,16 +177,7 @@ describe("treasury-balance-projection-reconciliation", { timeout: 60000 }, () =>
   // =============================================================================
 
   it("emits EPIC62 GATE evidence with correct projection and variance", async () => {
-    const result = await sql<{ total: string | null }>`
-      SELECT CAST(COALESCE(SUM(
-        CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END
-      ), 0) AS DECIMAL(18,2)) AS total
-      FROM cash_bank_transactions
-      WHERE company_id = ${companyId}
-        AND status = 'POSTED'
-    `.execute(getTestDb());
-
-    const netBalance = Number(result.rows[0]?.total ?? "0");
+    const netBalance = await getCashBalance(getTestDb(), companyId);
 
     const gatePayload = {
       gate: "__EPIC62_GATE__",

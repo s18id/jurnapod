@@ -21,7 +21,6 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { sql } from "kysely";
 import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
 import { closeTestDb, getTestDb } from "../../helpers/db";
 import {
@@ -35,7 +34,12 @@ import {
   setModulePermission,
   cleanupTestFixtures,
 } from "../../fixtures";
-import { createTestCashBankTransaction } from "@jurnapod/modules-treasury";
+import {
+  createTestCashBankTransaction,
+  getCashBalance,
+  getCashInflows,
+  getCashOutflows,
+} from "@jurnapod/modules-treasury";
 import { makeTag } from "../../helpers/tags";
 
 // Fixed future dates — beyond any real transaction, ensures deterministic isolation
@@ -165,49 +169,29 @@ describe("cash-flow-consistency-reconciliation", { timeout: 60000 }, () => {
 
   describe("AC3: cash-flow equation", () => {
     it("opening balance before the period is zero", async () => {
-      const db = getTestDb();
-      const result = await sql<{ opening: number | null }>`
-        SELECT COALESCE(
-          SUM(CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END),
-          0
-        ) AS opening
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND transaction_date < ${FIXED_DATE_FROM}
-          AND status = 'POSTED'
-      `.execute(db);
-
-      const opening = Number(result.rows[0]?.opening ?? 0);
+      const opening = await getCashBalance(getTestDb(), isolatedCompanyId, {
+        dateToExclusive: FIXED_DATE_FROM,
+      });
       expect(opening).toBe(EXPECTED_OPENING);
     });
 
     it("inflows sum matches TOP_UP seeded amounts", async () => {
-      const db = getTestDb();
-      const result = await sql<{ inflows: number | null }>`
-        SELECT COALESCE(SUM(amount), 0) AS inflows
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND transaction_type IN ('TOP_UP', 'MUTATION')
-          AND status = 'POSTED'
-          AND transaction_date BETWEEN ${FIXED_DATE_FROM} AND ${FIXED_DATE_TO}
-      `.execute(db);
-
-      const inflows = Number(result.rows[0]?.inflows ?? 0);
+      const inflows = await getCashInflows(
+        getTestDb(),
+        isolatedCompanyId,
+        FIXED_DATE_FROM,
+        FIXED_DATE_TO,
+      );
       expect(inflows).toBe(EXPECTED_INFLOWS);
     });
 
     it("outflows sum matches WITHDRAWAL seeded amounts", async () => {
-      const db = getTestDb();
-      const result = await sql<{ outflows: number | null }>`
-        SELECT COALESCE(SUM(amount), 0) AS outflows
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND transaction_type = 'WITHDRAWAL'
-          AND status = 'POSTED'
-          AND transaction_date BETWEEN ${FIXED_DATE_FROM} AND ${FIXED_DATE_TO}
-      `.execute(db);
-
-      const outflows = Number(result.rows[0]?.outflows ?? 0);
+      const outflows = await getCashOutflows(
+        getTestDb(),
+        isolatedCompanyId,
+        FIXED_DATE_FROM,
+        FIXED_DATE_TO,
+      );
       expect(outflows).toBe(WITHDRAWAL_AMOUNT);
     });
 
@@ -215,52 +199,20 @@ describe("cash-flow-consistency-reconciliation", { timeout: 60000 }, () => {
       const db = getTestDb();
 
       // Opening balance (before period)
-      const openResult = await sql<{ opening: number | null }>`
-        SELECT COALESCE(
-          SUM(CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END),
-          0
-        ) AS opening
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND transaction_date < ${FIXED_DATE_FROM}
-          AND status = 'POSTED'
-      `.execute(db);
-      const opening = Number(openResult.rows[0]?.opening ?? 0);
+      const opening = await getCashBalance(db, isolatedCompanyId, {
+        dateToExclusive: FIXED_DATE_FROM,
+      });
 
       // Inflows (during period)
-      const inflowResult = await sql<{ inflows: number | null }>`
-        SELECT COALESCE(SUM(amount), 0) AS inflows
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND transaction_type IN ('TOP_UP', 'MUTATION')
-          AND status = 'POSTED'
-          AND transaction_date BETWEEN ${FIXED_DATE_FROM} AND ${FIXED_DATE_TO}
-      `.execute(db);
-      const inflows = Number(inflowResult.rows[0]?.inflows ?? 0);
+      const inflows = await getCashInflows(db, isolatedCompanyId, FIXED_DATE_FROM, FIXED_DATE_TO);
 
       // Outflows (during period)
-      const outflowResult = await sql<{ outflows: number | null }>`
-        SELECT COALESCE(SUM(amount), 0) AS outflows
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND transaction_type = 'WITHDRAWAL'
-          AND status = 'POSTED'
-          AND transaction_date BETWEEN ${FIXED_DATE_FROM} AND ${FIXED_DATE_TO}
-      `.execute(db);
-      const outflows = Number(outflowResult.rows[0]?.outflows ?? 0);
+      const outflows = await getCashOutflows(db, isolatedCompanyId, FIXED_DATE_FROM, FIXED_DATE_TO);
 
       // Closing balance — net position as of end date
-      const closeResult = await sql<{ closing: number | null }>`
-        SELECT COALESCE(
-          SUM(CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END),
-          0
-        ) AS closing
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND status = 'POSTED'
-          AND transaction_date <= ${FIXED_DATE_TO}
-      `.execute(db);
-      const closing = Number(closeResult.rows[0]?.closing ?? 0);
+      const closing = await getCashBalance(db, isolatedCompanyId, {
+        dateTo: FIXED_DATE_TO,
+      });
 
       // AC3 core assertion: opening + inflows - outflows == closing
       const computed = opening + inflows - outflows;
@@ -292,21 +244,9 @@ describe("cash-flow-consistency-reconciliation", { timeout: 60000 }, () => {
 
   describe("AC4: closing balance matches treasury", () => {
     it("full balance query matches computed closing balance", async () => {
-      const db = getTestDb();
-
-      // Full balance: net of all POSTED transactions up to end date
-      const balanceResult = await sql<{ balance: number | null }>`
-        SELECT COALESCE(
-          SUM(CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END),
-          0
-        ) AS balance
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND status = 'POSTED'
-          AND transaction_date <= ${FIXED_DATE_TO}
-      `.execute(db);
-
-      const fullBalance = Number(balanceResult.rows[0]?.balance ?? 0);
+      const fullBalance = await getCashBalance(getTestDb(), isolatedCompanyId, {
+        dateTo: FIXED_DATE_TO,
+      });
       expect(fullBalance).toBe(EXPECTED_CLOSING);
 
       // Emit EPIC62 GATE evidence
@@ -339,18 +279,9 @@ describe("cash-flow-consistency-reconciliation", { timeout: 60000 }, () => {
       });
 
       // Balance should still be the same (VOID excluded)
-      const balanceResult = await sql<{ balance: number | null }>`
-        SELECT COALESCE(
-          SUM(CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END),
-          0
-        ) AS balance
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND status = 'POSTED'
-          AND transaction_date <= ${FIXED_DATE_TO}
-      `.execute(db);
-
-      const balance = Number(balanceResult.rows[0]?.balance ?? 0);
+      const balance = await getCashBalance(db, isolatedCompanyId, {
+        dateTo: FIXED_DATE_TO,
+      });
       expect(balance).toBe(EXPECTED_CLOSING);
     });
 
@@ -383,18 +314,9 @@ describe("cash-flow-consistency-reconciliation", { timeout: 60000 }, () => {
       });
 
       // Original company balance must be unchanged (tenant isolation)
-      const balanceResult = await sql<{ balance: number | null }>`
-        SELECT COALESCE(
-          SUM(CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END),
-          0
-        ) AS balance
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND status = 'POSTED'
-          AND transaction_date <= ${FIXED_DATE_TO}
-      `.execute(db);
-
-      const balance = Number(balanceResult.rows[0]?.balance ?? 0);
+      const balance = await getCashBalance(db, isolatedCompanyId, {
+        dateTo: FIXED_DATE_TO,
+      });
       expect(balance).toBe(EXPECTED_CLOSING);
     });
   });
@@ -407,105 +329,41 @@ describe("cash-flow-consistency-reconciliation", { timeout: 60000 }, () => {
     it("returns identical opening balance across repeated queries", async () => {
       const db = getTestDb();
 
-      const r1 = await sql<{ opening: number | null }>`
-        SELECT COALESCE(
-          SUM(CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END),
-          0
-        ) AS opening
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND transaction_date < ${FIXED_DATE_FROM}
-          AND status = 'POSTED'
-      `.execute(db);
+      const r1 = await getCashBalance(db, isolatedCompanyId, {
+        dateToExclusive: FIXED_DATE_FROM,
+      });
+      const r2 = await getCashBalance(db, isolatedCompanyId, {
+        dateToExclusive: FIXED_DATE_FROM,
+      });
 
-      const r2 = await sql<{ opening: number | null }>`
-        SELECT COALESCE(
-          SUM(CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END),
-          0
-        ) AS opening
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND transaction_date < ${FIXED_DATE_FROM}
-          AND status = 'POSTED'
-      `.execute(db);
-
-      expect(Number(r1.rows[0]?.opening)).toBe(Number(r2.rows[0]?.opening));
+      expect(r1).toBe(r2);
     });
 
     it("returns identical inflows across repeated queries", async () => {
       const db = getTestDb();
 
-      const r1 = await sql<{ inflows: number | null }>`
-        SELECT COALESCE(SUM(amount), 0) AS inflows
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND transaction_type IN ('TOP_UP', 'MUTATION')
-          AND status = 'POSTED'
-          AND transaction_date BETWEEN ${FIXED_DATE_FROM} AND ${FIXED_DATE_TO}
-      `.execute(db);
+      const r1 = await getCashInflows(db, isolatedCompanyId, FIXED_DATE_FROM, FIXED_DATE_TO);
+      const r2 = await getCashInflows(db, isolatedCompanyId, FIXED_DATE_FROM, FIXED_DATE_TO);
 
-      const r2 = await sql<{ inflows: number | null }>`
-        SELECT COALESCE(SUM(amount), 0) AS inflows
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND transaction_type IN ('TOP_UP', 'MUTATION')
-          AND status = 'POSTED'
-          AND transaction_date BETWEEN ${FIXED_DATE_FROM} AND ${FIXED_DATE_TO}
-      `.execute(db);
-
-      expect(Number(r1.rows[0]?.inflows)).toBe(Number(r2.rows[0]?.inflows));
+      expect(r1).toBe(r2);
     });
 
     it("returns identical outflows across repeated queries", async () => {
       const db = getTestDb();
 
-      const r1 = await sql<{ outflows: number | null }>`
-        SELECT COALESCE(SUM(amount), 0) AS outflows
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND transaction_type = 'WITHDRAWAL'
-          AND status = 'POSTED'
-          AND transaction_date BETWEEN ${FIXED_DATE_FROM} AND ${FIXED_DATE_TO}
-      `.execute(db);
+      const r1 = await getCashOutflows(db, isolatedCompanyId, FIXED_DATE_FROM, FIXED_DATE_TO);
+      const r2 = await getCashOutflows(db, isolatedCompanyId, FIXED_DATE_FROM, FIXED_DATE_TO);
 
-      const r2 = await sql<{ outflows: number | null }>`
-        SELECT COALESCE(SUM(amount), 0) AS outflows
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND transaction_type = 'WITHDRAWAL'
-          AND status = 'POSTED'
-          AND transaction_date BETWEEN ${FIXED_DATE_FROM} AND ${FIXED_DATE_TO}
-      `.execute(db);
-
-      expect(Number(r1.rows[0]?.outflows)).toBe(Number(r2.rows[0]?.outflows));
+      expect(r1).toBe(r2);
     });
 
     it("returns identical closing balance across repeated queries", async () => {
       const db = getTestDb();
 
-      const r1 = await sql<{ closing: number | null }>`
-        SELECT COALESCE(
-          SUM(CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END),
-          0
-        ) AS closing
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND status = 'POSTED'
-          AND transaction_date <= ${FIXED_DATE_TO}
-      `.execute(db);
+      const r1 = await getCashBalance(db, isolatedCompanyId, { dateTo: FIXED_DATE_TO });
+      const r2 = await getCashBalance(db, isolatedCompanyId, { dateTo: FIXED_DATE_TO });
 
-      const r2 = await sql<{ closing: number | null }>`
-        SELECT COALESCE(
-          SUM(CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END),
-          0
-        ) AS closing
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND status = 'POSTED'
-          AND transaction_date <= ${FIXED_DATE_TO}
-      `.execute(db);
-
-      expect(Number(r1.rows[0]?.closing)).toBe(Number(r2.rows[0]?.closing));
+      expect(r1).toBe(r2);
     });
   });
 
@@ -539,50 +397,12 @@ describe("cash-flow-consistency-reconciliation", { timeout: 60000 }, () => {
     it("emits zero-variance GATE log for the complete flow", async () => {
       const db = getTestDb();
 
-      const openResult = await sql<{ opening: number | null }>`
-        SELECT COALESCE(
-          SUM(CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END),
-          0
-        ) AS opening
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND transaction_date < ${FIXED_DATE_FROM}
-          AND status = 'POSTED'
-      `.execute(db);
-
-      const inflowResult = await sql<{ inflows: number | null }>`
-        SELECT COALESCE(SUM(amount), 0) AS inflows
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND transaction_type IN ('TOP_UP', 'MUTATION')
-          AND status = 'POSTED'
-          AND transaction_date BETWEEN ${FIXED_DATE_FROM} AND ${FIXED_DATE_TO}
-      `.execute(db);
-
-      const outflowResult = await sql<{ outflows: number | null }>`
-        SELECT COALESCE(SUM(amount), 0) AS outflows
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND transaction_type = 'WITHDRAWAL'
-          AND status = 'POSTED'
-          AND transaction_date BETWEEN ${FIXED_DATE_FROM} AND ${FIXED_DATE_TO}
-      `.execute(db);
-
-      const closeResult = await sql<{ closing: number | null }>`
-        SELECT COALESCE(
-          SUM(CASE WHEN transaction_type = 'WITHDRAWAL' THEN -amount ELSE amount END),
-          0
-        ) AS closing
-        FROM cash_bank_transactions
-        WHERE company_id = ${isolatedCompanyId}
-          AND status = 'POSTED'
-          AND transaction_date <= ${FIXED_DATE_TO}
-      `.execute(db);
-
-      const opening = Number(openResult.rows[0]?.opening ?? 0);
-      const inflows = Number(inflowResult.rows[0]?.inflows ?? 0);
-      const outflows = Number(outflowResult.rows[0]?.outflows ?? 0);
-      const closing = Number(closeResult.rows[0]?.closing ?? 0);
+      const opening = await getCashBalance(db, isolatedCompanyId, {
+        dateToExclusive: FIXED_DATE_FROM,
+      });
+      const inflows = await getCashInflows(db, isolatedCompanyId, FIXED_DATE_FROM, FIXED_DATE_TO);
+      const outflows = await getCashOutflows(db, isolatedCompanyId, FIXED_DATE_FROM, FIXED_DATE_TO);
+      const closing = await getCashBalance(db, isolatedCompanyId, { dateTo: FIXED_DATE_TO });
 
       const computed = opening + inflows - outflows;
       const variance = Math.abs(computed - closing);

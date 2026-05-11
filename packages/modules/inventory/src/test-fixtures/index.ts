@@ -29,3 +29,13 @@ export {
   type CreateTestRecipeIngredientOptions,
   type CreateTestRecipeCompositionOptions,
 } from "./recipe-fixtures.js";
+
+export {
+  createTestInventoryTransaction,
+  type CreateTestInventoryTransactionOptions,
+} from "./inventory-transaction-fixtures.js";
+
+export {
+  createTestItemPrice,
+  type CreateTestItemPriceOptions,
+} from "./item-price-fixtures.js";

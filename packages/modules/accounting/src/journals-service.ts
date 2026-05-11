@@ -90,11 +90,13 @@ export class JournalsService {
    * @param data The journal entry data
    * @param userId Optional user ID for audit logging
    * @param trx Optional external transaction (if provided, uses this transaction instead of creating a new one)
+   * @param opts Optional overrides for doc_type and doc_id (default: 'MANUAL' / Date.now())
    */
   async createManualEntry(
     data: ManualJournalEntryCreateRequest,
     userId?: number,
-    trx?: KyselySchema
+    trx?: KyselySchema,
+    opts?: { docType?: string; docId?: number }
   ): Promise<JournalBatchResponse> {
     if (data.client_ref) {
       const existingId = await this.findManualEntryIdByClientRef(
@@ -126,13 +128,14 @@ export class JournalsService {
       }
     }
 
-    // For manual entries, we use a unique doc_id based on timestamp
-    const docId = Date.now();
+    // For manual entries, we use a unique doc_id based on timestamp (overridable via opts)
+    const docId = opts?.docId ?? Date.now();
+    const docType = opts?.docType ?? 'MANUAL';
 
     const batchId = await (trx 
-      ? this.executeManualEntryInsert(trx, data, docId, totalDebit, totalCredit, userId)
+      ? this.executeManualEntryInsert(trx, data, docId, docType, totalDebit, totalCredit, userId)
       : withTransactionRetry(this.db, async (innerTrx) => 
-          this.executeManualEntryInsert(innerTrx as unknown as KyselySchema, data, docId, totalDebit, totalCredit, userId)
+          this.executeManualEntryInsert(innerTrx as unknown as KyselySchema, data, docId, docType, totalDebit, totalCredit, userId)
         )
     );
 
@@ -148,6 +151,7 @@ export class JournalsService {
     trx: KyselySchema,
     data: ManualJournalEntryCreateRequest,
     docId: number,
+    docType: string,
     totalDebit: number,
     totalCredit: number,
     userId?: number
@@ -159,7 +163,7 @@ export class JournalsService {
       VALUES (
         ${data.company_id},
         ${data.outlet_id ?? null},
-        'MANUAL',
+        ${docType},
         ${docId},
         ${data.client_ref ?? null},
         ${data.entry_date},

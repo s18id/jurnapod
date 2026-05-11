@@ -234,6 +234,12 @@ export type FiscalPeriodFixture = AccountingFiscalPeriodFixture;
 export type APReconciliationSettingsFixture = AccountingAPReconciliationSettingsFixture;
 export type AccountingAccountFixture = AccountingAccountFixtureType;
 
+// Re-export seeded fixtures (createSeededSalesInvoice) from API-layer fixture module
+export {
+  createSeededSalesInvoice,
+  type SeededSalesInvoiceResult,
+} from '../../src/lib/test-fixtures-seeded';
+
 // Re-export canonical constants from @jurnapod/db/test-fixtures
 // Q49-001 Pass 1: evidence of consumer flip to package fixture export
 export {

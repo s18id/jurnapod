@@ -5,9 +5,8 @@
 // Integration tests for trigger 0201 compatibility with AR snapshot rows on ap_reconciliation_snapshots.
 // Real DB required (trigger behavior only).
 //
-// Fixture Mode: Partial Fixture — trigger behavior requires direct DB state not achievable
-// via service-layer fixtures. Direct Kysely INSERT on ap_reconciliation_snapshots is the
-// appropriate tool for DB-level trigger testing (per story scope note).
+// Fixture Mode: Partial Fixture — trigger behavior tested via canonical fixture + direct SQL
+// for trigger-exercise operations (UPDATE/DELETE). Snapshot creation uses exported fixture.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { sql } from 'kysely';
@@ -16,6 +15,7 @@ import { closeTestDb, getTestDb } from '../../helpers/db';
 import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { resetFixtureRegistry, createTestCompanyMinimal, createTestUser, getTestAccessToken, loginForTest, assignUserGlobalRole, getRoleIdByCode } from '../../fixtures';
 import { makeTag } from '../../helpers/tags';
+import { createTestReconciliationSnapshot } from '@jurnapod/modules-purchasing/test-fixtures';
 
 let baseUrl: string;
 let db: ReturnType<typeof getTestDb>;
@@ -76,28 +76,16 @@ async function getUserIdForCompany(db: ReturnType<typeof getTestDb>, companyId: 
 // AC1: Trigger 0201 permits AR snapshot INSERT
 it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
     const userId = await getUserIdForCompany(db, companyAId);
-    const snapshotId = await sql`
-      INSERT INTO ap_reconciliation_snapshots (
-        company_id, as_of_date, timezone, snapshot_version,
-        ap_subledger_balance, gl_control_balance, variance,
-        configured_account_ids_json, account_source, inputs_hash,
-        created_by, auto_generated, status
-      ) VALUES (
-        ${companyAId},
-        '2026-03-31',
-        'Asia/Jakarta',
-        1,
-        1000000.0000,
-        1000000.0000,
-        0.0000,
-        '{"accounts":[]}',
-        'fallback_company_default',
-        'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
-        ${userId},
-        0,
-        'ACTIVE'
-      )
-    `.execute(db).then(r => Number(r.insertId));
+    const snapshot = await createTestReconciliationSnapshot(getTestDb(), {
+      companyId: companyAId,
+      userId,
+      asOfDate: '2026-03-31',
+      snapshotVersion: 1,
+      apSubledgerBalance: 1000000.0000,
+      glControlBalance: 1000000.0000,
+      inputsHash: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+    });
+    const snapshotId = snapshot.id;
 
     expect(snapshotId).toBeGreaterThan(0);
 
@@ -108,28 +96,16 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
   // AC2: Trigger 0201 permits AR snapshot archive transition
   it('AC2: AR snapshot archive transition (status=ARCHIVED) is permitted', async () => {
     const userId = await getUserIdForCompany(db, companyAId);
-    const snapshotId = await sql`
-      INSERT INTO ap_reconciliation_snapshots (
-        company_id, as_of_date, timezone, snapshot_version,
-        ap_subledger_balance, gl_control_balance, variance,
-        configured_account_ids_json, account_source, inputs_hash,
-        created_by, auto_generated, status
-      ) VALUES (
-        ${companyAId},
-        '2026-03-31',
-        'Asia/Jakarta',
-        2,
-        1500000.0000,
-        1500000.0000,
-        0.0000,
-        '{"accounts":[]}',
-        'fallback_company_default',
-        'b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3',
-        ${userId},
-        0,
-        'ACTIVE'
-      )
-    `.execute(db).then(r => Number(r.insertId));
+    const snapshot = await createTestReconciliationSnapshot(getTestDb(), {
+      companyId: companyAId,
+      userId,
+      asOfDate: '2026-03-31',
+      snapshotVersion: 2,
+      apSubledgerBalance: 1500000.0000,
+      glControlBalance: 1500000.0000,
+      inputsHash: 'b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3',
+    });
+    const snapshotId = snapshot.id;
 
     // Archive transition — should succeed (trigger allows NEW.status = 'ARCHIVED')
     const result = await sql`
@@ -153,28 +129,16 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
   // AC3: Trigger 0201 blocks non-archive UPDATE
   it('AC3: Non-archive UPDATE on AR snapshot rows is blocked', async () => {
     const userId = await getUserIdForCompany(db, companyAId);
-    const snapshotId = await sql`
-      INSERT INTO ap_reconciliation_snapshots (
-        company_id, as_of_date, timezone, snapshot_version,
-        ap_subledger_balance, gl_control_balance, variance,
-        configured_account_ids_json, account_source, inputs_hash,
-        created_by, auto_generated, status
-      ) VALUES (
-        ${companyAId},
-        '2026-04-15',
-        'Asia/Jakarta',
-        3,
-        2000000.0000,
-        2000000.0000,
-        0.0000,
-        '{"accounts":[]}',
-        'fallback_company_default',
-        'c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
-        ${userId},
-        0,
-        'ACTIVE'
-      )
-    `.execute(db).then(r => Number(r.insertId));
+    const snapshot = await createTestReconciliationSnapshot(getTestDb(), {
+      companyId: companyAId,
+      userId,
+      asOfDate: '2026-04-15',
+      snapshotVersion: 3,
+      apSubledgerBalance: 2000000.0000,
+      glControlBalance: 2000000.0000,
+      inputsHash: 'c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
+    });
+    const snapshotId = snapshot.id;
 
     // Attempt non-archive UPDATE (e.g., change balance) — trigger must block
     let blocked = false;
@@ -202,28 +166,16 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
   // AC4: DELETE is blocked by migration 0191 trigger (not by trigger 0201, but by the companion DELETE trigger)
   it('AC4: DELETE on AR snapshot rows is blocked by DB trigger', async () => {
     const userId = await getUserIdForCompany(db, companyAId);
-    const snapshotId = await sql`
-      INSERT INTO ap_reconciliation_snapshots (
-        company_id, as_of_date, timezone, snapshot_version,
-        ap_subledger_balance, gl_control_balance, variance,
-        configured_account_ids_json, account_source, inputs_hash,
-        created_by, auto_generated, status
-      ) VALUES (
-        ${companyAId},
-        '2026-04-20',
-        'Asia/Jakarta',
-        4,
-        500000.0000,
-        500000.0000,
-        0.0000,
-        '{"accounts":[]}',
-        'fallback_company_default',
-        'd4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5',
-        ${userId},
-        0,
-        'ACTIVE'
-      )
-    `.execute(db).then(r => Number(r.insertId));
+    const snapshot = await createTestReconciliationSnapshot(getTestDb(), {
+      companyId: companyAId,
+      userId,
+      asOfDate: '2026-04-20',
+      snapshotVersion: 4,
+      apSubledgerBalance: 500000.0000,
+      glControlBalance: 500000.0000,
+      inputsHash: 'd4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5',
+    });
+    const snapshotId = snapshot.id;
 
     // DELETE is BLOCKED by the DELETE trigger from migration 0191
     let blocked = false;
@@ -247,28 +199,16 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
   // AC5: Re-archive UPDATE is idempotent
   it('AC5: Re-archive UPDATE to ARCHIVED succeeds (idempotent)', async () => {
     const userId = await getUserIdForCompany(db, companyAId);
-    const snapshotId = await sql`
-      INSERT INTO ap_reconciliation_snapshots (
-        company_id, as_of_date, timezone, snapshot_version,
-        ap_subledger_balance, gl_control_balance, variance,
-        configured_account_ids_json, account_source, inputs_hash,
-        created_by, auto_generated, status
-      ) VALUES (
-        ${companyAId},
-        '2026-04-25',
-        'Asia/Jakarta',
-        5,
-        750000.0000,
-        750000.0000,
-        0.0000,
-        '{"accounts":[]}',
-        'fallback_company_default',
-        'e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6',
-        ${userId},
-        0,
-        'ACTIVE'
-      )
-    `.execute(db).then(r => Number(r.insertId));
+    const snapshot = await createTestReconciliationSnapshot(getTestDb(), {
+      companyId: companyAId,
+      userId,
+      asOfDate: '2026-04-25',
+      snapshotVersion: 5,
+      apSubledgerBalance: 750000.0000,
+      glControlBalance: 750000.0000,
+      inputsHash: 'e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6',
+    });
+    const snapshotId = snapshot.id;
 
     // First archive
     await sql`
@@ -298,52 +238,28 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
     const asOfDate = '2026-05-01';
 
     // Insert snapshot for Company A
-    const snapshotIdA = await sql`
-      INSERT INTO ap_reconciliation_snapshots (
-        company_id, as_of_date, timezone, snapshot_version,
-        ap_subledger_balance, gl_control_balance, variance,
-        configured_account_ids_json, account_source, inputs_hash,
-        created_by, auto_generated, status
-      ) VALUES (
-        ${companyAId},
-        ${asOfDate},
-        'Asia/Jakarta',
-        10,
-        3000000.0000,
-        3000000.0000,
-        0.0000,
-        '{"accounts":[]}',
-        'fallback_company_default',
-        'f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1',
-        ${userIdA},
-        0,
-        'ACTIVE'
-      )
-    `.execute(db).then(r => Number(r.insertId));
+    const snapshotA = await createTestReconciliationSnapshot(getTestDb(), {
+      companyId: companyAId,
+      userId: userIdA,
+      asOfDate,
+      snapshotVersion: 10,
+      apSubledgerBalance: 3000000.0000,
+      glControlBalance: 3000000.0000,
+      inputsHash: 'f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1',
+    });
+    const snapshotIdA = snapshotA.id;
 
     // Insert snapshot for Company B (same as_of_date)
-    const snapshotIdB = await sql`
-      INSERT INTO ap_reconciliation_snapshots (
-        company_id, as_of_date, timezone, snapshot_version,
-        ap_subledger_balance, gl_control_balance, variance,
-        configured_account_ids_json, account_source, inputs_hash,
-        created_by, auto_generated, status
-      ) VALUES (
-        ${companyBId},
-        ${asOfDate},
-        'Asia/Jakarta',
-        1,
-        500000.0000,
-        500000.0000,
-        0.0000,
-        '{"accounts":[]}',
-        'fallback_company_default',
-        'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
-        ${userIdB},
-        0,
-        'ACTIVE'
-      )
-    `.execute(db).then(r => Number(r.insertId));
+    const snapshotB = await createTestReconciliationSnapshot(getTestDb(), {
+      companyId: companyBId,
+      userId: userIdB,
+      asOfDate,
+      snapshotVersion: 1,
+      apSubledgerBalance: 500000.0000,
+      glControlBalance: 500000.0000,
+      inputsHash: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+    });
+    const snapshotIdB = snapshotB.id;
 
     // Query Company A snapshots — should only return Company A row
     const rowsA = await sql`

@@ -116,6 +116,17 @@ export { CashBankPostingMapper, type TreasuryPostingRepository } from "./posting
 export { CashBankService, type CashBankServiceOptions } from "./cash-bank-service.js";
 
 // -----------------------------------------------------------------------------
+// Aggregation query helpers (Story 64.7)
+// -----------------------------------------------------------------------------
+
+export {
+  getCashBalance,
+  getCashInflows,
+  getCashOutflows,
+  type CashBalanceOptions,
+} from "./cash-bank-queries.js";
+
+// -----------------------------------------------------------------------------
 // Test fixtures (Story 63.8)
 // -----------------------------------------------------------------------------
 

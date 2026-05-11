@@ -34,3 +34,16 @@ export { createTestPurchaseInvoice } from "./purchase-invoice-fixtures.js";
 
 // AP payment fixtures
 export { createTestApPayment } from "./ap-payment-fixtures.js";
+
+// Seeded purchase invoice fixture (wraps full production posting flow)
+export {
+  createSeededPurchaseInvoice,
+  type SeededPurchaseInvoiceResult,
+} from "./seeded-purchase-invoice-fixtures.js";
+
+// Reconciliation snapshot fixtures
+export {
+  createTestReconciliationSnapshot,
+  type ReconciliationSnapshotFixture,
+  type CreateTestReconciliationSnapshotOpts,
+} from "./reconciliation-fixtures.js";

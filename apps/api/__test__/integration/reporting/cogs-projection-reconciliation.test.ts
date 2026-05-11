@@ -12,7 +12,6 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { sql } from "kysely";
 import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
 import { closeTestDb, getTestDb } from "../../helpers/db";
 import {
@@ -29,7 +28,9 @@ import {
   cleanupTestFixtures,
 } from "../../fixtures";
 import { makeTag } from "../../helpers/tags";
+import { JournalsService } from "@jurnapod/modules-accounting";
 import { postCogsForSale } from "@jurnapod/modules-accounting/posting/cogs";
+import { createTestAccountMapping } from "@jurnapod/modules-accounting/test-fixtures";
 
 describe("cogs-projection-reconciliation", { timeout: 60000 }, () => {
   let companyId: number;
@@ -83,12 +84,18 @@ describe("cogs-projection-reconciliation", { timeout: 60000 }, () => {
 
     // 6. Create account_mappings for COGS_DEFAULT (mapping_type_id=7)
     //    and INVENTORY_ASSET_DEFAULT (mapping_type_id=8)
-    await sql`
-      INSERT INTO account_mappings (company_id, outlet_id, mapping_type_id, mapping_key, account_id)
-      VALUES
-        (${companyId}, NULL, 7, 'COGS_DEFAULT', ${cogsAccount.id}),
-        (${companyId}, NULL, 8, 'INVENTORY_ASSET_DEFAULT', ${invAssetAccount.id})
-    `.execute(getTestDb());
+    await createTestAccountMapping(getTestDb(), {
+      companyId,
+      mappingTypeId: 7,
+      mappingKey: 'COGS_DEFAULT',
+      accountId: cogsAccount.id,
+    });
+    await createTestAccountMapping(getTestDb(), {
+      companyId,
+      mappingTypeId: 8,
+      mappingKey: 'INVENTORY_ASSET_DEFAULT',
+      accountId: invAssetAccount.id,
+    });
 
     // 8. Post COGS: postCogsForSale with 2 units of the item
     const saleDate = new Date("2026-04-01");
@@ -141,25 +148,15 @@ describe("cogs-projection-reconciliation", { timeout: 60000 }, () => {
   // =============================================================================
 
   it("COGS journal batch total matches posting result (AC2)", async () => {
-    // Query COGS journal total — scoped to the specific batch to avoid
-    // picking up residual data from prior test runs for the same seed company.
-    const cogsJournalRows = await sql<{ total_cogs: string | null }>`
-      SELECT CAST(COALESCE(SUM(jl.debit), 0) AS DECIMAL(18,4)) AS total_cogs
-      FROM journal_lines jl
-      INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-      WHERE ${batchId !== undefined ? sql`jb.id = ${batchId}` : sql`FALSE`}
-    `.execute(getTestDb());
+    // Use JournalsService.getJournalBatch to fetch the full batch (production path)
+    const svc = new JournalsService(getTestDb());
+    const batch = await svc.getJournalBatch(batchId!, companyId);
 
-    const journalTotal = Number(cogsJournalRows.rows[0]?.total_cogs ?? "0");
+    // Sum journal line debits in TypeScript (replaces inline COALESCE(SUM(...)))
+    const journalTotal = batch.lines.reduce((sum, line) => sum + line.debit, 0);
 
-    // Verify the batch has doc_type = 'COGS'
-    if (batchId !== undefined) {
-      const docTypeRows = await sql<{ doc_type: string }>`
-        SELECT doc_type FROM journal_batches
-        WHERE id = ${batchId} AND company_id = ${companyId}
-      `.execute(getTestDb());
-      expect(docTypeRows.rows[0]?.doc_type).toBe("COGS");
-    }
+    // Verify the batch has doc_type = 'COGS' (already available from the batch response)
+    expect(batch.doc_type).toBe("COGS");
 
     // Assert journal total matches posting total (to 4 decimal places)
     expect(journalTotal.toFixed(4)).toBe(postingTotalCogs.toFixed(4));
@@ -182,19 +179,13 @@ describe("cogs-projection-reconciliation", { timeout: 60000 }, () => {
   // =============================================================================
 
   it("COGS journal is balanced (debits = credits)", async () => {
-    const balanceRows = await sql<{
-      total_debit: string | null;
-      total_credit: string | null;
-    }>`
-      SELECT
-        CAST(SUM(jl.debit) AS DECIMAL(18,4)) AS total_debit,
-        CAST(SUM(jl.credit) AS DECIMAL(18,4)) AS total_credit
-      FROM journal_lines jl
-      WHERE ${batchId !== undefined ? sql`jl.journal_batch_id = ${batchId}` : sql`FALSE`}
-    `.execute(getTestDb());
+    // Use JournalsService.getJournalBatch to fetch the full batch (production path)
+    const svc = new JournalsService(getTestDb());
+    const batch = await svc.getJournalBatch(batchId!, companyId);
 
-    const totalDebit = Number(balanceRows.rows[0]?.total_debit ?? "0");
-    const totalCredit = Number(balanceRows.rows[0]?.total_credit ?? "0");
+    // Sum debits and credits from batch lines in TypeScript
+    const totalDebit = batch.lines.reduce((sum, line) => sum + line.debit, 0);
+    const totalCredit = batch.lines.reduce((sum, line) => sum + line.credit, 0);
 
     expect(totalDebit.toFixed(4)).toBe(totalCredit.toFixed(4));
   });
@@ -205,13 +196,11 @@ describe("cogs-projection-reconciliation", { timeout: 60000 }, () => {
 
   it("COGS journal batch produces deterministic output (AC3)", async () => {
     const queryCogsJournal = async () => {
-      const rows = await sql<{ total_cogs: string | null }>`
-        SELECT CAST(COALESCE(SUM(jl.debit), 0) AS DECIMAL(18,4)) AS total_cogs
-        FROM journal_lines jl
-        INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-        WHERE ${batchId !== undefined ? sql`jb.id = ${batchId}` : sql`FALSE`}
-      `.execute(getTestDb());
-      return Number(rows.rows[0]?.total_cogs ?? "0");
+      // Use JournalsService.getJournalBatch to fetch the full batch (production path)
+      const svc = new JournalsService(getTestDb());
+      const batch = await svc.getJournalBatch(batchId!, companyId);
+      // Sum journal line debits in TypeScript (replaces inline COALESCE(SUM(...)))
+      return batch.lines.reduce((sum, line) => sum + line.debit, 0);
     };
 
     const firstQuery = await queryCogsJournal();
@@ -227,15 +216,12 @@ describe("cogs-projection-reconciliation", { timeout: 60000 }, () => {
   // =============================================================================
 
   it("emits EPIC62 GATE evidence with correct projection and variance (AC4)", async () => {
-    // Query COGS journal total for evidence
-    const cogsJournalRows = await sql<{ total_cogs: string | null }>`
-      SELECT CAST(COALESCE(SUM(jl.debit), 0) AS DECIMAL(18,4)) AS total_cogs
-      FROM journal_lines jl
-      INNER JOIN journal_batches jb ON jb.id = jl.journal_batch_id
-      WHERE ${batchId !== undefined ? sql`jb.id = ${batchId}` : sql`FALSE`}
-    `.execute(getTestDb());
+    // Use JournalsService.getJournalBatch to fetch the full batch (production path)
+    const svc = new JournalsService(getTestDb());
+    const batch = await svc.getJournalBatch(batchId!, companyId);
 
-    const journalTotal = Number(cogsJournalRows.rows[0]?.total_cogs ?? "0");
+    // Sum journal line debits in TypeScript (replaces inline COALESCE(SUM(...)))
+    const journalTotal = batch.lines.reduce((sum, line) => sum + line.debit, 0);
     const variance = Math.abs(journalTotal - postingTotalCogs).toFixed(4);
 
     const gatePayload = {

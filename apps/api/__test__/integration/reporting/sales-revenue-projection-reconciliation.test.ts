@@ -21,6 +21,7 @@ import {
   createTestCompanyMinimal,
   createTestOutletMinimal,
   createTestUser,
+  createTestFiscalYear,
   getRoleIdByCode,
   assignUserGlobalRole,
   assignUserOutletRole,
@@ -31,6 +32,7 @@ import {
 } from "../../fixtures";
 import { makeTag } from "../../helpers/tags";
 import { getTestBaseUrl } from "../../helpers/env";
+import { createTestJournalBatch } from "@jurnapod/modules-accounting/test-fixtures";
 
 // Fixed future dates — beyond any real transaction, ensures deterministic isolation
 const FIXED_DATE_FROM = "2099-01-01";
@@ -168,10 +170,12 @@ describe("sales-revenue-projection-reconciliation", { timeout: 60000 }, () => {
       const tag = makeTag("SALESREV");
 
       // Seed fiscal_year
-      await sql`
-        INSERT INTO fiscal_years (company_id, code, name, start_date, end_date, status)
-        VALUES (${isolatedCompanyId}, ${(`FY-${tag}`).slice(0, 32)}, ${`Fiscal Year ${tag}`}, ${FIXED_DATE_FROM}, ${FIXED_DATE_TO}, 'OPEN')
-      `.execute(db);
+      await createTestFiscalYear(isolatedCompanyId, {
+        year: 2099,
+        startDate: FIXED_DATE_FROM,
+        endDate: FIXED_DATE_TO,
+        status: 'OPEN',
+      });
 
       // Create REVENUE account (now uses canonical fixture that sets account_type_id at creation)
       const accountCode = `REV-${tag}`.slice(0, 32);
@@ -183,18 +187,26 @@ describe("sales-revenue-projection-reconciliation", { timeout: 60000 }, () => {
       });
       revenueAccountId = revenueAccount.id;
 
-      // Create journal batch
-      const batchResult = await sql<{ insertId: number }>`
-        INSERT INTO journal_batches (company_id, doc_type, doc_id, posted_at, created_at, updated_at)
-        VALUES (${isolatedCompanyId}, 'JOURNAL', 1, ${`${FIXED_DATE_FROM} 12:00:00`}, NOW(), NOW())
-      `.execute(db);
-      const batchId = Number(batchResult.insertId);
-
-      // Credit line: Revenue account credited
-      await sql`
-        INSERT INTO journal_lines (company_id, journal_batch_id, account_id, line_date, debit, credit, description, created_at, updated_at)
-        VALUES (${isolatedCompanyId}, ${batchId}, ${revenueAccountId}, ${LINE_DATE}, 0, ${CREDIT_AMOUNT}, ${`Test revenue entry ${tag}`}, NOW(), NOW())
-      `.execute(db);
+      // Create journal batch via production JournalsService
+      // (replaces raw SQL INSERT INTO journal_batches/journal_lines)
+      await createTestJournalBatch(db, {
+        companyId: isolatedCompanyId,
+        entryDate: LINE_DATE,
+        entries: [
+          {
+            accountId: revenueAccountId,
+            debit: 0,
+            credit: CREDIT_AMOUNT,
+            description: `Test revenue entry ${tag}`,
+          },
+          {
+            accountId: revenueAccountId,
+            debit: CREDIT_AMOUNT,
+            credit: 0,
+            description: `Balancing debit entry ${tag}`,
+          },
+        ],
+      });
     });
 
     it("projection revenue matches GL revenue source-of-truth", async () => {

@@ -24,15 +24,18 @@ import {
   createTestCompanyMinimal,
   createTestOutletMinimal,
   createTestUser,
+  createTestFiscalYear,
   getRoleIdByCode,
   assignUserGlobalRole,
   assignUserOutletRole,
   setModulePermission,
   loginForTest,
+  createTestAccount,
 } from "../../fixtures";
 import { getDb } from "@/lib/db";
-import { sql } from "kysely";
 import { makeTag } from "../../helpers/tags";
+import { createTestJournalBatch } from "@jurnapod/modules-accounting/test-fixtures";
+import { TrialBalanceService } from "@jurnapod/modules-accounting";
 
 // Fixed future dates — beyond any real transaction, ensures deterministic isolation
 const FIXED_DATE_FROM = "2099-01-01";
@@ -114,11 +117,12 @@ describe("gl-trial-balance-reconciliation", { timeout: 60000 }, () => {
 
       // Seed fiscal_year for the test year range
       const db = getDb();
-      const tag = makeTag("GLTB");
-      await sql`
-        INSERT INTO fiscal_years (company_id, code, name, start_date, end_date, status)
-        VALUES (${isolatedCompanyId}, ${(`FY-${tag}`).slice(0, 32)}, ${`Fiscal Year ${tag}`}, ${FIXED_DATE_FROM}, ${FIXED_DATE_TO}, 'OPEN')
-      `.execute(db);
+      await createTestFiscalYear(isolatedCompanyId, {
+        year: 2099,
+        startDate: FIXED_DATE_FROM,
+        endDate: FIXED_DATE_TO,
+        status: 'OPEN',
+      });
     });
 
     it("returns zero totals with no journal data", async () => {
@@ -156,6 +160,7 @@ describe("gl-trial-balance-reconciliation", { timeout: 60000 }, () => {
     let isolatedToken: string;
     let assetAccountId: number;
     let liabilityAccountId: number;
+    let fiscalYearId: number;
 
     const DEBIT_AMOUNT = 100000;
     const CREDIT_AMOUNT = 100000;
@@ -191,44 +196,53 @@ describe("gl-trial-balance-reconciliation", { timeout: 60000 }, () => {
       const db = getDb();
       const tag = makeTag("GLTB");
 
-      // Seed fiscal_year
-      await sql`
-        INSERT INTO fiscal_years (company_id, code, name, start_date, end_date, status)
-        VALUES (${isolatedCompanyId}, ${(`FY-${tag}`).slice(0, 32)}, ${`Fiscal Year ${tag}`}, ${FIXED_DATE_FROM}, ${FIXED_DATE_TO}, 'OPEN')
-      `.execute(db);
+      // Seed fiscal_year — capture ID for TrialBalanceService
+      const fy = await createTestFiscalYear(isolatedCompanyId, {
+        year: 2099,
+        startDate: FIXED_DATE_FROM,
+        endDate: FIXED_DATE_TO,
+        status: 'OPEN',
+      });
+      fiscalYearId = fy.id;
 
-      // Create Asset account (type_name='ASSET', normal_balance='D')
-      const assetResult = await sql<{ insertId: number }>`
-        INSERT INTO accounts (company_id, code, name, type_name, normal_balance, report_group, is_active, is_group)
-        VALUES (${isolatedCompanyId}, ${(`AST-${tag}`).slice(0, 32)}, ${`Test Asset ${tag}`}, 'ASSET', 'D', 'NRC', 1, 0)
-      `.execute(db);
-      assetAccountId = Number(assetResult.insertId);
+      // Create Asset account via canonical fixture
+      const assetAccount = await createTestAccount({
+        companyId: isolatedCompanyId,
+        code: `AST-${tag}`.slice(0, 32),
+        name: `Test Asset ${tag}`,
+        typeName: "ASSET",
+      });
+      assetAccountId = assetAccount.id;
 
-      // Create Liability account (type_name='LIABILITY', normal_balance='K')
-      const liabilityResult = await sql<{ insertId: number }>`
-        INSERT INTO accounts (company_id, code, name, type_name, normal_balance, report_group, is_active, is_group)
-        VALUES (${isolatedCompanyId}, ${(`LIA-${tag}`).slice(0, 32)}, ${`Test Liability ${tag}`}, 'LIABILITY', 'K', 'NRC', 1, 0)
-      `.execute(db);
-      liabilityAccountId = Number(liabilityResult.insertId);
+      // Create Liability account via canonical fixture
+      const liabilityAccount = await createTestAccount({
+        companyId: isolatedCompanyId,
+        code: `LIA-${tag}`.slice(0, 32),
+        name: `Test Liability ${tag}`,
+        typeName: "LIABILITY",
+      });
+      liabilityAccountId = liabilityAccount.id;
 
-      // Create journal batch (doc_type='JOURNAL', doc_id=1 for this isolated company)
-      const batchResult = await sql<{ insertId: number }>`
-        INSERT INTO journal_batches (company_id, doc_type, doc_id, posted_at, created_at, updated_at)
-        VALUES (${isolatedCompanyId}, 'JOURNAL', 1, ${`${FIXED_DATE_FROM} 12:00:00`}, NOW(), NOW())
-      `.execute(db);
-      const batchId = Number(batchResult.insertId);
-
-      // Debit line: Asset account debited
-      await sql`
-        INSERT INTO journal_lines (company_id, journal_batch_id, account_id, line_date, debit, credit, description, created_at, updated_at)
-        VALUES (${isolatedCompanyId}, ${batchId}, ${assetAccountId}, ${LINE_DATE}, ${DEBIT_AMOUNT}, 0, ${`Test debit entry ${tag}`}, NOW(), NOW())
-      `.execute(db);
-
-      // Credit line: Liability account credited (balanced entry)
-      await sql`
-        INSERT INTO journal_lines (company_id, journal_batch_id, account_id, line_date, debit, credit, description, created_at, updated_at)
-        VALUES (${isolatedCompanyId}, ${batchId}, ${liabilityAccountId}, ${LINE_DATE}, 0, ${CREDIT_AMOUNT}, ${`Test credit entry ${tag}`}, NOW(), NOW())
-      `.execute(db);
+      // Create balanced journal batch via production JournalsService
+      // (replaces raw SQL INSERT INTO journal_batches/journal_lines)
+      await createTestJournalBatch(db, {
+        companyId: isolatedCompanyId,
+        entryDate: LINE_DATE,
+        entries: [
+          {
+            accountId: assetAccountId,
+            debit: DEBIT_AMOUNT,
+            credit: 0,
+            description: `Test debit entry ${tag}`,
+          },
+          {
+            accountId: liabilityAccountId,
+            debit: 0,
+            credit: CREDIT_AMOUNT,
+            description: `Test credit entry ${tag}`,
+          },
+        ],
+      });
     });
 
     // ---------------------------------------------------------------------------
@@ -248,7 +262,7 @@ describe("gl-trial-balance-reconciliation", { timeout: 60000 }, () => {
       expect(body.data.totals.total_debit).toBe(body.data.totals.total_credit);
     });
 
-    it("totals match direct SUM(journal_lines) aggregate from source of truth", async () => {
+    it("totals match TrialBalanceService (canonical computation)", async () => {
       const res = await getJson(
         `/api/reports/trial-balance?date_from=${FIXED_DATE_FROM}&date_to=${FIXED_DATE_TO}`,
         isolatedToken
@@ -257,18 +271,15 @@ describe("gl-trial-balance-reconciliation", { timeout: 60000 }, () => {
 
       const body = await res.json();
 
-      // Direct DB query: sum of all journal_lines for this company in range
-      const db = getDb();
-      const jlResult = await sql<{ total_debit: number; total_credit: number }>`
-        SELECT COALESCE(SUM(debit), 0) AS total_debit, COALESCE(SUM(credit), 0) AS total_credit
-        FROM journal_lines
-        WHERE company_id = ${isolatedCompanyId}
-          AND line_date BETWEEN ${FIXED_DATE_FROM} AND ${FIXED_DATE_TO}
-      `.execute(db);
-      const jlRow = jlResult.rows[0];
+      // Canonical trial balance via TrialBalanceService (replaces inline SQL)
+      const tbService = new TrialBalanceService(getDb());
+      const tbResult = await tbService.getTrialBalance({
+        companyId: isolatedCompanyId,
+        fiscalYearId,
+      });
 
-      expect(body.data.totals.total_debit).toBe(Number(jlRow.total_debit));
-      expect(body.data.totals.total_credit).toBe(Number(jlRow.total_credit));
+      expect(body.data.totals.total_debit).toBe(tbResult.totalDebits);
+      expect(body.data.totals.total_credit).toBe(tbResult.totalCredits);
     });
 
     it("per-account balance matches SUM(jl.debit - jl.credit) from journal_lines source of truth", async () => {
@@ -290,20 +301,16 @@ describe("gl-trial-balance-reconciliation", { timeout: 60000 }, () => {
 
       expect(rows.length).toBeGreaterThan(0);
 
-      const db = getDb();
-
-      // For each account row, verify balance = SUM(debit - credit) from journal_lines
-      // Variance = projection_balance - subledger_balance, MUST be 0 for each account
+      // For each account row, verify balance via TrialBalanceService (replaces inline SQL)
+      // Variance = projection_balance - canonical_balance, MUST be 0 for each account
+      const tbService = new TrialBalanceService(getDb());
+      const tbResult = await tbService.getTrialBalance({
+        companyId: isolatedCompanyId,
+        fiscalYearId,
+      });
       for (const row of rows) {
-        const aggResult = await sql<{ balance: number }>`
-          SELECT COALESCE(SUM(debit - credit), 0) AS balance
-          FROM journal_lines
-          WHERE company_id = ${isolatedCompanyId}
-            AND account_id = ${row.account_id}
-            AND line_date BETWEEN ${FIXED_DATE_FROM} AND ${FIXED_DATE_TO}
-        `.execute(db);
-
-        const expectedBalance = Number(aggResult.rows[0]?.balance ?? 0);
+        const tbEntry = tbResult.accounts.find((a: { accountId: number; netBalance: number }) => a.accountId === row.account_id);
+        const expectedBalance = tbEntry?.netBalance ?? 0;
         expect(row.balance).toBe(expectedBalance);
       }
 

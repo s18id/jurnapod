@@ -119,7 +119,7 @@ export async function createTestInventoryGLAccount(
     companyId,
     code: options.code,
     name: options.name ?? "Inventory Asset Test Fixture",
-    typeName: "INVENTORY",
+    typeName: "ASSET", // COGS posting validation requires ASSET type for inventory accounts
   });
 }
 

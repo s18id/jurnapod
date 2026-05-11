@@ -25,3 +25,10 @@ export {
   createTestOutletMinimal,
   createTestOutletWithoutTimezone,
 } from "./outlet-fixtures.js";
+
+// Audit log fixtures
+export {
+  createTestAuditLog,
+  type AuditLogFixture,
+  type CreateTestAuditLogOpts,
+} from "./audit-fixtures.js";

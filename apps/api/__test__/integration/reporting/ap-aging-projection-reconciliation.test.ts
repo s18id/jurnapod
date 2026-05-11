@@ -20,6 +20,7 @@ import {
   createTestCompanyMinimal,
   createTestOutletMinimal,
   createTestUser,
+  createTestAccount,
   getRoleIdByCode,
   assignUserGlobalRole,
   setModulePermission,
@@ -28,8 +29,8 @@ import {
   getOrCreateTestCashierForPermission,
 } from "../../fixtures";
 import { getDb } from "@/lib/db";
-import { sql } from "kysely";
 import { makeTag } from "../../helpers/tags";
+import { APReconciliationService, fromScaled4 } from "@jurnapod/modules-accounting";
 import { createSupplierFixture, createTestPurchaseInvoice, createTestApPayment } from "@jurnapod/modules-purchasing/test-fixtures";
 import { PurchaseInvoiceService, APPaymentService } from "@jurnapod/modules-purchasing";
 
@@ -206,15 +207,11 @@ describe("ap-aging-projection-reconciliation", { timeout: 60000 }, () => {
         const projectionBaseOpen = parseFloat(body.data.grand_totals.base_open_amount);
         expect(projectionBaseOpen).toBe(INVOICE_AMOUNT);
 
-        // Subledger verification: direct DB query
+        // Subledger verification: use APReconciliationService
         const db = getDb();
-        const subledgerResult = await sql<{ subledger_total: string }>`
-          SELECT COALESCE(SUM(pi.grand_total * pi.exchange_rate), 0) AS subledger_total
-          FROM purchase_invoices pi
-          WHERE pi.company_id = ${isolatedCompanyId}
-            AND pi.status = 2
-        `.execute(db);
-        const subledgerTotal = parseFloat(subledgerResult.rows[0]!.subledger_total);
+        const apService = new APReconciliationService(db);
+        const balance = await apService.getAPSubledgerBalance(isolatedCompanyId, FIXED_AS_OF_DATE);
+        const subledgerTotal = parseFloat(fromScaled4(balance));
 
         const variance = Math.abs(projectionBaseOpen - subledgerTotal);
         expect(variance).toBe(0);
@@ -253,11 +250,13 @@ describe("ap-aging-projection-reconciliation", { timeout: 60000 }, () => {
         const accounts = await createTestPurchasingAccounts(isolatedCompanyId);
 
         // Create a bank account for the ap_payment FK
-        const bankAccountRes = await sql<{ insertId: number }>`
-          INSERT INTO accounts (company_id, code, name, type_name, is_active, is_group)
-          VALUES (${isolatedCompanyId}, ${`BANK-${makeTag("APA")}`.slice(0, 32)}, 'Test Bank Account', 'BANK', 1, 0)
-        `.execute(db);
-        isolatedBankAccountId = Number(bankAccountRes.insertId);
+        const bankAccount = await createTestAccount({
+          companyId: isolatedCompanyId,
+          code: `BANK-${makeTag("APA")}`.slice(0, 32),
+          name: 'Test Bank Account',
+          typeName: 'BANK',
+        });
+        isolatedBankAccountId = bankAccount.id;
 
         const email = `ap-pay-${makeTag("APA")}@example.com`;
         const user = await createTestUser(isolatedCompanyId, {
@@ -341,23 +340,11 @@ describe("ap-aging-projection-reconciliation", { timeout: 60000 }, () => {
         const expectedOpen = INVOICE_AMOUNT - PAYMENT_AMOUNT;
         expect(projectionBaseOpen).toBe(expectedOpen);
 
-        // Subledger verification: total invoiced minus total paid
+        // Subledger verification: use APReconciliationService
         const db = getDb();
-        const subledgerResult = await sql<{ subledger_total: string }>`
-          SELECT
-            COALESCE(SUM(pi.grand_total * pi.exchange_rate), 0)
-            - COALESCE((
-              SELECT SUM(apl.allocation_amount)
-              FROM ap_payment_lines apl
-              INNER JOIN ap_payments ap ON ap.id = apl.ap_payment_id
-              WHERE ap.company_id = ${isolatedCompanyId}
-                AND ap.status = 20
-            ), 0) AS subledger_total
-          FROM purchase_invoices pi
-          WHERE pi.company_id = ${isolatedCompanyId}
-            AND pi.status = 2
-        `.execute(db);
-        const subledgerTotal = parseFloat(subledgerResult.rows[0]!.subledger_total);
+        const apService = new APReconciliationService(db);
+        const balance = await apService.getAPSubledgerBalance(isolatedCompanyId, FIXED_AS_OF_DATE);
+        const subledgerTotal = parseFloat(fromScaled4(balance));
 
         const variance = Math.abs(projectionBaseOpen - subledgerTotal);
         expect(variance).toBe(0);

@@ -29,6 +29,10 @@ export interface CreateTestInventoryItemOptions {
   type: ItemType;
   is_active?: boolean;
   track_stock?: boolean;
+  /** COGS account ID for accounting integration (default: not set) */
+  cogs_account_id?: number | null;
+  /** Inventory Asset account ID for accounting integration (default: not set) */
+  inventory_asset_account_id?: number | null;
 }
 
 /**
@@ -60,6 +64,8 @@ export async function createTestInventoryItem(
       type: opts.type,
       is_active: opts.is_active ?? true,
       track_stock: opts.track_stock ?? (opts.type === "PRODUCT" || opts.type === "INGREDIENT"),
+      cogs_account_id: opts.cogs_account_id ?? undefined,
+      inventory_asset_account_id: opts.inventory_asset_account_id ?? undefined,
     }
   );
 

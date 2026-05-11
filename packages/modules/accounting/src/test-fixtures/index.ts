@@ -53,3 +53,17 @@ export {
   createTestVarianceAccount,
 } from "./account-fixtures.js";
 export type { CreateTestAccountOpts } from "./account-fixtures.js";
+
+// Journal batch fixtures (production JournalsService path)
+export {
+  createTestJournalBatch,
+  type JournalEntryLine,
+  type TestJournalBatchResult,
+} from "./journal-fixtures.js";
+
+// Account mapping fixtures
+export {
+  createTestAccountMapping,
+  type AccountMappingFixture,
+  type CreateTestAccountMappingOpts,
+} from "./account-mapping-fixtures.js";

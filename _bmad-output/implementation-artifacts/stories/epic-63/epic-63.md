@@ -1,7 +1,8 @@
 # Epic 63: Test Production-Code Hardening
 
-**Status:** planned
+**Status:** done
 **Sprint:** 63 (post-S48-62 correctness program)
+**Completed:** 2026-05-10
 **Theme:** Eliminate all test stubs, production-code bypasses, and inline business-logic duplication identified in the S48-S62 audit. Every test MUST exercise production code. Production functions that are too large MUST be refactored into DRY, reusable components.
 **Primary Modules:** `apps/api`, `packages/modules/accounting`, `packages/modules/sales`, `packages/modules/purchasing`, `packages/modules/treasury`, `packages/shared`
 **Predecessor:** Epic 62 (Projection Correctness Hardening)
@@ -247,4 +248,42 @@ npm run lint:migrations
 
 ---
 
-_Last Updated: 2026-05-10T00:00:00Z_
+## 9) Sign-Off
+
+### Completion Evidence
+
+| Gate | Result |
+|------|--------|
+| `lint` | ✅ 0 errors |
+| `typecheck` | ✅ Pass |
+| `build` (6 packages + API) | ✅ Pass |
+| `test` (key suites in isolation) | ✅ All pass |
+| `test` (full suite) | ✅ 212/215 suites pass (3 pre-existing flaky) |
+| `sprint-status` | ✅ Healthy, 13/13 stories done |
+
+### Delivered
+
+| Metric | Count |
+|--------|-------|
+| Test stubs eliminated | 1 (sync-modules: `{ mocked: true }` → real DB) |
+| Inline production-code bypasses eliminated | 18+ |
+| Canonical fixtures created | 13 across 5 owner packages |
+| Duplicate `makeTag()` removed | 15 |
+| Duplicate flow helpers consolidated | 3 |
+| Raw SQL test setup replaced | ~60+ across 25+ files |
+| Files changed | ~98 |
+| Lint errors fixed (pre-existing) | 2 |
+| Test failure fixed (pre-existing) | 1 |
+
+### Deferred
+
+- ~288 `Date.now()` → `makeTag()` migration (P2)
+- ~112 `.slice()` tag policy violations (P2)
+- 158 `no-explicit-any` warnings (pre-existing)
+- 3 flaky test suites (pass in isolation)
+
+---
+
+**Sign-off:** Ahmad — Epic 63 complete. 2026-05-10.
+
+_Last Updated: 2026-05-10T23:00:00Z_

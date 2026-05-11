@@ -20,16 +20,17 @@ import {
   createTestCompanyMinimal,
   createTestOutletMinimal,
   createTestUser,
+  createTestFiscalYear,
   getRoleIdByCode,
   assignUserGlobalRole,
   setModulePermission,
   ensureTestSalesAccountMappings,
   loginForTest,
+  createSeededSalesInvoice,
 } from "../../fixtures";
 import { getDb } from "@/lib/db";
 import { sql } from "kysely";
 import { makeTag } from "../../helpers/tags";
-import { createTestSalesInvoice } from "@jurnapod/modules-sales/test-fixtures";
 
 describe("ar-subledger-reconciliation", { timeout: 60000 }, () => {
   let baseUrl: string;
@@ -234,29 +235,25 @@ describe("ar-subledger-reconciliation", { timeout: 60000 }, () => {
         });
         expect(settingsRes.status).toBe(200);
 
-        // Insert a POSTED invoice directly (bypasses API to avoid numbering template dependency)
-        const { id: invoiceId } = await createTestSalesInvoice(db, {
-          companyId: isolatedCompanyId,
-          outletId: isolatedOutletId,
-          invoiceDate: FIXED_AS_OF_DATE,
-          dueDate: "2020-01-01",
-          totalAmount: INVOICE_AMOUNT,
+        // Create a seeded sales invoice with journal entries via production JournalsService
+        // (replaces raw SQL INSERT INTO journal_batches/journal_lines)
+        // Must seed an open fiscal year first — JournalsService validates fiscal year boundaries
+        await createTestFiscalYear(isolatedCompanyId, {
+          year: 2099,
+          startDate: FIXED_AS_OF_DATE,
+          endDate: FIXED_AS_OF_DATE,
+          status: 'OPEN',
         });
 
-        // Insert matching GL journal batch (doc_type=SALES_INVOICE, posted within cutoff).
-        // posted_at uses noon UTC on the as_of_date — safely before the end-of-day UTC boundary
-        // regardless of the company's local timezone (Asia/Jakarta = UTC+7, cutoff ≈ 16:59:59 UTC).
-        const batchResult = await sql<{ insertId: number }>`
-          INSERT INTO journal_batches (company_id, doc_type, doc_id, posted_at, created_at, updated_at)
-          VALUES (${isolatedCompanyId}, 'SALES_INVOICE', ${invoiceId}, ${`${FIXED_AS_OF_DATE} 12:00:00`}, NOW(), NOW())
-        `.execute(db);
-        const batchId = Number(batchResult.insertId);
-
-        // AR debit line: debit the AR account (asset — debit is positive)
-        await sql`
-          INSERT INTO journal_lines (company_id, journal_batch_id, account_id, line_date, debit, credit, description, created_at, updated_at)
-          VALUES (${isolatedCompanyId}, ${batchId}, ${isolatedArAccountId}, ${FIXED_AS_OF_DATE}, ${INVOICE_AMOUNT}, 0, 'AR reconciliation test', NOW(), NOW())
-        `.execute(db);
+        const seeded = await createSeededSalesInvoice(db, {
+          companyId: isolatedCompanyId,
+          outletId: isolatedOutletId,
+          arAccountId: isolatedArAccountId,
+          revenueAccountId: mappings.sales_revenue_account_id,
+          invoiceDate: FIXED_AS_OF_DATE,
+          totalAmount: INVOICE_AMOUNT,
+        });
+        const invoiceId = seeded.invoiceId;
       });
 
       it("AR subledger correctly reflects posted invoice balance", async () => {
