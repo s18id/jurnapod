@@ -1,6 +1,6 @@
 # Epic 64: Test Production-Code Integration — Phase 2
 
-**Status:** planned
+**Status:** in-progress
 **Sprint:** 64
 **Theme:** Replace inline SQL aggregations in tests with production reconciliation/balance/reporting services. Every test verification that sums journal lines, computes subledger balances, or aggregates financial values MUST use the same production service that the API uses.
 **Primary Modules:** `apps/api`, `packages/modules/accounting`, `packages/modules/treasury`, `packages/modules/purchasing`, `packages/modules/inventory-costing`

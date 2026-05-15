@@ -2,7 +2,8 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 /**
- * Inventory Valuation Projection Reconciliation Integration Tests (Story 62.2)
+ * Inventory Valuation Projection Reconciliation Integration Tests
+ * (Story 62.2 baseline; Epic 64 Story 64.3 verification-path alignment)
  *
  * Tests inventory valuation projection vs source-of-truth cost layers reconciliation:
  * - AC1: Inventory valuation projection matches cost layers with zero variance
@@ -12,6 +13,7 @@
  * The source-of-truth is the inventory_cost_layers table.
  * The projection is getAllItemsCostSummary() from @jurnapod/modules-inventory-costing.
  * Verification: repeated calls to the production function produce identical results.
+ * Epic 64 note: inline SQL verification paths are removed in favor of production service calls.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -197,8 +199,7 @@ describe("inventory-valuation-projection-reconciliation", { timeout: 60000 }, ()
 
   describe("Error paths", () => {
     it("returns zero totals for non-existent companyId", async () => {
-      // getItemsCostSummary queries with WHERE l.company_id = <id>
-      // When no rows match, COALESCE(SUM(...), 0) returns zero
+      // When no rows match, getAllItemsCostSummary returns zero for all totals
       const summary = await getAllItemsCostSummary(0, getTestDb());
 
       expect(Number(summary.totalCost)).toBe(0);

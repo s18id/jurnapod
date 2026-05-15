@@ -3,12 +3,15 @@
 
 /**
  * COGS Projection vs Source-of-Truth Journal Entries Reconciliation
- * (Story 62.2 AC2, AC3, AC4)
+ * (Story 62.2 AC2, AC3, AC4; Epic 64 Story 64.2 verification-path alignment)
  *
  * Tests:
  * - AC2: COGS journal batch total matches posting result with zero variance
  * - AC3: Deterministic projection outputs
  * - AC4: EPIC62 GATE evidence emission
+ *
+ * Epic 64 note:
+ * - Inline SQL verification paths are replaced by JournalsService journal batch reads.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -152,7 +155,7 @@ describe("cogs-projection-reconciliation", { timeout: 60000 }, () => {
     const svc = new JournalsService(getTestDb());
     const batch = await svc.getJournalBatch(batchId!, companyId);
 
-    // Sum journal line debits in TypeScript (replaces inline COALESCE(SUM(...)))
+    // Sum journal line debits in TypeScript (replaces inline SQL aggregate)
     const journalTotal = batch.lines.reduce((sum, line) => sum + line.debit, 0);
 
     // Verify the batch has doc_type = 'COGS' (already available from the batch response)
@@ -199,7 +202,7 @@ describe("cogs-projection-reconciliation", { timeout: 60000 }, () => {
       // Use JournalsService.getJournalBatch to fetch the full batch (production path)
       const svc = new JournalsService(getTestDb());
       const batch = await svc.getJournalBatch(batchId!, companyId);
-      // Sum journal line debits in TypeScript (replaces inline COALESCE(SUM(...)))
+      // Sum journal line debits in TypeScript (replaces inline SQL aggregate)
       return batch.lines.reduce((sum, line) => sum + line.debit, 0);
     };
 
@@ -220,7 +223,7 @@ describe("cogs-projection-reconciliation", { timeout: 60000 }, () => {
     const svc = new JournalsService(getTestDb());
     const batch = await svc.getJournalBatch(batchId!, companyId);
 
-    // Sum journal line debits in TypeScript (replaces inline COALESCE(SUM(...)))
+    // Sum journal line debits in TypeScript (replaces inline SQL aggregate)
     const journalTotal = batch.lines.reduce((sum, line) => sum + line.debit, 0);
     const variance = Math.abs(journalTotal - postingTotalCogs).toFixed(4);
 

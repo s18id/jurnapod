@@ -1,6 +1,6 @@
 # Story 64.3: Fix inventory-valuation-projection — Use getAllItemsCostSummary
 
-Status: ready-for-dev
+Status: done
 
 > ⚠️ **Sprint-Status Append-Only Rule (E45-A1 / E46-A1) — MANDATORY:**
 > If this story modifies `_bmad-output/implementation-artifacts/sprint-status.yaml`:
@@ -19,7 +19,7 @@ So that **tests verify against the same production valuation service the API use
 
 ## Context
 
-Epic 63 eliminated test stubs and raw SQL INSERTs. A deeper audit found that `inventory-valuation-projection.test.ts` uses a hand-rolled SQL aggregation for verification:
+Epic 63 eliminated test stubs and raw SQL INSERTs. A deeper audit found that `inventory-valuation-projection-reconciliation.test.ts` uses a hand-rolled SQL aggregation for verification:
 
 ```sql
 COALESCE(SUM(l.remaining_qty * l.unit_cost), 0)
@@ -96,7 +96,7 @@ COALESCE(SUM(l.remaining_qty * l.unit_cost), 0)
 ## Acceptance Criteria
 
 **AC1: Inline SQL aggregation replaced with production function**
-**Given** the test file `inventory-valuation-projection.test.ts`
+**Given** the test file `inventory-valuation-projection-reconciliation.test.ts`
 **When** the inline `COALESCE(SUM(l.remaining_qty * l.unit_cost), 0)` is replaced
 **Then** the test uses `getAllItemsCostSummary()` from `@jurnapod/modules-inventory-costing` for verification
 
@@ -116,7 +116,7 @@ COALESCE(SUM(l.remaining_qty * l.unit_cost), 0)
 
 | # | Target File/Function | Status |
 |---|----------------------|--------|
-| 1 | `apps/api/__test__/integration/inventory/inventory-valuation-projection.test.ts` inline SQL | To be migrated |
+| 1 | `apps/api/__test__/integration/reporting/inventory-valuation-projection-reconciliation.test.ts` inline SQL | To be migrated |
 
 **AC verification requires:** All rows show "migrated" — partial completion is not acceptance.
 
@@ -134,7 +134,7 @@ COALESCE(SUM(l.remaining_qty * l.unit_cost), 0)
 
 ## Tasks / Subtasks
 
-- [ ] Open `inventory-valuation-projection.test.ts`
+- [ ] Open `inventory-valuation-projection-reconciliation.test.ts`
 - [ ] Locate inline SQL aggregation
 - [ ] Replace with `getAllItemsCostSummary()` call
 - [ ] Run test and compare output
@@ -151,7 +151,7 @@ COALESCE(SUM(l.remaining_qty * l.unit_cost), 0)
 
 | File | Action | Description |
 |------|--------|-------------|
-| `apps/api/__test__/integration/inventory/inventory-valuation-projection.test.ts` | Modify | Replace inline SQL with `getAllItemsCostSummary()` |
+| `apps/api/__test__/integration/reporting/inventory-valuation-projection-reconciliation.test.ts` | Modify | Replace inline SQL with `getAllItemsCostSummary()` |
 
 ## Estimated Effort
 
@@ -170,7 +170,7 @@ Low
 ## Validation Evidence
 
 - `npm run test:integration -w @jurnapod/api -- --run inventory-valuation-projection` passes
-- `grep -n 'COALESCE(SUM' apps/api/__test__/integration/inventory/inventory-valuation-projection.test.ts` returns 0 results
+- `grep -n 'COALESCE(SUM' apps/api/__test__/integration/reporting/inventory-valuation-projection-reconciliation.test.ts` returns 0 results
 
 ## Dependencies
 

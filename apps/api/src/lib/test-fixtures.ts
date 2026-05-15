@@ -1314,7 +1314,6 @@ export async function createTestInventoryStock(
 
 // Re-export TransactionType for test fixture helpers
 export { TransactionType } from "./stock.js";
-import { TransactionType } from "./stock.js";
 
 /**
  * Create a test inventory transaction using the canonical adjustStock path.
@@ -1347,7 +1346,6 @@ export async function createTestInventoryTransaction(
     referenceId: string;
   }>
 ): Promise<{ transactionId: number; referenceId: string }> {
-  const db = getDb();
   const refId = options?.referenceId ?? `TEST-ADJ-${Date.now().toString(36)}`;
 
   // Use adjustStock which creates the inventory_transactions record atomically

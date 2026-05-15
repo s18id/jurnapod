@@ -1,6 +1,6 @@
-# Story 64.2: Fix cogs-projection-reconciliation — Use JournalsService.getBatch
+# Story 64.2: Fix cogs-projection-reconciliation — Use JournalsService.getJournalBatch
 
-Status: ready-for-dev
+Status: done
 
 > ⚠️ **Sprint-Status Append-Only Rule (E45-A1 / E46-A1) — MANDATORY:**
 > If this story modifies `_bmad-output/implementation-artifacts/sprint-status.yaml`:
@@ -14,7 +14,7 @@ Status: ready-for-dev
 ## Story
 
 As a **developer maintaining the accounting module**,  
-I want **COGS projection tests to use `JournalsService.getBatch()` instead of inline SQL SUM**,  
+I want **COGS projection tests to use `JournalsService.getJournalBatch()` instead of inline SQL SUM**,  
 So that **tests verify against the same journal batch the API uses**.
 
 ## Context
@@ -25,7 +25,7 @@ Epic 63 eliminated test stubs and raw SQL INSERTs. A deeper audit found that `co
 SELECT CAST(COALESCE(SUM(jl.debit), 0) AS DECIMAL(18,4))
 ```
 
-at lines ~152, 191, 215, 237. This duplicates what `JournalsService.getBatch(batchId)` already returns (the full journal batch with lines). The test should use the production service to fetch the batch, then sum lines in TypeScript.
+at lines ~152, 191, 215, 237. This duplicates what `JournalsService.getJournalBatch(batchId, companyId)` already returns (the full journal batch with lines). The test should use the production service to fetch the batch, then sum lines in TypeScript.
 
 **Predecessor:** Epic 63
 **Parallel batch:** Batch 1 (stories 64.1, 64.2, 64.3 — no dependencies)
@@ -47,7 +47,7 @@ at lines ~152, 191, 215, 237. This duplicates what `JournalsService.getBatch(bat
 
 | Scenario | Type | Coverage Plan |
 |----------|------|--------------|
-| Replace 4 inline SUM queries with `getBatch()` + TypeScript sum | Happy | Integration |
+| Replace 4 inline SUM queries with `getJournalBatch()` + TypeScript sum | Happy | Integration |
 | Verify TypeScript sum matches prior SQL sum | Edge | Integration |
 
 **Sign-off:** Test scenarios reviewed and approved before implementation begins.
@@ -87,7 +87,7 @@ at lines ~152, 191, 215, 237. This duplicates what `JournalsService.getBatch(bat
 
 | # | Decision | Modules Affected | Rationale | Alternatives Considered | Winston Sign-Off |
 |---|----------|-----------------|-----------|------------------------|-----------------|
-| 1 | Use `JournalsService.getBatch()` + TypeScript sum | `accounting` | Production service available, eliminates SQL duplication | Keep inline SQL (rejected: drift risk) | N/A |
+| 1 | Use `JournalsService.getJournalBatch()` + TypeScript sum | `accounting` | Production service available, eliminates SQL duplication | Keep inline SQL (rejected: drift risk) | N/A |
 
 **Hard gate:** No cross-module decisions required. Implementation may proceed.
 
@@ -100,10 +100,10 @@ at lines ~152, 191, 215, 237. This duplicates what `JournalsService.getBatch(bat
 **When** lines ~152, 191, 215, 237 are reviewed
 **Then** no inline `COALESCE(SUM(jl.debit), 0)` remains in verification paths
 
-**AC2: Use JournalsService.getBatch() for journal retrieval**
+**AC2: Use JournalsService.getJournalBatch() for journal retrieval**
 **Given** the migrated test
 **When** journal batch data is needed
-**Then** `JournalsService.getBatch(batchId)` is called and lines are summed in TypeScript
+**Then** `JournalsService.getJournalBatch(batchId, companyId)` is called and lines are summed in TypeScript
 
 **AC3: Test assertions remain correct**
 **Given** the migrated test
@@ -116,10 +116,10 @@ at lines ~152, 191, 215, 237. This duplicates what `JournalsService.getBatch(bat
 
 | # | Target File/Function | Status |
 |---|----------------------|--------|
-| 1 | `apps/api/__test__/integration/accounting/cogs-projection-reconciliation.test.ts` line ~152 | To be migrated |
-| 2 | `apps/api/__test__/integration/accounting/cogs-projection-reconciliation.test.ts` line ~191 | To be migrated |
-| 3 | `apps/api/__test__/integration/accounting/cogs-projection-reconciliation.test.ts` line ~215 | To be migrated |
-| 4 | `apps/api/__test__/integration/accounting/cogs-projection-reconciliation.test.ts` line ~237 | To be migrated |
+| 1 | `apps/api/__test__/integration/reporting/cogs-projection-reconciliation.test.ts` line ~152 | To be migrated |
+| 2 | `apps/api/__test__/integration/reporting/cogs-projection-reconciliation.test.ts` line ~191 | To be migrated |
+| 3 | `apps/api/__test__/integration/reporting/cogs-projection-reconciliation.test.ts` line ~215 | To be migrated |
+| 4 | `apps/api/__test__/integration/reporting/cogs-projection-reconciliation.test.ts` line ~237 | To be migrated |
 
 **AC verification requires:** All rows show "migrated" — partial completion is not acceptance.
 
@@ -139,7 +139,7 @@ at lines ~152, 191, 215, 237. This duplicates what `JournalsService.getBatch(bat
 
 - [ ] Open `cogs-projection-reconciliation.test.ts`
 - [ ] Locate all 4 inline `COALESCE(SUM(jl.debit), 0)` queries
-- [ ] Replace each with `JournalsService.getBatch(batchId)` call + TypeScript `.reduce()` or `.sum()`
+- [ ] Replace each with `JournalsService.getJournalBatch(batchId, companyId)` call + TypeScript `.reduce()` or `.sum()`
 - [ ] Run test and verify all 4 assertions pass
 - [ ] Document any assertion adjustments
 
@@ -153,7 +153,7 @@ at lines ~152, 191, 215, 237. This duplicates what `JournalsService.getBatch(bat
 
 | File | Action | Description |
 |------|--------|-------------|
-| `apps/api/__test__/integration/accounting/cogs-projection-reconciliation.test.ts` | Modify | Replace 4 inline SUM queries with `JournalsService.getBatch()` |
+| `apps/api/__test__/integration/reporting/cogs-projection-reconciliation.test.ts` | Modify | Replace 4 inline SUM queries with `JournalsService.getJournalBatch()` |
 
 ## Estimated Effort
 
@@ -165,7 +165,7 @@ Low
 
 ## Dev Notes
 
-- `JournalsService.getBatch(batchId)` returns the full journal batch with lines array
+- `JournalsService.getJournalBatch(batchId, companyId)` returns the full journal batch with lines array
 - Sum in TypeScript: `batch.lines.reduce((sum, l) => sum + Number(l.debit), 0)`
 - Use `toScaled4()` or equivalent if the production service already returns scaled values
 - If lines are returned as strings (DECIMAL), use `Number()` or keep as string comparison
@@ -173,7 +173,7 @@ Low
 ## Validation Evidence
 
 - `npm run test:integration -w @jurnapod/api -- --run cogs-projection-reconciliation` passes
-- `grep -n 'COALESCE(SUM' apps/api/__test__/integration/accounting/cogs-projection-reconciliation.test.ts` returns 0 results
+- `grep -n 'COALESCE(SUM' apps/api/__test__/integration/reporting/cogs-projection-reconciliation.test.ts` returns 0 results
 
 ## Dependencies
 

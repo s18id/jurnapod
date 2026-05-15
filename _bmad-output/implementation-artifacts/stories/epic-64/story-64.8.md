@@ -1,6 +1,6 @@
 # Story 64.8: Fix cogs-posting package test — Create inventory fixtures
 
-Status: ready-for-dev
+Status: done
 
 > ⚠️ **Sprint-Status Append-Only Rule (E45-A1 / E46-A1) — MANDATORY:**
 > If this story modifies `_bmad-output/implementation-artifacts/sprint-status.yaml`:
