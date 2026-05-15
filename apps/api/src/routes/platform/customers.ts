@@ -24,8 +24,8 @@ import {
 } from "@jurnapod/shared";
 import { requireAccess, authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";
 import { getCustomerService, CustomerNotFoundError, CustomerCodeConflictError, CustomerValidationError } from "../../lib/customers.js";
-import { errorResponse, successResponse } from "../../lib/response.js";
-import { readClientIp } from "../../lib/request-meta.js";
+import { errorResponse, successResponse } from "@jurnapod/shared";
+import { readClientIp } from "@jurnapod/shared";
 import { isMysqlError, mysqlDuplicateErrorCode } from "../../lib/shared/master-data-utils.js";
 
 declare module "hono" {

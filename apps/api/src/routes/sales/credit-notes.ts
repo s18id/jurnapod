@@ -29,7 +29,7 @@ import {
   DatabaseReferenceError
 } from "@/lib/credit-notes";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
-import { errorResponse, successResponse } from "@/lib/response";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import { requireAccess } from "@/lib/auth-guard";
 import { customerExistsInCompany } from "@/lib/customers";
 import type { AuthContext } from "@/lib/auth-guard";

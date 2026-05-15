@@ -23,12 +23,12 @@ export {
   DatabaseConflictError,
   DatabaseReferenceError,
   DatabaseForbiddenError
-} from "./common-errors";
+} from "@jurnapod/shared";
 import {
   DatabaseConflictError,
   DatabaseReferenceError,
   DatabaseForbiddenError
-} from "./common-errors";
+} from "@jurnapod/shared";
 
 // =============================================================================
 // Types

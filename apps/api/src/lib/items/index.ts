@@ -4,7 +4,7 @@
 import { sql } from "kysely";
 import { toUtcIso } from "@/lib/date-helpers";
 import { getDb, type KyselySchema } from "../db.js";
-import { DatabaseConflictError, DatabaseReferenceError } from "../master-data-errors.js";
+import { DatabaseConflictError, DatabaseReferenceError } from "@jurnapod/shared";
 import { isMysqlError, mysqlDuplicateErrorCode } from "../shared/master-data-utils.js";
 import { withTransactionRetry, type Transaction } from "@jurnapod/db";
 

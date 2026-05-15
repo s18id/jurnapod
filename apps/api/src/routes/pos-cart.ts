@@ -19,7 +19,7 @@ import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { NumericIdSchema } from "@jurnapod/shared";
 import { authenticateRequest, type AuthContext } from "../lib/auth-guard.js";
-import { errorResponse, successResponse } from "../lib/response.js";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import { resolvePrice } from "../lib/pricing/variant-price-resolver.js";
 import { getVariantById } from "../lib/item-variants.js";
 import { checkVariantStockAvailability, type VariantStockCheckResult } from "../lib/inventory/variant-stock.js";

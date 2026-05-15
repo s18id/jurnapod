@@ -10,6 +10,42 @@
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
     },
+    "./lib/pagination": {
+      "types": "./dist/src/lib/pagination.d.ts",
+      "default": "./dist/src/lib/pagination.js"
+    },
+    "./lib/response": {
+      "types": "./dist/src/lib/response.d.ts",
+      "default": "./dist/src/lib/response.js"
+    },
+    "./lib/retry": {
+      "types": "./dist/src/lib/retry.d.ts",
+      "default": "./dist/src/lib/retry.js"
+    },
+    "./lib/batch": {
+      "types": "./dist/src/lib/batch.d.ts",
+      "default": "./dist/src/lib/batch.js"
+    },
+    "./lib/encryption": {
+      "types": "./dist/src/lib/encryption.d.ts",
+      "default": "./dist/src/lib/encryption.js"
+    },
+    "./lib/request-meta": {
+      "types": "./dist/src/lib/request-meta.d.ts",
+      "default": "./dist/src/lib/request-meta.js"
+    },
+    "./lib/common-errors": {
+      "types": "./dist/src/lib/common-errors.d.ts",
+      "default": "./dist/src/lib/common-errors.js"
+    },
+    "./export/types": {
+      "types": "./dist/src/export/types.d.ts",
+      "default": "./dist/src/export/types.js"
+    },
+    "./export/formatter": {
+      "types": "./dist/src/export/formatter.d.ts",
+      "default": "./dist/src/export/formatter.js"
+    },
     "./test/fixtures": {
       "types": "./dist/test/fixtures/index.d.ts",
       "default": "./dist/test/fixtures/index.js"

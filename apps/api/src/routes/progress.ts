@@ -18,7 +18,7 @@ import {
   type AuthContext
 } from "../lib/auth-guard.js";
 import { toUtcIso } from "@/lib/date-helpers";
-import { errorResponse, successResponse } from "../lib/response.js";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import {
   getProgress,
   listProgress,

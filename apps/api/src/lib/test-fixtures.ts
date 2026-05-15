@@ -72,7 +72,7 @@ import { hashPassword } from "./password-hash";
 import { createCompany, CompanyCodeExistsError } from "./companies";
 import { createUserBasic, UserEmailExistsError } from "./users";
 import { createItem } from "./items/index.js";
-import { DatabaseConflictError } from "./master-data-errors.js";
+import { DatabaseConflictError } from "@jurnapod/shared";
 import { adjustStock } from "./stock.js";
 import { MODULE_PERMISSION_BITS, buildPermissionMask, type ModulePermission } from "@jurnapod/auth";
 import {

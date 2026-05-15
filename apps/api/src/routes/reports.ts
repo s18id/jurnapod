@@ -27,7 +27,7 @@ import { z } from "zod";
 import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { authenticateRequest } from "@/lib/auth-guard";
-import { successResponse } from "@/lib/response";
+import { successResponse } from "@jurnapod/shared";
 import {
   getTrialBalance,
   getProfitLoss,

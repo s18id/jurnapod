@@ -7,7 +7,7 @@ import { getDb, type KyselySchema } from "../db.js";
 import {
   DatabaseForbiddenError,
   DatabaseReferenceError
-} from "../master-data-errors.js";
+} from "@jurnapod/shared";
 import {
   recordMasterDataAuditLog
 } from "../shared/master-data-utils.js";

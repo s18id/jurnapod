@@ -22,7 +22,7 @@ import {
   requireAccess,
   type AuthContext
 } from "../lib/auth-guard.js";
-import { errorResponse, successResponse } from "../lib/response.js";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import { getSetting, setSetting } from "../lib/settings.js";
 
 declare module "hono" {

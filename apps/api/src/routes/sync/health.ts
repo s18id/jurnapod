@@ -12,7 +12,7 @@ import type { Handler } from "hono";
 import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { checkSyncModuleHealth } from "../../lib/sync-modules.js";
-import { readClientIp } from "../../lib/request-meta.js";
+import { readClientIp } from "@jurnapod/shared";
 import { authenticateRequest } from "../../lib/auth-guard.js";
 import type { AuthContext } from "../../lib/auth-guard.js";
 import { nowUTC } from "@/lib/date-helpers";

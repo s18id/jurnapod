@@ -20,7 +20,7 @@ import {
   requireAccess,
   type AuthContext
 } from "../lib/auth-guard.js";
-import { errorResponse, successResponse } from "../lib/response.js";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import {
   listCompanyModules,
   listCompanyModulesExtended,
@@ -29,7 +29,7 @@ import {
   ModuleNotFoundError
 } from "../lib/settings-modules.js";
 import { setModuleRolePermission } from "../lib/users.js";
-import { readClientIp } from "../lib/request-meta.js";
+import { readClientIp } from "@jurnapod/shared";
 import {
   ExtendedCompanyModulesUpdateSchema,
 } from "@jurnapod/shared";

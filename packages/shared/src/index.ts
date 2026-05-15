@@ -40,6 +40,20 @@ export * from "./decimal-scale4.js";
 export * from "./schemas/table-reservation.js";
 export * from "./schemas/customers.js";
 export * from "./schemas/purchasing.js";
+export * from "./schemas/platform-settings.js";
+
+// Pure utility libraries (zero DB dependency)
+export * from "./lib/pagination.js";
+export * from "./lib/response.js";
+export * from "./lib/retry.js";
+export * from "./lib/batch.js";
+export * from "./lib/encryption.js";
+export * from "./lib/request-meta.js";
+export * from "./lib/common-errors.js";
+
+// Export framework types and formatters
+export * from "./export/types.js";
+export * from "./export/formatter.js";
 
 // Client types and utilities
 export * from "./client.js";

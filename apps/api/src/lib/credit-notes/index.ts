@@ -35,4 +35,4 @@ export {
   DatabaseConflictError,
   DatabaseForbiddenError,
   DatabaseReferenceError
-} from "../master-data-errors";
+} from "@jurnapod/shared";

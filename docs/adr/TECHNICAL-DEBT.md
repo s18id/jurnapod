@@ -64,7 +64,7 @@ This document serves as the central registry for all known technical debt in the
 | TD-005 | Helper duplication across domain modules | P2 | **RESOLVED** | Epic 3 Retro |
 | TD-006 | Fixed-assets route test coverage gap | P3 | **RESOLVED** | Story 7.4 |
 
-**Resolution (TD-005):** Addressed in Epic 4 Story 4.1 - shared utilities extracted to `lib/shared/` and `lib/master-data-errors.ts`.
+**Resolution (TD-005):** Addressed in Epic 4 Story 4.1 - shared utilities extracted to `lib/shared/` with canonical error classes now provided by `@jurnapod/shared` (`packages/shared/src/lib/common-errors.ts`).
 
 **Resolution (TD-006):** HTTP-level integration tests added in `tests/integration/fixed-assets.integration.test.mjs` (Story 7.4): 401 unauthorized, full CRUD lifecycle, 400 validation errors, 404 not-found for categories and assets.
 

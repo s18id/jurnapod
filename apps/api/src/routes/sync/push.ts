@@ -15,7 +15,7 @@ import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { SyncPushRequestSchema } from "@jurnapod/shared";
 import { authenticateRequest, requireAccess, type AuthContext } from "../../lib/auth-guard.js";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
-import { errorResponse, successResponse } from "../../lib/response.js";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import { SyncIdempotencyMetricsCollector, syncIdempotencyMetricsCollector } from "@jurnapod/sync-core";
 import { getSyncPushDbPool } from "../../lib/sync/push/db.js";
 import type { SyncPushTransactionPayload } from "../../lib/sync/push/types.js";

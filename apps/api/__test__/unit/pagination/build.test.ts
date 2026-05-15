@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildPaginatedResponse, buildPaginationMeta } from '../../../src/lib/pagination';
+import { buildPaginatedResponse, buildPaginationMeta } from '@jurnapod/shared';
 
 describe('pagination.build', () => {
   describe('buildPaginatedResponse', () => {

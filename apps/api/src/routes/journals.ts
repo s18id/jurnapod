@@ -18,7 +18,7 @@ import { Hono } from "hono";
 import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { authenticateRequest } from "@/lib/auth-guard";
-import { errorResponse } from "@/lib/response";
+import { errorResponse } from "@jurnapod/shared";
 import {
   handleListJournals,
   handleCreateJournal,

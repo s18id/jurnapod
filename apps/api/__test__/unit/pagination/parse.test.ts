@@ -8,8 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parsePagination } from '../../../src/lib/pagination';
-import { MAX_PAGE_SIZE, DEFAULT_PAGE_SIZE } from '../../../src/lib/pagination';
+import { parsePagination, MAX_PAGE_SIZE, DEFAULT_PAGE_SIZE } from '@jurnapod/shared';
 
 describe('pagination.parse', () => {
   describe('limit parsing', () => {

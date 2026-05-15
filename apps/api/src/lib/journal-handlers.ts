@@ -16,7 +16,7 @@
 
 import { z } from "zod";
 import { requireAccess } from "./auth-guard";
-import { errorResponse, successResponse } from "./response";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import {
   createManualJournalEntry,
   listJournalBatches,

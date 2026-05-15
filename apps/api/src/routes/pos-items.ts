@@ -15,7 +15,7 @@ import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { NumericIdSchema } from "@jurnapod/shared";
 import { authenticateRequest, type AuthContext } from "../lib/auth-guard.js";
-import { errorResponse, successResponse } from "../lib/response.js";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import { getItemVariants } from "../lib/item-variants.js";
 import { resolvePrice } from "../lib/pricing/variant-price-resolver.js";
 

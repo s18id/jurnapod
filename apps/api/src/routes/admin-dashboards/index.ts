@@ -21,7 +21,7 @@ import { Hono } from "hono";
 import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { authenticateRequest, requireAccess, type AuthContext } from "../../lib/auth-guard.js";
-import { errorResponse } from "../../lib/response.js";
+import { errorResponse } from "@jurnapod/shared";
 import { getJournalHealthMetricsSnapshot } from "../../lib/metrics/dashboard-metrics.js";
 
 // Sub-routers for split routes

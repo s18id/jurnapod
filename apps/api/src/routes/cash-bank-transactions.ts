@@ -22,7 +22,7 @@ import {
   type AuthContext
 } from "../lib/auth-guard.js";
 import { userHasOutletAccess } from "../lib/auth.js";
-import { errorResponse, successResponse } from "../lib/response.js";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import {
   CashBankValidationError,
   CashBankNotFoundError,

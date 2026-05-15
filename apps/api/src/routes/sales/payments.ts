@@ -33,7 +33,7 @@ import { getComposedPaymentService } from "@/lib/modules-sales/payment-service-c
 import { PaymentVarianceConfigError } from "@/lib/sales-posting";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { requireAccess } from "@/lib/auth-guard";
-import { errorResponse, successResponse } from "@/lib/response";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import type { AuthContext } from "@/lib/auth-guard";
 import { getCompanyService } from "@/lib/companies";
 

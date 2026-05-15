@@ -20,7 +20,7 @@ import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { NumericIdSchema, SyncPullPayloadSchema } from "@jurnapod/shared";
 import { authenticateRequest, requireAccess, requireAccessForOutletQuery, type AuthContext } from "../../lib/auth-guard.js";
-import { errorResponse, successResponse } from "../../lib/response.js";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
 import { getPosSyncModuleAsync } from "../../lib/sync-modules.js";
 

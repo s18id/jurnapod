@@ -1,6 +1,12 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
+/**
+ * API response envelope helpers.
+ *
+ * Pure utility — uses Web API `Response` (available in Node 18+).
+ */
+
 export type WarningPayload = {
   code: string;
   reason: string;

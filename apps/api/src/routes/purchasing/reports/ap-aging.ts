@@ -13,7 +13,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { authenticateRequest, requireAccess, type AuthContext } from "@/lib/auth-guard";
-import { errorResponse, successResponse } from "@/lib/response";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import { getAPAgingSummary, getAPAgingSupplierDetail } from "@/lib/purchasing/ap-aging-report";
 import { nowUTC, fromUtcIso } from "@/lib/date-helpers";
 

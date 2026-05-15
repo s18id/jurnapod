@@ -30,7 +30,7 @@ import {
 } from "@jurnapod/modules-sales";
 import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { requireAccess } from "@/lib/auth-guard";
-import { errorResponse, successResponse } from "@/lib/response";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import type { AuthContext } from "@/lib/auth-guard";
 import { createApiSalesDb } from "@/lib/modules-sales/sales-db";
 import { getAccessScopeChecker } from "@/lib/modules-sales/access-scope-checker";

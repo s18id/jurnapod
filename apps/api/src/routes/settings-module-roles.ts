@@ -17,9 +17,9 @@ import {
   requireAccess,
   type AuthContext
 } from "../lib/auth-guard.js";
-import { errorResponse, successResponse } from "../lib/response.js";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import { setModuleRolePermission } from "../lib/users.js";
-import { readClientIp } from "../lib/request-meta.js";
+import { readClientIp } from "@jurnapod/shared";
 
 declare module "hono" {
   interface ContextVariableMap {

@@ -29,7 +29,7 @@ import {
 } from "../lib/stock.js";
 import { authenticateRequest, requireAccess, type AuthContext } from "../lib/auth-guard.js";
 import { type RoleCode, userHasOutletAccess } from "../lib/auth.js";
-import { successResponse, errorResponse } from "../lib/response.js";
+import { successResponse, errorResponse } from "@jurnapod/shared";
 import { telemetryMiddleware } from "../middleware/telemetry.js";
 import { NumericIdSchema } from "@jurnapod/shared";
 

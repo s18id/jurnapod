@@ -25,7 +25,7 @@ import {
   requireAccess,
   type AuthContext,
 } from "@/lib/auth-guard";
-import { errorResponse, successResponse } from "@/lib/response";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import { recordMasterDataAuditLogDefaultDb } from "@/lib/shared/master-data-utils";
 import {
   getAPReconciliationSettings,

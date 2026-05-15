@@ -11,7 +11,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import { errorResponse } from "../../lib/response.js";
+import { errorResponse } from "@jurnapod/shared";
 import {
   type TrialBalanceQuery,
 } from "@jurnapod/modules-accounting/trial-balance";

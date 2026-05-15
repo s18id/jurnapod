@@ -29,7 +29,7 @@ import { z } from "zod";
 import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import { authenticateRequest, requireAccess, type AuthContext } from "../../lib/auth-guard.js";
-import { errorResponse } from "../../lib/response.js";
+import { errorResponse } from "@jurnapod/shared";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
 import { checkDuplicateClientTx } from "../../lib/sync/check-duplicate.js";
 import { toUtcIso } from "@/lib/date-helpers";

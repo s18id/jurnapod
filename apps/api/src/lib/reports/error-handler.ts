@@ -19,7 +19,7 @@ import {
   type ReportType,
 } from "@/lib/reports/telemetry";
 import { FiscalYearSelectionError } from "@/lib/fiscal-years";
-import { errorResponse } from "@/lib/response";
+import { errorResponse } from "@jurnapod/shared";
 
 /**
  * Execute a report query with timeout and telemetry.

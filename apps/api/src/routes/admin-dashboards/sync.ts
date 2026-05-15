@@ -9,7 +9,7 @@
 import { Hono } from "hono";
 import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import { errorResponse } from "../../lib/response.js";
+import { errorResponse } from "@jurnapod/shared";
 import { getOutboxMetricsSnapshot, getSyncHealthMetricsSnapshot } from "../../lib/metrics/dashboard-metrics.js";
 import type { AuthContext } from "../../lib/auth-guard.js";
 

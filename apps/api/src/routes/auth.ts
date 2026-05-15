@@ -32,7 +32,7 @@ import {
   rotateRefreshToken
 } from "@/lib/refresh-tokens";
 import { findActiveUserTokenProfile, issueAccessTokenForUser } from "@/lib/auth";
-import { errorResponse, successResponse } from "@/lib/response";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 
 const authRoutes = new Hono();
 

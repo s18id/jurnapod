@@ -35,7 +35,7 @@ import { listUserOutletIds, userHasOutletAccess } from "@/lib/auth";
 import { requireAccess, type AuthContext } from "@/lib/auth-guard";
 import { getCompanyService } from "@/lib/companies";
 import { customerExistsInCompany } from "@/lib/customers";
-import { errorResponse, successResponse } from "@/lib/response";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import { getComposedInvoiceService } from "@/lib/modules-sales";
 
 const invoiceRoutes = new Hono();

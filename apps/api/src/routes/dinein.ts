@@ -17,7 +17,7 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { NumericIdSchema, ServiceSessionStatusIdSchema } from "@jurnapod/shared";
 import { authenticateRequest, requireAccess } from "@/lib/auth-guard";
 import { toUtcIso } from "@/lib/date-helpers";
-import { errorResponse, successResponse } from "@/lib/response";
+import { errorResponse, successResponse } from "@jurnapod/shared";
 import { listSessions } from "@/lib/service-sessions";
 import { userHasOutletAccess } from "@/lib/auth";
 import type { AuthContext } from "@/lib/auth-guard";

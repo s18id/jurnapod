@@ -174,7 +174,7 @@ Evaluated. Vendor SDKs provide more out-of-the-box features but couple the codeb
 ## References
 
 - `apps/api/src/middleware/telemetry.ts` — full implementation
-- `apps/api/src/lib/response.ts` — response headers include correlation IDs
+- `packages/shared/src/lib/response.ts` — standardized response envelope helpers used by API routes
 - Epic 11.1: Reliability baseline and SLO instrumentation
 - Epic 11.3: Sync idempotency (use of `client_tx_id` in sync routes)
 - `packages/telemetry/` — shared telemetry utilities

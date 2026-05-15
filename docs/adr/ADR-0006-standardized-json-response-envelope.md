@@ -58,7 +58,7 @@ if (!json.success) {
 
 ### Response helpers
 
-All handlers use two helper functions from `lib/response.ts` — direct `Response.json()` calls in route handlers are not allowed:
+All handlers use two helper functions from `@jurnapod/shared` (canonical source: `packages/shared/src/lib/response.ts`) — direct `Response.json()` calls in route handlers are not allowed:
 
 ```typescript
 // Success
@@ -106,7 +106,7 @@ app.onError((error: unknown) => {
 
 ### TypeScript types
 
-The envelope types are defined in `lib/response.ts` and used in `packages/shared` for client-side consumption:
+The envelope types are defined in `packages/shared/src/lib/response.ts` and consumed through `@jurnapod/shared` for client-side usage:
 
 ```typescript
 export type SuccessPayload<T> = {
@@ -161,6 +161,6 @@ Evaluated. RFC 7807 (`application/problem+json`) is well-suited for public APIs,
 
 ## References
 
-- `apps/api/src/lib/response.ts` — `successResponse()`, `errorResponse()`, `ApiResponse<T>`
+- `packages/shared/src/lib/response.ts` — `successResponse()`, `errorResponse()`, `ApiResponse<T>`
 - `apps/api/src/server.ts` — global `onError` handler
 - `packages/shared/` — shared response types for frontend consumption
