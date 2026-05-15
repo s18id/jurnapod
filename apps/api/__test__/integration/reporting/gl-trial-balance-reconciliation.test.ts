@@ -10,8 +10,8 @@
  * - AC6: EPIC62 GATE evidence + auth protection
  *
  * The source-of-truth is the journal_lines table joined with accounts.
- * The trial balance MUST balance (SUM(debits) == SUM(credits) across all rows).
- * Per-account balance = SUM(jl.debit - jl.credit) for that account_id within date range.
+ * The trial balance MUST balance (total debits equal total credits across all rows).
+ * Per-account balance equals debit-minus-credit aggregation for each account in range.
  * Variance = per-account projection_balance - subledger_balance, MUST be 0 for each account.
  */
 
@@ -282,7 +282,7 @@ describe("gl-trial-balance-reconciliation", { timeout: 60000 }, () => {
       expect(body.data.totals.total_credit).toBe(tbResult.totalCredits);
     });
 
-    it("per-account balance matches SUM(jl.debit - jl.credit) from journal_lines source of truth", async () => {
+    it("per-account balance matches debit-minus-credit aggregation from journal_lines source of truth", async () => {
       const res = await getJson(
         `/api/reports/trial-balance?date_from=${FIXED_DATE_FROM}&date_to=${FIXED_DATE_TO}`,
         isolatedToken

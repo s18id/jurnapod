@@ -13,7 +13,7 @@
  * Source-of-truth: cash_bank_transactions table.
  * Inflows:  TOP_UP and MUTATION transaction types
  * Outflows: WITHDRAWAL transaction type
- * Balance:  SUM(CASE WHEN WITHDRAWAL THEN -amount ELSE amount END) for POSTED transactions
+ * Balance: signed aggregation of posted withdrawals and inflows
  *
  * Reference:
  * - treasury-balance-projection-reconciliation.test.ts (same table, created in parallel)

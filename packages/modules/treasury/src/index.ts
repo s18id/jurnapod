@@ -116,7 +116,10 @@ export { CashBankPostingMapper, type TreasuryPostingRepository } from "./posting
 export { CashBankService, type CashBankServiceOptions } from "./cash-bank-service.js";
 
 // -----------------------------------------------------------------------------
-// Aggregation query helpers (Story 64.7)
+// Aggregation query helpers — available as static methods on CashBankService:
+//   CashBankService.getCashBalance(db, companyId, opts?)
+//   CashBankService.getCashInflows(db, companyId, dateFrom, dateTo)
+//   CashBankService.getCashOutflows(db, companyId, dateFrom, dateTo)
 // -----------------------------------------------------------------------------
 
 // -----------------------------------------------------------------------------

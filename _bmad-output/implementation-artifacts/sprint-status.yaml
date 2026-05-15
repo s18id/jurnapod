@@ -721,13 +721,13 @@ development_status:
   63-13-full-validation-gate: done
 
   # Epic 64: Test Production-Code Integration — Phase 2
-  epic-64: in-progress
+  epic-64: done
   64-1-ap-multicurrency-correctness: done
   64-2-cogs-projection-reconciliation: done
   64-3-inventory-valuation-projection: done
-  64-4-trial-balance-service-export: ready-for-dev
-  64-5-ap-reconciliation-service-export: ready-for-dev
-  64-6-ar-reconciliation-service-export: ready-for-dev
-  64-7-cash-bank-service-export: ready-for-dev
+  64-4-trial-balance-service-export: done
+  64-5-ap-reconciliation-service-export: done
+  64-6-ar-reconciliation-service-export: done
+  64-7-cash-bank-service-export: done
   64-8-cogs-posting-fixtures: done
-  64-9-full-validation-gate: backlog
+  64-9-full-validation-gate: done

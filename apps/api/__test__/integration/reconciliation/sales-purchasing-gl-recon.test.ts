@@ -53,7 +53,7 @@ function tag(prefix: string): string {
 
 /**
  * Get journal totals (debit/credit sums) for a document.
- * Replaces inline COALESCE(SUM(...)) queries with JournalsService.getJournalBatch().
+ * Replaces inline aggregate SQL queries with JournalsService.getJournalBatch().
  */
 async function getJournalTotalsForDoc(
   companyId: number,

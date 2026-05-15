@@ -1,7 +1,7 @@
 # Technical Debt Registry
 
 **Status:** Living Document  
-**Last Updated:** 2026-04-04  
+**Last Updated:** 2026-05-16  
 **Review Cadence:** Per-epic (before closing epic retrospective)
 
 ---
@@ -184,11 +184,11 @@ This document serves as the central registry for all known technical debt in the
 
 | Priority | Open | Resolved | Total |
 |----------|------|---------|-------|
-| P1 | 0 | 4 | 4 |
+| P1 | 2 | 4 | 6 |
 | P2 | 1 | 18 | 19 |
 | P3 | 0 | 9 | 9 |
 | P4 | 0 | 3 | 3 |
-| **Total** | **1** | **34** | **35** |
+| **Total** | **3** | **34** | **37** |
 
 ---
 
@@ -321,10 +321,28 @@ Run the [TD Health Check Template](./td-health-check-template.md) before every e
 
 ---
 
+### Epic 64: Test Production-Code Integration — Phase 2
+
+| ID | Description | Priority | Status | ADR/Story |
+|----|-------------|----------|--------|-----------|
+| TD-039 | Repository-wide API integration suite has pre-existing `insertCustomer is not a function` failures outside Epic 64 changed files; this blocks strict full-suite gate closure | P1 | **Open** | Story 64.9 |
+| TD-040 | Repository-wide fixture-flow gate reports pre-existing P0/P1 violations outside Epic 64 changed files; this blocks strict zero-violation gate closure | P1 | **Open** | Story 64.9 |
+
+**Description:** Epic 64 scoped validation confirms all epic-scope checks pass (build, lint/typecheck, inline-SQL elimination, focused reconciliation tests). Full repository gates still fail due to pre-existing failures in unrelated files.
+
+**Planned Resolution:**
+- TD-039: Restore `insertCustomer` fixture path in affected sales/reporting integration suites, then re-run full API integration gate.
+- TD-040: Refactor flagged purchasing/sales setup writes to canonical fixtures and re-run fixture-flow gate.
+
+**Owner:** Platform QA + Domain Maintainers
+
+---
+
 ## Changelog
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-05-16 | Added TD-039 and TD-040 for pre-existing full-suite and fixture-flow blockers identified during Story 64.9 gate | Story 64.9 |
 | 2026-04-19 | Added TD-038 - 156 pre-existing no-explicit-any warnings in API package | Epic 45 Retro |
 | 2026-03-26 | Initial creation - cataloged debt from Epics 0-6 | Story 6.6 |
 | 2026-03-26 | Marked Epic 6 debt items as resolved | Story 6.6 |
