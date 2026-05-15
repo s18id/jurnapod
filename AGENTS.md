@@ -176,69 +176,34 @@ All sync operations must use these field names:
 
 ---
 
-## Canonical Datetime API (Epic 53)
+## Epoch Milliseconds as Canonical Internal Type
 
-All datetime conversions MUST use the namespaced API from `packages/shared/src/schemas/datetime.ts`.
-Re-exported for apps via `apps/api/src/lib/date-helpers.ts`.
+The canonical internal representation for all business event instants is **epoch milliseconds** (`TimestampMs` — `number`). Business logic MUST operate on epoch milliseconds; conversions to/from ISO strings MUST occur only at API boundaries or representational contexts.
 
-### Conversion Flow
+### Internal representation rules
 
-```
-API INPUT (Z only — strict z.string().datetime(), no {offset: true})
-  ↓ validation
-Always Z string                              ← business logic layer
-  ↓ fromUtcIso.mysql() / fromUtcIso.epochMs()
-DB (DATETIME or BIGINT)
-  ↑ toUtcIso.dateLike() / toUtcIso.epochMs()
-Always Z string                              ← business logic layer
-  ↓ response serialization
-API OUTPUT (Z only)
-```
+- **Business logic**: operates on epoch milliseconds (`number`) only.
+- **API input**: API routes MAY accept ISO datetime strings; boundary validation layer MUST normalize to epoch ms before passing to business logic.
+- **API output**: MAY return ISO datetime strings during migration; epoch ms is the canonical internal form.
+- **DB storage (`*_ts`)**: `BIGINT` epoch milliseconds — read and write as `number`.
+- **DB storage (`*_at`)**: `DATETIME` — convert via canonical helpers at boundaries.
+- **Business date (`*_date`)**: `YYYY-MM-DD` via `DateOnlySchema` — separate domain, not a UTC instant.
 
-### Namespaced API
+### Timezone fallback rule
 
-| Namespace | Method | Input | Output | Replaces |
-|-----------|--------|-------|--------|----------|
-| `toUtcIso` | `.dateLike(value, opts?)` | `Date\|string` | Z string | `toRfc3339`, `toRfc3339Required`, `toUtcInstant` |
-| `toUtcIso` | `.epochMs(ms)` | number | Z string | `fromEpochMs` |
-| `toUtcIso` | `.businessDate(date, tz, boundary)` | YYYY-MM-DD | Z string | `normalizeDate` |
-| `toUtcIso` | `.asOfDateRange(date, tz)` | YYYY-MM-DD | `{startUTC, nextDayUTC}` | `asOfDateToUtcRange` |
-| `toUtcIso` | `.dateRange(from, to, tz)` | dates + tz | `{fromStartUTC, toEndUTC}` | `toDateTimeRangeWithTimezone` |
-| `fromUtcIso` | `.epochMs(iso)` | Z string | number | `toEpochMs` |
-| `fromUtcIso` | `.mysql(iso)` | Z string | YYYY-MM-DD HH:mm:ss | `toMysqlDateTime` |
-| `fromUtcIso` | `.businessDate(iso, tz)` | Z string | YYYY-MM-DD | `toBusinessDate` |
-| `fromUtcIso` | `.localDisplay(iso, tz, opts?)` | Z string | local display | `fromUtcInstant`, `formatForDisplay` |
-| `fromUtcIso` | `.dateOnly(iso)` | Z string | YYYY-MM-DD | `toDateOnly` |
+When timezone input is missing, the implementation MUST define a deterministic fallback policy (UTC or company default timezone) and apply it consistently. The fallback MUST be documented per domain. UTC MUST NOT be used as a silent fallback for business date operations unless UTC is the explicitly documented fallback for that domain.
 
-### Standalone (unchanged)
+### Prohibited patterns
 
-| Export | Signature | Purpose |
-|--------|-----------|---------|
-| `nowUTC()` | `() => string` | Current time as Z string |
-| `isValidTimeZone(tz)` | `(string) => boolean` | IANA validation |
-| `resolveBusinessTimezone(outlet?, company?)` | `(string?, string?) => string` | outlet→company→error |
-| `resolveEventTime({at?, ts?, date?, ...})` | `(object) => string` | Flexible router |
-| `UtcIsoSchema` | `z.string().datetime()` | Strict Z-only, no offset |
+The following are forbidden in business logic paths:
+- `new Date()`, `Date.now()` for business timestamps
+- Manual string slicing (`.slice(0, 10)` or equivalent) on ISO strings for business date extraction — use canonical timezone-aware helpers
+- UTC fallback (`?? 'UTC'`) as silent default for business date operations (UTC MAY be the documented fallback for a domain)
+- String-concatenated end-of-day boundaries
 
-### Rules
+### Half-open interval rule
 
-- **API input: Z only** — `z.string().datetime()` with NO `{offset: true}`. Reject offset at validation.
-- **Business logic: Z only** — all internal values are Z strings. Conversions happen only at two DB boundary points.
-- **DB write (DATETIME `*_at`)**: `fromUtcIso.mysql(zStr)` — Z → `YYYY-MM-DD HH:mm:ss`
-- **DB write (BIGINT `*_ts`)**: `fromUtcIso.epochMs(zStr)` — Z → epoch ms
-- **DB read (DATETIME)**: `toUtcIso.dateLike(dbVal)` — Date/MySQL → Z
-- **DB read (BIGINT)**: `toUtcIso.epochMs(ms)` — epoch ms → Z
-- **YYYY-MM-DD (business date)**: Use `DateOnlySchema` — separate domain, not a UTC instant
-- **`toUtcIso.dateLike(x)` returns `string | null`**: Use `as string` when the value is known non-null, or `{ nullable: true }` for nullable inputs
-
-### Removed Functions (Epic 53 cleanup)
-
-The following functions were removed. Use their replacements above:
-`toRfc3339`, `toRfc3339Required`, `toUtcInstant`, `toMysqlDateTime`, `toMysqlDateTimeFromDateLike`,
-`toEpochMs`, `fromEpochMs`, `toBusinessDate`, `normalizeDate`, `fromUtcInstant`, `formatForDisplay`,
-`toDateOnly`, `asOfDateToUtcRange`, `toDateTimeRangeWithTimezone`, `businessDateFromEpochMs`,
-`epochMsToPeriodBoundaries`, `compareDates`, `addDays`, `isInFiscalYear`, `resolveEventTimeDetails`,
-`RfcDateTimeSchema`
+For datetime column filtering, use half-open intervals: `col >= startUTC AND col < nextDayUTC`. Overlap rule: `a_start < b_end && b_start < a_end` — `end == next start` is **non-overlap**.
 
 ---
 
@@ -249,7 +214,7 @@ The following functions were removed. Use their replacements above:
   - `reservation_end_ts` — Source of truth for calendar windows and overlap checks
 - **API compatibility**: `reservation_at` derived from `reservation_start_ts` (not canonical)
 - **Overlap rule**: `a_start < b_end && b_start < a_end` — `end == next start` is **non-overlap**
-- **Timezone resolution order**: `outlet.timezone` → `company.timezone` (no UTC fallback)
+- **Timezone fallback**: When timezone input is missing, the domain MUST define a deterministic fallback (UTC or company default) and document it. UTC is only allowed as a fallback when explicitly documented for the domain.
 - **Query/index rule**: Never wrap indexed timestamp columns in SQL functions; apply functions only on constants
 
 ---

@@ -45,9 +45,14 @@ _Critical rules and patterns. Read before implementing. Follow ALL rules exactly
 
 ### Date/Time
 - **CRITICAL**: Never use native `Date` for business logic; use `@js-temporal/polyfill`
-- MySQL → Temporal: `Temporal.Instant.fromEpochMilliseconds(row.ts)`
-- Temporal → MySQL: `instant.epochMilliseconds` (BIGINT)
-- BigInt → JSON: `BigInt(val).toString()`
+- **Canonical internal representation**: epoch milliseconds (`TimestampMs` — `number`)
+- Business logic MUST operate on epoch milliseconds; conversions to/from ISO strings occur only at API boundaries
+- API routes MAY accept ISO datetime strings; boundary MUST normalize to epoch ms immediately
+- API output MAY return ISO strings during migration
+- `*_ts` columns store `BIGINT` epoch ms; `*_at` columns store `DATETIME` (converted via helpers); `*_date` columns store `YYYY-MM-DD` via `DateOnlySchema`
+- Timezone fallback: when timezone is missing, the domain MUST define a deterministic fallback (UTC or company default) and document it; UTC MAY be the documented fallback for domains where tenant-specific business hours do not apply
+- Manual string slicing (`.slice(0, 10)` or equivalent) on ISO strings for business date extraction is prohibited — use canonical timezone-aware helpers
+- Half-open interval rule for datetime filtering: `col >= startUTC AND col < nextDayUTC`; overlap: `a_start < b_end && b_start < a_end`
 
 ### Money
 - Never use `FLOAT`/`DOUBLE`; use `DECIMAL(18,2)` in SQL, `number` in TS
@@ -401,7 +406,7 @@ No story may be marked DONE based solely on self-attestation of the implementing
 6. **Immutable financial records**: Use VOID/REFUND, never edit finalized records
 7. **Audit logs canonical**: Filter by `success` not `result`
 8. **Shared contracts**: TS/Zod contracts in `packages/shared` must stay aligned
-9. **Reservation timezone**: No UTC fallback; resolve in order: outlet → company
+9. **Timezone fallback**: When timezone input is missing, the domain MUST define a deterministic fallback (UTC or company default) and document it. UTC MUST NOT be used as a silent fallback unless it is the explicitly documented fallback for that domain.
 10. **Resource-level ACL**: Permissions use `module.resource` format per Epic 39
 
 ### Temporary Scope Override (Architecture-First Freeze)
@@ -420,7 +425,6 @@ No story may be marked DONE based solely on self-attestation of the implementing
 - **Never** use hardcoded IDs (`company_id=1`)
 - **Never** ad-hoc SQL in tests for setup
 - **Never** relative import paths
-- **Never** UTC fallback for timezone
 - **Never** retry sync indefinitely (max 3)
 
 ---
