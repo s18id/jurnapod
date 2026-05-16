@@ -65,6 +65,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build library packages for API type resolution
+        run: npm run build:libs
+
       - name: Run API typecheck (blocking gate)
         run: npm run typecheck -w @jurnapod/api
         # AC2: Non-zero typecheck exit = CI failure
@@ -143,10 +146,11 @@ jobs:
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping"
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ptestdb --silent"
           --health-interval=10s
           --health-timeout=5s
-          --health-retries=3
+          --health-start-period=30s
+          --health-retries=10
     env:
       DB_HOST: 127.0.0.1
       DB_PORT: 3306
@@ -186,6 +190,36 @@ jobs:
 
       - name: Build library packages for test runtime resolution
         run: npm run build:libs
+
+      - name: Wait for database
+        run: |
+          node --input-type=module <<'NODE'
+          import mysql from 'mysql2/promise';
+
+          const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+          for (let attempt = 1; attempt <= 30; attempt += 1) {
+            try {
+              const connection = await mysql.createConnection({
+                host: '127.0.0.1',
+                port: 3306,
+                user: 'root',
+                password: 'testdb',
+                database: 'jurnapod',
+              });
+              await connection.ping();
+              await connection.end();
+              console.log('Database ready');
+              process.exit(0);
+            } catch (error) {
+              console.log(`Waiting for database... (${attempt}/30)`);
+              await wait(2000);
+            }
+          }
+
+          console.error('Database not ready after 60s');
+          process.exit(1);
+          NODE
 
       - name: Install DB and seed
         run: npm run db:migrate && npm run db:seed && npm run db:seed:test-data && npm run db:smoke
@@ -313,10 +347,11 @@ jobs:
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping"
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ptestdb --silent"
           --health-interval=10s
           --health-timeout=5s
-          --health-retries=3
+          --health-start-period=30s
+          --health-retries=10
     env:
       DB_HOST: 127.0.0.1
       DB_PORT: 3306
@@ -356,6 +391,36 @@ jobs:
 
       - name: Build library packages for test runtime resolution
         run: npm run build:libs
+
+      - name: Wait for database
+        run: |
+          node --input-type=module <<'NODE'
+          import mysql from 'mysql2/promise';
+
+          const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+          for (let attempt = 1; attempt <= 30; attempt += 1) {
+            try {
+              const connection = await mysql.createConnection({
+                host: '127.0.0.1',
+                port: 3306,
+                user: 'root',
+                password: 'testdb',
+                database: 'jurnapod',
+              });
+              await connection.ping();
+              await connection.end();
+              console.log('Database ready');
+              process.exit(0);
+            } catch (error) {
+              console.log(`Waiting for database... (${attempt}/30)`);
+              await wait(2000);
+            }
+          }
+
+          console.error('Database not ready after 60s');
+          process.exit(1);
+          NODE
 
       - name: Install DB and seed
         run: npm run db:migrate && npm run db:seed && npm run db:seed:test-data && npm run db:smoke

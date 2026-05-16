@@ -16,6 +16,8 @@ import {
   getOrCreateTestCashierForPermission,
   createTestSupplier,
 } from '../../fixtures';
+import { makeTag } from '../../helpers/tags';
+import { cleanupPurchasingDocuments } from '@jurnapod/modules-purchasing/test-fixtures';
 
 // Deterministic counter for test data
 let baseUrl: string;
@@ -54,7 +56,7 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     cashierToken = cashier.accessToken;
 
     const supplier = await createTestSupplier(cashierCompanyId, {
-      code: `PO-SUP-${++poTagCounter}`,
+      code: makeTag('POSUP', 32),
       name: 'PO Test Supplier',
       currency: 'IDR',
     });
@@ -62,14 +64,10 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    // Clean up purchase orders created by this test (targeted by ID to avoid gap locks)
+    // Clean up purchase orders created by this test
     try {
       const db = getTestDb();
-      if (createdPOIds.length > 0) {
-        // Delete lines first, then headers
-        await sql`DELETE FROM purchase_order_lines WHERE purchase_order_id IN (${sql.join(createdPOIds)})`.execute(db);
-        await sql`DELETE FROM purchase_orders WHERE id IN (${sql.join(createdPOIds)})`.execute(db);
-      }
+      await cleanupPurchasingDocuments(db, cashierCompanyId);
     } catch (e) {
       // ignore cleanup errors
     }

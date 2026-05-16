@@ -1964,29 +1964,33 @@ export async function cleanupTestFixtures(): Promise<void> {
     }
   }
   
-  // 2b. Period-close overrides and audit logs (FK on users)
-  // These must be cleaned before users to avoid FK constraint failures
+  // 2b. Audit logs that reference fixture users/companies.
+  // period_close_overrides is append-only and DELETE is blocked by DB trigger;
+  // do not attempt to delete those rows during generic fixture cleanup.
   for (const user of createdFixtures.users) {
     try {
-      await sql`DELETE FROM period_close_overrides WHERE user_id = ${user.id}`.execute(db);
       await sql`DELETE FROM audit_logs WHERE user_id = ${user.id}`.execute(db);
     } catch (error) {
-      console.warn(`Failed to cleanup period_close_overrides/audit_logs for user ${user.id}:`, error);
+      console.warn(`Failed to cleanup audit_logs for user ${user.id}:`, error);
     }
   }
-  // Also clean any orphaned period_close_overrides by company (in case user_id mismatch)
   for (const company of createdFixtures.companies) {
     try {
-      await sql`DELETE FROM period_close_overrides WHERE company_id = ${company.id}`.execute(db);
       await sql`DELETE FROM audit_logs WHERE company_id = ${company.id}`.execute(db);
     } catch (error) {
-      console.warn(`Failed to cleanup period_close_overrides/audit_logs for company ${company.id}:`, error);
+      console.warn(`Failed to cleanup audit_logs for company ${company.id}:`, error);
     }
   }
 
   // 3. Users (and their role assignments - should cascade)
   for (const user of createdFixtures.users) {
     try {
+      const periodCloseOverrideRef = await sql`
+        SELECT id FROM period_close_overrides WHERE user_id = ${user.id} LIMIT 1
+      `.execute(db);
+      if (periodCloseOverrideRef.rows.length > 0) {
+        continue;
+      }
       await sql`DELETE FROM users WHERE id = ${user.id}`.execute(db);
     } catch (error) {
       console.warn(`Failed to cleanup user ${user.id}:`, error);

@@ -49,7 +49,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestBaseUrl } from '../../helpers/env';
 import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { closeTestDb, getTestDb } from '../../helpers/db';
-import { sql } from 'kysely';
 import {
   resetFixtureRegistry,
   createTestCompanyMinimal,
@@ -63,6 +62,10 @@ import {
   createTestPurchasingSettings,
   createTestBankAccount,
 } from '../../fixtures';
+import {
+  cleanupPurchasingDocuments,
+  cleanupCompanyModules,
+} from '@jurnapod/modules-purchasing/test-fixtures';
 
 import { makeTag } from "../../helpers/tags";
 import { createSentPurchaseOrder } from "../../helpers/purchasing-flows";
@@ -202,17 +205,8 @@ describe('purchasing.ap-state-machine', { timeout: 30000 }, () => {
   afterAll(async () => {
     try {
       const db = getTestDb();
-      // Clean in dependency order (payment_lines → payments → invoice_lines → invoices)
-      // @fixture-teardown-allowed rationale="cleanup only"
-      await sql`DELETE FROM ap_payment_lines WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM ap_payments WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM purchase_invoice_lines WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM purchase_invoices WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM goods_receipt_lines WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM goods_receipts WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM purchase_order_lines WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM purchase_orders WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM company_modules WHERE company_id = ${testCompanyId}`.execute(db);
+      await cleanupPurchasingDocuments(db, testCompanyId);
+      await cleanupCompanyModules(db, testCompanyId);
     } catch (e) {
       // ignore cleanup errors
     }

@@ -6,6 +6,7 @@
     { "path": "./packages/shared" },
     { "path": "./packages/auth" },
     { "path": "./packages/offline-db" },
+    { "path": "./packages/telemetry" },
     // Level 1: deps on Level 0
     { "path": "./packages/sync-core" },
     { "path": "./packages/notifications" },
@@ -20,6 +21,7 @@
     { "path": "./packages/backoffice-sync" },
     // Level 3: deps on Level 2
     { "path": "./packages/modules/inventory" },
+    { "path": "./packages/modules/purchasing" },
     { "path": "./packages/pos-sync" }
   ]
 }

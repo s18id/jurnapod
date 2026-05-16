@@ -36,6 +36,14 @@ import {
   getTestAccessToken,
   cleanupTestFixtures,
 } from "../../fixtures";
+import { setTestFiscalPeriodStatus, cleanupAccountingJournalDocuments, cleanupFiscalStructure } from "@jurnapod/modules-accounting/test-fixtures";
+import {
+  cleanupPurchasingDocuments,
+  cleanupCompanyModuleRoles,
+  cleanupPurchasingSupportTables,
+  cleanupCompanySettings,
+  cleanupBankAccounts,
+} from "@jurnapod/modules-purchasing/test-fixtures";
 import { acquireReadLock, releaseReadLock } from "../../helpers/setup";
 
 // ---------------------------------------------------------------------------
@@ -210,31 +218,14 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
   afterAll(async () => {
     try {
       const db = getTestDb();
-      // Teardown — child → parent FK order
-      await sql`DELETE FROM audit_logs WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM period_close_overrides WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM purchase_credit_lines WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM purchase_credits WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM ap_payment_lines WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM ap_payments WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM purchase_invoice_lines WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM purchase_invoices WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM journal_lines WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM journal_batches WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM period_close_overrides WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM period_close_overrides WHERE user_id = ${ownerUserId}`.execute(db);
-      await sql`DELETE FROM period_close_overrides WHERE user_id = ${noManageUserId}`.execute(db);
-      await sql`DELETE FROM audit_logs WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM fiscal_periods WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM fiscal_years WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM settings_strings WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM bank_accounts WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM suppliers WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM user_role_assignments WHERE user_id IN (SELECT id FROM users WHERE company_id = ${company.id})`.execute(db);
-      await sql`DELETE FROM module_roles WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM users WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM outlets WHERE company_id = ${company.id}`.execute(db);
-      await sql`DELETE FROM companies WHERE id = ${company.id}`.execute(db);
+      // Teardown via canonical owner-package helpers
+      await cleanupPurchasingDocuments(db, company.id);
+      await cleanupPurchasingSupportTables(db, company.id);
+      await cleanupAccountingJournalDocuments(db, company.id);
+      await cleanupFiscalStructure(db, company.id);
+      await cleanupCompanySettings(db, company.id);
+      await cleanupBankAccounts(db, company.id);
+      await cleanupCompanyModuleRoles(db, company.id);
     } catch {
       // ignore cleanup errors
     }
@@ -267,7 +258,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
   it("AC1: closed period blocks posting with 400", async () => {
     // Close period 2024-01
     const db = getTestDb();
-    await sql`UPDATE fiscal_periods SET status = 2 WHERE id = ${period2024_1_Id}`.execute(db);
+    await setTestFiscalPeriodStatus(db, period2024_1_Id, 'CLOSED');
 
     // Create draft invoice in closed period — creation is blocked because period is closed
     const res = await postJson("/api/purchasing/invoices", ownerToken, {
@@ -283,7 +274,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
     expect(body.error.code).toBe("INVALID_REQUEST");
 
     // Re-open for other tests
-    await sql`UPDATE fiscal_periods SET status = 1 WHERE id = ${period2024_1_Id}`.execute(db);
+    await setTestFiscalPeriodStatus(db, period2024_1_Id, 'OPEN');
   });
 
   // ========================================================================
@@ -293,7 +284,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
     it("CASHIER override attempt rejected with 403", async () => {
       // Close period 2024-01
       const db = getTestDb();
-      await sql`UPDATE fiscal_periods SET status = 2 WHERE id = ${period2024_1_Id}`.execute(db);
+      await setTestFiscalPeriodStatus(db, period2024_1_Id, 'CLOSED');
 
       const res = await postJson("/api/purchasing/invoices", noManageToken, {
         supplier_id: supplierId,
@@ -309,13 +300,13 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
       expect(body.error.code).toBe("FORBIDDEN");
 
       // Re-open
-      await sql`UPDATE fiscal_periods SET status = 1 WHERE id = ${period2024_1_Id}`.execute(db);
+      await setTestFiscalPeriodStatus(db, period2024_1_Id, 'OPEN');
     });
 
     it("COMPANY_ADMIN override succeeds with 201", async () => {
       // Close period 2024-01
       const db = getTestDb();
-      await sql`UPDATE fiscal_periods SET status = 2 WHERE id = ${period2024_1_Id}`.execute(db);
+      await setTestFiscalPeriodStatus(db, period2024_1_Id, 'CLOSED');
 
       const res = await postJson("/api/purchasing/invoices", ownerToken, {
         supplier_id: supplierId,
@@ -332,7 +323,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
       expect(body.data.id).toBeDefined();
 
       // Re-open
-      await sql`UPDATE fiscal_periods SET status = 1 WHERE id = ${period2024_1_Id}`.execute(db);
+      await setTestFiscalPeriodStatus(db, period2024_1_Id, 'OPEN');
     });
   });
 
@@ -349,7 +340,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
       LIMIT 1
     `.execute(db);
     const period2099_1_Id = (period2099_1.rows[0] as { id: number }).id;
-    await sql`UPDATE fiscal_periods SET status = 2 WHERE id = ${period2099_1_Id}`.execute(db);
+    await setTestFiscalPeriodStatus(db, period2099_1_Id, 'CLOSED');
 
     const res = await postJson("/api/purchasing/invoices", ownerToken, {
       supplier_id: supplierId,
@@ -397,7 +388,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
     expect(overrideRow.rows.length).toBe(1);
 
     // Re-open
-    await sql`UPDATE fiscal_periods SET status = 1 WHERE id = ${period2099_1_Id}`.execute(db);
+    await setTestFiscalPeriodStatus(db, period2099_1_Id, 'OPEN');
   });
 
   // ========================================================================
@@ -412,7 +403,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
       LIMIT 1
     `.execute(db);
     const period2099_1_Id = (period2099_1.rows[0] as { id: number }).id;
-    await sql`UPDATE fiscal_periods SET status = 2 WHERE id = ${period2099_1_Id}`.execute(db);
+    await setTestFiscalPeriodStatus(db, period2099_1_Id, 'CLOSED');
 
     // Create invoice in closed future period
     const draftRes = await postJson("/api/purchasing/invoices", ownerToken, {
@@ -468,7 +459,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
     expect(overrideRow.rows.length).toBe(1);
 
     // Re-open
-    await sql`UPDATE fiscal_periods SET status = 1 WHERE id = ${period2099_1_Id}`.execute(db);
+    await setTestFiscalPeriodStatus(db, period2099_1_Id, 'OPEN');
   });
 
   it("AC3b: void AP payment with override creates audit log entry", async () => {
@@ -480,7 +471,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
       LIMIT 1
     `.execute(db);
     const period2099_1_Id = (period2099_1.rows[0] as { id: number }).id;
-    await sql`UPDATE fiscal_periods SET status = 2 WHERE id = ${period2099_1_Id}`.execute(db);
+    await setTestFiscalPeriodStatus(db, period2099_1_Id, 'CLOSED');
 
     // Create a draft invoice first (to pay against)
     const invRes = await postJson("/api/purchasing/invoices", ownerToken, {
@@ -554,7 +545,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
     expect(overrideRow.rows.length).toBe(1);
 
     // Re-open
-    await sql`UPDATE fiscal_periods SET status = 1 WHERE id = ${period2099_1_Id}`.execute(db);
+    await setTestFiscalPeriodStatus(db, period2099_1_Id, 'OPEN');
   });
 
   it("AC3b: void purchase credit with override creates audit log entry", async () => {
@@ -566,7 +557,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
       LIMIT 1
     `.execute(db);
     const period2099_1_Id = (period2099_1.rows[0] as { id: number }).id;
-    await sql`UPDATE fiscal_periods SET status = 2 WHERE id = ${period2099_1_Id}`.execute(db);
+    await setTestFiscalPeriodStatus(db, period2099_1_Id, 'CLOSED');
 
     // Create a draft invoice first (to credit against)
     const invRes = await postJson("/api/purchasing/invoices", ownerToken, {
@@ -643,7 +634,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
     expect(overrideRow.rows.length).toBe(1);
 
     // Re-open
-    await sql`UPDATE fiscal_periods SET status = 1 WHERE id = ${period2099_1_Id}`.execute(db);
+    await setTestFiscalPeriodStatus(db, period2099_1_Id, 'OPEN');
   });
 
   // ========================================================================
@@ -665,7 +656,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
     const invoiceId = draftBody.data.id;
 
     // Step 2: Close the period
-    await sql`UPDATE fiscal_periods SET status = 2 WHERE id = ${period2024_1_Id}`.execute(db);
+    await setTestFiscalPeriodStatus(db, period2024_1_Id, 'CLOSED');
 
     // Step 3: Try to post with override_reason — should be blocked because period ended
     const postRes = await postJson(`/api/purchasing/invoices/${invoiceId}/post`, ownerToken, {
@@ -677,7 +668,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
     expect(postBody.error.code).toBe("PERIOD_CLOSED");
 
     // Re-open
-    await sql`UPDATE fiscal_periods SET status = 1 WHERE id = ${period2024_1_Id}`.execute(db);
+    await setTestFiscalPeriodStatus(db, period2024_1_Id, 'OPEN');
   });
 
   it("AC4: backdated void to closed period blocked even with override", async () => {
@@ -699,7 +690,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
     expect(postRes.status).toBe(200);
 
     // Step 2: Close the period
-    await sql`UPDATE fiscal_periods SET status = 2 WHERE id = ${period2024_1_Id}`.execute(db);
+    await setTestFiscalPeriodStatus(db, period2024_1_Id, 'CLOSED');
 
     // Step 3: Try to void with override_reason — should be blocked because period ended
     const voidRes = await postJson(`/api/purchasing/invoices/${invoiceId}/void`, ownerToken, {
@@ -711,7 +702,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
     expect(voidBody.error.code).toBe("PERIOD_CLOSED");
 
     // Re-open
-    await sql`UPDATE fiscal_periods SET status = 1 WHERE id = ${period2024_1_Id}`.execute(db);
+    await setTestFiscalPeriodStatus(db, period2024_1_Id, 'OPEN');
   });
 
   // ========================================================================
@@ -728,7 +719,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
       `.execute(db);
       const period2026_2_Id = (period2026_2.rows[0] as { id: number }).id;
 
-      await sql`UPDATE fiscal_periods SET status = 2 WHERE id = ${period2026_2_Id}`.execute(db);
+      await setTestFiscalPeriodStatus(db, period2026_2_Id, 'CLOSED');
 
       const res = await postJson("/api/purchasing/invoices", ownerToken, {
         supplier_id: supplierId,
@@ -743,7 +734,7 @@ describe("purchasing.ap-period-close-enforcement (Story 54.5)", { timeout: 60000
       expect(body.error.code).toBe("INVALID_REQUEST");
 
       // Re-open
-      await sql`UPDATE fiscal_periods SET status = 1 WHERE id = ${period2026_2_Id}`.execute(db);
+      await setTestFiscalPeriodStatus(db, period2026_2_Id, 'OPEN');
     });
 
     it("invoice in next period allowed (Jakarta timezone)", async () => {

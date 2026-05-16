@@ -17,6 +17,7 @@ import {
   createTestItem,
   createTestSupplier,
 } from '../../fixtures';
+import { cleanupPurchasingDocuments } from '@jurnapod/modules-purchasing/test-fixtures';
 
 import { makeTag } from "../../helpers/tags";
 import { createSentPurchaseOrder } from "../../helpers/purchasing-flows";
@@ -55,16 +56,7 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
     // PO line IDs do not match newly-created POs, leaving received_qty at 0.
     try {
       const db = getTestDb();
-      await sql`DELETE grl FROM goods_receipt_lines grl
-        INNER JOIN goods_receipts gr ON grl.receipt_id = gr.id
-        WHERE gr.company_id = ${cashierCompanyId}`.execute(db);
-      await sql`DELETE FROM goods_receipts
-        WHERE company_id = ${cashierCompanyId}`.execute(db);
-      await sql`DELETE pol FROM purchase_order_lines pol
-        INNER JOIN purchase_orders po ON pol.order_id = po.id
-        WHERE po.company_id = ${cashierCompanyId}`.execute(db);
-      await sql`DELETE FROM purchase_orders
-        WHERE company_id = ${cashierCompanyId}`.execute(db);
+      await cleanupPurchasingDocuments(db, cashierCompanyId);
     } catch (_e) {
       // best-effort; ignore if tables don't exist yet
     }
@@ -88,17 +80,10 @@ describe('purchasing.receipts', { timeout: 30000 }, () => {
   });
 
   afterAll(async () => {
-    // Clean up goods receipts and purchase orders created by this test (targeted by ID to avoid gap locks)
+    // Clean up goods receipts and purchase orders created by this test
     try {
       const db = getTestDb();
-      if (createdGRIds.length > 0) {
-        await sql`DELETE FROM goods_receipt_lines WHERE goods_receipt_id IN (${sql.join(createdGRIds)})`.execute(db);
-        await sql`DELETE FROM goods_receipts WHERE id IN (${sql.join(createdGRIds)})`.execute(db);
-      }
-      if (createdPOIds.length > 0) {
-        await sql`DELETE FROM purchase_order_lines WHERE purchase_order_id IN (${sql.join(createdPOIds)})`.execute(db);
-        await sql`DELETE FROM purchase_orders WHERE id IN (${sql.join(createdPOIds)})`.execute(db);
-      }
+      await cleanupPurchasingDocuments(db, cashierCompanyId);
     } catch (e) {
       // ignore cleanup errors
     }

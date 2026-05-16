@@ -23,6 +23,30 @@ const STATUS_OPEN_INT = 1;
  * @param options.status - 'OPEN' | 'CLOSED' (default: 'OPEN')
  * @returns Fiscal period fixture with id, fiscalYearId, periodNumber, startDate, endDate, status
  */
+/**
+ * Set a test fiscal period status.
+ *
+ * Test/test-fixture helper — operates directly on the fiscal_periods table to
+ * change period status for period-close enforcement tests.
+ * NOT a production business-write path.
+ *
+ * Status mapping:
+ *   'OPEN'   → 1
+ *   'CLOSED' → 2
+ *
+ * @param db - KyselySchema database instance
+ * @param periodId - Fiscal period ID
+ * @param status - 'OPEN' | 'CLOSED'
+ */
+export async function setTestFiscalPeriodStatus(
+  db: KyselySchema,
+  periodId: number,
+  status: "OPEN" | "CLOSED"
+): Promise<void> {
+  const statusInt = status === "CLOSED" ? 2 : 1;
+  await sql`UPDATE fiscal_periods SET status = ${statusInt} WHERE id = ${periodId}`.execute(db);
+}
+
 export async function createTestFiscalPeriod(
   db: KyselySchema,
   fiscalYearId: number,

@@ -30,6 +30,11 @@ import {
   createTestPurchasingAccounts,
   createTestBankAccount,
 } from '../../fixtures';
+import {
+  cleanupPurchasingDocuments,
+  cleanupCompanyModules,
+  cleanupPurchasingSupportTables,
+} from '@jurnapod/modules-purchasing/test-fixtures';
 import { computePurchaseInvoiceOpenAmount } from '@jurnapod/modules-purchasing';
 
 import { makeTag } from "../../helpers/tags";
@@ -143,15 +148,9 @@ describe('purchasing.ap-payment-correctness', { timeout: 30000 }, () => {
   afterAll(async () => {
     try {
       const db = getTestDb();
-      // @fixture-teardown-allowed rationale="cleanup only"
-      await sql`UPDATE ap_payments SET journal_batch_id = NULL WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE apl FROM ap_payment_lines apl INNER JOIN ap_payments ap ON ap.id = apl.ap_payment_id WHERE ap.company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM ap_payments WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM purchase_invoice_lines WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM purchase_invoices WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM exchange_rates WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM suppliers WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM company_modules WHERE company_id = ${testCompanyId}`.execute(db);
+      await cleanupPurchasingDocuments(db, testCompanyId);
+      await cleanupPurchasingSupportTables(db, testCompanyId);
+      await cleanupCompanyModules(db, testCompanyId);
       await cleanupTestFixtures();
       await closeTestDb();
     } finally {

@@ -15,7 +15,14 @@ import { closeTestDb, getTestDb } from '../../helpers/db';
 import { acquireReadLock, releaseReadLock } from '../../helpers/setup';
 import { resetFixtureRegistry, createTestCompanyMinimal, createTestUser, getTestAccessToken, loginForTest, assignUserGlobalRole, getRoleIdByCode } from '../../fixtures';
 import { makeTag } from '../../helpers/tags';
-import { createTestReconciliationSnapshot, createPurchasingAccountsFixture } from '@jurnapod/modules-purchasing/test-fixtures';
+import {
+  createTestReconciliationSnapshot,
+  createPurchasingAccountsFixture,
+  archiveTestReconciliationSnapshot,
+  archiveTestReconciliationSnapshots,
+  attemptForbiddenSnapshotMutation,
+  attemptForbiddenSnapshotDelete,
+} from '@jurnapod/modules-purchasing/test-fixtures';
 
 let baseUrl: string;
 let db: ReturnType<typeof getTestDb>;
@@ -89,8 +96,8 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
 
     expect(snapshotId).toBeGreaterThan(0);
 
-// Cleanup — use ARCHIVED transition (allowed) since DELETE is blocked
-    await sql`UPDATE ap_reconciliation_snapshots SET status='ARCHIVED', archived_at=NOW() WHERE id=${snapshotId}`.execute(db);
+    // Cleanup — use ARCHIVED transition (allowed) since DELETE is blocked
+    await archiveTestReconciliationSnapshot(db, snapshotId);
   });
 
   // AC2: Trigger 0201 permits AR snapshot archive transition
@@ -104,13 +111,7 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
     const snapshotId = snapshot.id;
 
     // Archive transition — should succeed (trigger allows NEW.status = 'ARCHIVED')
-    const result = await sql`
-      UPDATE ap_reconciliation_snapshots
-      SET status = 'ARCHIVED', archived_at = NOW()
-      WHERE id = ${snapshotId}
-    `.execute(db);
-
-    expect(result.numAffectedRows).toBe(1n);
+    await archiveTestReconciliationSnapshot(db, snapshotId);
 
     // Verify
     const row = await sql`
@@ -119,7 +120,7 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
     expect((row.rows[0] as { status: string } | undefined)?.status).toBe('ARCHIVED');
 
     // Cleanup
-    await sql`UPDATE ap_reconciliation_snapshots SET status='ARCHIVED', archived_at=NOW() WHERE id=${snapshotId}`.execute(db);
+    await archiveTestReconciliationSnapshot(db, snapshotId);
   });
 
   // AC3: Trigger 0201 blocks non-archive UPDATE
@@ -133,18 +134,7 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
     const snapshotId = snapshot.id;
 
     // Attempt non-archive UPDATE (e.g., change balance) — trigger must block
-    let blocked = false;
-    let errorMessage = '';
-    try {
-      await sql`
-        UPDATE ap_reconciliation_snapshots
-        SET ap_subledger_balance = 9999999.0000
-        WHERE id = ${snapshotId}
-      `.execute(db);
-    } catch (err: unknown) {
-      blocked = true;
-      errorMessage = err instanceof Error ? err.message : String(err);
-    }
+    const { blocked, errorMessage } = await attemptForbiddenSnapshotMutation(db, snapshotId);
 
     expect(blocked).toBe(true);
     // Trigger 0201 sets MESSAGE_TEXT to indicate append-only — message confirms block
@@ -152,7 +142,7 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
     expect(errorMessage).toContain('append-only');
 
     // Cleanup
-    await sql`UPDATE ap_reconciliation_snapshots SET status='ARCHIVED', archived_at=NOW() WHERE id=${snapshotId}`.execute(db);
+    await archiveTestReconciliationSnapshot(db, snapshotId);
   });
 
   // AC4: DELETE is blocked by migration 0191 trigger (not by trigger 0201, but by the companion DELETE trigger)
@@ -166,22 +156,13 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
     const snapshotId = snapshot.id;
 
     // DELETE is BLOCKED by the DELETE trigger from migration 0191
-    let blocked = false;
-    let errorMessage = '';
-    try {
-      await sql`
-        DELETE FROM ap_reconciliation_snapshots WHERE id = ${snapshotId}
-      `.execute(db);
-    } catch (err: unknown) {
-      blocked = true;
-      errorMessage = err instanceof Error ? err.message : String(err);
-    }
+    const { blocked, errorMessage } = await attemptForbiddenSnapshotDelete(db, snapshotId);
 
     expect(blocked).toBe(true);
     expect(errorMessage).toContain('append-only');
 
     // Cleanup via ARCHIVED transition
-    await sql`UPDATE ap_reconciliation_snapshots SET status='ARCHIVED', archived_at=NOW() WHERE id=${snapshotId}`.execute(db);
+    await archiveTestReconciliationSnapshot(db, snapshotId);
   });
 
   // AC5: Re-archive UPDATE is idempotent
@@ -195,24 +176,19 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
     const snapshotId = snapshot.id;
 
     // First archive
-    await sql`
-      UPDATE ap_reconciliation_snapshots
-      SET status = 'ARCHIVED', archived_at = NOW()
-      WHERE id = ${snapshotId}
-    `.execute(db);
+    await archiveTestReconciliationSnapshot(db, snapshotId);
 
     // Second archive UPDATE — should succeed (trigger allows NEW.status = 'ARCHIVED')
-    // MySQL UPDATE returns numAffectedRows, not rowsAffected
-    const result2 = await sql`
-      UPDATE ap_reconciliation_snapshots
-      SET status = 'ARCHIVED', archived_at = NOW()
-      WHERE id = ${snapshotId}
-    `.execute(db);
+    await archiveTestReconciliationSnapshot(db, snapshotId);
 
-    expect(result2.numAffectedRows).toBe(1n);
+    // Verify snapshot still exists (not deleted)
+    const verifyRow = await sql`
+      SELECT status FROM ap_reconciliation_snapshots WHERE id = ${snapshotId}
+    `.execute(db);
+    expect((verifyRow.rows[0] as { status: string } | undefined)?.status).toBe('ARCHIVED');
 
     // Cleanup — use ARCHIVED transition (DELETE blocked by trigger)
-    await sql`UPDATE ap_reconciliation_snapshots SET status='ARCHIVED', archived_at=NOW() WHERE id=${snapshotId}`.execute(db);
+    await archiveTestReconciliationSnapshot(db, snapshotId);
   });
 
   // AC6: company_id isolation enforced on AR snapshot queries
@@ -265,7 +241,7 @@ it('AC1: AR snapshot INSERT is permitted by trigger 0201', async () => {
     expect(crossQuery.rows.length).toBe(0);
 
     // Cleanup — use ARCHIVED transition (DELETE blocked by trigger 0191)
-    await sql`UPDATE ap_reconciliation_snapshots SET status='ARCHIVED', archived_at=NOW() WHERE id IN (${snapshotIdA}, ${snapshotIdB})`.execute(db);
+    await archiveTestReconciliationSnapshots(db, [snapshotIdA, snapshotIdB]);
   });
 
   // AC7: No new migration needed — verify migration 0201 is the only required artifact

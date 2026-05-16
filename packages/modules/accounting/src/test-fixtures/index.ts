@@ -24,6 +24,7 @@ export {
 // Fiscal period fixtures
 export {
   createTestFiscalPeriod,
+  setTestFiscalPeriodStatus,
 } from "./fiscal-period-fixtures.js";
 
 // Fiscal close balance fixture
@@ -67,3 +68,10 @@ export {
   type AccountMappingFixture,
   type CreateTestAccountMappingOpts,
 } from "./account-mapping-fixtures.js";
+
+// Cleanup helpers
+export {
+  cleanupAccountingJournalDocuments,
+  cleanupAccountingChartDocuments,
+  cleanupFiscalStructure,
+} from "./cleanup-helpers.js";

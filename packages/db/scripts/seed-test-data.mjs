@@ -130,6 +130,19 @@ function generateClientTxId() {
   return `test_${Date.now()}_${randomSuffix(8)}`;
 }
 
+/**
+ * Convert a MySQL DATETIME string (YYYY-MM-DD HH:mm:ss) to epoch milliseconds UTC.
+ * Throws on invalid input.
+ */
+function datetimeToEpochMsUtc(datetimeString) {
+  const date = new Date(datetimeString.replace(' ', 'T') + 'Z');
+  const ms = date.getTime();
+  if (Number.isNaN(ms)) {
+    throw new Error(`Invalid datetime string: ${datetimeString}`);
+  }
+  return ms;
+}
+
 async function hashPassword(password) {
   return argon2Hash(password, {
     algorithm: 2,
@@ -519,11 +532,12 @@ async function seedPOSTransactions(connection, companyId, outlets, items, accoun
     const total = subtotal; // Total calculated from line items
 
     // Create POS transaction (no amount fields here - calculated from related tables)
+    const trxAtEpochMs = datetimeToEpochMsUtc(transactionDate);
     const [txResult] = await connection.execute(
       `INSERT INTO pos_transactions (
-         company_id, outlet_id, client_tx_id, status, trx_at, created_at, updated_at
-       ) VALUES (?, ?, ?, 'COMPLETED', ?, ?, ?)`,
-      [companyId, outlet.id, clientTxId, transactionDate, transactionDate, transactionDate]
+         company_id, outlet_id, client_tx_id, status, trx_at, trx_at_ts, created_at, updated_at
+       ) VALUES (?, ?, ?, 'COMPLETED', ?, ?, ?, ?)`,
+      [companyId, outlet.id, clientTxId, transactionDate, trxAtEpochMs, transactionDate, transactionDate]
     );
     const transactionId = Number(txResult.insertId);
 

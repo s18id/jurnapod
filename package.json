@@ -86,6 +86,7 @@
     "@typescript-eslint/eslint-plugin": "^8.57.2",
     "@typescript-eslint/parser": "^8.57.2",
     "concurrently": "^9.2.1",
+    "dotenv": "^16.4.7",
     "eslint": "^9.39.3",
     "eslint-plugin-boundaries": "^6.0.2",
     "nodemon": "^3.1.14",

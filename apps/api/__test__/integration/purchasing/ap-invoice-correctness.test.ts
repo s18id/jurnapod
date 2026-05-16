@@ -32,6 +32,8 @@ import {
   createTestPurchasingAccounts,
   createTestPurchasingSettings,
 } from '../../fixtures';
+import { cleanupPurchasingDocuments } from '@jurnapod/modules-purchasing/test-fixtures';
+import { cleanupAccountingJournalDocuments, cleanupAccountingChartDocuments } from '@jurnapod/modules-accounting/test-fixtures';
 import { toScaledBigInt } from '../../helpers/money.js';
 import { createAccount } from '../../../src/lib/accounts.js';
 import { createTaxRate } from '../../../src/lib/tax-rates.js';
@@ -133,13 +135,9 @@ describe('purchasing.ap-invoice-correctness', { timeout: 30000 }, () => {
   afterAll(async () => {
     try {
       const db = getTestDb();
-      await sql`DELETE FROM purchase_invoice_lines WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM purchase_invoices WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM journal_lines WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM journal_batches WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM exchange_rates WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM tax_rates WHERE company_id = ${testCompanyId}`.execute(db);
-      await sql`DELETE FROM accounts WHERE company_id = ${testCompanyId}`.execute(db);
+      await cleanupPurchasingDocuments(db, testCompanyId);
+      await cleanupAccountingJournalDocuments(db, testCompanyId);
+      await cleanupAccountingChartDocuments(db, testCompanyId);
     } catch (e) {
       // ignore cleanup errors
     }
