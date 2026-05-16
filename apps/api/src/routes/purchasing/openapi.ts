@@ -79,7 +79,6 @@ import {
   APReconciliationSummaryQuerySchema,
   APReconciliationDrilldownQuerySchema,
   APReconciliationDrilldownResponseSchema,
-  NumericIdSchema,
 } from "@jurnapod/shared";
 
 // ── Shared response schemas ──────────────────────────────────────────────────

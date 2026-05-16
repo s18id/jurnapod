@@ -14,6 +14,12 @@
  * We explicitly force exit after writing to ensure clean termination.
  */
 
+// Provide a fallback encryption key for spec generation so that module
+// imports do not fail when the real server env is not loaded.
+if (!process.env.PLATFORM_SETTINGS_ENCRYPTION_KEY) {
+  process.env.PLATFORM_SETTINGS_ENCRYPTION_KEY = "dummy-key-for-spec-generation-only";
+}
+
 import { openAPISpec } from "../src/routes/openapi-aggregator.js";
 
 process.stdout.write(JSON.stringify(openAPISpec, null, 2));
