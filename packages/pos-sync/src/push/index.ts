@@ -4,8 +4,14 @@
  * POS Sync Push Layer
  * 
  * Orchestrates sync push operations using sync-core/data queries.
- * Phase 2 business logic (stock deduction via modules-inventory, COGS posting via modules-accounting)
- * is implemented. Table/reservation release and posting hooks are stubs pending story 27.6.
+ * 
+ * Architecture:
+ * - `handlePushSync` — canonical entry point; orchestrates all push operation types
+ * - `persistPushBatch` — canonical transaction persistence path; used by both
+ *   `handlePushSync` and external callers
+ * - Phase 2 business logic (stock deduction via modules-inventory, COGS posting via
+ *   modules-accounting, POS_SALE journal via postingHook) is implemented inline
+ * - Table/reservation release is a stub pending story 27.6
  * 
  * This module has zero HTTP knowledge - it accepts plain params and returns typed results.
  */
@@ -14,6 +20,7 @@ import { createHash } from "node:crypto";
 import { sql } from "kysely";
 
 import type { KyselySchema } from "@jurnapod/db";
+import { withTransaction } from "@jurnapod/db";
 import type {
   PushSyncParams,
   PushSyncResult,
@@ -81,7 +88,7 @@ import {
   isCashierInCompany,
 } from "@jurnapod/sync-core";
 
-import { toUtcIso, fromUtcIso } from "@jurnapod/shared";
+import { parseIsoToTimestampMs, toUtcIso, fromUtcIso } from "@jurnapod/shared";
 
 // Modules for Phase2 business logic
 import { getStockService } from "@jurnapod/modules-inventory";
@@ -108,7 +115,7 @@ function toMysqlDateTimeStrict(value: string, fieldName: string = "datetime"): s
 }
 
 function toTimestampMs(value: string, fieldName: string = "datetime"): number {
-  return fromUtcIso.epochMs(toUtcIso.dateLike(value) as string);
+  return parseIsoToTimestampMs(toUtcIso.dateLike(value) as string);
 }
 
 function normalizeTrxAtForHash(trxAt: string | number): number {
@@ -116,7 +123,7 @@ function normalizeTrxAtForHash(trxAt: string | number): number {
     return trxAt > 1e12 ? trxAt : trxAt * 1000;
   }
   try {
-    return fromUtcIso.epochMs(toUtcIso.dateLike(trxAt) as string);
+    return parseIsoToTimestampMs(toUtcIso.dateLike(trxAt) as string);
   } catch {
     throw new Error(`Invalid trx_at: ${trxAt}`);
   }
@@ -405,10 +412,10 @@ async function createCogsReversalJournalsForCorrection(
     status: "VOID" | "REFUND";
     originalPosTransactionId: number;
     correctionPosTransactionId: number;
-    correctionPostedAt: string;
+    correctionPostedAtTs: number;
     clientTxId: string;
   },
-): Promise<void> {
+): Promise<number> {
   const originalCogsBatches = await sql<ExistingCogsJournalBatchRow>`
     SELECT id
     FROM journal_batches
@@ -420,10 +427,13 @@ async function createCogsReversalJournalsForCorrection(
   `.execute(db);
 
   if (originalCogsBatches.rows.length === 0) {
-    return;
+    return 0;
   }
 
-  const reversalLineDate = params.correctionPostedAt.slice(0, 10);
+  const correctionPostedAt = fromUtcIso.mysql(toUtcIso.epochMs(params.correctionPostedAtTs));
+  const reversalLineDate = fromUtcIso.dateOnly(toUtcIso.epochMs(params.correctionPostedAtTs));
+
+  let reversalBatchCount = 0;
 
   for (const batch of originalCogsBatches.rows) {
     const originalBatchId = Number(batch.id);
@@ -458,7 +468,7 @@ async function createCogsReversalJournalsForCorrection(
     const totalDebitMinor = reversalLines.reduce((sum, line) => sum + toMinorUnits(line.debit), 0);
     const totalCreditMinor = reversalLines.reduce((sum, line) => sum + toMinorUnits(line.credit), 0);
     if (totalDebitMinor !== totalCreditMinor) {
-      throw new Error(`COGS_REVERSAL_UNBALANCED:${originalBatchId}`);
+      throw new Error("COGS_REVERSAL_UNBALANCED");
     }
 
     const reversalBatchInsert = await sql`
@@ -473,7 +483,7 @@ async function createCogsReversalJournalsForCorrection(
         ${params.outletId},
         ${COGS_REVERSAL_DOC_TYPE},
         ${params.originalPosTransactionId},
-        ${params.correctionPostedAt}
+        ${correctionPostedAt}
       )
     `.execute(db);
 
@@ -503,7 +513,11 @@ async function createCogsReversalJournalsForCorrection(
         description
       ) VALUES ${sql.join(values, sql`, `)}
     `.execute(db);
+
+    reversalBatchCount++;
   }
+
+  return reversalBatchCount;
 }
 
 function listLegacyEquivalentTrxAtVariants(trxAt: string): string[] {
@@ -530,6 +544,22 @@ function listLegacyEquivalentTrxAtVariants(trxAt: string): string[] {
 
 function computePayloadSha256(canonicalPayload: string): string {
   return createHash("sha256").update(canonicalPayload).digest("hex");
+}
+
+function logInfoBestEffort(event: string, payload: Record<string, unknown>): void {
+  try {
+    console.info(event, payload);
+  } catch {
+    // Logging MUST NOT change committed business outcomes.
+  }
+}
+
+function logWarnBestEffort(event: string, payload: Record<string, unknown>): void {
+  try {
+    console.warn(event, payload);
+  } catch {
+    // Logging MUST NOT change committed business outcomes.
+  }
 }
 
 // ============================================================================
@@ -614,10 +644,11 @@ async function processTransaction(
 
     const finalizedIdentityMatch = await findMatchingFinalizedTransactionByBusinessIdentity(db, tx);
     if (finalizedIdentityMatch && finalizedIdentityMatch.status === "COMPLETED") {
-      // Guard ONLY blocks genuine mutations: COMPLETED→VOID, COMPLETED→REFUND, etc.
-      // Do NOT block COMPLETED→COMPLETED — a different client_tx_id means a new independent
-      // submission, not a mutation. filterNewTransactions handles client_tx_id dedup.
-      if (tx.status !== "COMPLETED") {
+      // Fail-fast: block non-reversal mutations.
+      // COMPLETED → COMPLETED: allowed (different client_tx_id, independent submission).
+      // COMPLETED → VOID/REFUND: allowed (reversal context, passes through for
+      //   authoritative in-transaction check below).
+      if (tx.status !== "COMPLETED" && tx.status !== "VOID" && tx.status !== "REFUND") {
         return {
           client_tx_id: tx.client_tx_id,
           result: "ERROR",
@@ -625,7 +656,6 @@ async function processTransaction(
         };
       }
     }
-    const originalCompletedTransactionId = finalizedIdentityMatch?.status === "COMPLETED" ? finalizedIdentityMatch.id : null;
 
     // Verify cashier belongs to company
     const cashierValid = await isCashierInCompany(db, tx.cashier_user_id, tx.company_id);
@@ -643,7 +673,7 @@ async function processTransaction(
     const openedAtCanonical = tx.opened_at ? toMysqlDateTimeStrict(tx.opened_at) : trxAtCanonical;
     const closedAtCanonical = tx.closed_at ? toMysqlDateTimeStrict(tx.closed_at) : trxAtCanonical;
 
-    // Insert transaction header
+    // Build transaction input (pure computation, no DB access)
     const txInput: PosTransactionInsertInput = {
       client_tx_id: tx.client_tx_id,
       company_id: tx.company_id,
@@ -667,119 +697,207 @@ async function processTransaction(
       payload_hash_version: PAYLOAD_HASH_VERSION_CANONICAL_TRX_AT,
     };
 
-    const posTransactionId = await insertPosTransaction(db, txInput);
+    let cogsReversalLog: {
+      correlation_id: string;
+      status: "VOID" | "REFUND";
+      company_id: number;
+      outlet_id: number;
+      original_pos_transaction_id: number;
+      correction_pos_transaction_id: number;
+      reversal_batch_count: number;
+    } | null = null;
 
-    // Insert transaction items
-    for (let i = 0; i < tx.items.length; i++) {
-      const item = tx.items[i];
-      const itemInput: PosTransactionItemInsertInput = {
-        pos_transaction_id: posTransactionId,
-        company_id: tx.company_id,
-        outlet_id: tx.outlet_id,
-        line_no: i + 1,
-        item_id: item.item_id,
-        variant_id: item.variant_id ?? null,
-        qty: item.qty,
-        price_snapshot: item.price_snapshot,
-        name_snapshot: item.name_snapshot,
-      };
-      await insertPosTransactionItem(db, itemInput);
-    }
+    // ====================================================================
+    // Atomic write transaction: all business writes for this transaction
+    // MUST succeed or roll back together. Any exception thrown inside
+    // the callback triggers automatic rollback by Kysely.
+    // ====================================================================
+    const posTransactionId = await withTransaction(db, async (trx) => {
+      // ==================================================================
+      // In-transaction TOCTOU mitigation: re-read the finalized business
+      // identity INSIDE the atomic boundary. This is the authoritative
+      // check; the pre-transaction read above is a fail-fast hint only.
+      // ==================================================================
+      const inTxFinalizedMatch = await findMatchingFinalizedTransactionByBusinessIdentity(trx, tx);
 
-    // Insert transaction payments
-    for (let i = 0; i < tx.payments.length; i++) {
-      const payment = tx.payments[i];
-      const paymentInput: PosTransactionPaymentInsertInput = {
-        pos_transaction_id: posTransactionId,
-        company_id: tx.company_id,
-        outlet_id: tx.outlet_id,
-        payment_no: i + 1,
-        method: payment.method,
-        amount: payment.amount,
-      };
-      await insertPosTransactionPayment(db, paymentInput);
-    }
+      // Authority guard: COMPLETED → non-VOID/non-REFUND/non-COMPLETED is an
+      // invalid mutation. VOID/REFUND are reversals — allowed.
+      if (
+        inTxFinalizedMatch &&
+        inTxFinalizedMatch.status === "COMPLETED" &&
+        tx.status !== "COMPLETED" &&
+        tx.status !== "VOID" &&
+        tx.status !== "REFUND"
+      ) {
+        throw new Error("FINALIZED_TRANSACTION_MUTATION_REQUIRES_VOID_OR_REFUND");
+      }
 
-    // Insert taxes (STUB: using provided taxes directly, no calculation)
-    if (tx.taxes && tx.taxes.length > 0) {
-      for (const tax of tx.taxes) {
-        const taxInput: PosTransactionTaxInsertInput = {
-          pos_transaction_id: posTransactionId,
+      // Authoritative original-completed-transaction ID (in-transaction value).
+      // Used for COGS reversal and postingHook context in VOID/REFUND paths.
+      const originalCompletedTransactionId =
+        inTxFinalizedMatch?.status === "COMPLETED" ? inTxFinalizedMatch.id : null;
+
+      // Phase 1: Persist transaction header + items + payments + taxes
+      const posTrxId = await insertPosTransaction(trx, txInput);
+
+      // Insert transaction items
+      for (let i = 0; i < tx.items.length; i++) {
+        const item = tx.items[i];
+        const itemInput: PosTransactionItemInsertInput = {
+          pos_transaction_id: posTrxId,
           company_id: tx.company_id,
           outlet_id: tx.outlet_id,
-          tax_rate_id: tax.tax_rate_id,
-          amount: tax.amount,
+          line_no: i + 1,
+          item_id: item.item_id,
+          variant_id: item.variant_id ?? null,
+          qty: item.qty,
+          price_snapshot: item.price_snapshot,
+          name_snapshot: item.name_snapshot,
         };
-        await insertPosTransactionTax(db, taxInput);
+        await insertPosTransactionItem(trx, itemInput);
       }
-    }
 
-    // Phase 2: Stock deduction + COGS + posting hook (after persist transaction)
-    // Only for COMPLETED transactions
-    if (tx.status === "COMPLETED") {
-      // Idempotency check: skip if already deducted (on retry)
-      const existingDeduction = await sql`
-        SELECT id FROM inventory_transactions
-        WHERE company_id = ${tx.company_id}
-          AND outlet_id = ${tx.outlet_id}
-          AND reference_type = 'SALE'
-          AND reference_id = ${tx.client_tx_id}
-          AND quantity_delta < 0
-        LIMIT 1
-      `.execute(db);
+      // Insert transaction payments
+      for (let i = 0; i < tx.payments.length; i++) {
+        const payment = tx.payments[i];
+        const paymentInput: PosTransactionPaymentInsertInput = {
+          pos_transaction_id: posTrxId,
+          company_id: tx.company_id,
+          outlet_id: tx.outlet_id,
+          payment_no: i + 1,
+          method: payment.method,
+          amount: payment.amount,
+        };
+        await insertPosTransactionPayment(trx, paymentInput);
+      }
 
-      let stockResults = null;
-      if (existingDeduction.rows.length === 0) {
-        // Deduct stock via modules-inventory
-        const stockItems = tx.items
-          .filter(item => item.qty > 0)
-          .map(item => ({
-            variantId: item.variant_id,
-            itemId: item.item_id,
-            quantity: item.qty,
-            trackStock: true
-          }));
-
-        if (stockItems.length > 0) {
-          stockResults = await getStockService(db).resolveAndDeductForPosTransaction({
-            companyId: tx.company_id,
-            outletId: tx.outlet_id,
-            posTransactionId: String(posTransactionId),
-            items: stockItems,
-            referenceId: tx.client_tx_id,
-            userId: tx.cashier_user_id
-          }, db);
-
-          // Post COGS via modules-accounting
-          if (stockResults && stockResults.length > 0) {
-            const cogsItems = stockResults.map((r: { itemId: number; quantity: number; unitCost: number; totalCost: number }) => ({
-              itemId: r.itemId,
-              quantity: r.quantity,
-              unitCost: r.unitCost,
-              totalCost: r.totalCost
-            }));
-            const deductionCosts: StockCostEntry[] = stockResults.map((r: { stockTxId: number; itemId: number; quantity: number; unitCost: number; totalCost: number }) => ({
-              stockTxId: r.stockTxId,
-              itemId: r.itemId,
-              quantity: r.quantity,
-              unitCost: r.unitCost,
-              totalCost: r.totalCost
-            }));
-            await postCogsForSale({
-              saleId: String(posTransactionId),
-              companyId: tx.company_id,
-              outletId: tx.outlet_id,
-              items: cogsItems,
-              deductionCosts,
-              saleDate: trxAtTs,
-              postedBy: tx.cashier_user_id
-            }, db);
-          }
+      // Insert taxes (STUB: using provided taxes directly, no calculation)
+      if (tx.taxes && tx.taxes.length > 0) {
+        for (const tax of tx.taxes) {
+          const taxInput: PosTransactionTaxInsertInput = {
+            pos_transaction_id: posTrxId,
+            company_id: tx.company_id,
+            outlet_id: tx.outlet_id,
+            tax_rate_id: tax.tax_rate_id,
+            amount: tax.amount,
+          };
+          await insertPosTransactionTax(trx, taxInput);
         }
       }
 
-      // Posting hook: create POS_SALE journal for COMPLETED transactions
-      if (postingHook) {
+      // Phase 2: Stock deduction + COGS + posting hook (only for COMPLETED)
+      if (tx.status === "COMPLETED") {
+        // Idempotency check: skip if already deducted (on retry)
+        const existingDeduction = await sql`
+          SELECT id FROM inventory_transactions
+          WHERE company_id = ${tx.company_id}
+            AND outlet_id = ${tx.outlet_id}
+            AND reference_type = 'SALE'
+            AND reference_id = ${tx.client_tx_id}
+            AND quantity_delta < 0
+          LIMIT 1
+        `.execute(trx);
+
+        let stockResults: Array<{ stockTxId: number; itemId: number; quantity: number; unitCost: number; totalCost: number }> | null = null;
+        if (existingDeduction.rows.length === 0) {
+          // Deduct stock via modules-inventory
+          const stockItems = tx.items
+            .filter(item => item.qty > 0)
+            .map(item => ({
+              variantId: item.variant_id,
+              itemId: item.item_id,
+              quantity: item.qty,
+              trackStock: true
+            }));
+
+          if (stockItems.length > 0) {
+            stockResults = await getStockService(trx).resolveAndDeductForPosTransaction({
+              companyId: tx.company_id,
+              outletId: tx.outlet_id,
+              posTransactionId: String(posTrxId),
+              items: stockItems,
+              referenceId: tx.client_tx_id,
+              userId: tx.cashier_user_id
+            }, trx);
+
+            // Post COGS via modules-accounting.
+            // Throw on failure so the outer transaction rolls back all Phase 1 + Phase 2 writes.
+            if (stockResults && stockResults.length > 0) {
+              const cogsItems = stockResults.map((r) => ({
+                itemId: r.itemId,
+                quantity: r.quantity,
+                unitCost: r.unitCost,
+                totalCost: r.totalCost
+              }));
+              const deductionCosts: StockCostEntry[] = stockResults.map((r) => ({
+                stockTxId: r.stockTxId,
+                itemId: r.itemId,
+                quantity: r.quantity,
+                unitCost: r.unitCost,
+                totalCost: r.totalCost
+              }));
+              const cogsResult = await postCogsForSale({
+                saleId: String(posTrxId),
+                companyId: tx.company_id,
+                outletId: tx.outlet_id,
+                items: cogsItems,
+                deductionCosts,
+                saleDate: trxAtTs,
+                postedBy: tx.cashier_user_id
+              }, trx);
+              if (!cogsResult.success) {
+                throw new Error(`COGS_POSTING_FAILED: ${cogsResult.errors?.join("; ") ?? "unknown error"}`);
+              }
+            }
+          }
+        }
+
+        // Posting hook: create POS_SALE journal for COMPLETED transactions
+        if (postingHook) {
+          const hookContext: PostingHookContext = {
+            correlationId,
+            companyId: tx.company_id,
+            outletId: tx.outlet_id,
+            userId: tx.cashier_user_id,
+            clientTxId: tx.client_tx_id,
+            status: tx.status,
+            trxAt: tx.trx_at,
+            posTransactionId: posTrxId,
+          };
+          await postingHook(trx, hookContext);
+        }
+      }
+
+      // COGS reversals for VOID/REFUND corrections
+      if ((tx.status === "VOID" || tx.status === "REFUND") && originalCompletedTransactionId !== null) {
+        const reversalBatchCount = await createCogsReversalJournalsForCorrection(trx, {
+          companyId: tx.company_id,
+          outletId: tx.outlet_id,
+          status: tx.status,
+          originalPosTransactionId: originalCompletedTransactionId,
+          correctionPosTransactionId: posTrxId,
+          correctionPostedAtTs: trxAtTs,
+          clientTxId: tx.client_tx_id,
+        });
+        if (reversalBatchCount > 0) {
+          cogsReversalLog = {
+            correlation_id: correlationId,
+            status: tx.status,
+            company_id: tx.company_id,
+            outlet_id: tx.outlet_id,
+            original_pos_transaction_id: originalCompletedTransactionId,
+            correction_pos_transaction_id: posTrxId,
+            reversal_batch_count: reversalBatchCount,
+          };
+        }
+      }
+
+      // Posting hook: create POS_SALE_REVERSAL for VOID/REFUND corrections
+      if (
+        (tx.status === "VOID" || tx.status === "REFUND") &&
+        originalCompletedTransactionId !== null &&
+        postingHook
+      ) {
         const hookContext: PostingHookContext = {
           correlationId,
           companyId: tx.company_id,
@@ -788,56 +906,41 @@ async function processTransaction(
           clientTxId: tx.client_tx_id,
           status: tx.status,
           trxAt: tx.trx_at,
-          posTransactionId,
+          posTransactionId: posTrxId,
+          originalPosTransactionId: originalCompletedTransactionId,
         };
-        await postingHook(db, hookContext);
+        await postingHook(trx, hookContext);
+      }
+
+      return posTrxId;
+    });
+
+    if (cogsReversalLog) {
+      logInfoBestEffort("pos_sync_push_cogs_reversal_created", cogsReversalLog);
+    }
+
+    // Record success metric (outside transaction — metric collection is non-transactional)
+    if (metricsCollector) {
+      try {
+        const operationResult: SyncOperationResult = {
+          client_tx_id: tx.client_tx_id,
+          result: "OK",
+          latency_ms: Math.max(0, Date.now() - startedAtMs),
+          is_retry: false,
+        };
+        metricsCollector.recordResults(companyId, [operationResult]);
+      } catch (metricError) {
+        logWarnBestEffort("pos_sync_push_metrics_record_failed", {
+          correlation_id: correlationId,
+          company_id: companyId,
+          outlet_id: outletId,
+          client_tx_id: tx.client_tx_id,
+          error: metricError instanceof Error ? metricError.message : String(metricError),
+        });
       }
     }
 
-    if ((tx.status === "VOID" || tx.status === "REFUND") && originalCompletedTransactionId !== null) {
-      await createCogsReversalJournalsForCorrection(db, {
-        companyId: tx.company_id,
-        outletId: tx.outlet_id,
-        status: tx.status,
-        originalPosTransactionId: originalCompletedTransactionId,
-        correctionPosTransactionId: posTransactionId,
-        correctionPostedAt: trxAtCanonical,
-        clientTxId: tx.client_tx_id,
-      });
-    }
-
-    // Posting hook: create POS_SALE_REVERSAL for VOID/REFUND corrections
-    if (
-      (tx.status === "VOID" || tx.status === "REFUND") &&
-      originalCompletedTransactionId !== null &&
-      postingHook
-    ) {
-      const hookContext: PostingHookContext = {
-        correlationId,
-        companyId: tx.company_id,
-        outletId: tx.outlet_id,
-        userId: tx.cashier_user_id,
-        clientTxId: tx.client_tx_id,
-        status: tx.status,
-        trxAt: tx.trx_at,
-        posTransactionId,
-        originalPosTransactionId: originalCompletedTransactionId,
-      };
-      await postingHook(db, hookContext);
-    }
-
-    // Record success metric
-    if (metricsCollector) {
-      const operationResult: SyncOperationResult = {
-        client_tx_id: tx.client_tx_id,
-        result: "OK",
-        latency_ms: Math.max(0, Date.now() - startedAtMs),
-        is_retry: false,
-      };
-      metricsCollector.recordResults(companyId, [operationResult]);
-    }
-
-    console.info("pos_sync_push_transaction_processed", {
+    logInfoBestEffort("pos_sync_push_transaction_processed", {
       correlation_id: correlationId,
       client_tx_id: tx.client_tx_id,
       pos_transaction_id: posTransactionId,
@@ -888,11 +991,20 @@ async function filterNewTransactions(
     // Check for duplicate within current batch first
     if (seenClientTxIds.has(tx.client_tx_id)) {
       duplicateResults.push({ client_tx_id: tx.client_tx_id, result: "DUPLICATE" });
-      // Persist SKIPPED audit entry for within-batch duplicate
-      await sql`
-        INSERT INTO audit_logs (company_id, outlet_id, user_id, action, result, success, payload_json)
-        VALUES (${companyId}, ${outletId}, ${tx.cashier_user_id}, 'SYNC_PUSH_DUPLICATE_SKIPPED', 'SKIPPED', 0, ${JSON.stringify({ client_tx_id: tx.client_tx_id, reason: 'duplicate_within_batch' })})
-      `.execute(db);
+      try {
+        // Persist SKIPPED audit entry for within-batch duplicate
+        await sql`
+          INSERT INTO audit_logs (company_id, outlet_id, user_id, action, result, success, payload_json)
+          VALUES (${companyId}, ${outletId}, ${tx.cashier_user_id}, 'SYNC_PUSH_DUPLICATE_SKIPPED', 'SKIPPED', 0, ${JSON.stringify({ client_tx_id: tx.client_tx_id, reason: 'duplicate_within_batch' })})
+        `.execute(db);
+      } catch (auditError) {
+        logWarnBestEffort("pos_sync_push_duplicate_audit_failed", {
+          company_id: companyId,
+          outlet_id: outletId,
+          client_tx_id: tx.client_tx_id,
+          error: auditError instanceof Error ? auditError.message : String(auditError),
+        });
+      }
       continue; // Skip - don't add to newTransactions
     }
 
@@ -925,11 +1037,20 @@ async function filterNewTransactions(
 
       if (idempotencyResult.outcome === "RETURN_CACHED") {
         duplicateResults.push({ client_tx_id: tx.client_tx_id, result: "DUPLICATE" });
-        // Persist SKIPPED audit entry for in-DB duplicate (true idempotent replay)
-        await sql`
-          INSERT INTO audit_logs (company_id, outlet_id, user_id, action, result, success, payload_json)
-          VALUES (${companyId}, ${outletId}, ${tx.cashier_user_id}, 'SYNC_PUSH_DUPLICATE_SKIPPED', 'SKIPPED', 0, ${JSON.stringify({ client_tx_id: tx.client_tx_id, reason: 'idempotent_replay' })})
-        `.execute(db);
+        try {
+          // Persist SKIPPED audit entry for in-DB duplicate (true idempotent replay)
+          await sql`
+            INSERT INTO audit_logs (company_id, outlet_id, user_id, action, result, success, payload_json)
+            VALUES (${companyId}, ${outletId}, ${tx.cashier_user_id}, 'SYNC_PUSH_DUPLICATE_SKIPPED', 'SKIPPED', 0, ${JSON.stringify({ client_tx_id: tx.client_tx_id, reason: 'idempotent_replay' })})
+          `.execute(db);
+        } catch (auditError) {
+          logWarnBestEffort("pos_sync_push_duplicate_audit_failed", {
+            company_id: companyId,
+            outlet_id: outletId,
+            client_tx_id: tx.client_tx_id,
+            error: auditError instanceof Error ? auditError.message : String(auditError),
+          });
+        }
       } else {
         duplicateResults.push({ client_tx_id: tx.client_tx_id, result: "ERROR", message: "IDEMPOTENCY_CONFLICT" });
       }
@@ -1458,10 +1579,17 @@ function buildTransactionBatches(
 /**
  * Persist a batch of transactions with controlled concurrency.
  * 
- * This function processes transactions in batches with:
- * - Configurable concurrency (default 3, max 5)
- * - Idempotency via client_tx_id
- * - Individual transaction error handling (failures don't fail entire batch)
+ * This is the **canonical transaction orchestration path** for POS push.
+ * Both `handlePushSync` (the main push entry point) and external callers
+ * delegate transaction persistence through this function.
+ * 
+ * Processing:
+ * - Filters to eligible transactions (matching companyId + outletId)
+ * - Batch-checks idempotency via client_tx_id and payload hash
+ * - Splits new transactions into batches with configurable concurrency
+ * - Processes each batch concurrently via Promise.all
+ * - Individual transaction failures do not fail the entire batch
+ * - Returns results in original input order; non-eligible transactions are skipped
  * 
  * @param db - Database connection
  * @param transactions - Array of transactions to persist
@@ -1471,6 +1599,7 @@ function buildTransactionBatches(
  * @param options - Optional configuration
  * @param options.maxConcurrency - Maximum concurrent transactions (default 3, max 5)
  * @param options.metricsCollector - Optional metrics collector
+ * @param options.postingHook - Optional posting hook callback (creates POS_SALE journals)
  * @param options.injectFailureAfterPersist - Test hook: when true, throws after successful persistence
  * @returns Array of results per transaction (one per transaction: OK/DUPLICATE/ERROR)
  */
@@ -1483,6 +1612,8 @@ export async function persistPushBatch(
   options?: {
     maxConcurrency?: number;
     metricsCollector?: SyncIdempotencyMetricsCollector;
+    /** Optional posting hook callback (for POS_SALE journal creation/reversal). See PostingHookFn. */
+    postingHook?: PostingHookFn;
     /** Test hook: when true, throws after successful persistence to simulate failure between phases */
     injectFailureAfterPersist?: boolean;
   }
@@ -1515,7 +1646,7 @@ export async function persistPushBatch(
 
   for (const batch of batches) {
     const batchPromises = batch.map((tx) =>
-      processTransaction(db, tx, companyId, outletId, correlationId, options?.metricsCollector)
+      processTransaction(db, tx, companyId, outletId, correlationId, options?.metricsCollector, options?.postingHook)
     );
     const batchResults = await Promise.all(batchPromises);
     newTransactionResults.push(...batchResults);
@@ -1544,26 +1675,34 @@ export async function persistPushBatch(
   // First occurrence uses the result from resultMap, subsequent occurrences get DUPLICATE
   const returnedClientTxIds = new Set<string>();
 
-  // Return results in same order as input transactions
-  for (const tx of transactions) {
+  // Return results in same order as eligible input transactions only
+  // (company_id/outlet_id mismatches are intentionally excluded from results)
+  for (const tx of eligibleTransactions) {
     const result = resultMap.get(tx.client_tx_id);
     if (result) {
       if (returnedClientTxIds.has(tx.client_tx_id)) {
         // This is a subsequent occurrence - return DUPLICATE
         allResults.push({ client_tx_id: tx.client_tx_id, result: "DUPLICATE" });
-        // Persist SKIPPED audit entry for within-batch duplicate (same client_tx_id multiple times in input)
-        await sql`
-          INSERT INTO audit_logs (company_id, outlet_id, user_id, action, result, success, payload_json)
-          VALUES (${companyId}, ${outletId}, ${tx.cashier_user_id}, 'SYNC_PUSH_DUPLICATE_SKIPPED', 'SKIPPED', 0, ${JSON.stringify({ client_tx_id: tx.client_tx_id, reason: 'within_batch_duplicate_input' })})
-        `.execute(db);
+        try {
+          // Persist SKIPPED audit entry for within-batch duplicate (same client_tx_id multiple times in input)
+          await sql`
+            INSERT INTO audit_logs (company_id, outlet_id, user_id, action, result, success, payload_json)
+            VALUES (${companyId}, ${outletId}, ${tx.cashier_user_id}, 'SYNC_PUSH_DUPLICATE_SKIPPED', 'SKIPPED', 0, ${JSON.stringify({ client_tx_id: tx.client_tx_id, reason: 'within_batch_duplicate_input' })})
+          `.execute(db);
+        } catch (auditError) {
+          logWarnBestEffort("pos_sync_push_duplicate_audit_failed", {
+            company_id: companyId,
+            outlet_id: outletId,
+            client_tx_id: tx.client_tx_id,
+            error: auditError instanceof Error ? auditError.message : String(auditError),
+          });
+        }
       } else {
         // First occurrence - return the actual result
         allResults.push(result);
         returnedClientTxIds.add(tx.client_tx_id);
       }
     }
-    // Note: transactions not matching company_id/outlet_id are not included in results
-    // (they are filtered out before processing)
   }
 
   return allResults;
@@ -1576,11 +1715,11 @@ export async function persistPushBatch(
 /**
  * Handle push sync for POS client.
  * 
- * This is the canonical entry point for POS data synchronization (push direction).
- * It orchestrates all push operations using sync-core/data queries.
- * 
- * Business logic stubs (tax calculation, COGS posting, stock cost calculation)
- * are left for the API layer to handle.
+ * Canonical entry point for POS data synchronization (push direction).
+ * Orchestrates all push operation types:
+ * - **Transactions**: delegates to `persistPushBatch` (the canonical transaction persistence path)
+ * - Active orders, order updates, item cancellations, variant sales, variant stock adjustments
+ *   processed via their respective dedicated handlers.
  * 
  * @param params - Push sync parameters including db connection and all operation types
  * @returns Combined results from all push operations
@@ -1626,29 +1765,18 @@ export async function handlePushSync(
 
   try {
     // ========================================================================
-    // Process Transactions
+    // Process Transactions (canonical path: delegate to persistPushBatch)
     // ========================================================================
     if (transactions.length > 0) {
-      // Filter to eligible transactions and check for duplicates
-      const eligibleTransactions = transactions.filter(
-        (tx) => tx.company_id === companyId && tx.outlet_id === outletId
-      );
-
-      const { newTransactions, duplicateResults } = await filterNewTransactions(
+      const transactionResults = await persistPushBatch(
         db,
-        eligibleTransactions,
+        transactions,
         companyId,
-        outletId
+        outletId,
+        correlationId,
+        { metricsCollector, postingHook }
       );
-
-      // Add duplicate results
-      results.push(...duplicateResults);
-
-      // Process new transactions sequentially to avoid race conditions
-      for (const tx of newTransactions) {
-        const result = await processTransaction(db, tx, companyId, outletId, correlationId, metricsCollector, postingHook);
-        results.push(result);
-      }
+      results.push(...transactionResults);
     }
 
     // ========================================================================

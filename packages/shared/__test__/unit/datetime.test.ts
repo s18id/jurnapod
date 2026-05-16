@@ -5,6 +5,10 @@ import {
   toUtcIso,
   fromUtcIso,
   nowUTC,
+  parseIsoToTimestampMs,
+  timestampMsToIso,
+  timestampMsToDateOnly,
+  dateOnlyToTimestampMs,
 } from '../../src/schemas/datetime.js';
 
 describe('datetime helpers — shared/schemas/datetime.ts', () => {
@@ -46,11 +50,9 @@ describe('datetime helpers — shared/schemas/datetime.ts', () => {
       expect(() => resolveBusinessTimezone('Invalid/Zone', 'Also/Invalid')).toThrow(/unresolved business timezone/i);
     });
 
-    it('throws with UTC as the sole input (no UTC fallback)', () => {
-      // UTC is valid IANA but the policy says no UTC fallback for business operations.
-      // The function should still accept it if provided as explicit value, but
-      // it is not used as a fallback when the preferred source is absent/invalid.
-      // Test: null outlet + valid UTC company → accepts UTC (valid IANA)
+    it('accepts UTC when explicitly provided as company timezone', () => {
+      // Explicit UTC company timezone is valid and should be accepted.
+      // This is not a silent fallback; it is explicitly supplied input.
       expect(resolveBusinessTimezone(null, 'UTC')).toBe('UTC');
     });
 
@@ -353,6 +355,163 @@ describe('datetime helpers — shared/schemas/datetime.ts', () => {
       const result = nowUTC();
       expect(result).toMatch(/Z$/);
       expect(() => toUtcIso.dateLike(result)).not.toThrow();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Epoch-ms-first standalone helpers (S48 migration)
+  // -------------------------------------------------------------------------
+
+  describe('parseIsoToTimestampMs', () => {
+    it('converts a valid UTC Z string to epoch ms', () => {
+      const expected = new Date('2024-03-15T00:00:00.000Z').getTime();
+      expect(parseIsoToTimestampMs('2024-03-15T00:00:00.000Z')).toBe(expected);
+    });
+
+    it('converts an ISO string with offset to epoch ms', () => {
+      // 2024-03-15T07:00:00.000+07:00 = 2024-03-15T00:00:00.000Z
+      const result = parseIsoToTimestampMs('2024-03-15T07:00:00.000+07:00');
+      expect(result).toBe(new Date('2024-03-15T00:00:00.000Z').getTime());
+    });
+
+    it('returns an integer', () => {
+      const result = parseIsoToTimestampMs('2024-03-15T00:00:00.000Z');
+      expect(Number.isInteger(result)).toBe(true);
+    });
+
+    it('throws for an invalid ISO string', () => {
+      expect(() => parseIsoToTimestampMs('not-a-date')).toThrow(/invalid iso datetime/i);
+    });
+
+    it('throws for an empty string', () => {
+      expect(() => parseIsoToTimestampMs('')).toThrow(/invalid iso datetime/i);
+    });
+  });
+
+  describe('timestampMsToIso', () => {
+    it('converts epoch ms to a UTC Z string', () => {
+      const ms = new Date('2024-03-15T00:00:00.000Z').getTime();
+      expect(timestampMsToIso(ms)).toBe('2024-03-15T00:00:00.000Z');
+    });
+
+    it('works with zero (epoch start)', () => {
+      expect(timestampMsToIso(0)).toBe('1970-01-01T00:00:00.000Z');
+    });
+
+    it('throws for NaN', () => {
+      expect(() => timestampMsToIso(NaN)).toThrow(/invalid TimestampMs/i);
+    });
+
+    it('throws for Infinity', () => {
+      expect(() => timestampMsToIso(Infinity)).toThrow(/invalid TimestampMs/i);
+    });
+
+    it('throws for -Infinity', () => {
+      expect(() => timestampMsToIso(-Infinity)).toThrow(/invalid TimestampMs/i);
+    });
+  });
+
+  describe('timestampMsToDateOnly', () => {
+    const utcMidnight = new Date('2026-04-15T00:00:00.000Z').getTime();
+
+    it('returns YYYY-MM-DD for UTC timezone (default)', () => {
+      expect(timestampMsToDateOnly(utcMidnight)).toBe('2026-04-15');
+    });
+
+    it('returns correct business date for Asia/Jakarta (UTC+7)', () => {
+      // 2026-04-14T17:00:00.000Z = 2026-04-15 00:00 in Jakarta
+      const jakartaMidnight = new Date('2026-04-14T17:00:00.000Z').getTime();
+      expect(timestampMsToDateOnly(jakartaMidnight, 'Asia/Jakarta')).toBe('2026-04-15');
+    });
+
+    it('returns correct business date for America/New_York (UTC-5)', () => {
+      // 2026-04-15T04:00:00.000Z = 2026-04-15 00:00 in New York
+      const nyMidnight = new Date('2026-04-15T04:00:00.000Z').getTime();
+      expect(timestampMsToDateOnly(nyMidnight, 'America/New_York')).toBe('2026-04-15');
+    });
+
+    it('throws for NaN input', () => {
+      expect(() => timestampMsToDateOnly(NaN, 'UTC')).toThrow(/invalid TimestampMs/i);
+    });
+
+    it('throws for Infinity input', () => {
+      expect(() => timestampMsToDateOnly(Infinity, 'UTC')).toThrow(/invalid TimestampMs/i);
+    });
+
+    it('throws for invalid timezone', () => {
+      expect(() => timestampMsToDateOnly(utcMidnight, 'Not/A/Zone')).toThrow(/invalid timezone/i);
+    });
+
+    it('defaults to UTC when no timezone is provided', () => {
+      // A UTC midnight should return that date in UTC
+      expect(timestampMsToDateOnly(utcMidnight)).toBe('2026-04-15');
+    });
+  });
+
+  describe('dateOnlyToTimestampMs', () => {
+    it('converts YYYY-MM-DD to start-of-day epoch ms in UTC', () => {
+      const result = dateOnlyToTimestampMs('2026-04-15');
+      const expected = new Date('2026-04-15T00:00:00.000Z').getTime();
+      expect(result).toBe(expected);
+    });
+
+    it('returns start-of-day in Asia/Jakarta (UTC+7)', () => {
+      // 2026-04-15 00:00 Jakarta = 2026-04-14T17:00:00.000Z
+      const result = dateOnlyToTimestampMs('2026-04-15', 'Asia/Jakarta');
+      expect(result).toBe(new Date('2026-04-14T17:00:00.000Z').getTime());
+    });
+
+    it('returns start-of-day in America/New_York (UTC-5)', () => {
+      // 2026-04-15 00:00 New York = 2026-04-15T04:00:00.000Z
+      const result = dateOnlyToTimestampMs('2026-04-15', 'America/New_York');
+      expect(result).toBe(new Date('2026-04-15T04:00:00.000Z').getTime());
+    });
+
+    it('returns an integer', () => {
+      const result = dateOnlyToTimestampMs('2026-04-15', 'UTC');
+      expect(Number.isInteger(result)).toBe(true);
+    });
+
+    it('throws for an invalid date string', () => {
+      expect(() => dateOnlyToTimestampMs('not-a-date')).toThrow(/invalid date format/i);
+    });
+
+    it('throws for an overflow date (2026-02-30)', () => {
+      expect(() => dateOnlyToTimestampMs('2026-02-30')).toThrow(/invalid date format/i);
+    });
+
+    it('throws for an invalid timezone', () => {
+      expect(() => dateOnlyToTimestampMs('2026-04-15', 'Not/A/Zone')).toThrow(/invalid timezone/i);
+    });
+
+    it('defaults to UTC when no timezone is provided', () => {
+      // 2026-04-15 00:00 UTC should be exactly midnight UTC
+      const result = dateOnlyToTimestampMs('2026-04-15');
+      const expected = new Date('2026-04-15T00:00:00.000Z').getTime();
+      expect(result).toBe(expected);
+    });
+  });
+
+  describe('epoch-ms roundtrip (canonical)', () => {
+    it('roundtrips: TimestampMs → ISO → TimestampMs', () => {
+      const original = new Date('2026-04-15T12:30:45.000Z').getTime();
+      const iso = timestampMsToIso(original);
+      const recovered = parseIsoToTimestampMs(iso);
+      expect(recovered).toBe(original);
+    });
+
+    it('roundtrips: DateOnly → TimestampMs → DateOnly (UTC)', () => {
+      const date = '2026-04-15';
+      const ts = dateOnlyToTimestampMs(date, 'UTC');
+      const recovered = timestampMsToDateOnly(ts, 'UTC');
+      expect(recovered).toBe(date);
+    });
+
+    it('roundtrips: DateOnly → TimestampMs → DateOnly (Asia/Jakarta)', () => {
+      const date = '2026-04-15';
+      const ts = dateOnlyToTimestampMs(date, 'Asia/Jakarta');
+      const recovered = timestampMsToDateOnly(ts, 'Asia/Jakarta');
+      expect(recovered).toBe(date);
     });
   });
 });

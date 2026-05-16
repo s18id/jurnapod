@@ -94,9 +94,6 @@ function generateIdempotencyKey(): string {
 }
 
 function formatDateOnly(value: Date | string): string {
-  if (typeof value === "string") {
-    return value.slice(0, 10);
-  }
   return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
 }
 

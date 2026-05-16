@@ -47,7 +47,6 @@ export * from "./lib/pagination.js";
 export * from "./lib/response.js";
 export * from "./lib/retry.js";
 export * from "./lib/batch.js";
-export * from "./lib/encryption.js";
 export * from "./lib/request-meta.js";
 export * from "./lib/common-errors.js";
 

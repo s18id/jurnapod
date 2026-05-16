@@ -16,7 +16,7 @@
  */
 
 import { Temporal } from "@js-temporal/polyfill";
-import { toUtcIso, fromUtcIso } from "@jurnapod/shared";
+import { parseIsoToTimestampMs, timestampMsToIso } from "@jurnapod/shared";
 
 /**
  * Unix epoch milliseconds - canonical storage format for reservation timestamps
@@ -70,14 +70,14 @@ export const RESERVATION_MIN_DURATION_MINUTES = 15;
  * @throws Error if the instant string is not valid RFC3339 format with timezone offset
  */
 export function toUnixMs(utcInstant: UtcInstant): UnixMs {
-  return fromUtcIso.epochMs(utcInstant);
+  return parseIsoToTimestampMs(utcInstant);
 }
 
 /**
  * Convert unix milliseconds to UTC ISO instant
  */
 export function fromUnixMs(unixMs: UnixMs): UtcInstant {
-  return toUtcIso.epochMs(unixMs);
+  return timestampMsToIso(unixMs);
 }
 
 /**

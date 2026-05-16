@@ -8,7 +8,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { formatDateOnly, parseFeatureGateValue } from '../../../src/lib/shared/common-utils';
+import {
+  formatDateOnly,
+  formatDateOnlyFromUnknown,
+  parseFeatureGateValue,
+} from '../../../src/lib/shared/common-utils';
 
 describe('common-utils.format', () => {
   describe('formatDateOnly', () => {
@@ -33,6 +37,44 @@ describe('common-utils.format', () => {
       const date = new Date('2024-06-15T23:59:59+07:00');
       const result = formatDateOnly(date);
       expect(result).toMatch(/^2024-06-/);
+    });
+
+    it('extracts date from ISO datetime string', () => {
+      const result = formatDateOnly('2024-03-15T10:30:00.000Z');
+      expect(result).toBe('2024-03-15');
+    });
+
+    it('returns raw string for non-date string input', () => {
+      expect(formatDateOnly('not-a-date')).toBe('not-a-date');
+    });
+  });
+
+  describe('formatDateOnlyFromUnknown', () => {
+    it('returns empty string for null/undefined', () => {
+      expect(formatDateOnlyFromUnknown(null)).toBe('');
+      expect(formatDateOnlyFromUnknown(undefined)).toBe('');
+    });
+
+    it('returns YYYY-MM-DD string unchanged', () => {
+      expect(formatDateOnlyFromUnknown('2024-12-25')).toBe('2024-12-25');
+    });
+
+    it('extracts date from ISO datetime string', () => {
+      expect(formatDateOnlyFromUnknown('2024-03-15T10:30:00.000Z')).toBe('2024-03-15');
+    });
+
+    it('returns raw invalid date strings unchanged', () => {
+      expect(formatDateOnlyFromUnknown('not-a-date')).toBe('not-a-date');
+    });
+
+    it('converts numeric epoch milliseconds using UTC default', () => {
+      const epoch = new Date('2024-03-15T00:00:00.000Z').getTime();
+      expect(formatDateOnlyFromUnknown(epoch)).toBe('2024-03-15');
+    });
+
+    it('stringifies unhandled value types without truncation', () => {
+      expect(formatDateOnlyFromUnknown({ hello: 'world' })).toBe('[object Object]');
+      expect(formatDateOnlyFromUnknown(Symbol('x'))).toBe('Symbol(x)');
     });
   });
 

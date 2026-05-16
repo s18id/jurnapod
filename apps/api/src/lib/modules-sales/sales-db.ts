@@ -109,9 +109,16 @@ interface SalesInvoiceTaxRow {
 }
 
 function formatDateOnly(value: string): string {
-  if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
-    return value.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
   }
+
+  try {
+    return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
+  } catch {
+    // Fall through to preserve legacy behavior for odd date-like strings.
+  }
+
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return value;
@@ -1699,8 +1706,8 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
 
     if (dateFrom && dateTo && filters.timezone && filters.timezone !== 'UTC') {
       const range = toUtcIso.dateRange(dateFrom, dateTo, filters.timezone);
-      dateFrom = range.fromStartUTC.slice(0, 10);
-      dateTo = range.toEndUTC.slice(0, 10);
+      dateFrom = fromUtcIso.dateOnly(range.fromStartUTC);
+      dateTo = fromUtcIso.dateOnly(range.toEndUTC);
     }
 
     // Build query
@@ -1806,8 +1813,8 @@ export class ApiSalesDbExecutor implements SalesDbExecutor {
 
     if (dateFrom && dateTo && f.timezone && f.timezone !== 'UTC') {
       const range = toUtcIso.dateRange(dateFrom, dateTo, f.timezone);
-      dateFrom = range.fromStartUTC.slice(0, 10);
-      dateTo = range.toEndUTC.slice(0, 10);
+      dateFrom = fromUtcIso.dateOnly(range.fromStartUTC);
+      dateTo = fromUtcIso.dateOnly(range.toEndUTC);
     }
 
     // Build WHERE clause dynamically

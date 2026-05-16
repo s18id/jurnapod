@@ -12,7 +12,7 @@
 import type { KyselySchema } from "@/lib/db";
 import { getDb } from "@/lib/db";
 import { withTransactionRetry } from "@jurnapod/db";
-import { toUtcIso, fromUtcIso } from "@/lib/date-helpers";
+import { toUtcIso, fromUtcIso, timestampMsToDateOnly } from "@/lib/date-helpers";
 import {
   getNextDocumentNumber,
   NumberingConflictError,
@@ -179,21 +179,39 @@ export async function ensureUserHasOutletAccess(
 
 /**
  * Format a Date or ISO date string to YYYY-MM-DD format.
+ *
+ * Uses timezone-aware helpers from @jurnapod/shared for string inputs.
+ * Date objects are formatted using their local-time components for backward
+ * compatibility with callers that provide local-time Date instances.
  */
 export function formatDateOnly(value: Date | string): string {
-  if (typeof value === "string") {
-    return value.slice(0, 10);
+  if (value instanceof Date) {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   }
 
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  // String: already YYYY-MM-DD? Return as-is.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+
+  // String: extract date portion from an ISO datetime string
+  try {
+    return fromUtcIso.dateOnly(value);
+  } catch {
+    // Preserve compatibility for non-canonical caller input.
+    return value;
+  }
 }
 
 /**
  * Format an unknown date value (Date, string, or other) to YYYY-MM-DD format.
+ *
  * Handles values from database rows where type may not be strictly typed.
+ * Uses timezone-aware helpers from @jurnapod/shared instead of manual slicing.
+ * Falls back to empty string on unparseable values.
  */
 export function formatDateOnlyFromUnknown(value: unknown): string {
   if (value === null || value === undefined) {
@@ -203,14 +221,23 @@ export function formatDateOnlyFromUnknown(value: unknown): string {
     return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
   }
   if (typeof value === "string") {
-    return value.slice(0, 10);
+    // Already a date-only string? Return as-is.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return value;
+    }
+    // Try to extract date from ISO datetime string
+    try {
+      return fromUtcIso.dateOnly(value);
+    } catch {
+      return value;
+    }
   }
   if (typeof value === "number") {
-    // Assume Unix timestamp in milliseconds
-    return fromUtcIso.dateOnly(toUtcIso.epochMs(value));
+    // Assume Unix timestamp in milliseconds — use timezone-aware helper
+    return timestampMsToDateOnly(value, "UTC");
   }
-  // Fallback: convert to string and slice
-  return String(value).slice(0, 10);
+  // Fallback: stringify unhandled types without truncation.
+  return String(value);
 }
 
 // =============================================================================

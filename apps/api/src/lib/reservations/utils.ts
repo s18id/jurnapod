@@ -16,7 +16,7 @@ import {
   ReservationStatusV2,
   type ReservationStatus,
 } from "@jurnapod/shared";
-import { toUtcIso, fromUtcIso } from "../date-helpers";
+import { parseIsoToTimestampMs, timestampMsToIso } from "../date-helpers";
 import { getSetting } from "../settings";
 
 // Import types from local types module
@@ -34,32 +34,74 @@ import {
 // ============================================================================
 
 /**
- * Convert Date or string to ISO string format
- * Uses Date parsing because MySQL DATETIME columns return 'YYYY-MM-DD HH:MM:SS' format
+ * Convert Date or string to ISO string via timestamp-ms-first canonical flow.
+ *
+ * MySQL DATETIME columns return 'YYYY-MM-DD HH:MM:SS' format — the Date
+ * constructor interprets this as local time (non-ISO format per spec),
+ * so we normalize through epoch milliseconds for both ISO and MySQL inputs.
+ *
+ * @throws {ReservationValidationError} when the input is neither null nor a valid datetime
  */
 export function toIso(value: Date | string | null): string | null {
-  if (!value) {
+  if (value === null) {
     return null;
   }
   try {
-    const date = value instanceof Date ? value : new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return null;
+    let ts: number;
+    if (value instanceof Date) {
+      ts = value.getTime();
+      if (Number.isNaN(ts)) {
+        throw new ReservationValidationError("Invalid Date object with NaN time");
+      }
+    } else {
+      // Try canonical ISO path first, then MySQL DATETIME fallback
+      try {
+        ts = parseIsoToTimestampMs(value);
+      } catch {
+        const d = new Date(value);
+        ts = d.getTime();
+        if (Number.isNaN(ts)) {
+          throw new ReservationValidationError(`Invalid datetime string: ${value}`);
+        }
+      }
     }
-    return toUtcIso.dateLike(date) as string;
-  } catch {
-    return null;
+    return timestampMsToIso(ts);
+  } catch (err) {
+    if (err instanceof ReservationValidationError) throw err;
+    throw new ReservationValidationError("Invalid reservation datetime value");
   }
 }
 
 /**
- * Convert Date or string to unix milliseconds
+ * Convert Date or string to epoch milliseconds via timestamp-ms-first canonical flow.
+ *
+ * For string inputs, uses `parseIsoToTimestampMs` (ISO format) with a fallback
+ * to the Date constructor for MySQL DATETIME strings.
+ *
+ * @throws {ReservationValidationError} when the input is not a valid datetime
  */
 export function toUnixMs(value: Date | string): number {
   try {
-    const iso = toUtcIso.dateLike(value) as string;
-    return fromUtcIso.epochMs(iso);
-  } catch {
+    if (value instanceof Date) {
+      const ts = value.getTime();
+      if (Number.isNaN(ts)) {
+        throw new ReservationValidationError(`Invalid reservation datetime value (type=Date, NaN)`);
+      }
+      return ts;
+    }
+    // Try canonical ISO path first, then MySQL DATETIME fallback
+    try {
+      return parseIsoToTimestampMs(value);
+    } catch {
+      const d = new Date(value);
+      const ts = d.getTime();
+      if (Number.isNaN(ts)) {
+        throw new ReservationValidationError(`Invalid datetime string: ${value}`);
+      }
+      return ts;
+    }
+  } catch (err) {
+    if (err instanceof ReservationValidationError) throw err;
     const valueType = value instanceof Date ? "Date" : typeof value;
     throw new ReservationValidationError(`Invalid reservation datetime value (type=${valueType})`);
   }
@@ -91,7 +133,7 @@ export function mapRow(row: ReservationDbRow) {
   if (reservationStartTs === null) {
     throw new ReservationValidationError("reservation_start_ts is required for reservation mapping");
   }
-  const reservationAt = toUtcIso.epochMs(reservationStartTs);
+  const reservationAt = timestampMsToIso(reservationStartTs);
   const createdAt = toIso(row.created_at);
   const updatedAt = toIso(row.updated_at);
   if (!reservationAt || !createdAt || !updatedAt) {
@@ -159,9 +201,18 @@ export function mapDbRowToReservation(row: ReservationDbRow): Reservation {
   if (reservationStartTs === null) {
     throw new ReservationValidationError("reservation_start_ts is required for reservation mapping");
   }
-  const reservationTimeStr = toUtcIso.epochMs(reservationStartTs);
   const createdAtStr = toIso(row.created_at);
   const updatedAtStr = toIso(row.updated_at);
+  if (createdAtStr === null) {
+    throw new ReservationValidationError("created_at is required for reservation mapping");
+  }
+  if (updatedAtStr === null) {
+    throw new ReservationValidationError("updated_at is required for reservation mapping");
+  }
+
+  // Create Date objects from validated timestamp-ms values (canonical path)
+  const createdAtTs = parseIsoToTimestampMs(createdAtStr);
+  const updatedAtTs = parseIsoToTimestampMs(updatedAtStr);
 
   return {
     id: BigInt(row.id),
@@ -176,14 +227,14 @@ export function mapDbRowToReservation(row: ReservationDbRow): Reservation {
     customerName: row.customer_name ?? "",
     customerPhone: row.customer_phone ?? null,
     customerEmail: row.customer_email ?? null,
-    reservationTime: new Date(reservationTimeStr),
+    reservationTime: new Date(reservationStartTs),
     durationMinutes: row.duration_minutes ?? 0,
     notes: row.notes ?? null,
     cancellationReason: row.cancellation_reason ?? null,
     createdBy: row.created_by ?? "",
     updatedBy: row.updated_by ?? null,
-    createdAt: createdAtStr ? new Date(createdAtStr) : new Date(),
-    updatedAt: updatedAtStr ? new Date(updatedAtStr) : new Date(),
+    createdAt: new Date(createdAtTs),
+    updatedAt: new Date(updatedAtTs),
   };
 }
 

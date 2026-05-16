@@ -18,6 +18,8 @@ loadEnv({ path: path.resolve(process.cwd(), '.env') });
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { createKysely, type KyselySchema } from '@jurnapod/db';
 import { persistPushBatch, type TransactionPush, type SyncPushResultItem } from '../../src/push/index.js';
+import type { PostingHookFn } from '../../src/push/types.js';
+import { sql } from 'kysely';
 
 // ============================================================================
 // Test Configuration
@@ -299,6 +301,48 @@ describe('persistPushBatch Integration', () => {
       expect(results[0].result).toBe('OK');
     });
 
+    test('should ignore mismatched transaction even when client_tx_id collides with eligible transaction', async () => {
+      const sharedClientTxId = 'test-int-tx-company-collision-1';
+      const transactions: TransactionPush[] = [
+        {
+          client_tx_id: sharedClientTxId,
+          company_id: fixtures.testCompanyId + 9999, // Invalid - wrong company
+          outlet_id: fixtures.testOutletId,
+          cashier_user_id: fixtures.cashierUserId,
+          status: 'COMPLETED',
+          service_type: 'TAKEAWAY',
+          trx_at: '2024-01-15T11:36:00+07:00',
+          items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+          payments: [{ method: 'CASH', amount: 15000 }],
+        },
+        {
+          client_tx_id: sharedClientTxId,
+          company_id: fixtures.testCompanyId, // Valid
+          outlet_id: fixtures.testOutletId,
+          cashier_user_id: fixtures.cashierUserId,
+          status: 'COMPLETED',
+          service_type: 'TAKEAWAY',
+          trx_at: '2024-01-15T11:37:00+07:00',
+          items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Test Item' }],
+          payments: [{ method: 'CASH', amount: 15000 }],
+        },
+      ];
+
+      const results = await persistPushBatch(
+        fixtures.db,
+        transactions,
+        fixtures.testCompanyId,
+        fixtures.testOutletId,
+        'test-correlation'
+      );
+
+      // Only eligible transaction should appear in results.
+      // Mismatched tenant row must never consume or shadow a valid result.
+      expect(results).toHaveLength(1);
+      expect(results[0].client_tx_id).toBe(sharedClientTxId);
+      expect(results[0].result).toBe('OK');
+    });
+
     test('should filter out transactions with mismatched outlet_id', async () => {
       const transactions: TransactionPush[] = [
         {
@@ -550,7 +594,7 @@ describe('persistPushBatch Integration', () => {
       expect(differentResults[0].result).toBe('OK');
     });
 
-    test('AC2: blocks COMPLETED→VOID with different client_tx_id (mutation)', async () => {
+    test('AC2: allows COMPLETED→VOID with different client_tx_id (reversal context)', async () => {
       const trxAt = '2024-01-15T18:00:00Z';
       const items = [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Guard Test Item' }];
       const payments = [{ method: 'CASH', amount: 15000 }];
@@ -577,7 +621,9 @@ describe('persistPushBatch Integration', () => {
       );
       expect(completedResults[0].result).toBe('OK');
 
-      // Attempt to push VOID with same business identity but different client_tx_id — MUST be blocked
+      // Push VOID with same business identity but different client_tx_id.
+      // This is a valid reversal (COMPLETED→VOID), not an invalid mutation.
+      // The in-transaction authority check allows VOID/REFUND through.
       const voidResults = await persistPushBatch(
         fixtures.db,
         [{
@@ -595,8 +641,7 @@ describe('persistPushBatch Integration', () => {
         fixtures.testOutletId,
         'test-correlation'
       );
-      expect(voidResults[0].result).toBe('ERROR');
-      expect(voidResults[0].message).toBe('FINALIZED_TRANSACTION_MUTATION_REQUIRES_VOID_OR_REFUND');
+      expect(voidResults[0].result).toBe('OK');
     });
 
     test('AC3: returns DUPLICATE for COMPLETED→COMPLETED with same client_tx_id', async () => {
@@ -644,6 +689,56 @@ describe('persistPushBatch Integration', () => {
         'test-correlation'
       );
       expect(secondResults[0].result).toBe('DUPLICATE');
+    });
+
+    test('AC4: allows COMPLETED→REFUND with different client_tx_id (reversal context)', async () => {
+      const trxAt = '2024-01-15T18:00:00Z';
+      const items = [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Guard Test Item' }];
+      const payments = [{ method: 'CASH', amount: 15000 }];
+      const completedClientTxId = 'test-int-guard-ac4-completed';
+      const refundClientTxId = 'test-int-guard-ac4-refund-attempt';
+
+      // Seed a completed transaction
+      const completedResults = await persistPushBatch(
+        fixtures.db,
+        [{
+          client_tx_id: completedClientTxId,
+          company_id: fixtures.testCompanyId,
+          outlet_id: fixtures.testOutletId,
+          cashier_user_id: fixtures.cashierUserId,
+          status: 'COMPLETED',
+          service_type: 'TAKEAWAY',
+          trx_at: trxAt,
+          items,
+          payments,
+        }],
+        fixtures.testCompanyId,
+        fixtures.testOutletId,
+        'test-correlation'
+      );
+      expect(completedResults[0].result).toBe('OK');
+
+      // Push REFUND with same business identity but different client_tx_id.
+      // This is a valid reversal (COMPLETED→REFUND), not an invalid mutation.
+      // The in-transaction authority check allows VOID/REFUND through.
+      const refundResults = await persistPushBatch(
+        fixtures.db,
+        [{
+          client_tx_id: refundClientTxId,
+          company_id: fixtures.testCompanyId,
+          outlet_id: fixtures.testOutletId,
+          cashier_user_id: fixtures.cashierUserId,
+          status: 'REFUND',
+          service_type: 'TAKEAWAY',
+          trx_at: trxAt,
+          items,
+          payments,
+        }],
+        fixtures.testCompanyId,
+        fixtures.testOutletId,
+        'test-correlation'
+      );
+      expect(refundResults[0].result).toBe('OK');
     });
   });
 
@@ -698,6 +793,100 @@ describe('persistPushBatch Integration', () => {
       expect(results[0].result).toBe('OK'); // Valid
       expect(results[1].result).toBe('ERROR'); // DINE_IN without table_id
       expect(results[2].result).toBe('OK'); // Valid
+    });
+  });
+
+  describe('atomicity regression (S48+)', () => {
+    test('rolls back all writes when postingHook throws after Phase 1 insert', async () => {
+      const clientTxId = 'test-int-tx-atomicity-hook-throw';
+      const { testCompanyId, testOutletId } = fixtures;
+
+      // ── Capture pre-push counts for rollback verification ────────────
+      const preCogsBatchCount = await sql<{ cnt: number }>`
+        SELECT COUNT(*) AS cnt FROM journal_batches
+        WHERE company_id = ${testCompanyId}
+          AND outlet_id = ${testOutletId}
+          AND doc_type = 'COGS'
+      `.execute(fixtures.db);
+
+      const preCogsLineCount = await sql<{ cnt: number }>`
+        SELECT COUNT(*) AS cnt FROM journal_lines jl
+        JOIN journal_batches jb ON jl.journal_batch_id = jb.id
+        WHERE jb.company_id = ${testCompanyId}
+          AND jb.outlet_id = ${testOutletId}
+          AND jb.doc_type = 'COGS'
+      `.execute(fixtures.db);
+
+      const cogsBatchCountBefore = Number(preCogsBatchCount.rows[0]?.cnt ?? 0);
+      const cogsLineCountBefore = Number(preCogsLineCount.rows[0]?.cnt ?? 0);
+
+      // A posting hook that unconditionally throws, simulating a Phase 2 failure
+      const throwingHook: PostingHookFn = async (_db, _ctx) => {
+        throw new Error('SIMULATED_POSTING_HOOK_FAILURE');
+      };
+
+      const transaction: TransactionPush = {
+        client_tx_id: clientTxId,
+        company_id: testCompanyId,
+        outlet_id: testOutletId,
+        cashier_user_id: fixtures.cashierUserId,
+        status: 'COMPLETED',
+        service_type: 'TAKEAWAY',
+        trx_at: '2024-01-15T18:30:00+07:00',
+        items: [{ item_id: fixtures.testItemId, qty: 1, price_snapshot: 15000, name_snapshot: 'Atomicity Test' }],
+        payments: [{ method: 'CASH', amount: 15000 }],
+      };
+
+      const results = await persistPushBatch(
+        fixtures.db,
+        [transaction],
+        testCompanyId,
+        testOutletId,
+        'test-correlation',
+        { postingHook: throwingHook }
+      );
+
+      // ── Assert ERROR result and message ─────────────────────────────
+      expect(results).toHaveLength(1);
+      expect(results[0].result).toBe('ERROR');
+      expect(results[0].client_tx_id).toBe(clientTxId);
+      expect(results[0].message).toContain('SIMULATED_POSTING_HOOK_FAILURE');
+
+      // ── Assert (a): no pos_transactions row for clientTxId ──────────
+      const ptRows = await sql<{ cnt: number }>`
+        SELECT COUNT(*) AS cnt FROM pos_transactions
+        WHERE client_tx_id = ${clientTxId}
+          AND company_id = ${testCompanyId}
+      `.execute(fixtures.db);
+      expect(Number(ptRows.rows[0]?.cnt ?? 0)).toBe(0);
+
+      // ── Assert (b): no inventory_transactions row for reference_id ──
+      const itRows = await sql<{ cnt: number }>`
+        SELECT COUNT(*) AS cnt FROM inventory_transactions
+        WHERE reference_id = ${clientTxId}
+          AND company_id = ${testCompanyId}
+          AND outlet_id = ${testOutletId}
+      `.execute(fixtures.db);
+      expect(Number(itRows.rows[0]?.cnt ?? 0)).toBe(0);
+
+      // ── Assert (c): COGS journal_batches count unchanged ────────────
+      const postCogsBatchCount = await sql<{ cnt: number }>`
+        SELECT COUNT(*) AS cnt FROM journal_batches
+        WHERE company_id = ${testCompanyId}
+          AND outlet_id = ${testOutletId}
+          AND doc_type = 'COGS'
+      `.execute(fixtures.db);
+      expect(Number(postCogsBatchCount.rows[0]?.cnt ?? 0)).toBe(cogsBatchCountBefore);
+
+      // ── Assert (d): COGS journal_lines count unchanged ──────────────
+      const postCogsLineCount = await sql<{ cnt: number }>`
+        SELECT COUNT(*) AS cnt FROM journal_lines jl
+        JOIN journal_batches jb ON jl.journal_batch_id = jb.id
+        WHERE jb.company_id = ${testCompanyId}
+          AND jb.outlet_id = ${testOutletId}
+          AND jb.doc_type = 'COGS'
+      `.execute(fixtures.db);
+      expect(Number(postCogsLineCount.rows[0]?.cnt ?? 0)).toBe(cogsLineCountBefore);
     });
   });
 });

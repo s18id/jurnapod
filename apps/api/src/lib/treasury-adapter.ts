@@ -378,7 +378,7 @@ export class KyselyPostingRepository implements TreasuryPostingRepository, Posti
       return;
     }
 
-    const effectiveLineDate = lineDate ?? this.postedAt.slice(0, 10);
+    const effectiveLineDate = lineDate ?? fromUtcIso.dateOnly(toUtcIso.dateLike(this.postedAt) as string);
 
     await this.db
       .insertInto("journal_lines")

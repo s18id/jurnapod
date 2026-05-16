@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
+import { timestampMsToDateOnly } from "@jurnapod/shared";
 import { rowsToCsv, downloadCsv } from "../lib/import/csv";
 
 type ItemForExport = {
@@ -57,7 +58,7 @@ export function buildItemsCsv(items: ItemForExport[], groups: ItemGroupForExport
 
 export function downloadItemsCsv(items: ItemForExport[], groups: ItemGroupForExport[]): void {
   const csv = buildItemsCsv(items, groups);
-  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const date = timestampMsToDateOnly(Date.now()).replace(/-/g, "");
   downloadCsv(csv, `items-filtered-${date}.csv`);
 }
 
@@ -92,7 +93,7 @@ export function downloadPricesCsv(
   selectedOutletId: number
 ): void {
   const csv = buildPricesCsv(prices, items, pricingViewMode, selectedOutletId);
-  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const date = timestampMsToDateOnly(Date.now()).replace(/-/g, "");
   const mode = pricingViewMode === "defaults" ? "defaults" : `outlet-${selectedOutletId}`;
   downloadCsv(csv, `prices-filtered-${mode}-${date}.csv`);
 }

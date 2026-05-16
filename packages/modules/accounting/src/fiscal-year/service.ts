@@ -144,14 +144,7 @@ export async function insertFiscalYear(
 }
 
 function formatDateOnly(value: string | Date): string {
-  if (typeof value === "string") {
-    return value.slice(0, 10);
-  }
-  // Handle Date object - format as YYYY-MM-DD
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
 }
 
 function parseDateOnly(value: string): Date {
@@ -200,14 +193,14 @@ function formatDateOnlyFromUnknown(value: unknown): string {
     return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
   }
   if (typeof value === "string") {
-    return value.slice(0, 10);
+    return fromUtcIso.dateOnly(toUtcIso.dateLike(value) as string);
   }
   if (typeof value === "number") {
     // Assume Unix timestamp in milliseconds
     return fromUtcIso.dateOnly(toUtcIso.dateLike(new Date(value)) as string);
   }
-  // Fallback: convert to string and slice
-  return String(value).slice(0, 10);
+  // Fallback: not a recognized date-like type — return stringified value as-is.
+  return String(value);
 }
 
 /**

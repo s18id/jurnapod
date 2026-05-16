@@ -52,7 +52,7 @@ export class DepreciationPostingRepository implements PostingRepository {
     private readonly db: KyselySchema,
     private readonly postedAt: string
   ) {
-    this.lineDate = postedAt.slice(0, 10);
+    this.lineDate = fromUtcIso.dateOnly(postedAt);
   }
 
   async createJournalBatch(request: PostingRequest): Promise<{ journal_batch_id: number }> {

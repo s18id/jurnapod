@@ -669,7 +669,16 @@ async function postCogsForSaleInternal(
       useDeductionCosts: (input.deductionCosts?.length ?? 0) > 0
     };
 
-    const result = await withTransactionRetry(db, async (trx) => {
+    /**
+     * Posting execution callback — MUST execute within a database transaction.
+     *
+     * Uses withTransactionRetry to handle transient deadlocks (MySQL errno 1213),
+     * but passes through directly when the caller already owns a transaction
+     * (db.isTransaction). The isTransaction guard MUST be checked before every
+     * call site to prevent nested SAVEPOINT retry scope from diverging from the
+     * caller-owned atomic unit.
+     */
+    const executorCallback = async (trx: Transaction): Promise<PostingResult> => {
       const repository = new CogsRepository(trx, lineDate);
       const mapper = new CogsPostingMapper(executor, saleDetail);
 
@@ -701,7 +710,15 @@ async function postCogsForSaleInternal(
       }
 
       return txResult;
-    });
+    };
+
+    // Prevent nested transactions: pass through when caller already owns one.
+    let result: PostingResult;
+    if (db.isTransaction) {
+      result = await executorCallback(db as unknown as Transaction);
+    } else {
+      result = await withTransactionRetry(db, executorCallback);
+    }
 
     return {
       success: true,

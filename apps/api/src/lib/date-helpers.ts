@@ -23,9 +23,15 @@
 export {
   // Canonical schemas
   UtcIsoSchema,
-  // Namespaced API
+  DateOnlySchema,
+  // Namespaced API (migration-compatible)
   toUtcIso,
   fromUtcIso,
+  // Epoch-ms-first standalone helpers (canonical)
+  parseIsoToTimestampMs,
+  timestampMsToIso,
+  timestampMsToDateOnly,
+  dateOnlyToTimestampMs,
   // Validation
   isValidTimeZone,
   // Event time
@@ -34,4 +40,9 @@ export {
   resolveBusinessTimezone,
   // General
   nowUTC,
+  // Types
+  type TimestampMs,
+  type UtcIso,
+  type DateOnly,
+  type Timezone,
 } from "@jurnapod/shared";

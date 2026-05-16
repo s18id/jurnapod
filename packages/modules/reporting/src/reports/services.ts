@@ -453,7 +453,7 @@ export async function getTrialBalance(filter: TrialBalanceFilter): Promise<Trial
   const outletIds = filter.outletIds;
   const includeUnassigned = filter.includeUnassignedOutlet ?? true;
   
-  const asOfDate = filter.asOf ? filter.asOf.slice(0, 10) : filter.dateTo;
+  const asOfDate = filter.asOf ? fromUtcIso.dateOnly(filter.asOf) : filter.dateTo;
 
   return await withTransaction(db, async (trx) => {
     const accounts = await trx

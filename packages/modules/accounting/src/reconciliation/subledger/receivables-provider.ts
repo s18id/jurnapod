@@ -18,7 +18,7 @@ import type { KyselySchema } from "@jurnapod/db";
 import {
   resolveBusinessTimezone,
   toUtcIso,
-  fromUtcIso,
+  timestampMsToDateOnly,
 } from "@jurnapod/shared";
 import {
   type SubledgerBalanceProvider,
@@ -134,7 +134,7 @@ export class ReceivablesSubledgerProvider implements SubledgerBalanceProvider {
     const timezone = await this.resolveBusinessTimezone(companyId, outletId);
 
     // Convert asOfEpochMs to business date string (YYYY-MM-DD) using canonical helper
-    const asOfDate = fromUtcIso.businessDate(toUtcIso.epochMs(asOfEpochMs), timezone);
+    const asOfDate = timestampMsToDateOnly(asOfEpochMs, timezone);
 
     // Get settings for account IDs
     const settings = await this.arReconciliationService.getARReconciliationSettings({ companyId });

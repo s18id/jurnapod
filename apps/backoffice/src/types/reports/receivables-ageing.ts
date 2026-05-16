@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
+import { fromUtcIso, nowUTC } from "@jurnapod/shared";
+
 /**
  * Types for Receivables Ageing Report
  */
@@ -120,7 +122,7 @@ export interface ReceivablesAgeingFilters {
 }
 
 export const DEFAULT_FILTERS: ReceivablesAgeingFilters = {
-  asOfDate: new Date().toISOString().slice(0, 10),
+  asOfDate: fromUtcIso.dateOnly(nowUTC()),
   outletId: null,
   customerId: null,
 };

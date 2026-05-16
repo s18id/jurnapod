@@ -3,6 +3,7 @@
 
 import { useState, useCallback, useMemo } from "react";
 import { apiStreamingRequest } from "../lib/api-client";
+import { fromUtcIso, nowUTC } from "@jurnapod/shared";
 
 // ============================================================================
 // Types
@@ -581,7 +582,7 @@ export function useExportDialog({
 
       // Get filename
       const contentDisposition = response.headers.get("content-disposition");
-      let filename = `jurnapod-${entityType}-${new Date().toISOString().slice(0, 10)}.${format}`;
+      let filename = `jurnapod-${entityType}-${fromUtcIso.dateOnly(nowUTC())}.${format}`;
       if (contentDisposition) {
         const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
         if (match) {

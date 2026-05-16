@@ -162,7 +162,7 @@ describe('TransactionPush validation logic', () => {
 
   function createTransaction(overrides: Partial<TransactionPush> = {}): TransactionPush {
     return {
-      client_tx_id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      client_tx_id: 'tx-unit-default',
       company_id: companyId,
       outlet_id: outletId,
       cashier_user_id: 1,

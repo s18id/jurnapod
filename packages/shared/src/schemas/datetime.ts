@@ -7,32 +7,57 @@ import { z } from "zod";
 /**
  * Jurnapod Datetime Canonical API
  *
+ * ## Policy context (S48 epoch-ms-first)
+ *
+ * The canonical internal representation for all business event instants is
+ * **epoch milliseconds** (`TimestampMs = number`). Business logic MUST operate
+ * on `TimestampMs`; conversions to/from ISO strings MUST occur only at API
+ * boundaries or representational contexts.
+ *
+ * The migration-compatible namespaced API (`toUtcIso`, `fromUtcIso`) remains
+ * available for existing consumers. New code SHOULD prefer the standalone
+ * epoch-ms-first helpers listed below.
+ *
+ * ## Canonical internal format
+ *
+ *   TimestampMs = number  — epoch milliseconds (the one internal truth)
+ *   TimestampMs (API boundaries) → ISO Z string / MySQL datetime / date-only
+ *
+ * ## Epoch-ms-first standalone helpers (canonical)
+ *
+ *   parseIsoToTimestampMs(iso)          — Z string → TimestampMs
+ *   timestampMsToIso(ts)                — TimestampMs → Z string
+ *   timestampMsToDateOnly(ts, tz?)      — TimestampMs → YYYY-MM-DD (tz default UTC)
+ *   dateOnlyToTimestampMs(date, tz?)    — YYYY-MM-DD → TimestampMs (start of day, tz default UTC)
+ *
+ * ## Migration-compatible namespaced API (existing consumers)
+ *
  * Two namespaces representing the conversion trunk:
  *   toUtcIso   — "I want our canonical Z string. Here's what I have:"
  *   fromUtcIso — "I have our canonical Z string. Here's what I want:"
  *
- * Canonical internal + API format: UTC ISO Z string (e.g. "2026-03-16T10:30:00.000Z")
+ * Canonical ISO format: UTC ISO Z string (e.g. "2026-03-16T10:30:00.000Z")
  * Rejects offset datetime at validation boundary. No {offset: true} anywhere.
  *
- * Standalone utilities (unchanged):
- *   nowUTC()                                  — current time as Z string
- *   isValidTimeZone(tz)                        — IANA validation
- *   resolveBusinessTimezone(outlet?, company?)  — outlet→company→error
- *   resolveEventTime({at?, ts?, date?, ...})   — flexible router
- *
- * ToUtcIso namespace (produce Z string):
+ * ### ToUtcIso namespace (produce Z string):
  *   .dateLike(value, opts?)     — Date|string → Z string (replaces toRfc3339/toRfc3339Required/toUtcInstant)
  *   .epochMs(ms)                — number → Z string (replaces fromEpochMs)
  *   .businessDate(date, tz, b)  — YYYY-MM-DD + boundary → Z string (replaces normalizeDate)
  *   .asOfDateRange(date, tz)    — YYYY-MM-DD → {startUTC, nextDayUTC} (replaces asOfDateToUtcRange)
  *   .dateRange(from, to, tz)    — date range → {fromStartUTC, toEndUTC} (replaces toDateTimeRangeWithTimezone)
  *
- * FromUtcIso namespace (consume Z string):
+ * ### FromUtcIso namespace (consume Z string):
  *   .epochMs(iso)               — Z string → number (replaces toEpochMs)
  *   .mysql(iso)                 — Z string → YYYY-MM-DD HH:mm:ss (replaces toMysqlDateTime)
  *   .businessDate(iso, tz)      — Z string → YYYY-MM-DD (replaces toBusinessDate)
  *   .localDisplay(iso, tz, op?) — Z string → local display (replaces fromUtcInstant/formatForDisplay)
  *   .dateOnly(iso)              — Z string → YYYY-MM-DD (replaces toDateOnly)
+ *
+ * ## Standalone utilities (unchanged):
+ *   nowUTC()                                  — current time as Z string
+ *   isValidTimeZone(tz)                        — IANA validation
+ *   resolveBusinessTimezone(outlet?, company?)  — outlet→company→error
+ *   resolveEventTime({at?, ts?, date?, ...})   — flexible router
  *
  * @see _bmad-output/planning-artifacts/datetime-api-consolidation-plan.md
  */
@@ -90,6 +115,100 @@ export type DateOnly = z.infer<typeof DateOnlySchema>;
 export type Timezone = z.infer<typeof TimezoneSchema>;
 export type DateRangeQuery = z.infer<typeof DateRangeQuerySchema>;
 export type DateRangeWithTimezone = z.infer<typeof DateRangeWithTimezoneSchema>;
+
+// ---------------------------------------------------------------------------
+// Canonical epoch-ms-first primitives (S48 migration)
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical internal representation for all business event instants.
+ *
+ * Business logic MUST operate on `TimestampMs`. Conversions to/from ISO
+ * strings MUST occur only at API boundaries or representational contexts.
+ *
+ * @example
+ * ```ts
+ * const createdAt: TimestampMs = 1712304000000;
+ * ```
+ */
+export type TimestampMs = number;
+
+/**
+ * Parse an ISO 8601 datetime string to epoch milliseconds.
+ *
+ * Canonical boundary conversion: ISO string → TimestampMs.
+ *
+ * @param iso - ISO 8601 datetime string (Z suffix or offset)
+ * @returns epoch milliseconds
+ * @throws {Error} when the input is not a valid ISO datetime
+ */
+export function parseIsoToTimestampMs(iso: string): TimestampMs {
+  try {
+    return Temporal.Instant.from(iso).epochMilliseconds;
+  } catch {
+    throw new Error(`Invalid ISO datetime: ${iso}`);
+  }
+}
+
+/**
+ * Convert epoch milliseconds to a UTC ISO Z string.
+ *
+ * Canonical boundary conversion: TimestampMs → ISO string.
+ *
+ * @param ts - epoch milliseconds
+ * @returns UTC ISO Z string
+ * @throws {Error} when `ts` is not a finite number
+ */
+export function timestampMsToIso(ts: TimestampMs): string {
+  if (!Number.isFinite(ts)) {
+    throw new Error(`Invalid TimestampMs: ${ts}`);
+  }
+  return new Date(ts).toISOString();
+}
+
+/**
+ * Derive the business-local date (YYYY-MM-DD) from epoch milliseconds.
+ *
+ * Canonical boundary conversion: TimestampMs → business date string.
+ * Delegates to `fromUtcIso.businessDate` via `toUtcIso.epochMs` to reuse
+ * existing timezone-aware calendar logic.
+ *
+ * @param ts - epoch milliseconds
+ * @param timezone - IANA timezone (defaults to `"UTC"`)
+ * @returns date string in YYYY-MM-DD format
+ * @throws {Error} when `ts` is not a finite number or `timezone` is invalid
+ */
+export function timestampMsToDateOnly(ts: TimestampMs, timezone: string = "UTC"): string {
+  if (!Number.isFinite(ts)) {
+    throw new Error(`Invalid TimestampMs: ${ts}`);
+  }
+  if (!isValidTimeZone(timezone)) {
+    throw new Error(`Invalid timezone: ${timezone}`);
+  }
+  return fromUtcIso.businessDate(toUtcIso.epochMs(ts), timezone);
+}
+
+/**
+ * Convert a YYYY-MM-DD business date to epoch milliseconds at start of day.
+ *
+ * Canonical boundary conversion: business date string → TimestampMs.
+ * Uses the given timezone to determine start-of-day UTC instant.
+ *
+ * @param dateOnly - date string in YYYY-MM-DD format
+ * @param timezone - IANA timezone (defaults to `"UTC"`)
+ * @returns epoch milliseconds at 00:00:00.000 in the given timezone
+ * @throws {Error} when `dateOnly` is not a valid date or `timezone` is invalid
+ */
+export function dateOnlyToTimestampMs(dateOnly: string, timezone: string = "UTC"): TimestampMs {
+  if (!isValidDate(dateOnly)) {
+    throw new Error(`Invalid date format: ${dateOnly}. Expected: YYYY-MM-DD`);
+  }
+  if (!isValidTimeZone(timezone)) {
+    throw new Error(`Invalid timezone: ${timezone}`);
+  }
+  const iso = toUtcIso.businessDate(dateOnly, timezone, "start");
+  return parseIsoToTimestampMs(iso);
+}
 
 // ---------------------------------------------------------------------------
 // Timezone validation

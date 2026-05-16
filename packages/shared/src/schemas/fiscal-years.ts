@@ -3,8 +3,7 @@
 
 import { z } from "zod";
 import { NumericIdSchema } from "./common.js";
-
-const DateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+import { DateOnlySchema } from "./datetime.js";
 
 export const FiscalYearStatusSchema = z.enum(["OPEN", "CLOSED"]);
 

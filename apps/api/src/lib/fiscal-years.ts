@@ -149,9 +149,7 @@ async function triggerAutoSnapshotForFiscalYearClose(input: {
       };
     }
 
-    const asOfDate = fiscalYear.end_date instanceof Date
-      ? fromUtcIso.dateOnly(toUtcIso.dateLike(fiscalYear.end_date) as string)
-      : String(fiscalYear.end_date).slice(0, 10);
+    const asOfDate = fromUtcIso.dateOnly(toUtcIso.dateLike(fiscalYear.end_date) as string);
 
     await createAPReconciliationSnapshot({
       companyId: input.companyId,

@@ -3,8 +3,7 @@
 
 import { z } from "zod";
 import { MoneySchema, NumericIdSchema } from "./common.js";
-
-const DateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+import { DateOnlySchema } from "./datetime.js";
 const IdempotencyKeySchema = z.string().min(1).max(64);
 
 export const FixedAssetEventTypeSchema = z.enum([

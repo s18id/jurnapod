@@ -1414,15 +1414,18 @@ export async function upsertInventoryStock(
   }
 }
 
-// Default singleton instance
-let stockServiceInstance: StockServiceImpl | null = null;
-let stockServiceDb: KyselySchema | undefined = undefined;
+// Per-db-object cache using WeakMap so different Kysely/Transaction references
+// get distinct StockServiceImpl instances without retaining transaction objects
+// forever. The default no-arg path (getInventoryDb()) is cached too since
+// getInventoryDb() returns the same singleton object each call.
+const stockServiceCache = new WeakMap<object, StockServiceImpl>();
 
 export function getStockService(db?: KyselySchema): StockServiceImpl {
   const database = db ?? getInventoryDb();
-  if (!stockServiceInstance || stockServiceDb !== database) {
-    stockServiceInstance = new StockServiceImpl(database);
-    stockServiceDb = database;
+  let service = stockServiceCache.get(database);
+  if (!service) {
+    service = new StockServiceImpl(database);
+    stockServiceCache.set(database, service);
   }
-  return stockServiceInstance;
+  return service;
 }

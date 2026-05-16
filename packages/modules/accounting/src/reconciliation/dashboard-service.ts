@@ -19,7 +19,7 @@ import { Temporal } from "@js-temporal/polyfill";
 import {
   resolveBusinessTimezone,
   toUtcIso,
-  fromUtcIso,
+  timestampMsToDateOnly,
 } from "@jurnapod/shared";
 
 // =============================================================================
@@ -604,7 +604,7 @@ export class ReconciliationDashboardService {
 
     // Fall back to asOfEpochMs or default to current month using canonical period boundaries
     if (asOfEpochMs !== undefined) {
-      const bizDate = fromUtcIso.businessDate(toUtcIso.epochMs(asOfEpochMs), timezone);
+      const bizDate = timestampMsToDateOnly(asOfEpochMs, timezone);
       const year = parseInt(bizDate.slice(0, 4), 10);
       const month = parseInt(bizDate.slice(5, 7), 10);
       const periodStart = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
@@ -620,7 +620,7 @@ export class ReconciliationDashboardService {
     }
 
     // Default: current month using canonical period boundaries
-    const bizDateDefault = fromUtcIso.businessDate(toUtcIso.epochMs(Temporal.Now.instant().epochMilliseconds), timezone);
+    const bizDateDefault = timestampMsToDateOnly(Temporal.Now.instant().epochMilliseconds, timezone);
     const yearDefault = parseInt(bizDateDefault.slice(0, 4), 10);
     const monthDefault = parseInt(bizDateDefault.slice(5, 7), 10);
     const periodStartDefault = `${String(yearDefault).padStart(4, "0")}-${String(monthDefault).padStart(2, "0")}-01`;
@@ -949,7 +949,7 @@ export class ReconciliationDashboardService {
     const timezone = await this.resolveBusinessTimezone(companyId);
 
     // Build a Temporal.PlainDate from the current period anchor (first day of current month in business TZ)
-    const bizDateForPeriod = fromUtcIso.businessDate(toUtcIso.epochMs(currentPeriodStart.getTime()), timezone);
+    const bizDateForPeriod = timestampMsToDateOnly(currentPeriodStart.getTime(), timezone);
     const currentPlainDate = Temporal.PlainDate.from({
       year: parseInt(bizDateForPeriod.slice(0, 4), 10),
       month: parseInt(bizDateForPeriod.slice(5, 7), 10),
@@ -967,7 +967,7 @@ export class ReconciliationDashboardService {
       const targetEpochMs = targetPlainDate.toZonedDateTime(timezone).epochMilliseconds;
 
       // Get canonical month boundaries for target month
-      const bizDateTarget = fromUtcIso.businessDate(toUtcIso.epochMs(targetEpochMs), timezone);
+      const bizDateTarget = timestampMsToDateOnly(targetEpochMs, timezone);
       const yearTarget = parseInt(bizDateTarget.slice(0, 4), 10);
       const monthTarget = parseInt(bizDateTarget.slice(5, 7), 10);
       const periodStartTarget = `${String(yearTarget).padStart(4, "0")}-${String(monthTarget).padStart(2, "0")}-01`;

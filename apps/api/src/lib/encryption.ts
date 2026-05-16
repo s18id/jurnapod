@@ -8,4 +8,4 @@ export {
   decrypt,
   isEncryptedPayload,
   type EncryptedPayload,
-} from '@jurnapod/shared';
+} from '@jurnapod/shared/lib/encryption';

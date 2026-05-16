@@ -3,6 +3,7 @@
 
 import { rowsToCsv, downloadCsv } from "../lib/import/csv";
 import { parseDelimited as parseDelimitedShared } from "../lib/import/delimited";
+import { fromUtcIso, nowUTC } from "@jurnapod/shared";
 
 export type NormalizedOutletRow = {
   code: string | null;
@@ -395,7 +396,7 @@ export function buildOutletsCsv(outlets: OutletExportRow[]): string {
 
 export function downloadOutletsCsv(outlets: OutletExportRow[], companyId?: number): void {
   const csv = buildOutletsCsv(outlets);
-  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const date = fromUtcIso.dateOnly(nowUTC()).replace(/-/g, "");
   const companyPart = companyId ? `-${companyId}` : "";
   downloadCsv(csv, `outlets${companyPart}-${date}.csv`);
 }
