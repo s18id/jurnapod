@@ -1128,6 +1128,21 @@ inventoryRoutes.get("/items/:id/prices", async (c) => {
  * This enables auto-generated OpenAPI specs for the inventory endpoints.
  */
 export function registerInventoryRoutes(app: { openapi: OpenAPIHonoType["openapi"] }): void {
+  // Shared item response schema (runtime shape from items adapter, aligns with NormalizedItem)
+  const ItemResponseSchema = z.object({
+    id: NumericIdSchema,
+    company_id: NumericIdSchema,
+    sku: z.string().nullable(),
+    name: z.string(),
+    type: z.enum(["SERVICE", "PRODUCT", "INGREDIENT", "RECIPE"]),
+    item_group_id: NumericIdSchema.nullable(),
+    barcode: z.string().nullable(),
+    cogs_account_id: NumericIdSchema.nullable(),
+    inventory_asset_account_id: NumericIdSchema.nullable(),
+    is_active: z.boolean(),
+    updated_at: z.string(),
+  });
+
   // GET /inventory/items - List items
   const listItemsRoute = createRoute({
     path: "/inventory/items",
@@ -1143,7 +1158,17 @@ export function registerInventoryRoutes(app: { openapi: OpenAPIHonoType["openapi
       }),
     },
     responses: {
-      200: { description: "List of items" },
+      200: {
+        description: "List of items",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              data: z.array(ItemResponseSchema),
+            }),
+          },
+        },
+      },
       400: { description: "Invalid request" },
       401: { description: "Unauthorized" },
     },
@@ -1178,7 +1203,17 @@ export function registerInventoryRoutes(app: { openapi: OpenAPIHonoType["openapi
       }),
     },
     responses: {
-      200: { description: "Item details" },
+      200: {
+        description: "Item details",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              data: ItemResponseSchema,
+            }),
+          },
+        },
+      },
       400: { description: "Invalid request" },
       401: { description: "Unauthorized" },
       404: { description: "Item not found" },
@@ -1217,7 +1252,17 @@ export function registerInventoryRoutes(app: { openapi: OpenAPIHonoType["openapi
       },
     },
     responses: {
-      201: { description: "Item created" },
+      201: {
+        description: "Item created",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              data: ItemResponseSchema,
+            }),
+          },
+        },
+      },
       400: { description: "Invalid request" },
       401: { description: "Unauthorized" },
       409: { description: "Item conflict" },

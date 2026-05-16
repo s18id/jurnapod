@@ -26,6 +26,7 @@
     "test:integration:inventory:performance": "vitest run __test__/integration --testNamePattern='inventory.*performance'",
     "test:watch": "vitest",
     "test:ws": "node ../../scripts/websocket-test.js",
+    "test:smoke:stable-api": "vitest run __test__/integration/smoke/stable-api-smoke.test.ts",
     "fix:duplicate-roles": "tsx src/scripts/fix-duplicate-role-assignments.ts",
     "check:test-sql": "npx tsx scripts/check-test-sql.ts",
     "generate:openapi-scaffold": "tsx scripts/generate-openapi-scaffold.ts"

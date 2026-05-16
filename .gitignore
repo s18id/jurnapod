@@ -37,3 +37,6 @@ uploads/
 test-logs/
 .opencode-logs/
 *.tar.gz
+
+# API contract diff temp output
+.tmp-openapi-current.json

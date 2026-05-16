@@ -18,7 +18,9 @@ import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
 import {
   AccountCreateRequestSchema,
+  AccountResponseSchema,
   AccountUpdateRequestSchema,
+  AccountTypeResponseSchema,
   NumericIdSchema,
   FixedAssetCategoryCreateRequestSchema,
   FixedAssetCategoryUpdateRequestSchema,
@@ -1704,7 +1706,17 @@ export function registerAccountRoutes(app: { openapi: OpenAPIHonoType["openapi"]
       }),
     },
     responses: {
-      200: { description: "List of accounts" },
+      200: {
+        description: "List of accounts",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              data: z.array(AccountResponseSchema),
+            }),
+          },
+        },
+      },
       400: { description: "Invalid request" },
       401: { description: "Unauthorized" },
     },
@@ -1746,7 +1758,17 @@ export function registerAccountRoutes(app: { openapi: OpenAPIHonoType["openapi"]
       }),
     },
     responses: {
-      200: { description: "Account details" },
+      200: {
+        description: "Account details",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              data: AccountResponseSchema,
+            }),
+          },
+        },
+      },
       400: { description: "Invalid request" },
       401: { description: "Unauthorized" },
       404: { description: "Account not found" },
@@ -1785,7 +1807,17 @@ export function registerAccountRoutes(app: { openapi: OpenAPIHonoType["openapi"]
       },
     },
     responses: {
-      201: { description: "Account created" },
+      201: {
+        description: "Account created",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              data: AccountResponseSchema,
+            }),
+          },
+        },
+      },
       400: { description: "Invalid request" },
       401: { description: "Unauthorized" },
       409: { description: "Account code already exists" },
@@ -1815,7 +1847,17 @@ export function registerAccountRoutes(app: { openapi: OpenAPIHonoType["openapi"]
     description: "Get list of available account types",
     security: [{ BearerAuth: [] }],
     responses: {
-      200: { description: "List of account types" },
+      200: {
+        description: "List of account types",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              data: z.array(AccountTypeResponseSchema),
+            }),
+          },
+        },
+      },
       401: { description: "Unauthorized" },
     },
   });

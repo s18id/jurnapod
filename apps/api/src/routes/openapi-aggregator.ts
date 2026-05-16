@@ -57,6 +57,7 @@ import { registerTrialBalanceRoutes } from "./admin-dashboards/trial-balance.js"
 import { registerReconciliationRoutes } from "./admin-dashboards/reconciliation.js";
 import { registerPeriodCloseRoutes } from "./admin-dashboards/period-close.js";
 import { registerSyncDashboardRoutes } from "./admin-dashboards/sync.js";
+import { registerPurchasingOpenApiRoutes } from "./purchasing/openapi.js";
 
 // Create OpenAPIHono instance for spec generation
 const app = new OpenAPIHono({
@@ -125,6 +126,7 @@ registerTrialBalanceRoutes(app);
 registerReconciliationRoutes(app);
 registerPeriodCloseRoutes(app);
 registerSyncDashboardRoutes(app);
+registerPurchasingOpenApiRoutes(app);
 
 // Generate the base OpenAPI spec
 const baseSpec = app.getOpenAPIDocument({

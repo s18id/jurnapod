@@ -388,11 +388,11 @@ const ErrorResponseSchema = z.object({
 }).openapi("ErrorResponse");
 
 export const registerTaxRateRoutes = (app: OpenAPIHonoInterface): void => {
-  // GET /tax-rates - List tax rates for company
+  // GET /settings/tax-rates - List tax rates for company
   app.openapi(
     createRoute({
       method: "get",
-      path: "/tax-rates",
+      path: "/settings/tax-rates",
       tags: ["Settings"],
       summary: "List tax rates",
       description: "List all tax rates for the company",
@@ -419,11 +419,11 @@ export const registerTaxRateRoutes = (app: OpenAPIHonoInterface): void => {
     }
   );
 
-  // GET /tax-rates/default - List default tax rates
+  // GET /settings/tax-rates/default - List default tax rates
   app.openapi(
     createRoute({
       method: "get",
-      path: "/tax-rates/default",
+      path: "/settings/tax-rates/default",
       tags: ["Settings"],
       summary: "List default tax rates",
       description: "List default tax rates for the company",
@@ -450,11 +450,11 @@ export const registerTaxRateRoutes = (app: OpenAPIHonoInterface): void => {
     }
   );
 
-  // POST /tax-rates - Create tax rate
+  // POST /settings/tax-rates - Create tax rate
   app.openapi(
     createRoute({
       method: "post",
-      path: "/tax-rates",
+      path: "/settings/tax-rates",
       tags: ["Settings"],
       summary: "Create tax rate",
       description: "Create a new tax rate",
@@ -512,11 +512,11 @@ export const registerTaxRateRoutes = (app: OpenAPIHonoInterface): void => {
     }
   );
 
-  // GET /tax-defaults - Get company tax defaults
+  // GET /settings/tax-rates/defaults - Get company tax defaults
   app.openapi(
     createRoute({
       method: "get",
-      path: "/tax-defaults",
+      path: "/settings/tax-rates/defaults",
       tags: ["Settings"],
       summary: "Get tax defaults",
       description: "Get default tax rate IDs for the company",
@@ -543,11 +543,11 @@ export const registerTaxRateRoutes = (app: OpenAPIHonoInterface): void => {
     }
   );
 
-  // PUT /tax-defaults - Update company tax defaults
+  // PUT /settings/tax-rates/defaults - Update company tax defaults
   app.openapi(
     createRoute({
       method: "put",
-      path: "/tax-defaults",
+      path: "/settings/tax-rates/defaults",
       tags: ["Settings"],
       summary: "Update tax defaults",
       description: "Update default tax rate IDs for the company",
@@ -588,11 +588,11 @@ export const registerTaxRateRoutes = (app: OpenAPIHonoInterface): void => {
     }
   );
 
-  // PUT /tax-rates/:id - Update tax rate
+  // PUT /settings/tax-rates/:id - Update tax rate
   app.openapi(
     createRoute({
       method: "put",
-      path: "/tax-rates/{id}",
+      path: "/settings/tax-rates/{id}",
       tags: ["Settings"],
       summary: "Update tax rate",
       description: "Update an existing tax rate",
@@ -656,11 +656,11 @@ export const registerTaxRateRoutes = (app: OpenAPIHonoInterface): void => {
     }
   );
 
-  // DELETE /tax-rates/:id - Delete tax rate
+  // DELETE /settings/tax-rates/:id - Delete tax rate
   app.openapi(
     createRoute({
       method: "delete",
-      path: "/tax-rates/{id}",
+      path: "/settings/tax-rates/{id}",
       tags: ["Settings"],
       summary: "Delete tax rate",
       description: "Delete a tax rate",

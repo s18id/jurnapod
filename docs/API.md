@@ -20,6 +20,7 @@ POST /api/auth/login
 Content-Type: application/json
 
 {
+  "companyCode": "JP",
   "email": "user@example.com",
   "password": "password123"
 }
@@ -28,12 +29,11 @@ Content-Type: application/json
 **Response:**
 ```json
 {
-  "access_token": "jwt_token_here",
-  "refresh_token": "refresh_token_here",
-  "user": {
-    "id": 1,
-    "email": "user@example.com",
-    "company_id": 1
+  "success": true,
+  "data": {
+    "access_token": "jwt_token_here",
+    "token_type": "Bearer",
+    "expires_in": 3600
   }
 }
 ```
@@ -45,17 +45,20 @@ Content-Type: application/json
 ### Pull Master Data
 
 ```http
-GET /api/sync/pull?outlet_id=1&since_version=0
+GET /api/sync/pull?outlet_id={outletId}&since_version=0
 ```
 
 **Response:**
 ```json
 {
-  "version": 123,
-  "items": [...],
-  "prices": [...],
-  "tax_rates": [...],
-  "tax_defaults": [...]
+  "success": true,
+  "data": {
+    "data_version": 123,
+    "items": [],
+    "prices": [],
+    "tax_rates": [],
+    "tax_defaults": []
+  }
 }
 ```
 
@@ -126,29 +129,29 @@ Content-Type: application/json
   "success": false,
   "error": {
     "code": "CONFLICT",
-    "message": "Table state conflict detected"
-  },
-  "details": [
-    {
-      "client_tx_id": "pos-evt-001",
-      "status": "CONFLICT",
-      "table_version": 5,
-      "conflict_payload": {
-        "current_occupancy": {
-          "status_id": 2,
-          "guest_count": 2,
-          "service_session_id": 9001
-        },
-        "active_session": {
-          "id": 9001,
-          "status_id": 1,
-          "started_at": "2026-03-19T09:55:00.000Z"
-        },
-        "current_version": 5,
-        "conflict_reason": "Table state has changed since last sync (optimistic version mismatch)"
+    "message": "Table state conflict detected",
+    "details": [
+      {
+        "client_tx_id": "pos-evt-001",
+        "status": "CONFLICT",
+        "table_version": 5,
+        "conflict_payload": {
+          "current_occupancy": {
+            "status_id": 2,
+            "guest_count": 2,
+            "service_session_id": 9001
+          },
+          "active_session": {
+            "id": 9001,
+            "status_id": 1,
+            "started_at": "2026-03-19T09:55:00.000Z"
+          },
+          "current_version": 5,
+          "conflict_reason": "Table state has changed since last sync (optimistic version mismatch)"
+        }
       }
-    }
-  ]
+    ]
+  }
 }
 ```
 
@@ -213,7 +216,7 @@ Service sessions support multi-cashier operation with offline-safe idempotency.
 
 `ACTIVE -> LOCKED_FOR_PAYMENT -> CLOSED`
 
-### Finalize Checkpoints (recommended model)
+### Finalize Checkpoints (canonical model)
 
 - Session lines remain canonical in `table_service_session_lines` while service is active.
 - Each `finalize-batch` operation syncs current open lines to `pos_order_snapshot_lines` so other cashiers see the latest finalized order state.
@@ -330,7 +333,6 @@ POST /api/sales/invoices
 Content-Type: application/json
 
 {
-  "company_id": 1,
   "outlet_id": 1,
   "customer_name": "John Doe",
   "lines": [
@@ -400,8 +402,8 @@ POST /api/settings/tax-rates
 ### Tax Defaults
 
 ```http
-GET /api/settings/tax-defaults
-PUT /api/settings/tax-defaults
+GET /api/settings/tax-rates/defaults
+PUT /api/settings/tax-rates/defaults
 ```
 
 ---
@@ -411,31 +413,31 @@ PUT /api/settings/tax-defaults
 ### General Ledger
 
 ```http
-GET /api/reports/general-ledger?company_id=1&from=2026-01-01&to=2026-12-31
+GET /api/reports/general-ledger?from=2026-01-01&to=2026-12-31
 ```
 
 ### Trial Balance
 
 ```http
-GET /api/reports/trial-balance?company_id=1&as_of=2026-12-31
+GET /api/reports/trial-balance?as_of=2026-12-31
 ```
 
 ### Profit & Loss
 
 ```http
-GET /api/reports/profit-loss?company_id=1&from=2026-01-01&to=2026-12-31
+GET /api/reports/profit-loss?from=2026-01-01&to=2026-12-31
 ```
 
 ### Journal Entries
 
 ```http
-GET /api/reports/journals?company_id=1&from=2026-01-01&to=2026-12-31
+GET /api/reports/journals?from=2026-01-01&to=2026-12-31
 ```
 
 ### POS Transactions
 
 ```http
-GET /api/reports/pos-transactions?company_id=1&outlet_id=1&from=2026-01-01&to=2026-12-31
+GET /api/reports/pos-transactions?outlet_id={outletId}&from=2026-01-01&to=2026-12-31
 ```
 
 ---
@@ -835,6 +837,7 @@ All endpoints return standard error format:
 
 ```json
 {
+  "success": false,
   "error": {
     "code": "VALIDATION_ERROR",
     "message": "Invalid request data",
@@ -853,6 +856,93 @@ All endpoints return standard error format:
 - `409` - Conflict (e.g., table not available, group has active reservations)
 - `422` - Unprocessable Entity
 - `500` - Internal Server Error
+
+---
+
+## API Stability and Contract Governance
+
+The Jurnapod API uses a **stability classification** system to clearly define which endpoints clients can rely on and what changes are permitted without warning.
+
+### Stability Levels
+
+| Level | Meaning | Breaking Changes |
+|-------|---------|-----------------|
+| `stable` | Safe for production clients and internal app contracts | **No**, unless versioned or migrated |
+| `beta` | Usable internally; still under active design | Yes, with release notes |
+| `internal` | Not part of the client-facing contract | Yes, at any time |
+| `deprecated` | Scheduled for removal | Only for removal timeline |
+
+### Stable Endpoint Baseline
+
+The authoritative list of stable endpoints is in `docs/api-contracts/stable-endpoints.json` and is protected by CI via `scripts/check-api-contract-diff.ts`.
+
+**Current stable count:** 136 endpoints (OpenAPI-registered and runtime-mounted)
+
+**Baseline file:** `docs/api-contracts/openapi-0.3-stability-baseline.json`
+
+### Contract Documents
+
+| Document | Purpose |
+|----------|---------|
+| `docs/api-stability-matrix.md` | Exhaustive endpoint classification table (method/path/owner/clients/auth/permissions/idempotency/pagination) |
+| `docs/api-contracts/sync-contract.md` | POS sync push/pull contract, `client_tx_id` idempotency, result ordering, atomicity |
+| `docs/api-contracts/auth-acl-contract.md` | Auth model, role/permission system, company/outlet scoping, negative test requirements |
+| `docs/api-contracts/error-contract.md` | Standard error envelope, error code registry, HTTP status mapping |
+| `docs/api-contracts/datetime-money-contract.md` | RFC3339 datetime format, money format (string decimal), currency/FX rules, cursor semantics |
+| `docs/api-contracts/stable-contract-rules.md` | Change classification table (allowed / requires changelog / requires version bump) |
+| `docs/api-contracts/CHANGELOG.md` | Change history for stable endpoints |
+
+### Breaking Change Detection
+
+The CI gate `lint:api-contracts` runs on every PR to detect breaking changes to stable endpoints:
+
+```bash
+npx tsx scripts/check-api-contract-diff.ts
+```
+
+- **Exit 0**: No changes, or only additive changes with changelog entry
+- **Exit 1**: Breaking change detected (MUST be resolved)
+- **Exit 2**: Additive change without changelog entry (MUST be documented)
+- **Exit 3**: Missing baseline files
+
+### Beta Gaps (Known)
+
+The following groups are classified `beta` until OpenAPI registration and stable-list promotion are complete:
+
+| Group | Count | OpenAPI Required |
+|-------|------:|-----------------|
+| Non-promoted `/api/purchasing/*` routes (supplier statements, AP reconciliation detail/export/snapshots) | 13 | Yes |
+
+These MUST have OpenAPI registration and stable-list promotion before classification as `stable`.
+
+### Key Contracts
+
+**Sync (`POST /api/sync/push`)**
+- `client_tx_id` is required and is the idempotency key
+- Result statuses: `OK`, `DUPLICATE`, `ERROR`, `CONFLICT`
+- Response results preserve input order
+
+**Auth**
+- JWT Bearer token in `Authorization` header
+- Token expiry: configurable, default 15 minutes
+- Refresh via `POST /api/auth/refresh` with httpOnly cookie
+- All auth errors return `401 UNAUTHORIZED` (no distinction in message)
+
+**Error Envelope**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Human-readable description",
+    "details": []
+  }
+}
+```
+
+**Datetime**: RFC3339 with timezone (`2026-03-19T10:00:00.000Z`)
+
+**Money**: Decimal string (`"100000.00"`) — never floating-point
 
 ---
 

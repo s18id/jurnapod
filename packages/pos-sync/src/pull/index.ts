@@ -191,6 +191,10 @@ function transformVariants(
 
 /**
  * Transform variant prices to SyncPullVariantPrice format.
+ *
+ * Deduplicates outlet-specific and company-default prices by (item_id, variant_id) key.
+ * Outlet-specific prices win over company defaults. All emitted rows are projected to
+ * the requested outlet ID so the schema requires a positive integer.
  */
 function transformVariantPrices(
   prices: Array<{
@@ -201,16 +205,30 @@ function transformVariantPrices(
     price: number;
     is_active: boolean;
     updated_at: string;
-  }>
+  }>,
+  outletId: number
 ): SyncPullVariantPrice[] {
-  return prices.map((p) => ({
-    id: p.id,
-    item_id: p.item_id,
-    variant_id: p.variant_id,
-    outlet_id: p.outlet_id ?? 0,
-    price: p.price,
-    is_active: p.is_active,
-    updated_at: p.updated_at,
+  const map = new Map<string, { row: (typeof prices)[number]; isOutletSpecific: boolean }>();
+
+  for (const p of prices) {
+    const key = `${p.item_id}:${p.variant_id ?? "default"}`;
+    if (p.outlet_id === outletId) {
+      // Outlet-specific always wins over any previously seen default
+      map.set(key, { row: p, isOutletSpecific: true });
+    } else if (p.outlet_id === null && !map.has(key)) {
+      // Company default only when no outlet-specific row exists for this key
+      map.set(key, { row: p, isOutletSpecific: false });
+    }
+  }
+
+  return Array.from(map.values()).map(({ row }) => ({
+    id: row.id,
+    item_id: row.item_id,
+    variant_id: row.variant_id,
+    outlet_id: outletId,
+    price: row.price,
+    is_active: row.is_active,
+    updated_at: row.updated_at,
   }));
 }
 
@@ -264,7 +282,7 @@ export async function handlePullSync(
       items: transformItems(items),
       item_groups: [],
       prices: [],
-      variant_prices: transformVariantPrices(variantPrices),
+      variant_prices: transformVariantPrices(variantPrices, outletId),
       config: buildConfig(taxRates, defaultTaxRateIds),
       tables: transformTables(tables),
       reservations: transformReservations(reservations),

@@ -18,7 +18,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
-import { NumericIdSchema, SyncPullPayloadSchema } from "@jurnapod/shared";
+import { NumericIdSchema, SyncPullPayloadSchema, SyncPullResponseSchema } from "@jurnapod/shared";
 import { authenticateRequest, requireAccess, requireAccessForOutletQuery, type AuthContext } from "../../lib/auth-guard.js";
 import { errorResponse, successResponse } from "@jurnapod/shared";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
@@ -35,7 +35,7 @@ declare module "hono" {
 // =============================================================================
 
 const syncPullRequestSchema = z.object({
-  outlet_id: NumericIdSchema,
+  outlet_id: z.coerce.number().int().positive(),
   since_version: z.coerce.number().int().min(0).default(0),
   orders_cursor: z.coerce.number().int().min(0).optional()
 });
@@ -182,7 +182,7 @@ export function registerSyncPullRoutes(app: { openapi: OpenAPIHonoType["openapi"
     },
     responses: {
       200: {
-        content: { "application/json": { schema: SyncPullPayloadSchema } },
+        content: { "application/json": { schema: SyncPullResponseSchema } },
         description: "Sync pull successful",
       },
       400: {

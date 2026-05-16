@@ -21,7 +21,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
-import { NumericIdSchema } from "@jurnapod/shared";
+import { NumericIdSchema, UploadImageResponseSchema, ItemImagesResponseSchema } from "@jurnapod/shared";
 import {
   authenticateRequest,
   requireAccess,
@@ -402,6 +402,26 @@ imageRoutes.post("/:id/images/:imageId/set-primary", async (c) => {
  * Registers inventory image routes with an OpenAPIHono instance.
  */
 export function registerImageRoutes(app: { openapi: OpenAPIHonoType["openapi"] }): void {
+  const ItemImageDetailResponseSchema = z.object({
+    id: NumericIdSchema,
+    item_id: NumericIdSchema,
+    file_name: z.string(),
+    original_url: z.string(),
+    large_url: z.string(),
+    medium_url: z.string(),
+    thumbnail_url: z.string(),
+    width_pixels: z.number(),
+    height_pixels: z.number(),
+    file_size_bytes: z.number(),
+    is_primary: z.boolean(),
+    sort_order: z.number(),
+    created_at: z.string(),
+  });
+
+  const ItemImageActionResponseSchema = z.object({
+    id: NumericIdSchema,
+    message: z.string(),
+  });
 
   // POST /inventory/items/{id}/images
   const uploadRoute = createRoute({
@@ -417,9 +437,20 @@ export function registerImageRoutes(app: { openapi: OpenAPIHonoType["openapi"] }
       })
     },
     responses: {
-      201: { description: "Image uploaded successfully" },
+      201: {
+        description: "Image uploaded successfully",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              data: UploadImageResponseSchema,
+            }),
+          },
+        },
+      },
       400: { description: "Invalid request" },
       401: { description: "Unauthorized" },
+      404: { description: "Item or image not found" },
       500: { description: "Internal server error" }
     }
   });
@@ -438,7 +469,18 @@ export function registerImageRoutes(app: { openapi: OpenAPIHonoType["openapi"] }
       })
     },
     responses: {
-      200: { description: "Images retrieved successfully" },
+      200: {
+        description: "Images retrieved successfully",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              data: ItemImagesResponseSchema,
+            }),
+          },
+        },
+      },
+      400: { description: "Invalid request parameters" },
       401: { description: "Unauthorized" },
       500: { description: "Internal server error" }
     }
@@ -459,7 +501,18 @@ export function registerImageRoutes(app: { openapi: OpenAPIHonoType["openapi"] }
       })
     },
     responses: {
-      200: { description: "Image retrieved successfully" },
+      200: {
+        description: "Image retrieved successfully",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              data: ItemImageDetailResponseSchema,
+            }),
+          },
+        },
+      },
+      400: { description: "Invalid request parameters" },
       401: { description: "Unauthorized" },
       404: { description: "Image not found" },
       500: { description: "Internal server error" }
@@ -491,7 +544,17 @@ export function registerImageRoutes(app: { openapi: OpenAPIHonoType["openapi"] }
       }
     },
     responses: {
-      200: { description: "Image updated successfully" },
+      200: {
+        description: "Image updated successfully",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              data: ItemImageActionResponseSchema,
+            }),
+          },
+        },
+      },
       400: { description: "Invalid request" },
       401: { description: "Unauthorized" },
       404: { description: "Image not found" },
@@ -514,7 +577,18 @@ export function registerImageRoutes(app: { openapi: OpenAPIHonoType["openapi"] }
       })
     },
     responses: {
-      200: { description: "Image deleted successfully" },
+      200: {
+        description: "Image deleted successfully",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              data: ItemImageActionResponseSchema,
+            }),
+          },
+        },
+      },
+      400: { description: "Invalid request parameters" },
       401: { description: "Unauthorized" },
       404: { description: "Image not found" },
       500: { description: "Internal server error" }
@@ -536,7 +610,18 @@ export function registerImageRoutes(app: { openapi: OpenAPIHonoType["openapi"] }
       })
     },
     responses: {
-      200: { description: "Primary image set successfully" },
+      200: {
+        description: "Primary image set successfully",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              data: ItemImageActionResponseSchema,
+            }),
+          },
+        },
+      },
+      400: { description: "Invalid request parameters" },
       401: { description: "Unauthorized" },
       404: { description: "Image not found" },
       500: { description: "Internal server error" }
@@ -703,6 +788,12 @@ export function registerImageRoutes(app: { openapi: OpenAPIHonoType["openapi"] }
 
   app.openapi(deleteRoute, async (c) => {
     const auth = c.get("auth");
+    const itemIdStr = c.req.param("id");
+    const itemIdParse = NumericIdSchema.safeParse(itemIdStr);
+    if (!itemIdParse.success) {
+      return errorResponse("INVALID_REQUEST", "Invalid item ID", 400);
+    }
+
     const imageIdStr = c.req.param("imageId");
     const imageIdParse = NumericIdSchema.safeParse(imageIdStr);
     if (!imageIdParse.success) {

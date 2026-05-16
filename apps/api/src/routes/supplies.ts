@@ -133,7 +133,7 @@ suppliesRoutes.post("/", async (c) => {
     const accessResult = await requireAccess({
       module: "inventory",
       resource: "items",
-      permission: "read"
+      permission: "create"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -214,7 +214,7 @@ suppliesRoutes.patch("/:id", async (c) => {
     const accessResult = await requireAccess({
       module: "inventory",
       resource: "items",
-      permission: "create"
+      permission: "update"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -317,13 +317,48 @@ suppliesRoutes.delete("/:id", async (c) => {
 // ============================================================================
 
 /**
+ * Supply response schema for OpenAPI registration.
+ * Reflects the Supply interface from @jurnapod/modules-inventory.
+ */
+const SupplyResponseSchema = zodOpenApi
+  .object({
+    id: zodOpenApi.number().int().openapi({ description: "Supply ID", example: 1 }),
+    sku: zodOpenApi.string().nullable().openapi({ description: "Stock keeping unit", example: "SUP-001" }),
+    name: zodOpenApi.string().openapi({ description: "Supply name", example: "Coffee Beans" }),
+    unit: zodOpenApi.string().openapi({ description: "Unit of measure", example: "kg" }),
+    is_active: zodOpenApi.boolean().openapi({ description: "Whether the supply is active", example: true }),
+    updated_at: zodOpenApi.string().openapi({ description: "Last update timestamp (ISO 8601)", example: "2026-01-15T10:30:00.000Z" }),
+  })
+  .openapi("SupplyResponse");
+
+/**
+ * Standard error envelope schema shared across supplies OpenAPI responses.
+ */
+const SuppliesErrorResponseSchema = zodOpenApi
+  .object({
+    success: zodOpenApi.literal(false).openapi({ example: false }),
+    error: zodOpenApi
+      .object({
+        code: zodOpenApi.string().openapi({ description: "Error code" }),
+        message: zodOpenApi.string().openapi({ description: "Error message" }),
+      })
+      .openapi("SuppliesErrorDetail"),
+  })
+  .openapi("SuppliesErrorResponse");
+
+/**
  * Registers supply routes with an OpenAPIHono instance.
- * This enables auto-generated OpenAPI specs for the supply endpoints.
+ *
+ * NOTE: The handlers registered below are OpenAPI spec-registration scaffolding
+ * only. Runtime authentication, authorization (ACL), and tenant scoping are
+ * enforced by the `suppliesRoutes` Hono instance (lines 68–313). The OpenAPI
+ * handlers exist solely to produce accurate API documentation and do not
+ * duplicate the runtime guards.
  */
 export function registerSupplyRoutes(app: { openapi: OpenAPIHonoType["openapi"] }): void {
-  // GET /supplies - List supplies
+  // GET /inventory/supplies - List supplies
   const listSuppliesRoute = createRoute({
-    path: "/supplies",
+    path: "/inventory/supplies",
     method: "get",
     tags: ["Inventory"],
     summary: "List supplies",
@@ -335,9 +370,27 @@ export function registerSupplyRoutes(app: { openapi: OpenAPIHonoType["openapi"] 
       }),
     },
     responses: {
-      200: { description: "List of supplies" },
-      400: { description: "Invalid request" },
-      401: { description: "Unauthorized" },
+      200: {
+        content: {
+          "application/json": {
+            schema: zodOpenApi
+              .object({
+                success: zodOpenApi.literal(true).openapi({ example: true }),
+                data: zodOpenApi.array(SupplyResponseSchema).openapi({ description: "List of supplies" }),
+              })
+              .openapi("SuppliesListResponse"),
+          },
+        },
+        description: "List of supplies",
+      },
+      400: {
+        content: { "application/json": { schema: SuppliesErrorResponseSchema } },
+        description: "Invalid request",
+      },
+      401: {
+        content: { "application/json": { schema: SuppliesErrorResponseSchema } },
+        description: "Unauthorized",
+      },
     },
   });
 
@@ -357,9 +410,9 @@ export function registerSupplyRoutes(app: { openapi: OpenAPIHonoType["openapi"] 
     return c.json({ success: true, data: supplies });
   }) as any);
 
-  // GET /supplies/:id - Get supply
+  // GET /inventory/supplies/:id - Get supply
   const getSupplyRoute = createRoute({
-    path: "/supplies/{id}",
+    path: "/inventory/supplies/{id}",
     method: "get",
     tags: ["Inventory"],
     summary: "Get supply",
@@ -371,10 +424,31 @@ export function registerSupplyRoutes(app: { openapi: OpenAPIHonoType["openapi"] 
       }),
     },
     responses: {
-      200: { description: "Supply details" },
-      400: { description: "Invalid request" },
-      401: { description: "Unauthorized" },
-      404: { description: "Supply not found" },
+      200: {
+        content: {
+          "application/json": {
+            schema: zodOpenApi
+              .object({
+                success: zodOpenApi.literal(true).openapi({ example: true }),
+                data: SupplyResponseSchema,
+              })
+              .openapi("SupplyGetResponse"),
+          },
+        },
+        description: "Supply details",
+      },
+      400: {
+        content: { "application/json": { schema: SuppliesErrorResponseSchema } },
+        description: "Invalid request",
+      },
+      401: {
+        content: { "application/json": { schema: SuppliesErrorResponseSchema } },
+        description: "Unauthorized",
+      },
+      404: {
+        content: { "application/json": { schema: SuppliesErrorResponseSchema } },
+        description: "Supply not found",
+      },
     },
   });
 
@@ -392,9 +466,9 @@ export function registerSupplyRoutes(app: { openapi: OpenAPIHonoType["openapi"] 
     return c.json({ success: true, data: supply });
   }) as any);
 
-  // POST /supplies - Create supply
+  // POST /inventory/supplies - Create supply
   const createSupplyRoute = createRoute({
-    path: "/supplies",
+    path: "/inventory/supplies",
     method: "post",
     tags: ["Inventory"],
     summary: "Create supply",
@@ -410,10 +484,31 @@ export function registerSupplyRoutes(app: { openapi: OpenAPIHonoType["openapi"] 
       },
     },
     responses: {
-      201: { description: "Supply created" },
-      400: { description: "Invalid request" },
-      401: { description: "Unauthorized" },
-      409: { description: "Supply conflict" },
+      201: {
+        content: {
+          "application/json": {
+            schema: zodOpenApi
+              .object({
+                success: zodOpenApi.literal(true).openapi({ example: true }),
+                data: SupplyResponseSchema,
+              })
+              .openapi("SupplyCreateResponse"),
+          },
+        },
+        description: "Supply created",
+      },
+      400: {
+        content: { "application/json": { schema: SuppliesErrorResponseSchema } },
+        description: "Invalid request",
+      },
+      401: {
+        content: { "application/json": { schema: SuppliesErrorResponseSchema } },
+        description: "Unauthorized",
+      },
+      409: {
+        content: { "application/json": { schema: SuppliesErrorResponseSchema } },
+        description: "Supply conflict",
+      },
     },
   });
 

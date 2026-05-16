@@ -115,6 +115,31 @@ jobs:
       - name: Lint migration triggers (blocking gate)
         run: npm run lint:migrations
 
+  lint-api-contracts:
+    name: Lint API Contracts (required gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build library packages for API spec generation
+        run: npm run build:libs
+
+      - name: Check API contract diff (blocking gate)
+        run: npm run lint:api-contracts
+        # Fails on breaking changes; warns on additive changes without changelog
+
   # ─────────────────────────────────────────────────────────────────────────────
   # CRITICAL SUITES INTEGRATION GATE
   # All suites listed here MUST pass (0 failures) for CI to be green.
@@ -126,8 +151,8 @@ jobs:
   test-critical:
     name: Test Critical Suites (${{ matrix.database }})
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    needs: [lint-api, typecheck-api, fixture-flow]
+    timeout-minutes: 60
+    needs: [lint-api, typecheck-api, fixture-flow, lint-api-contracts]
     # AC3: All critical suites must pass (0 failures) for CI green
     # AC4 evidence is assembled in the evidence-capture job below
     strategy:
@@ -299,6 +324,18 @@ jobs:
             --exclude __test__/integration/resource-level-acl.integration.test.ts
         id: extended-test
 
+      - name: Run stable API smoke pack (both engines, required gate)
+        run: |
+          echo "=== RUNNING: stable-api-smoke ==="
+          mkdir -p apps/api/logs
+          if npm run test:api:stable-smoke 2>&1 | tee "apps/api/logs/stable-api-smoke.log"; then
+            echo "=== PASS: stable-api-smoke ==="
+          else
+            echo "=== FAIL: stable-api-smoke ==="
+            exit 1
+          fi
+        id: smoke
+
       - name: Upload critical suite test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -306,6 +343,7 @@ jobs:
           name: test-api-results-${{ matrix.db_key }}
           path: |
             apps/api/logs/s49-6-critical-*.log
+            apps/api/logs/stable-api-smoke.log
             **/test-results*.json
             **/coverage
           retention-days: 7

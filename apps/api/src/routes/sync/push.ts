@@ -12,7 +12,7 @@
 import { Hono } from "hono";
 import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
-import { SyncPushRequestSchema } from "@jurnapod/shared";
+import { SyncPushRequestSchema, SyncPushResponseSchema } from "@jurnapod/shared";
 import { authenticateRequest, requireAccess, type AuthContext } from "../../lib/auth-guard.js";
 import { getRequestCorrelationId } from "../../lib/correlation-id.js";
 import { errorResponse, successResponse } from "@jurnapod/shared";
@@ -272,6 +272,11 @@ export function registerSyncPushRoutes(app: { openapi: OpenAPIHonoType["openapi"
     responses: {
       200: {
         description: "Sync push completed",
+        content: {
+          "application/json": {
+            schema: SyncPushResponseSchema,
+          },
+        },
       },
       400: {
         content: { "application/json": { schema: SyncPushErrorResponseSchema } },
