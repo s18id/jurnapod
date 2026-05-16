@@ -330,9 +330,8 @@ All entries in `stable-endpoints.json` exist in the registered Hono route invent
 
 | Backlog Item | Severity | Required Action |
 |---|---|---|
-| `/api/purchasing/*` remains beta | P1 for release-stable AP lifecycle | Add OpenAPI registration, request/response schemas, smoke coverage, and stable list entries only after contracts are frozen |
-| Beta routes with `Not frozen` contracts | P2 | Add OpenAPI metadata before promotion |
-| Stable smoke pack is shallow for business workflows | P1 for release-candidate gate | Extend smoke flows for sync push/pull, sales posting, purchasing lifecycle, reports, import/export, and ACL negative cases |
+| Beta routes with `Not frozen` contracts | P2 | OpenAPI metadata MUST be added before promotion. |
+| Stable smoke pack — large export guardrail (>50K row) | P2 | Large export guardrail smoke (Excel > 50K row limit triggered by real large dataset) MUST be added before final release-candidate sign-off. Cross-tenant ACL, import upload/validate/apply, fiscal closed-period posting rejection, deep void PI lifecycle, and GRN line readback are now covered by stable API smoke Flows 11, 13, 17, and 18. |
 
 ---
 

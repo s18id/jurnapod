@@ -297,7 +297,7 @@ jobs:
             echo "ERROR: $failures suite(s) failed. CI gate requires 0 failures."
             exit 1
           fi
-          echo "All 17 critical suites passed."
+          echo "All isolated critical suites passed before stable smoke gate."
         id: test
 
       - name: Run extended suites (advisory — MySQL only, excludes critical)
@@ -321,7 +321,8 @@ jobs:
             --exclude __test__/integration/users/tenant-scope.test.ts \
             --exclude __test__/integration/outlets/tenant-scope.test.ts \
             --exclude __test__/integration/purchasing/suppliers-tenant-isolation.test.ts \
-            --exclude __test__/integration/resource-level-acl.integration.test.ts
+            --exclude __test__/integration/resource-level-acl.integration.test.ts \
+            --exclude __test__/integration/smoke/stable-api-smoke.test.ts
         id: extended-test
 
       - name: Run stable API smoke pack (both engines, required gate)

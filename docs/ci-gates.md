@@ -14,7 +14,7 @@ The CI pipeline enforces three classes of gates:
 
 | Gate Class | Blocking? | Description |
 |------------|-----------|-------------|
-| **Critical Gates** | ✅ YES — required for merge | API lint, API typecheck, fixture-flow policy, migration lint, critical matrix suites |
+| **Critical Gates** | ✅ YES — required for merge | API lint, API typecheck, API contract lint, fixture-flow policy, migration lint, critical matrix suites with stable API smoke pack |
 | **Advisory Checks** | ❌ NO — informational | Monorepo build, MySQL-only extended suites, sprint status integrity |
 | **Ratchet Checks** | ❌ NO — informational | Structure conformance for new violations only |
 
@@ -42,24 +42,30 @@ npm run typecheck -w @jurnapod/api
 
 **Policy:** `build:libs` **MUST** run before API typecheck so workspace consumers resolve current package `dist` exports. Non-zero `tsc` exit **MUST** result in CI failure.
 
-### 2.3 Fixture-Flow Policy Gate
+### 2.3 API Contract Lint Gate
+
+**Job:** `lint-api-contracts`
+**Command:** `npm run lint:api-contracts`
+**Policy:** Contract diff check **MUST** pass for stable endpoints. Breaking changes to stable endpoint schemas **MUST** fail CI. Additive changes without a changelog entry **MUST** produce a CI warning. Non-zero exit **MUST** result in CI failure.
+
+### 2.4 Fixture-Flow Policy Gate
 
 **Job:** `fixture-flow`
 **Command:** `npm run lint:fixture-flow`
 **Policy:** Fixture setup **MUST** follow owner-package fixture flow. New fixture-flow violations are P0/P1 process risks and **MUST** block merge.
 
-### 2.4 Migration Trigger Lint Gate
+### 2.5 Migration Trigger Lint Gate
 
 **Job:** `lint-migrations`
 **Command:** `npm run lint:migrations`
 **Policy:** Migrations **MUST NOT** introduce business-logic triggers unless explicitly annotated and reviewed by architecture.
 
-### 2.5 Critical Suites Integration Gate
+### 2.6 Critical Suites Integration Gate
 
 **Job:** `test-critical`
 **Database matrix:** `mysql:8.0` (`db_key=mysql8`) and `mariadb:11.8` (`db_key=mariadb118`)
 **Command shape:** Isolated workspace `test:single` runs per critical suite
-**Policy:** All critical suites **MUST** pass (0 failures) on both database engines for CI to be green.
+**Policy:** All critical suites **MUST** pass (0 failures) on both database engines for CI to be green. The stable API smoke pack (`apps/api/__test__/integration/smoke/stable-api-smoke.test.ts`) is a **required gate** within `test-critical` and **MUST** pass on both MySQL 8.0 and MariaDB 11.8.
 
 **API command pattern:**
 
@@ -96,8 +102,9 @@ npm run test:single -w @jurnapod/auth -- __test__/integration/resource-level-acl
 | `users/tenant-scope.test.ts` | Story 49.4 |
 | `outlets/tenant-scope.test.ts` | Story 49.4 |
 | `packages/auth/resource-level-acl.integration.test.ts` | Story 49.4 |
+| `smoke/stable-api-smoke.test.ts` | P1 review gate — API stabilization |
 
-**Extended suites:** Non-critical workspace tests run as an advisory MySQL-only step inside `test-critical` after the blocking critical suites pass. The step uses `continue-on-error: true` and explicitly excludes the 17 critical suite files to prevent redundant execution.
+**Extended suites:** Non-critical workspace tests run as an advisory MySQL-only step inside `test-critical` after the blocking critical suites pass. The step uses `continue-on-error: true` and explicitly excludes the required isolated suite files, including the stable API smoke pack, to prevent redundant execution.
 
 **Evidence:** 3-consecutive-green historical evidence is documented in:
 - `_bmad-output/planning-artifacts/epic-49-3consecutive-green-evidence.md`
@@ -119,7 +126,7 @@ Advisory checks **MUST NOT** block PR merge. Failures are logged and reported as
 
 **Location:** `test-critical` job, `Run extended suites (advisory — MySQL only, excludes critical)` step
 **Purpose:** Runs non-critical workspace tests once against MySQL after the blocking critical suites pass
-**Policy:** Failures in this step **MUST NOT** block merge. The step **MUST** exclude the 17 critical suite files because those files already run as blocking isolated suites on both MySQL and MariaDB.
+**Policy:** Failures in this step **MUST NOT** block merge. The step **MUST** exclude the required isolated suite files, including the stable API smoke pack, because those files already run as blocking isolated suites on both MySQL and MariaDB.
 
 ### 3.3 Sprint Status Integrity
 
@@ -140,10 +147,11 @@ Advisory checks **MUST NOT** block PR merge. Failures are logged and reported as
 | Artifact | Retention | Purpose |
 |----------|-----------|---------|
 | `lint-results` | 7 days | API lint output |
-| `test-api-results-${{ matrix.db_key }}` | 7 days | Critical suite logs plus any generated test result or coverage files for the database matrix leg |
+| `test-api-results-${{ matrix.db_key }}` | 7 days | Critical suite logs, stable API smoke log (`apps/api/logs/stable-api-smoke.log`), plus any generated test result or coverage files for the database matrix leg |
 | `build-artifacts` | 1 day | Build output |
 
 **Critical suite log path:** `apps/api/logs/s49-6-critical-*.log`
+**Stable API smoke log path:** `apps/api/logs/stable-api-smoke.log`
 **Extended suite evidence:** GitHub job log plus any generated `test-results*.json` or coverage artifact files
 **Historical evidence:** `_bmad-output/planning-artifacts/epic-49-3consecutive-green-evidence.md`
 

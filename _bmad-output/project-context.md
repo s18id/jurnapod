@@ -204,7 +204,7 @@ AUTH_TEST_DB_DATABASE=jurnapod
 AUTH_TEST_DB_CONNECTION_LIMIT=5
 ```
 
-Extended suites run as an advisory MySQL-only step inside `test-critical` after blocking critical suites pass. The advisory step MUST use `continue-on-error: true` and MUST exclude the 17 critical suite files to avoid redundant critical execution.
+Extended suites run as an advisory MySQL-only step inside `test-critical` after blocking critical suites pass. The advisory step MUST use `continue-on-error: true` and MUST exclude the required isolated suite files, including the stable API smoke pack, to avoid redundant critical execution.
 
 CI test artifacts use `test-api-results-${{ matrix.db_key }}` with matrix keys `mysql8` and `mariadb118`.
 

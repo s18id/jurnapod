@@ -657,6 +657,16 @@ async function processTransaction(
       }
     }
 
+    // Fail-fast: VOID/REFUND corrections require a matching original COMPLETED
+    // transaction. Reject standalone corrections before entering the transaction.
+    if ((tx.status === "VOID" || tx.status === "REFUND") && !finalizedIdentityMatch) {
+      return {
+        client_tx_id: tx.client_tx_id,
+        result: "ERROR",
+        message: "CORRECTION_REQUIRES_MATCHING_ORIGINAL",
+      };
+    }
+
     // Verify cashier belongs to company
     const cashierValid = await isCashierInCompany(db, tx.cashier_user_id, tx.company_id);
     if (!cashierValid) {
@@ -736,6 +746,14 @@ async function processTransaction(
       // Used for COGS reversal and postingHook context in VOID/REFUND paths.
       const originalCompletedTransactionId =
         inTxFinalizedMatch?.status === "COMPLETED" ? inTxFinalizedMatch.id : null;
+
+      // Guard: VOID/REFUND corrections MUST reference a matching original
+      // COMPLETED transaction. Reject standalone corrections that have no
+      // matching original — they would produce orphan correction rows with no
+      // reversal journal linkage and break auditability.
+      if ((tx.status === "VOID" || tx.status === "REFUND") && originalCompletedTransactionId === null) {
+        throw new Error("CORRECTION_REQUIRES_MATCHING_ORIGINAL");
+      }
 
       // Phase 1: Persist transaction header + items + payments + taxes
       const posTrxId = await insertPosTransaction(trx, txInput);
@@ -1589,7 +1607,8 @@ function buildTransactionBatches(
  * - Splits new transactions into batches with configurable concurrency
  * - Processes each batch concurrently via Promise.all
  * - Individual transaction failures do not fail the entire batch
- * - Returns results in original input order; non-eligible transactions are skipped
+ * - Returns one result per input transaction in original input order; company/outlet
+ *   mismatches return ERROR instead of being silently skipped
  * 
  * @param db - Database connection
  * @param transactions - Array of transactions to persist
@@ -1675,9 +1694,20 @@ export async function persistPushBatch(
   // First occurrence uses the result from resultMap, subsequent occurrences get DUPLICATE
   const returnedClientTxIds = new Set<string>();
 
-  // Return results in same order as eligible input transactions only
-  // (company_id/outlet_id mismatches are intentionally excluded from results)
-  for (const tx of eligibleTransactions) {
+  // Return one result per input transaction in original input order.
+  // Company/outlet mismatches MUST be explicit ERROR results so clients do not
+  // interpret silent omission as successful processing.
+  for (const tx of transactions) {
+    if (tx.company_id !== companyId) {
+      allResults.push({ client_tx_id: tx.client_tx_id, result: "ERROR", message: "COMPANY_ID_MISMATCH" });
+      continue;
+    }
+
+    if (tx.outlet_id !== outletId) {
+      allResults.push({ client_tx_id: tx.client_tx_id, result: "ERROR", message: "OUTLET_ID_MISMATCH" });
+      continue;
+    }
+
     const result = resultMap.get(tx.client_tx_id);
     if (result) {
       if (returnedClientTxIds.has(tx.client_tx_id)) {

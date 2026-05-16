@@ -49,6 +49,7 @@ import {
   getAccountById,
   getAccountTree,
   AccountCodeExistsError,
+  AccountNotFoundError,
   CircularReferenceError,
   ParentAccountCompanyMismatchError,
   AccountTypeCompanyMismatchError
@@ -814,6 +815,11 @@ accountRoutes.get("/:id", async (c) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return errorResponse("INVALID_REQUEST", "Invalid account ID", 400);
+    }
+
+    const err = error as { code?: string };
+    if (error instanceof AccountNotFoundError || err.code === "ACCOUNT_NOT_FOUND") {
+      return errorResponse("NOT_FOUND", "Account not found", 404);
     }
 
     console.error("GET /accounts/:id failed", error);
@@ -1777,16 +1783,30 @@ export function registerAccountRoutes(app: { openapi: OpenAPIHonoType["openapi"]
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.openapi(getAccountRoute, (async (c: any) => {
-    const auth = c.get("auth");
-    const { id } = c.req.valid("param");
-    const accountId = NumericIdSchema.parse(id);
+    try {
+      const auth = c.get("auth");
+      const { id } = c.req.valid("param");
+      const accountId = NumericIdSchema.parse(id);
 
-    const account = await getAccountById(accountId, auth.companyId);
-    if (!account) {
-      return c.json({ success: false, error: { code: "NOT_FOUND", message: "Account not found" } }, 404);
+      const account = await getAccountById(accountId, auth.companyId);
+      if (!account) {
+        return c.json({ success: false, error: { code: "NOT_FOUND", message: "Account not found" } }, 404);
+      }
+
+      return c.json({ success: true, data: account });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return errorResponse("INVALID_REQUEST", "Invalid account ID", 400);
+      }
+
+      const err = error as { code?: string };
+      if (error instanceof AccountNotFoundError || err.code === "ACCOUNT_NOT_FOUND") {
+        return errorResponse("NOT_FOUND", "Account not found", 404);
+      }
+
+      console.error("GET /accounts/:id failed", error);
+      return errorResponse("INTERNAL_ERROR", "Internal server error", 500);
     }
-
-    return c.json({ success: true, data: account });
   }) as any);
 
   // POST /accounts - Create account
