@@ -27,11 +27,10 @@ Authentication and authorization library for Jurnapod ERP.
 | `npm run typecheck` | TypeScript check |
 | `npm run build` | Compile TypeScript to dist/ |
 | `npm run lint` | Lint code (echo placeholder) |
-| `npm run test` | Run unit tests with mock adapters |
+| `npm run test` | Run unit and integration tests; DB-backed integration tests require real DB env |
 | `npm run test:unit` | Run unit tests excluding integration tests |
-| `npm run test:db` | Run integration tests with real DB |
-| `npm run test:single <file>` | Run single test file |
-| `npm run test:oauth` | Run tests including OAuth tests |
+| `npm run test:integration` | Run integration tests |
+| `npm run test:single -- <file>` | Run single test file from package directory |
 
 ---
 
@@ -291,18 +290,18 @@ await db
 
 | Category | Testing Method | Location |
 |----------|---------------|----------|
-| **DB operations** (tokens, throttle, RBAC, email tokens) | Integration tests with real DB | `integration/**/*.integration.test.ts` |
-| **Business logic** (password hashing, JWT signing, permission bitmasks) | Unit tests with no mocks needed | `src/**/*.test.ts` |
-| **Configuration validation** | Unit tests | `src/**/*.test.ts` |
+| **DB operations** (tokens, throttle, RBAC, email tokens) | Integration tests with real DB | `__test__/integration/**/*.integration.test.ts` |
+| **Business logic** (password hashing, JWT signing, permission bitmasks) | Unit tests with no mocks needed | `__test__/unit/**/*.test.ts` |
+| **Configuration validation** | Unit tests | `__test__/unit/**/*.test.ts` |
 
 ### Integration Tests (Real Database)
 
 DB-related tests MUST use integration tests with real database:
 
 ```typescript
-// integration/tokens/refresh-tokens.integration.test.ts
+// __test__/integration/refresh-tokens.integration.test.ts
 import { createAuthClient } from '@jurnapod/auth';
-import { createRealDbAdapter, closeTestPool } from '../../test-utils/real-adapter.js';
+import { createRealDbAdapter, closeTestPool } from '../../src/test-utils/real-adapter.js';
 
 describe('RefreshTokenManager', () => {
   let adapter: AuthDbAdapter;
@@ -325,7 +324,28 @@ describe('RefreshTokenManager', () => {
 
 Run integration tests:
 ```bash
-npm run test:db    # Run integration tests with real DB
+AUTH_TEST_USE_DB=1 npm run test:integration
+AUTH_TEST_USE_DB=1 npm run test:single -- __test__/integration/resource-level-acl.integration.test.ts
+```
+
+#### Real DB Environment
+
+Real-DB integration tests MUST set `AUTH_TEST_USE_DB=1`. Database connection values are read from `AUTH_TEST_DB_*` environment variables after `.env.test.db` and `.env.test.db.local` are loaded. CI MUST set explicit values because committed local defaults are not valid in GitHub service containers:
+
+```bash
+AUTH_TEST_USE_DB=1
+AUTH_TEST_DB_HOST=127.0.0.1
+AUTH_TEST_DB_PORT=3306
+AUTH_TEST_DB_USER=root
+AUTH_TEST_DB_PASSWORD=testdb
+AUTH_TEST_DB_DATABASE=jurnapod
+AUTH_TEST_DB_CONNECTION_LIMIT=5
+```
+
+From the repository root, run a single auth integration test with workspace syntax:
+
+```bash
+AUTH_TEST_USE_DB=1 npm run test:single -w @jurnapod/auth -- __test__/integration/resource-level-acl.integration.test.ts
 ```
 
 ### Unit Tests (Non-DB Logic)
@@ -333,8 +353,8 @@ npm run test:db    # Run integration tests with real DB
 Only non-DB logic runs without database:
 
 ```typescript
-// src/passwords/hash.test.ts - Unit test (no DB)
-import { PasswordHasher } from './hash.js';
+// __test__/unit/hash.test.ts - Unit test (no DB)
+import { PasswordHasher } from '../../src/passwords/hash.js';
 
 describe('PasswordHasher', () => {
   it('should hash and verify password', async () => {
@@ -348,8 +368,8 @@ describe('PasswordHasher', () => {
 
 ### Test File Naming
 
-- Unit tests: `src/**/*.test.ts` (co-located with source, for non-DB logic only)
-- Integration tests: `integration/**/*.integration.test.ts` (for DB-related operations)
+- Unit tests: `__test__/unit/**/*.test.ts` (for non-DB logic only)
+- Integration tests: `__test__/integration/**/*.integration.test.ts` (for DB-related operations)
 
 ### Test Categories
 
@@ -367,9 +387,9 @@ describe('PasswordHasher', () => {
 ### Running Tests
 
 ```bash
-npm run test       # Unit tests only (no mock DB)
-npm run test:db   # Integration tests with real database
-npm run test:unit  # Alias for npm run test
+npm run test:unit
+AUTH_TEST_USE_DB=1 npm run test:integration
+AUTH_TEST_USE_DB=1 npm run test:single -- __test__/integration/resource-level-acl.integration.test.ts
 ```
 
 ---

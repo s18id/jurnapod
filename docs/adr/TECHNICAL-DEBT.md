@@ -184,11 +184,11 @@ This document serves as the central registry for all known technical debt in the
 
 | Priority | Open | Resolved | Total |
 |----------|------|---------|-------|
-| P1 | 2 | 4 | 6 |
+| P1 | 0 | 6 | 6 |
 | P2 | 1 | 18 | 19 |
 | P3 | 0 | 9 | 9 |
 | P4 | 0 | 3 | 3 |
-| **Total** | **3** | **34** | **37** |
+| **Total** | **1** | **36** | **37** |
 
 ---
 
@@ -325,14 +325,15 @@ Run the [TD Health Check Template](./td-health-check-template.md) before every e
 
 | ID | Description | Priority | Status | ADR/Story |
 |----|-------------|----------|--------|-----------|
-| TD-039 | Repository-wide API integration suite has pre-existing `insertCustomer is not a function` failures outside Epic 64 changed files; this blocks strict full-suite gate closure | P1 | **Open** | Story 64.9 |
-| TD-040 | Repository-wide fixture-flow gate reports pre-existing P0/P1 violations outside Epic 64 changed files; this blocks strict zero-violation gate closure | P1 | **Open** | Story 64.9 |
+| TD-039 | Repository-wide API integration suite had pre-existing `insertCustomer is not a function` failures outside Epic 64 changed files; this blocked strict full-suite gate closure | P1 | **RESOLVED** | Story 64.9 / CI cleanup commits |
+| TD-040 | Repository-wide fixture-flow gate had pre-existing P0/P1 violations outside Epic 64 changed files; this blocked strict zero-violation gate closure | P1 | **RESOLVED** | Story 64.9 / CI cleanup commits |
 
-**Description:** Epic 64 scoped validation confirms all epic-scope checks pass (build, lint/typecheck, inline-SQL elimination, focused reconciliation tests). Full repository gates still fail due to pre-existing failures in unrelated files.
+**Description:** Epic 64 scoped validation confirmed all epic-scope checks passed (build, lint/typecheck, inline-SQL elimination, focused reconciliation tests). Full repository gates later failed due to pre-existing failures in unrelated files.
 
-**Planned Resolution:**
-- TD-039: Restore `insertCustomer` fixture path in affected sales/reporting integration suites, then re-run full API integration gate.
-- TD-040: Refactor flagged purchasing/sales setup writes to canonical fixtures and re-run fixture-flow gate.
+**Resolution:**
+- TD-039: Resolved by commit `2fb9041e` (`fix ci package graph and fixture flow`). The package graph now builds library packages before API gates, API package dependencies include required internal workspaces, and the stale `@jurnapod/modules-platform` export path was corrected by rebuilding package outputs. Validation evidence recorded during the cleanup showed the affected rerun passed and full API integration passed (`198` files, `1600` tests, `4` skipped).
+- TD-040: Resolved by commit `2fb9041e` (`fix ci package graph and fixture flow`). Raw setup/cleanup writes in flagged purchasing and sales tests were moved into owner-package helpers, fixture-flow policy remained enforced, and `npm run lint:fixture-flow` passed (`fixture-flow: pass (226 file(s) checked)`).
+- Follow-up CI hardening was completed by commits `d65e0924` (`fix ci test orchestration`) and `cfb9073b` (`fix critical ci test failures`). These commits corrected workspace test command wiring, removed brittle service-container health checks, configured auth DB integration env for both database matrix legs, and hardened AP/fiscal-year replay paths.
 
 **Owner:** Platform QA + Domain Maintainers
 
@@ -342,6 +343,7 @@ Run the [TD Health Check Template](./td-health-check-template.md) before every e
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-05-16 | Resolved TD-039 and TD-040 via CI/package graph, owner-package fixture-flow cleanup, auth DB env, AP snapshot retry, and fiscal-year replay hardening commits (`2fb9041e`, `d65e0924`, `cfb9073b`) | CI cleanup / Platform QA |
 | 2026-05-16 | Added TD-039 and TD-040 for pre-existing full-suite and fixture-flow blockers identified during Story 64.9 gate | Story 64.9 |
 | 2026-04-19 | Added TD-038 - 156 pre-existing no-explicit-any warnings in API package | Epic 45 Retro |
 | 2026-03-26 | Initial creation - cataloged debt from Epics 0-6 | Story 6.6 |

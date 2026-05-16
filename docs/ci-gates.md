@@ -1,9 +1,10 @@
 # CI Gates — Policy & Operations
 
-> **Effective:** 2026-04-23  
-> **Story:** 49.6 — CI Pipeline Reliability Enforcement  
-> **Scope:** All pull requests to `main` and release branches  
-> **Policy:** This document uses RFC-style keywords (`MUST`, `MUST NOT`, `SHOULD`) per file-structure-standard-v1.md Section 5a Policy E.
+> **Effective:** 2026-04-23
+> **Last Updated:** 2026-05-16
+> **Story:** 49.6 — CI Pipeline Reliability Enforcement
+> **Scope:** All pull requests to `main` and release branches
+> **Policy:** This document uses RFC-style keywords (`MUST`, `MUST NOT`, `SHOULD`, `MAY`) per file-structure-standard-v1.md Section 5a Policy E.
 
 ---
 
@@ -13,42 +14,66 @@ The CI pipeline enforces three classes of gates:
 
 | Gate Class | Blocking? | Description |
 |------------|-----------|-------------|
-| **Critical Gates** | ✅ YES — required for merge | Lint, typecheck, critical suite pass |
-| **Advisory Checks** | ❌ NO — informational | Build, extended test suites, sprint status integrity |
-| **Ratchet Checks** | ❌ NO — informational | Structure conformance (new violations only) |
+| **Critical Gates** | ✅ YES — required for merge | API lint, API typecheck, fixture-flow policy, migration lint, critical matrix suites |
+| **Advisory Checks** | ❌ NO — informational | Monorepo build, MySQL-only extended suites, sprint status integrity |
+| **Ratchet Checks** | ❌ NO — informational | Structure conformance for new violations only |
 
 ---
 
 ## 2. Critical Gates (Required — No Bypass)
 
-Critical gates **MUST** pass (exit 0) before any PR can be merged. There is no mechanism to bypass a critical gate without an explicit emergency exception approved by the architect role.
+Critical gates **MUST** pass (exit 0) before any PR can be merged. There is no bypass mechanism without an explicit emergency exception approved by the architect role.
 
-### 2.1 AC1: Lint Gate
+### 2.1 API Lint Gate
 
-**Job:** `lint-api`  
-**Command:** `npm run lint -w @jurnapod/api`  
-**Policy:** Non-zero lint exit **MUST** result in CI failure. Warnings are acceptable; errors are not.
+**Job:** `lint-api`
+**Command:** `npm run lint -w @jurnapod/api`
+**Policy:** Non-zero lint exit **MUST** result in CI failure. ESLint warnings are advisory unless the command exits non-zero.
 
+### 2.2 API Typecheck Gate
+
+**Job:** `typecheck-api`
+**Commands:**
+
+```bash
+npm run build:libs
+npm run typecheck -w @jurnapod/api
 ```
-Lint Gate Contract:
-- exit 0  → PASS (0 errors, any number of warnings)
-- exit 1 with errors → FAIL (blocks merge)
-- exit 1 with warnings only → PASS (still exit 1 due to eslint --max-warnings=0, but current baseline is 178 warnings so this is NOT triggered)
+
+**Policy:** `build:libs` **MUST** run before API typecheck so workspace consumers resolve current package `dist` exports. Non-zero `tsc` exit **MUST** result in CI failure.
+
+### 2.3 Fixture-Flow Policy Gate
+
+**Job:** `fixture-flow`
+**Command:** `npm run lint:fixture-flow`
+**Policy:** Fixture setup **MUST** follow owner-package fixture flow. New fixture-flow violations are P0/P1 process risks and **MUST** block merge.
+
+### 2.4 Migration Trigger Lint Gate
+
+**Job:** `lint-migrations`
+**Command:** `npm run lint:migrations`
+**Policy:** Migrations **MUST NOT** introduce business-logic triggers unless explicitly annotated and reviewed by architecture.
+
+### 2.5 Critical Suites Integration Gate
+
+**Job:** `test-critical`
+**Database matrix:** `mysql:8.0` (`db_key=mysql8`) and `mariadb:11.8` (`db_key=mariadb118`)
+**Command shape:** Isolated workspace `test:single` runs per critical suite
+**Policy:** All critical suites **MUST** pass (0 failures) on both database engines for CI to be green.
+
+**API command pattern:**
+
+```bash
+npm run test:single -w @jurnapod/api -- __test__/integration/<suite>.test.ts
 ```
 
-**Note:** Current baseline is **0 errors, 178 warnings**. The lint gate is green at exit 0.
+**Auth command pattern:**
 
-### 2.2 AC2: Typecheck Gate
+```bash
+npm run test:single -w @jurnapod/auth -- __test__/integration/resource-level-acl.integration.test.ts
+```
 
-**Job:** `typecheck-api`  
-**Command:** `npm run typecheck -w @jurnapod/api`  
-**Policy:** Non-zero `tsc` exit **MUST** result in CI failure.
-
-### 2.3 AC3: Critical Suites Integration Gate
-
-**Job:** `test-critical`  
-**Command:** Isolated `test:single` runs per critical suite (17 suites)  
-**Policy:** All critical suites **MUST** pass (0 failures) for CI to be green.
+**Auth DB environment:** the `test-critical` job **MUST** set `AUTH_TEST_USE_DB=1` and `AUTH_TEST_DB_*` values that point at the CI service database (`127.0.0.1:3306`, user `root`, password `testdb`, database `jurnapod`). These values override package-local `.env.test.db` defaults.
 
 **Critical Suites List:**
 
@@ -72,15 +97,9 @@ Lint Gate Contract:
 | `outlets/tenant-scope.test.ts` | Story 49.4 |
 | `packages/auth/resource-level-acl.integration.test.ts` | Story 49.4 |
 
-**Deferred suites (non-blocking — not yet in `test-critical`):**
-The following suites have 3× green evidence but are **not yet promoted** to the blocking `test-critical` job. They are tracked in `test-extended` and will be promoted incrementally as stability is confirmed:
-- `admin-dashboards/reconciliation.test.ts` (Story 49.2)
-- `admin-dashboards/trial-balance.test.ts` (Story 49.2)
-- `accounting/period-close.test.ts` (Story 49.2 — distinct from `period-close-guardrail`)
-- `sales/invoices-discounts.test.ts`, `sales/invoices-update.test.ts`, `sales/orders.test.ts`, `sales/credit-notes-customer.test.ts` (Story 49.2)
-- Additional Story 49.3 suites: `purchasing/suppliers.test.ts`, `purchasing/supplier-statements.test.ts`, `purchasing/exchange-rates.test.ts`, `purchasing/ap-aging-report.test.ts`, `purchasing/supplier-soft-delete.regression.test.ts`, `purchasing/supplier-contacts.test.ts`
+**Extended suites:** Non-critical workspace tests run as an advisory MySQL-only step inside `test-critical` after the blocking critical suites pass. The step uses `continue-on-error: true` and explicitly excludes the 17 critical suite files to prevent redundant execution.
 
-**Evidence:** 3-consecutive-green runs are documented per story in:
+**Evidence:** 3-consecutive-green historical evidence is documented in:
 - `_bmad-output/planning-artifacts/epic-49-3consecutive-green-evidence.md`
 - Individual story completion files (`story-49.2.completion.md`, etc.)
 
@@ -88,47 +107,44 @@ The following suites have 3× green evidence but are **not yet promoted** to the
 
 ## 3. Advisory Checks (Non-Blocking)
 
-Advisory checks run in parallel but **MUST NOT** block PR merge. Failures are logged and reported but do not prevent merge.
+Advisory checks **MUST NOT** block PR merge. Failures are logged and reported as health signals.
 
 ### 3.1 Build Check
 
-**Job:** `build`  
-**Purpose:** Monorepo build + all-workspace typecheck  
-**Note:** `typecheck-api` is the authoritative type gate; `build` runs `typecheck --workspaces --if-present` for full coverage but is non-blocking.
+**Job:** `build`
+**Purpose:** Monorepo build plus all-workspace typecheck
+**Policy:** `typecheck-api` is the authoritative API type gate. The build job provides broader workspace signal and remains advisory.
 
 ### 3.2 Extended Test Suites
 
-**Job:** `test-extended`  
-**Purpose:** Runs all non-critical suites (inventory, stock, recipes, POS, etc.)  
-**Policy:** Failures here **MUST NOT** block merge. Tracked as advisory signal for test health.
+**Location:** `test-critical` job, `Run extended suites (advisory — MySQL only, excludes critical)` step
+**Purpose:** Runs non-critical workspace tests once against MySQL after the blocking critical suites pass
+**Policy:** Failures in this step **MUST NOT** block merge. The step **MUST** exclude the 17 critical suite files because those files already run as blocking isolated suites on both MySQL and MariaDB.
 
 ### 3.3 Sprint Status Integrity
 
-**Job:** `sprint-status`  
-**Purpose:** Detects accidental sprint-status.yaml overwrites (file-integrity check)  
-**Policy:** Failures indicate a regression requiring immediate recovery.
+**Job:** `sprint-status`
+**Purpose:** Detects accidental `sprint-status.yaml` overwrites
+**Policy:** Failures indicate a sprint-tracking integrity regression and require immediate recovery.
 
 ### 3.4 Structure Conformance (Ratchet)
 
-**Job:** `structure-conformance`  
-**Purpose:** Catches new structure violations in active scope  
-**Policy:** FAIL only on new violations not in baseline. Baseline violations are tolerated debt.
+**Job:** `structure-conformance`
+**Purpose:** Catches new structure violations in active scope
+**Policy:** New violations in active scope **MUST** fail this check. Baseline violations remain tolerated debt.
 
 ---
 
 ## 4. Evidence Artifact Retention
 
-**Retention Policy:**
-
 | Artifact | Retention | Purpose |
 |----------|-----------|---------|
-| `lint-results` | 7 days | AC1 lint output |
-| `test-critical-results` | 7 days | AC3/AC4 critical suite logs |
-| `test-results` | 7 days | Extended suite logs |
+| `lint-results` | 7 days | API lint output |
+| `test-api-results-${{ matrix.db_key }}` | 7 days | Critical suite logs plus any generated test result or coverage files for the database matrix leg |
 | `build-artifacts` | 1 day | Build output |
 
-**Log paths for critical suites:** `apps/api/logs/s49-6-critical-*.log` (current CI run)
-
+**Critical suite log path:** `apps/api/logs/s49-6-critical-*.log`
+**Extended suite evidence:** GitHub job log plus any generated `test-results*.json` or coverage artifact files
 **Historical evidence:** `_bmad-output/planning-artifacts/epic-49-3consecutive-green-evidence.md`
 
 ---
@@ -137,14 +153,11 @@ Advisory checks run in parallel but **MUST NOT** block PR merge. Failures are lo
 
 Story 49.6 implements **Option A** (critical-only required gates). Under Option A:
 
-1. **Required blocking jobs:** `lint-api`, `typecheck-api`, `test-critical` — all MUST pass
-2. **Advisory jobs:** `build`, `test-extended`, `sprint-status`, `structure-conformance` — non-blocking
-3. **Extended suites** may be added to `test-critical` incrementally as they achieve 3× green stability
+1. **Required blocking jobs:** `lint-api`, `typecheck-api`, `fixture-flow`, `lint-migrations`, `test-critical` — all **MUST** pass.
+2. **Advisory jobs/signals:** `build`, MySQL-only extended suite step, `sprint-status`, `structure-conformance` — these **MUST NOT** block merge.
+3. **Extended suites** **MAY** be promoted to the critical suite list after they achieve documented stability and owner approval.
 
-**Rationale:** Running all ~77 critical suites 3× per CI run would exceed runner time limits. Option A ensures:
-- Financial/ACL correctness gates are always enforced
-- Non-critical suite flakiness does not block delivery
-- Extended suites provide signal without blocking
+**Rationale:** Running every integration suite across both database engines on every CI run exceeds runner budgets. Option A enforces financial, ACL, sync, fixture-flow, and migration correctness while retaining advisory signal for the broader test surface.
 
 ---
 
@@ -152,39 +165,46 @@ Story 49.6 implements **Option A** (critical-only required gates). Under Option 
 
 ### Lint Gate Failures
 
-**Symptom:** `lint-api` exits non-zero  
-**Check:** `npm run lint -w @jurnapod/api` locally — fix all errors before pushing
-
-**Common causes:**
-- Unused variable/import introduced in changed file
-- New `@typescript-eslint/no-unused-vars` violation
+**Symptom:** `lint-api` exits non-zero
+**Check:** `npm run lint -w @jurnapod/api` locally. Fix all lint errors before pushing.
 
 ### Typecheck Gate Failures
 
-**Symptom:** `typecheck-api` exits non-zero  
-**Check:** `npm run typecheck -w @jurnapod/api` locally — fix all type errors
+**Symptom:** `typecheck-api` exits non-zero
+**Check:** Run the same sequence locally:
+
+```bash
+npm run build:libs
+npm run typecheck -w @jurnapod/api
+```
+
+### Fixture-Flow Failures
+
+**Symptom:** `fixture-flow` exits non-zero
+**Check:** `npm run lint:fixture-flow` locally. Move setup writes to owner-package fixture helpers instead of bypassing the validator.
 
 ### Critical Suite Failures
 
-**Symptom:** `test-critical` fails (0 failures required)  
-**Check:** Download `test-critical-results` artifact — find failing suite log
-
-**Common causes:**
-- Time-dependent test introduced new `Date.now()` or `Math.random()`
-- Pool cleanup missing (`afterAll` without `pool.end()`)
-- RWLock not acquired in suite that shares test server
+**Symptom:** `test-critical` fails
+**Check:** Download `test-api-results-${{ matrix.db_key }}` and inspect `apps/api/logs/s49-6-critical-*.log`.
 
 **Recovery:**
-1. Identify failing suite(s) from CI log
-2. Run suite locally 3× consecutively: `npm run test:single -- <path> -w @jurnapod/api`
-3. If flakiness confirmed, move suite from `test-critical` to `test-extended` until hardened
-4. Document flakiness in epic-49-risk-register.md
+
+1. Identify failing suite(s) from CI logs.
+2. Run the suite locally 3× consecutively with workspace syntax, for example:
+
+   ```bash
+   npm run test:single -w @jurnapod/api -- __test__/integration/accounting/fiscal-year-close.test.ts
+   ```
+
+3. If flakiness is confirmed, suite demotion from the critical list **MUST** be approved by the test owner and tracked as a P1/P2 hardening item. Demoted coverage remains advisory through the MySQL-only extended suite step until stability evidence exists.
+4. Document confirmed CI flakiness in `_bmad-output/planning-artifacts/epic-49-risk-register.md` or the active epic risk register.
 
 ### Structure Conformance Failures
 
-**Symptom:** `structure-conformance` fails on new violation  
-**Check:** `npx tsx scripts/validate-structure-conformance.ts` locally  
-**Policy:** New violations in active scope MUST be fixed before merge. Baseline violations are tolerated.
+**Symptom:** `structure-conformance` fails on a new violation
+**Check:** `npx tsx scripts/validate-structure-conformance.ts` locally
+**Policy:** New violations in active scope **MUST** be fixed before merge. Baseline violations are tolerated debt.
 
 ---
 
@@ -192,15 +212,19 @@ Story 49.6 implements **Option A** (critical-only required gates). Under Option 
 
 ```
 lint-api ───────────────────────┐
-typecheck-api ──────────────────┼──► test-critical ──► (merge allowed)
-                                 │
+typecheck-api ──────────────────┼──► test-critical ──► blocking matrix gate
+fixture-flow ───────────────────┤
+
+lint-migrations ────────────────┐
 build ──────────────────────────┤
-test-extended ──────────────────┤
-sprint-status ─────────────────┤  (advisory only — no merge blocking)
-structure-conformance ─────────┘
+sprint-status ──────────────────┤  advisory/independent signal jobs
+structure-conformance ──────────┘
+
+test-critical/mysql8 ───────────► critical suites (blocking) ─► extended suites (advisory)
+test-critical/mariadb118 ───────► critical suites (blocking)
 ```
 
-All jobs run on `push` and `pull_request` events. Critical gates (`lint-api`, `typecheck-api`, `test-critical`) form the merge contract.
+All jobs run on `push` and `pull_request` events. Critical gates (`lint-api`, `typecheck-api`, `fixture-flow`, `lint-migrations`, `test-critical`) form the merge contract.
 
 ---
 

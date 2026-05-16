@@ -114,7 +114,7 @@ The `AuthClient` returned by `createAuthClient()` provides:
 
 ## Architecture
 
-See [`docs/tech-specs/auth-package.md`](../../docs/tech-specs/auth-package.md) for full technical specification.
+See [`packages/auth/AGENTS.md`](./AGENTS.md) for package-specific operating rules and [`docs/architecture.md`](../../docs/architecture.md) for system architecture context.
 
 ## Role Codes
 
@@ -133,11 +133,14 @@ const ROLE_CODES = [
 
 | Permission | Bit Value |
 |------------|-----------|
-| `create` | 1 |
-| `read` | 2 |
+| `read` | 1 |
+| `create` | 2 |
 | `update` | 4 |
 | `delete` | 8 |
-| `report` | 16 |
+| `analyze` | 16 |
+| `manage` | 32 |
+
+These values match the canonical resource-level ACL model: READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32.
 
 ## RBAC — `checkAccess()` and SUPER_ADMIN Bypass
 
@@ -146,7 +149,7 @@ const ROLE_CODES = [
 - User existence (`users` + `companies` join)
 - SUPER_ADMIN global detection
 - Role membership (global + outlet-scoped)
-- Module permission bitmask
+- Resource-level module permission bitmask (`module.resource`)
 - Outlet access
 
 ### SUPER_ADMIN Platform-Wide Bypass
@@ -176,7 +179,7 @@ For the `hasOutletAccess()` and `canManageCompanyDefaults()` helpers, the same g
 
 ## Database Adapter
 
-Consumers must implement `AuthDbAdapter` using Kysely:
+Consumers MUST implement `AuthDbAdapter` using Kysely:
 
 ```typescript
 interface AuthDbAdapter {

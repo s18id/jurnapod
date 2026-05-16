@@ -162,11 +162,51 @@ export default defineConfig({
 
 ### Test Scripts
 
-All packages support:
-- `npm test` - Run all tests
+Standard package scripts:
+- `npm test` - Run package tests configured by that workspace
 - `npm run test:unit` - Unit tests only
 - `npm run test:integration` - Integration tests only
-- `npm run test:single -- <file>` - Specific test file
+- `npm run test:single -- <file>` - Specific test file from inside a package workspace
+
+From the repository root, workspace-specific tests MUST use explicit workspace syntax:
+```bash
+npm run test:single -w @jurnapod/api -- __test__/integration/accounting/fiscal-year-close.test.ts
+npm run test:single -w @jurnapod/auth -- __test__/integration/resource-level-acl.integration.test.ts
+```
+
+### CI Gate Current State (MANDATORY)
+
+Current CI required gates:
+- `lint-api`: `npm run lint -w @jurnapod/api`
+- `typecheck-api`: `npm run build:libs` then `npm run typecheck -w @jurnapod/api`
+- `fixture-flow`: `npm run lint:fixture-flow`
+- `lint-migrations`: `npm run lint:migrations`
+- `test-critical`: isolated critical suites on `mysql:8.0` and `mariadb:11.8`
+
+Critical API suites MUST use workspace-relative paths:
+```bash
+npm run test:single -w @jurnapod/api -- __test__/integration/<suite>.test.ts
+```
+
+The auth critical suite MUST use the auth workspace directly:
+```bash
+npm run test:single -w @jurnapod/auth -- __test__/integration/resource-level-acl.integration.test.ts
+```
+
+Auth real-DB integration tests in CI MUST set:
+```bash
+AUTH_TEST_USE_DB=1
+AUTH_TEST_DB_HOST=127.0.0.1
+AUTH_TEST_DB_PORT=3306
+AUTH_TEST_DB_USER=root
+AUTH_TEST_DB_PASSWORD=testdb
+AUTH_TEST_DB_DATABASE=jurnapod
+AUTH_TEST_DB_CONNECTION_LIMIT=5
+```
+
+Extended suites run as an advisory MySQL-only step inside `test-critical` after blocking critical suites pass. The advisory step MUST use `continue-on-error: true` and MUST exclude the 17 critical suite files to avoid redundant critical execution.
+
+CI test artifacts use `test-api-results-${{ matrix.db_key }}` with matrix keys `mysql8` and `mariadb118`.
 
 ### Test Log Rule (MANDATORY)
 
@@ -196,6 +236,7 @@ Before starting the first story of any epic, run and record these pre-flight che
 
 ```bash
 npm run lint -w @jurnapod/api
+npm run build:libs
 npm run typecheck -w @jurnapod/api
 ```
 
@@ -320,9 +361,10 @@ export { createTestFiscalYear } from './test-fixtures/fiscal-year-fixtures';
 **Step 5 — Build owner package first, then validate.**
 ```bash
 npm run build -w @jurnapod/{module}
-npm run build -w @jurnapod/api
-npm run lint:fixture-flow -w @jurnapod/api
-npm test -w @jurnapod/api -- --run
+npm run build:libs
+npm run typecheck -w @jurnapod/api
+npm run lint:fixture-flow
+npm run test:single -w @jurnapod/api -- __test__/integration/<target>.test.ts
 ```
 
 **Anti-patterns (P0 blockers):**
@@ -393,6 +435,15 @@ No story may be marked DONE based solely on self-attestation of the implementing
 - Naming: `feature/`, `fix/`, `chore/`, `epic-N/`
 - PR titles reference story IDs for traceability
 - **No commit unless explicitly requested by user**
+
+### Documentation Integrity Current State
+
+Current/reference docs MUST reflect the active workflow, CI gates, package scripts, technical debt status, and operating rules. Historical story evidence and retrospective records MUST NOT be rewritten to backfill later fixes; later resolutions MUST be recorded in active trackers such as `docs/adr/TECHNICAL-DEBT.md`.
+
+Current resolved cleanup debt:
+- TD-039 (`insertCustomer`/package graph integration failures) is RESOLVED in `docs/adr/TECHNICAL-DEBT.md`.
+- TD-040 (fixture-flow pre-existing violations) is RESOLVED in `docs/adr/TECHNICAL-DEBT.md`.
+- `docs/ci-gates.md` is the current CI gate reference for required/advisory jobs and artifact names.
 
 ---
 
@@ -573,4 +624,4 @@ _bmad-output/
 
 ---
 
-_Last Updated: 2026-04-15_
+_Last Updated: 2026-05-16_
