@@ -351,6 +351,29 @@ function makeApproveFlowError(code: ApproveFlowErrorCode, message: string): Appr
   return error;
 }
 
+function parseResultJson(value: unknown): Record<string, unknown> {
+  if (value === null || value === undefined || value === "") {
+    return {};
+  }
+
+  if (typeof value === "string") {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+
+    console.warn("Fiscal year close replay result_json is not an object; returning empty replay result");
+    return {};
+  }
+
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  console.warn("Fiscal year close replay result_json has unsupported type; returning empty replay result");
+  return {};
+}
+
 /**
  * Approve and execute fiscal year close with journal posting.
  * 
@@ -389,7 +412,7 @@ export async function approveFiscalYearClose(
 
     // If already succeeded, return existing result (idempotent retry)
     if (lockedRequest.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED) {
-      const parsed = lockedRequest.result_json ? JSON.parse(lockedRequest.result_json) : {};
+      const parsed = parseResultJson(lockedRequest.result_json);
       const postedBatchIdsRaw = parsed.postedBatchIds;
       const postedBatchIds = Array.isArray(postedBatchIdsRaw)
         ? postedBatchIdsRaw.filter((v): v is number => typeof v === "number")
@@ -595,11 +618,11 @@ export async function approveFiscalYearClose(
     initialDelayMs: 200,
   });
 
-  // Auto-snapshot always attempted on successful close.
-  // Idempotency is handled by the snapshot service's SELECT ... FOR UPDATE
-  // + inputsHash guard (append-only trigger blocks ON DUPLICATE KEY).
+  // Auto-snapshot runs once for the initial successful close.
+  // Replayed idempotency responses MUST NOT trigger new side effects.
   const shouldAttemptAutoSnapshot = closeResult.success
-    && closeResult.newStatus === "CLOSED";
+    && closeResult.newStatus === "CLOSED"
+    && closeResult.replayed !== true;
 
   let snapshotWarning: AutoSnapshotWarning | null = null;
   if (shouldAttemptAutoSnapshot) {

@@ -9,7 +9,7 @@
 
 import { createHash } from "node:crypto";
 import { sql } from "kysely";
-import type { KyselySchema } from "@jurnapod/db";
+import { isDeadlockError, type KyselySchema } from "@jurnapod/db";
 import { toUtcIso, fromUtcIso } from "@jurnapod/shared";
 import { fromScaled4, toScaled } from "./ap-reconciliation-service.js";
 import { ApReconciliationService } from "./ap-reconciliation-service.js";
@@ -149,12 +149,31 @@ function computeInputsHash(input: {
 }
 
 function isDuplicateKeyError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === "ER_DUP_ENTRY"
-  );
+  const visited = new Set<unknown>();
+  let current: unknown = error;
+
+  while (typeof current === "object" && current !== null && !visited.has(current)) {
+    visited.add(current);
+
+    const err = current as {
+      code?: unknown;
+      errno?: unknown;
+      cause?: unknown;
+      originalError?: unknown;
+    };
+
+    if (err.code === "ER_DUP_ENTRY") {
+      return true;
+    }
+
+    if (err.errno === 1062) {
+      return true;
+    }
+
+    current = err.cause ?? err.originalError;
+  }
+
+  return false;
 }
 
 async function fetchSnapshotById(
@@ -224,7 +243,7 @@ export class ApReconciliationSnapshotService {
       variance: summary.variance,
     });
 
-    // Retry on unique key contention (first snapshot race on empty chain).
+    // Retry on unique-key and lock contention (first snapshot race on empty chain).
     const MAX_RETRIES = 3;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
       try {
@@ -386,7 +405,11 @@ export class ApReconciliationSnapshotService {
 
         return createdSnapshot;
       } catch (error) {
-        if (isDuplicateKeyError(error) && attempt < MAX_RETRIES - 1) {
+        if (
+          (isDuplicateKeyError(error) || isDeadlockError(error)) &&
+          attempt < MAX_RETRIES - 1
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
           continue;
         }
         throw error;
