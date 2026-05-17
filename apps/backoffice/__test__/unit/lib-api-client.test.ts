@@ -72,7 +72,7 @@ function create401Response() {
 describe("resolveToken", () => {
   beforeEach(() => {
     // Reset mocks to default behavior before each test
-    mockGetStoredAccessToken.mockReturnValue(TEST_TOKEN);
+    mockGetStoredAccessToken.mockClear().mockReturnValue(TEST_TOKEN);
     mockGetApiBaseUrl.mockReturnValue(TEST_BASE_URL);
     mockRequestRefreshToken.mockClear();
     mockFetch.mockClear();
@@ -238,7 +238,8 @@ describe("uploadWithProgress", () => {
       responseText: JSON.stringify({ success: true }),
     };
 
-    vi.stubGlobal("XMLHttpRequest", vi.fn(() => mockXHR));
+    // Use a regular function (not arrow) so new XMLHttpRequest() works as a constructor
+    vi.stubGlobal("XMLHttpRequest", vi.fn(function() { return mockXHR; }));
 
     const progressCallback = vi.fn();
     const formData = new FormData();
@@ -288,7 +289,7 @@ describe("uploadWithProgress", () => {
       responseText: JSON.stringify({ success: true }),
     };
 
-    vi.stubGlobal("XMLHttpRequest", vi.fn(() => mockXHR));
+    vi.stubGlobal("XMLHttpRequest", vi.fn(function() { return mockXHR; }));
 
     const progressCallback = vi.fn();
     const formData = new FormData();
@@ -337,7 +338,7 @@ describe("uploadWithProgress", () => {
       responseText: JSON.stringify({ success: true }),
     };
 
-    vi.stubGlobal("XMLHttpRequest", vi.fn(() => mockXHR));
+    vi.stubGlobal("XMLHttpRequest", vi.fn(function() { return mockXHR; }));
 
     const progressCallback = vi.fn();
     const formData = new FormData();

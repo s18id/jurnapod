@@ -16,16 +16,17 @@ import {
   Stack,
   Text,
   Title,
-  useMantineTheme
+  Select,
+  useMantineTheme,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { IconBell, IconRefresh, IconAlertTriangle } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 
-
 import { useOnlineStatus } from "../lib/connection";
 import type { OutboxItem, AlertReadHistory } from "../lib/offline-db";
 import type { SessionUser } from "../lib/session";
+import { useShell } from "./shell";
 
 import type { AppRoute } from "./routes";
 
@@ -143,11 +144,15 @@ export function AppLayout(props: AppLayoutProps) {
   const theme = useMantineTheme();
   const [opened, { toggle, close }] = useDisclosure();
 
+  // Shell context for company/outlet/sync state (Story 65-4)
+  const shell = useShell();
+
   return (
     <AppShell
       padding="md"
       header={{ height: 72 }}
       navbar={{ width: 280, breakpoint: "sm", collapsed: { mobile: !opened } }}
+      footer={{ height: 32 }}
       styles={{
         header: {
           backgroundColor: theme.other?.bodyBackgroundAlt ?? theme.white,
@@ -156,7 +161,11 @@ export function AppLayout(props: AppLayoutProps) {
         navbar: {
           backgroundColor: theme.other?.bodyBackgroundAlt ?? theme.white,
           borderRight: `1px solid ${theme.other?.border ?? theme.colors.gray[3]}`
-        }
+        },
+        footer: {
+          backgroundColor: theme.other?.bodyBackgroundAlt ?? theme.white,
+          borderTop: `1px solid ${theme.other?.border ?? theme.colors.gray[3]}`,
+        },
       }}
     >
       <AppShell.Header>
@@ -167,10 +176,35 @@ export function AppLayout(props: AppLayoutProps) {
               <Title order={3}>Jurnapod Backoffice</Title>
               <Text size="xs" c="dimmed">
                 {props.user.email} · company #{props.user.company_id}
+                {shell.outlet.currentOutlet && (
+                  <> · <Text span fw={600}>{shell.outlet.currentOutlet.name}</Text></>
+                )}
               </Text>
             </Box>
           </Group>
           <Group gap="xs" wrap="wrap" justify="flex-end">
+            {/* Outlet switcher (Story 65-4) */}
+            {shell.outlet.availableOutlets.length > 1 && (
+              <Select
+                size="xs"
+                w={160}
+                data={shell.outlet.availableOutlets.map((o) => ({
+                  value: String(o.id),
+                  label: o.name,
+                }))}
+                value={shell.outlet.currentOutlet ? String(shell.outlet.currentOutlet.id) : null}
+                onChange={(value) => {
+                  if (value) {
+                    const outlet = shell.outlet.availableOutlets.find(
+                      (o) => String(o.id) === value
+                    );
+                    if (outlet) shell.outlet.switchOutlet(outlet);
+                  }
+                }}
+                placeholder="Select outlet"
+                aria-label="Switch outlet"
+              />
+            )}
             <Popover
               width={320}
               position="bottom-end"
@@ -257,7 +291,7 @@ export function AppLayout(props: AppLayoutProps) {
                                       </Text>
                                     </Group>
                                     <Text size="xs" c="dimmed">
-                                      {new Date(item.timestamp).toLocaleDateString("id-ID")}
+                                      {item.timestamp.toLocaleDateString("id-ID")}
                                     </Text>
                                   </Group>
                                   <Text size="xs" c="dimmed" lineClamp={1} mt={4}>
@@ -306,7 +340,7 @@ export function AppLayout(props: AppLayoutProps) {
                                       </Text>
                                     </Group>
                                     <Text size="xs" c="dimmed">
-                                      {new Date(item.readAt).toLocaleDateString("id-ID")}
+                                      {item.readAt.toLocaleDateString("id-ID")}
                                     </Text>
                                   </Group>
                                   <Text size="xs" c="dimmed" lineClamp={1} mt={4}>
@@ -382,6 +416,36 @@ export function AppLayout(props: AppLayoutProps) {
           {props.children}
         </Container>
       </AppShell.Main>
+
+      {/* Status bar footer: sync health, last sync time, online status (Story 65-4) */}
+      <AppShell.Footer>
+        <Group h="100%" px="md" gap="md" justify="flex-end">
+          <Text size="xs" c="dimmed">
+            {shell.syncHealth.lastSyncLabel !== "Never"
+              ? `Last sync: ${shell.syncHealth.lastSyncLabel}`
+              : "Not yet synced"}
+          </Text>
+          <Badge
+            color={shell.syncHealth.healthy ? "green" : "yellow"}
+            variant="dot"
+            size="sm"
+          >
+            {shell.syncHealth.healthy ? "Sync OK" : "Sync issue"}
+          </Badge>
+          {shell.pendingJobs.count > 0 && (
+            <Badge
+              color="red"
+              variant="light"
+              size="sm"
+              component="a"
+              href="#/sync-queue"
+              style={{ cursor: "pointer" }}
+            >
+              {shell.pendingJobs.count} pending job{shell.pendingJobs.count !== 1 ? "s" : ""}
+            </Badge>
+          )}
+        </Group>
+      </AppShell.Footer>
     </AppShell>
   );
 }

@@ -22,6 +22,7 @@ import {
   refreshAccessToken,
   type SessionUser
 } from "../lib/session";
+import { useOnlineStatus } from "../lib/connection";
 import { PublicStaticPage } from "../features/privacy-page";
 import { SyncQueuePage } from "../features/sync-queue-page";
 import { SyncHistoryPage } from "../features/sync-history-page";
@@ -38,6 +39,15 @@ import {
   userCanAccessRoute,
   filterRoutesByModules
 } from "./routes";
+import {
+  ShellProvider,
+  useOutletSwitcher,
+  usePendingJobs,
+  useSyncHealth,
+  type ShellState,
+} from "./shell";
+
+export { HashedRouterBridge, RouterBridge } from "./router/router-bridge";
 
 type SessionStatus = "loading" | "anonymous" | "authenticated";
 
@@ -47,7 +57,7 @@ function lazyNamed<TModule extends Record<string, unknown>, TName extends keyof 
 ) {
   return lazy(async () => {
     const module = await loader();
-    return { default: module[exportName] as ComponentType<any> };
+    return { default: module[exportName] as ComponentType<Record<string, unknown>> };
   });
 }
 
@@ -497,6 +507,12 @@ export function AppRouter() {
     return setupAutoSync(user.id);
   }, [user]);
 
+  // --- Shell state hooks (Story 65-4) — MUST be called before any early returns ---
+  const isOnline = useOnlineStatus();
+  const outletSwitcher = useOutletSwitcher(user?.outlets ?? []);
+  const pendingJobs = usePendingJobs(user?.id ?? null);
+  const syncHealth = useSyncHealth(user?.id ?? null);
+
   const availableRoutes = useMemo(() => {
     if (!user) {
       return APP_ROUTES;
@@ -507,6 +523,27 @@ export function AppRouter() {
     const moduleFiltered = filterRoutesByModules(roleFiltered, enabledModules);
     return moduleFiltered;
   }, [user, enabledModules]);
+
+  const shellState: ShellState = useMemo(() => ({
+    user,
+    companyId: user?.company_id ?? null,
+    companyTimezone: user?.company_timezone ?? null,
+    outlet: {
+      currentOutlet: outletSwitcher.currentOutlet,
+      availableOutlets: outletSwitcher.availableOutlets,
+      switchOutlet: outletSwitcher.switchOutlet,
+    },
+    pendingJobs: {
+      count: pendingJobs.count,
+      loading: pendingJobs.loading,
+    },
+    isOnline,
+    syncHealth: {
+      healthy: syncHealth.healthy,
+      lastSyncTimestamp: syncHealth.lastSyncTimestamp,
+      lastSyncLabel: syncHealth.lastSyncLabel,
+    },
+  }), [user, outletSwitcher, pendingJobs, isOnline, syncHealth]);
 
   const publicSlug =
     typeof window !== "undefined" ? getPublicStaticSlugFromLocation(globalThis.location) : null;
@@ -629,7 +666,7 @@ export function AppRouter() {
     !modulesLoading && modulesSource !== "live" ? modulesSource : null;
 
   return (
-    <>
+    <ShellProvider state={shellState}>
       <AppLayout
         user={user}
         routes={availableRoutes}
@@ -652,6 +689,6 @@ export function AppRouter() {
         )}
       </AppLayout>
       <SyncNotification userId={user.id} />
-    </>
+    </ShellProvider>
   );
 }

@@ -2,7 +2,10 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "outDir": "dist"
+    "outDir": "dist",
+    "paths": {
+      "@/*": ["./apps/backoffice/src/*"]
+    }
   },
   "include": ["src"]
 }

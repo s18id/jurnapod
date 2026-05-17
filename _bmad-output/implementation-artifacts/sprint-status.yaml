@@ -731,3 +731,13 @@ development_status:
   64-7-cash-bank-service-export: done
   64-8-cogs-posting-fixtures: done
   64-9-full-validation-gate: done
+  # Epic 65: Backoffice Frontend Foundation
+  epic-65: done
+  65-0-openapi-decision: done
+  65-1-scaffold-tooling: done
+  65-2-typed-api-client: done
+  65-3-auth-session: done
+  65-4-role-aware-shell: done
+  65-5-mature-data-router: done
+  65-6-server-state-caching: done
+  65-7-shared-admin-primitives: done
