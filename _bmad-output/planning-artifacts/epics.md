@@ -83,6 +83,12 @@ NFR3: Templates must follow existing project conventions (AGENTS.md, existing pa
 | **Epic 60** | **Tenant + ACL Correctness Hardening** | **done** | **60** |
 | **Epic 61** | **Sales & Purchasing Lifecycle Correctness** | **planned** | **61** |
 | Epic 62 | Projection Correctness Hardening | backlog | 62 |
+| Epic 65 | Backoffice Frontend Foundation — Shell, Router, Auth, Typed API Client | planned (queued; requires backoffice unfreeze) | 65 |
+| Epic 66 | Backoffice Core Admin — Users, Roles, Companies, Permissions UX | planned (queued; requires backoffice unfreeze) | 66 |
+| Epic 67 | Backoffice Catalog Operations — Items, Prices, Import/Export Redesign | planned (queued; requires backoffice unfreeze) | 67 |
+| Epic 68 | Backoffice Async Workflows — Operations, SSE, Notifications, Audit | planned (queued; requires backoffice unfreeze) | 68 |
+| Epic 69 | Backoffice Finance & Purchasing — High-Risk Forms, Review Steps | planned (queued; requires backoffice unfreeze) | 69 |
+| Epic 70 | Backoffice Hardening — Accessibility, Internationalization, Testing, CI, Rollout | planned (queued; requires backoffice unfreeze) | 70 |
 
 ---
 
