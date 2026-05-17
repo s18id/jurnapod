@@ -741,3 +741,11 @@ development_status:
   65-5-mature-data-router: done
   65-6-server-state-caching: done
   65-7-shared-admin-primitives: done
+
+  # Epic 66: Backoffice Core Admin — Users, Roles, Companies, Permissions UX
+  epic-66: backlog
+  66-1-user-management: backlog
+  66-2-role-management-permission-matrix: backlog
+  66-3-company-outlet-management: backlog
+  66-4-permission-aware-navigation: backlog
+  66-5-audit-log-explorer: backlog

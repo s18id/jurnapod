@@ -1,6 +1,6 @@
 # Epic 66: Core Admin — Users, Roles, Companies, Permissions UX
 
-**Status:** planned (queued — requires explicit backoffice unfreeze before execution)
+**Status:** planned (queued — requires explicit Epic 66 backoffice unfreeze before execution)
 **Sprint/Timebox:** Weeks 3–4 (of Backoffice Frontend Program)
 **Theme:** Admin surfaces for identity and access management: user CRUD with role assignment and outlet scoping, role management with permission matrix, company/outlet management, permission-aware navigation, and audit log explorer.
 **Primary Modules:** `apps/backoffice`, `packages/auth`, `packages/modules/platform`
@@ -201,11 +201,14 @@ Implement the audit log explorer:
 
 | # | Precondition | Enforcement | Status |
 |---|--------------|-------------|--------|
-| 1 | Epic 65 (Foundation) complete with exit gate passed | sprint-status.yaml | ❌ (HOLDING) |
-| 2 | Backoffice unfreeze authorized | Written authorization | ❌ (HOLDING) |
-| 3 | Typed API client covers user/role/company/outlet/audit endpoints | 65-2 completion | ❌ (HOLDING) |
-| 4 | Route guards from Epic 65 functional | 65-5 completion | ❌ (HOLDING) |
-| 5 | TanStack Query from Epic 65 available | 65-6 completion | ❌ (HOLDING) |
+| 1 | Epic 65 (Foundation) complete with exit gate passed | sprint-status.yaml | ✅ COMPLETE (`epic-65: done`) |
+| 2 | Backoffice unfreeze authorized for Epic 66 | Written authorization | ❌ HOLDING |
+| 3 | Typed API client covers user/role/company/outlet/audit endpoints | API contract verification | ⚠️ PARTIAL — Epic 65 typed client exists; endpoint contract verification remains required per Story 66 specs |
+| 4 | Route guards from Epic 65 functional | 65-5 completion | ✅ COMPLETE |
+| 5 | TanStack Query from Epic 65 available | 65-6 completion | ✅ COMPLETE |
+| 6 | Epic 66 story specs created | Story files | ✅ COMPLETE (`story-66-1.md` through `story-66-5.md`) |
+
+**Execution boundary:** Stories 66-1 through 66-5 MUST remain planning-only until precondition #2 is satisfied.
 
 ---
 
