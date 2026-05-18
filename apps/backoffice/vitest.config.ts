@@ -33,6 +33,7 @@ export default defineConfig({
       "__test__/unit/features/inventory/*.test.tsx",
       "__test__/unit/features/import/*.test.ts",
       "__test__/unit/features/import/*.test.tsx",
+      "__test__/unit/features/*.test.tsx",
       "__test__/unit/export/*.test.ts",
       "__test__/unit/features/prices/*.test.ts",
       "__test__/unit/features/prices/*.test.tsx",

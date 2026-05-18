@@ -31,6 +31,15 @@ export interface PendingJobsInfo {
   loading: boolean;
 }
 
+export interface OperationsJobsInfo {
+  /** Count of persisted operations with running or failed status */
+  count: number;
+  /** Count of persisted operations with failed status */
+  failedCount: number;
+  /** Whether operation badge data is currently loading */
+  loading: boolean;
+}
+
 export interface SyncHealthInfo {
   /** Whether sync is currently in a healthy state */
   healthy: boolean;
@@ -51,6 +60,8 @@ export interface ShellState {
   outlet: OutletContext;
   /** Pending jobs / sync alert count */
   pendingJobs: PendingJobsInfo;
+  /** Persisted operations alert count */
+  operationsJobs: OperationsJobsInfo;
   /** Online/offline status */
   isOnline: boolean;
   /** Sync health and last sync timestamp */
@@ -72,6 +83,12 @@ const defaultPendingJobs: PendingJobsInfo = {
   loading: false,
 };
 
+const defaultOperationsJobs: OperationsJobsInfo = {
+  count: 0,
+  failedCount: 0,
+  loading: false,
+};
+
 const defaultSyncHealth: SyncHealthInfo = {
   healthy: true,
   lastSyncTimestamp: null,
@@ -84,6 +101,7 @@ const ShellContext = createContext<ShellState>({
   companyTimezone: null,
   outlet: defaultOutletContext,
   pendingJobs: defaultPendingJobs,
+  operationsJobs: defaultOperationsJobs,
   isOnline: true,
   syncHealth: defaultSyncHealth,
 });

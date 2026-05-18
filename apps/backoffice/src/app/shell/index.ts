@@ -54,6 +54,7 @@ export {
 } from "./shell-context";
 export type {
   OutletContext,
+  OperationsJobsInfo,
   ShellProviderProps,
   ShellState,
 } from "./shell-context";

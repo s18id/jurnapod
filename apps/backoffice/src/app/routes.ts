@@ -19,6 +19,11 @@ export type AppRoute = {
    * legacy role + module checking only.
    */
   permission?: NavPermissionRequirement;
+  /**
+   * When true, route permission checks MUST use backend-supplied user.permissions only.
+   * Role-derived fallback permissions MUST NOT grant this route.
+   */
+  requiresExplicitPermission?: boolean;
 };
 
 export const APP_ROUTES: readonly AppRoute[] = [
@@ -238,6 +243,13 @@ export const APP_ROUTES: readonly AppRoute[] = [
     // Gap: no generated/runtime /api/audit-logs contract exists to verify a
     // dedicated generic audit resource. Keep client UX deny-by-default here.
     permission: { module: "platform", resource: "settings", permissionMask: PERMISSION_BITS.READ }
+  },
+  {
+    path: "/operations",
+    label: "Operations",
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    permission: { module: "platform", resource: "operations", permissionMask: PERMISSION_BITS.READ },
+    requiresExplicitPermission: true
   },
   {
     path: "/companies",

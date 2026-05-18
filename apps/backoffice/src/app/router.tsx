@@ -30,6 +30,8 @@ import { SyncHistoryPage } from "../features/sync-history-page";
 import { PWASettingsPage } from "../features/pwa-settings-page";
 import { ResetPasswordPage } from "../features/reset-password-page";
 import { VerifyEmailPage } from "../features/verify-email-page";
+import { OPERATIONS_LIST_REFETCH_MS, useOperationsList } from "../hooks/use-operations-list";
+import { canReadOperations } from "../lib/operations-permissions";
 
 import { AppLayout } from "./layout";
 import {
@@ -110,6 +112,7 @@ const ReservationCalendarPage = lazyNamed(() => import("../features/reservation-
 const TableBoardPage = lazyNamed(() => import("../features/table-board-page"), "TableBoardPage");
 const ItemImportPage = lazyNamed(() => import("../features/item-import-page"), "ItemImportPage");
 const PriceImportPage = lazyNamed(() => import("../features/price-import-page"), "PriceImportPage");
+const OperationsCenter = lazyNamed(() => import("../features/operations/operations-center"), "OperationsCenter");
 
 function RouteLoadingFallback() {
   return <div style={{ padding: "1rem" }}>Loading…</div>;
@@ -294,6 +297,9 @@ function RouteScreen(props: { path: string; user: SessionUser }) {
   }
   if (props.path === "/pwa-settings") {
     return <PWASettingsPage />;
+  }
+  if (props.path === "/operations") {
+    return renderLazyPage(<OperationsCenter user={props.user} />);
   }
   if (props.path === "/account-mappings") {
     return renderLazyPage(<AccountMappingsPage user={props.user} />);
@@ -527,6 +533,16 @@ export function AppRouter() {
   const outletSwitcher = useOutletSwitcher(user?.outlets ?? []);
   const pendingJobs = usePendingJobs(user?.id ?? null);
   const syncHealth = useSyncHealth(user?.id ?? null);
+  const hasOperationsAccess = canReadOperations(user);
+  const runningOperations = useOperationsList(
+    { status: "running", limit: 1, offset: 0 },
+    { enabled: hasOperationsAccess },
+  );
+  const hasRunningOperations = (runningOperations.data?.total ?? 0) > 0;
+  const failedOperations = useOperationsList(
+    { status: "failed", limit: 1, offset: 0 },
+    { enabled: hasOperationsAccess, refetchInterval: hasRunningOperations ? OPERATIONS_LIST_REFETCH_MS : false },
+  );
 
   const availableRoutes = useMemo(() => {
     if (!user) {
@@ -538,6 +554,7 @@ export function AppRouter() {
       user.global_roles,
       enabledModules,
       effectivePermissions,
+      user.permissions,
     ).visibleRoutes;
   }, [user, enabledModules, effectivePermissions]);
 
@@ -554,13 +571,18 @@ export function AppRouter() {
       count: pendingJobs.count,
       loading: pendingJobs.loading,
     },
+    operationsJobs: {
+      count: (runningOperations.data?.total ?? 0) + (failedOperations.data?.total ?? 0),
+      failedCount: failedOperations.data?.total ?? 0,
+      loading: runningOperations.isLoading || failedOperations.isLoading,
+    },
     isOnline,
     syncHealth: {
       healthy: syncHealth.healthy,
       lastSyncTimestamp: syncHealth.lastSyncTimestamp,
       lastSyncLabel: syncHealth.lastSyncLabel,
     },
-  }), [user, outletSwitcher, pendingJobs, isOnline, syncHealth]);
+  }), [user, outletSwitcher, pendingJobs, runningOperations.data?.total, runningOperations.isLoading, failedOperations.data?.total, failedOperations.isLoading, isOnline, syncHealth]);
 
   const publicSlug =
     typeof window !== "undefined" ? getPublicStaticSlugFromLocation(globalThis.location) : null;
@@ -594,12 +616,12 @@ export function AppRouter() {
   const canAccess = !!(
     user &&
     route &&
-    userCanAccessRoute(user.roles, route, user.global_roles) &&
+    (route.requiresExplicitPermission || userCanAccessRoute(user.roles, route, user.global_roles)) &&
     (!route.requiredModule || enabledModules[route.requiredModule] === true) &&
     // Backend authority: API enforces deny-by-default.
     // Client-side permission check is a UX convenience (deny-by-default for
     // permissioned routes when effective permissions are insufficient).
-    userSatisfiesRoutePermission(route.permission, effectivePermissions)
+    userSatisfiesRoutePermission(route.permission, route.requiresExplicitPermission ? user.permissions : effectivePermissions)
   );
 
   async function handleSignIn(input: { companyCode: string; email: string; password: string }) {

@@ -202,6 +202,36 @@ describe("navigation section filtering (AC2)", () => {
     expect(visible.visibleRoutes).toHaveLength(1);
     expect(visible.visibleRoutes[0].path).toBe("/items");
   });
+
+  it("shows explicit-permission operations route without role-derived access", () => {
+    const operationsRoute = findRoute("/operations")!;
+    const visible = filterNavigation(
+      [operationsRoute],
+      ["CASHIER"],
+      [],
+      {},
+      [],
+      [{ module: "platform", resource: "operations", mask: PERMISSION_BITS.READ }],
+    );
+
+    expect(operationsRoute.requiresExplicitPermission).toBe(true);
+    expect(visible.visibleRoutes).toHaveLength(1);
+    expect(visible.visibleRoutes[0].path).toBe("/operations");
+  });
+
+  it("hides explicit-permission operations route when backend permission is absent", () => {
+    const operationsRoute = findRoute("/operations")!;
+    const visible = filterNavigation(
+      [operationsRoute],
+      ["OWNER"],
+      [],
+      {},
+      permissionsFromRoleCodes(["OWNER"]),
+      [],
+    );
+
+    expect(visible.visibleRoutes).toHaveLength(0);
+  });
 });
 
 // ============================================================================

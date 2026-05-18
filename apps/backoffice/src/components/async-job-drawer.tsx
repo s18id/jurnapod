@@ -27,8 +27,10 @@ import {
   type OperationStatus,
   useOperationProgress,
 } from "@/hooks/use-operation-progress";
-import { PERMISSION_BITS, userHasPermission } from "@/lib/auth/permissions";
+import { canReadOperations } from "@/lib/operations-permissions";
 import type { SessionUser } from "@/lib/session";
+
+export { canReadOperations } from "@/lib/operations-permissions";
 
 export interface AsyncJobDrawerProps {
   opened: boolean;
@@ -38,10 +40,6 @@ export interface AsyncJobDrawerProps {
   user?: SessionUser | null;
   enableSse?: boolean;
   progressState?: OperationProgressState;
-}
-
-export function canReadOperations(user: SessionUser | null | undefined): boolean {
-  return userHasPermission(user?.permissions ?? [], "platform", "operations", PERMISSION_BITS.READ);
 }
 
 export function formatEtaSeconds(etaSeconds: number | null): string {

@@ -100,10 +100,11 @@ export function filterNavigation(
   globalRoles: readonly RoleCode[],
   enabledModules: Record<string, boolean>,
   userPermissions?: readonly UserPermissionEntry[],
+  explicitUserPermissions?: readonly UserPermissionEntry[],
 ): NavFilterResult {
   // Step 1: Role-based filtering (existing)
   const roleFiltered = routes.filter((route) =>
-    userCanAccessRoute(roles, route, globalRoles),
+    route.requiresExplicitPermission || userCanAccessRoute(roles, route, globalRoles),
   );
 
   // Step 2: Module-based filtering (existing)
@@ -111,13 +112,19 @@ export function filterNavigation(
 
   // Step 3: Permission-based filtering uses formal AppRoute.permission metadata.
   // Routes without permission metadata continue to rely on role + module visibility.
-  const loadedPermissions = userPermissions ?? [];
   const permissionFiltered = moduleFiltered.filter((route) => {
     if (!route.permission) {
       return true;
     }
 
-    return userSatisfiesPermission(loadedPermissions, route.permission);
+    if (route.requiresExplicitPermission) {
+      if (explicitUserPermissions === undefined) {
+        return false;
+      }
+      return userSatisfiesPermission(explicitUserPermissions, route.permission);
+    }
+
+    return userSatisfiesPermission(userPermissions ?? [], route.permission);
   });
 
   return {

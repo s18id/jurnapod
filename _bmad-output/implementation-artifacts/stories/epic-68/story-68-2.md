@@ -1,6 +1,6 @@
-# Story 68-2: Operations/Job Center — List, Filter, Retry, Detail
+# Story 68-2: Operations/Job Center — List, Filter, Detail
 
-Status: backlog
+Status: review
 
 > ⚠️ **Sprint-Status Append-Only Rule (E45-A1 / E46-A1) — MANDATORY:**
 > If this story modifies `_bmad-output/implementation-artifacts/sprint-status.yaml`:
@@ -14,12 +14,12 @@ Status: backlog
 ## Story
 
 As a **company admin or operator**,  
-I want **a centralized operations center where I can view all async jobs, filter by status, retry failures, and inspect details**,  
+I want **a centralized operations center where I can view async jobs, filter by supported fields, and inspect details**,  
 So that **I can manage and troubleshoot background operations from a single place**.
 
 ## Context
 
-The operations center is the primary surface for async job management. It consumes the AsyncJobDrawer (Story 68-1) for detail views and provides list/filter capabilities via the EntityTable primitive from Epic 65. The page MUST auto-refresh for running jobs and provide quick actions (retry, cancel) where supported by the backend contract.
+The operations center is the primary surface for async job visibility. It consumes the AsyncJobDrawer (Story 68-1) for detail views and provides list/filter capabilities via the EntityTable primitive from Epic 65. The page MUST auto-refresh for running jobs and MUST NOT expose generic retry or cancel actions unless backend endpoints are added in a future story.
 
 **Critical dependency:** Story 68-0 (contract verification) determines which operation types exist, which support retry/cancel, and how list/filter endpoints behave. Story 68-1 (AsyncJobDrawer) provides the detail view.
 
@@ -35,9 +35,9 @@ The operations center is the primary surface for async job management. It consum
 
 ### Pre-Implementation Checklist
 
-- [ ] **Happy paths identified:** Operations list loads; filter by status; click row opens drawer; retry failed job
-- [ ] **Error paths identified:** API failure loading list; permission denied; retry fails; cancel fails
-- [ ] **Edge cases identified:** Empty list; very long list (>1000 jobs); job transitions while viewing; multiple users retrying same job
+- [ ] **Happy paths identified:** Operations list loads; filter by status/type; click row opens drawer; unsupported retry/cancel controls remain hidden
+- [ ] **Error paths identified:** API failure loading list; permission denied; operation row removed before drawer opens
+- [ ] **Edge cases identified:** Empty list; very long list (>1000 jobs); job transitions while viewing; selected operation removed before drawer opens
 - [ ] **Test fixture needs identified:** Mock operation list data for each status; mock filter responses
 - [ ] **Integration test scope defined:** Unit tests for list/filter UI; integration tests for API + drawer interaction
 - [ ] **Negative auth test role selected:** `CASHIER` for operations list (may lack READ on `platform.operations`)
@@ -49,10 +49,10 @@ The operations center is the primary surface for async job management. It consum
 | List all operations for company | Happy | Integration |
 | Filter by status=failed | Happy | Unit |
 | Filter by type=import | Happy | Unit |
-| Filter by date range | Happy | Unit |
+| Unsupported date range hidden | Edge | Unit |
 | Click row opens AsyncJobDrawer | Happy | Unit |
-| Retry failed job | Happy | Integration |
-| Cancel running job | Happy | Integration (if backend supports) |
+| Generic retry action hidden | Edge | Unit |
+| Generic cancel action hidden | Edge | Unit |
 | Auto-refresh for running jobs | Happy | Unit |
 | Jobs badge shows count | Happy | Unit |
 | Empty list shows empty state | Edge | Unit |
@@ -66,17 +66,15 @@ The operations center is the primary surface for async job management. It consum
 
 ### Pre-Implementation Checklist
 
-- [ ] Producer error classes: `OperationNotFoundError`, `RetryNotAllowedError`, `CancelNotAllowedError`
-- [ ] Consumer catch paths: List shows error banner; retry/cancel show inline error
+- [ ] Producer error classes: `OperationNotFoundError`, `OperationsListError`
+- [ ] Consumer catch paths: List shows error banner; drawer shows operation-not-found state if selected operation disappears
 - [ ] Fallback handling: Generic "Operation failed" with operation ID
-- [ ] Error response mapping: 400 → invalid state for retry/cancel; 403 → permission denied; 404 → operation not found
+- [ ] Error response mapping: 400 → invalid list filter; 403 → permission denied; 404 → operation not found in drawer
 
 ### Verified Error Paths
 
 | Producer Error | Consumer Handling | Fallback |
 |----------------|-------------------|----------|
-| Retry not allowed | Inline error on row; disable retry button | Toast notification |
-| Cancel not allowed | Inline error on row; disable cancel button | Toast notification |
 | Operation not found | Remove row from list; show "Job removed" | Refresh list |
 
 ---
@@ -95,8 +93,8 @@ The operations center is the primary surface for async job management. It consum
 **When** filters are applied  
 **Then** the list updates to show only matching operations  
 **And** supported filters are:
-- Status: `queued`, `running`, `completed`, `failed`, `cancelled`, `partially_failed`
-- Type: per contract document (e.g., `import`, `export`, `sync`, `bulk-update`)
+- Status: `running`, `completed`, `failed`, `cancelled`
+- Type: per contract document: `import`, `export`, `batch_update`
 - Pagination: `limit` and `offset`
 - Date range and creator filters are not required unless backend support is added
 
@@ -194,7 +192,7 @@ const { data } = useQuery({
 ---
 
 ## Story Points
-**8 points** (medium-high — list/filter composition, auto-refresh, retry/cancel mutations)
+**8 points** (medium-high — list/filter composition, auto-refresh, shell badge integration)
 
 ---
 
@@ -203,7 +201,7 @@ const { data } = useQuery({
 ### Phase 1: List and filter
 1. **Create `useOperationsList` hook** — TanStack Query with pagination, filters
 2. **Create operations center page** — EntityTable + FilterBar composition
-3. **Implement filter bar** — Status, type, date range, creator filters
+3. **Implement filter bar** — Status and type filters only
 
 ### Phase 2: Actions
 4. **Document retry/cancel absence** — Hide generic controls and expose no unsupported action
@@ -216,8 +214,8 @@ const { data } = useQuery({
 
 ### Phase 4: Testing
 9. **Unit tests for list/filter** — Filter behavior, pagination, empty state
-10. **Unit tests for actions** — Retry, cancel, permission gating
-11. **Integration tests** — Real API calls for list, retry, cancel
+10. **Unit tests for actions** — Drawer opening, retry/cancel absence, permission gating
+11. **Integration tests** — Real API list authorization remains covered by Story 68-1 AC0 operations route tests
 
 ---
 
@@ -261,4 +259,74 @@ npx tsx scripts/validate-sprint-status.ts --epic 68
 
 ---
 
-_Last Updated: 2026-05-18 (prepared by bmad-sm)
+_Last Updated: 2026-05-19 (implementation in review)
+
+---
+
+## Dev Agent Record
+
+### Implementation Plan
+
+- Implement Operations Center against Story 68-0 verified backend contract: `/operations` with `limit`, `offset`, optional `status`, and optional `type`.
+- Use backend-supported statuses only: `running`, `completed`, `failed`, `cancelled`.
+- Use backend-supported types only: `import`, `export`, `batch_update`.
+- Wire row/detail actions to Story 68-1 `AsyncJobDrawer` and do not expose unsupported generic retry/cancel controls.
+- Add shell operations badge based on `running + failed` operation counts, with failed-state deep link to `#/operations?status=failed`.
+- Require explicit backend-provided `platform.operations.READ` for route navigation, page access, badge queries, and Operations Center rendering.
+
+### Completion Notes
+
+- Added `useOperationsList` TanStack Query hook with canonical `/operations` path, offset pagination, response validation, and 10-second refetch policy only while running operations exist.
+- Added Operations Center page using EntityTable, filter bar, offset pagination mapping, empty state, permission-denied state, and row click / details button opening AsyncJobDrawer.
+- Added Operations filter bar with status/type filters only; date range and creator filters remain absent because backend support does not exist.
+- Added `/operations` route with explicit `platform.operations.READ` route metadata and explicit-permission navigation filtering.
+- Added shell operations badge state for running/failed operation counts and footer badge deep-link behavior.
+- Added DataTable row activation support for operation row clicks.
+- Added focused unit tests for list params, filters, empty state, permission gating, no retry/cancel controls, badge helpers, and auto-refresh policy.
+- Review fix: explicit-permission routes now bypass legacy role prefilter and require backend-provided permission entries for Operations route visibility/access.
+- Review fix: failed-count badge query refreshes while running operations exist so running-to-failed transitions update the badge and failed deep link.
+- Review fix: empty-state import link now deep-links to `#/items/import`.
+
+### Validation Evidence
+
+- `npm run test:single -w @jurnapod/backoffice -- __test__/unit/features/operations-center.test.tsx` — passed; 8 tests passed.
+- `npm run test:single -w @jurnapod/backoffice -- __test__/unit/features/operations-filter-bar.test.tsx` — passed; 3 tests passed.
+- `npm run test:single -w @jurnapod/backoffice -- __test__/unit/app-router-guards-permissions.test.ts` — passed; 77 tests passed.
+- `npm run lint -w @jurnapod/backoffice` — passed.
+- `npm run typecheck -w @jurnapod/backoffice` — passed.
+- `npm run build -w @jurnapod/backoffice` — passed; existing Vite chunk-size/dynamic-import warnings only.
+- `npx tsx scripts/validate-sprint-status.ts` — passed.
+
+### Review Result
+
+- Architecture review: GO.
+- Prior NO-GO findings resolved:
+  - P1: `/operations` now uses explicit `platform.operations.READ` via `requiresExplicitPermission` and backend-provided `user.permissions` only.
+  - P2: failed-count badge query refreshes while running operations exist, so running-to-failed transitions update the badge and failed deep link.
+  - P3: empty-state import link now points to `#/items/import`.
+- Final severity findings: P0 none, P1 none, P2 none, P3 none.
+
+### File List
+
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `_bmad-output/implementation-artifacts/stories/epic-68/story-68-2.md`
+- `apps/backoffice/__test__/unit/features/operations-center.test.tsx`
+- `apps/backoffice/__test__/unit/features/operations-filter-bar.test.tsx`
+- `apps/backoffice/src/app/layout.tsx`
+- `apps/backoffice/src/app/router.tsx`
+- `apps/backoffice/src/app/routes.ts`
+- `apps/backoffice/src/app/shell/index.ts`
+- `apps/backoffice/src/app/shell/shell-context.tsx`
+- `apps/backoffice/src/app/shell/use-nav-filtering.ts`
+- `apps/backoffice/src/components/async-job-drawer.tsx`
+- `apps/backoffice/src/components/ui/DataTable/DataTable.tsx`
+- `apps/backoffice/src/components/ui/DataTable/types.ts`
+- `apps/backoffice/src/features/operations/operations-center.tsx`
+- `apps/backoffice/src/features/operations/operations-filter-bar.tsx`
+- `apps/backoffice/src/hooks/use-operations-list.ts`
+- `apps/backoffice/src/lib/operations-permissions.ts`
+- `apps/backoffice/vitest.config.ts`
+
+### Change Log
+
+- 2026-05-19: Implemented Story 68-2 Operations Center UI/client scope and moved story to review.

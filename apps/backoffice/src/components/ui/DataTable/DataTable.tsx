@@ -100,6 +100,10 @@ export interface DataTableProps<TData> {
   onSelectionChange?: OnSelectionChange;
   /** Callback when retry is clicked */
   onRetry?: () => void;
+  /** Callback when a data row is activated */
+  onRowClick?: (row: TData) => void;
+  /** Accessible label for an activatable data row */
+  rowAriaLabel?: (row: TData) => string;
   /** Skeleton loader dimensions by column id */
   skeletonDimensions?: Record<string, { width?: number | string; height?: number }>;
   /** Empty state message */
@@ -707,6 +711,8 @@ export function DataTable<TData>({
   onPaginationChange,
   onSelectionChange,
   onRetry,
+  onRowClick,
+  rowAriaLabel,
   skeletonDimensions,
   emptyState,
   _caption,
@@ -979,6 +985,17 @@ export function DataTable<TData>({
               data-selected={isSelected}
               className={zebraClass}
               data-testid={testId ? `${testId}-row-${rowId}` : undefined}
+              onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+              onKeyDown={onRowClick ? (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onRowClick(row.original);
+                }
+              } : undefined}
+              tabIndex={onRowClick ? 0 : undefined}
+              role={onRowClick ? "button" : undefined}
+              aria-label={onRowClick ? rowAriaLabel?.(row.original) ?? `Open row ${rowId}` : undefined}
+              style={onRowClick ? { cursor: "pointer" } : undefined}
             >
               {/* Selection cell */}
               {showSelection && (
@@ -1027,6 +1044,8 @@ export function DataTable<TData>({
     zebraStriping,
     handleRetry,
     handleRowSelect,
+    onRowClick,
+    rowAriaLabel,
     testId,
     emptyState,
   ]);

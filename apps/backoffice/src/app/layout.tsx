@@ -95,6 +95,7 @@ const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
     label: "Settings",
     paths: [
       "/audit-logs",
+      "/operations",
       "/companies",
       "/outlets",
       "/users",
@@ -138,6 +139,14 @@ function resolvePosBaseUrl(): string {
   }
 
   return "";
+}
+
+export function getOperationsBadgeHref(failedCount: number): string {
+  return failedCount > 0 ? "#/operations?status=failed" : "#/operations";
+}
+
+export function formatOperationsBadgeLabel(count: number): string {
+  return `${count} operation${count !== 1 ? "s" : ""}`;
 }
 
 export function AppLayout(props: AppLayoutProps) {
@@ -443,6 +452,19 @@ export function AppLayout(props: AppLayoutProps) {
               style={{ cursor: "pointer" }}
             >
               {shell.pendingJobs.count} pending job{shell.pendingJobs.count !== 1 ? "s" : ""}
+            </Badge>
+          )}
+          {shell.operationsJobs.count > 0 && (
+            <Badge
+              color={shell.operationsJobs.failedCount > 0 ? "red" : "blue"}
+              variant="light"
+              size="sm"
+              component="a"
+              href={getOperationsBadgeHref(shell.operationsJobs.failedCount)}
+              style={{ cursor: "pointer" }}
+              data-testid="operations-jobs-badge"
+            >
+              {formatOperationsBadgeLabel(shell.operationsJobs.count)}
             </Badge>
           )}
         </Group>
