@@ -1,6 +1,6 @@
 # Epic 66: Core Admin — Users, Roles, Companies, Permissions UX
 
-**Status:** planned (queued — requires explicit Epic 66 backoffice unfreeze before execution)
+**Status:** done (all stories complete with reviewer GO and owner sign-off)
 **Sprint/Timebox:** Weeks 3–4 (of Backoffice Frontend Program)
 **Theme:** Admin surfaces for identity and access management: user CRUD with role assignment and outlet scoping, role management with permission matrix, company/outlet management, permission-aware navigation, and audit log explorer.
 **Primary Modules:** `apps/backoffice`, `packages/auth`, `packages/modules/platform`
@@ -21,7 +21,7 @@ Epic 66 builds on Epic 65's foundation (typed API client, auth session, shell, r
 - The repo's ACL model uses 8 canonical modules with resource-level permissions, 6 permission bits (READ=1, CREATE=2, UPDATE=4, DELETE=8, ANALYZE=16, MANAGE=32), and 5 permission masks
 - Role presets exist: SUPER_ADMIN, OWNER, COMPANY_ADMIN, ADMIN, ACCOUNTANT, CASHIER
 - Users can have outlet-scoped role assignments
-- The audit back-end exposes period-transition audit APIs and likely general audit query
+- The audit back-end now exposes generic read-only audit list/detail APIs delivered by Story 66-5
 - Epic 45 already documented canonical permission bit values and fixture standards
 
 ### 1.3 Non-Goals
@@ -67,7 +67,7 @@ Epic 66 builds on Epic 65's foundation (typed API client, auth session, shell, r
 
 ### Story 66-1 — User management: list, create, edit, role assignment, outlet scoping
 
-**Status:** planned
+**Status:** done
 **Type:** feature
 **Risk:** Medium
 **Dependencies:** Epic 65 (typed API client, shell, router, TanStack Query)
@@ -92,7 +92,7 @@ Implement the user management surface:
 
 ### Story 66-2 — Role management: presets, permission matrix editor, change review
 
-**Status:** planned
+**Status:** done
 **Type:** feature
 **Risk:** High (permission matrix is data-dense and error-prone)
 **Dependencies:** 66-1 (role assignment pattern)
@@ -117,7 +117,7 @@ Implement role management:
 
 ### Story 66-3 — Company/outlet management with ScopeBadge
 
-**Status:** planned
+**Status:** done
 **Type:** feature
 **Risk:** Low
 **Dependencies:** Epic 65 (shell, typed API client)
@@ -141,7 +141,7 @@ Implement company and outlet management:
 
 ### Story 66-4 — Permission-aware navigation and route guards
 
-**Status:** planned
+**Status:** done
 **Type:** feature
 **Risk:** Low
 **Dependencies:** 66-1, 66-2 (permission data model), Epic 65 (route guards shell)
@@ -165,7 +165,7 @@ Integrate permission data into the shell navigation and route guards built in Ep
 
 ### Story 66-5 — Audit log explorer
 
-**Status:** planned
+**Status:** done
 **Type:** feature
 **Risk:** Medium
 **Dependencies:** 66-4 (permission-aware navigation), Epic 65 (data table primitives)
@@ -202,26 +202,26 @@ Implement the audit log explorer:
 | # | Precondition | Enforcement | Status |
 |---|--------------|-------------|--------|
 | 1 | Epic 65 (Foundation) complete with exit gate passed | sprint-status.yaml | ✅ COMPLETE (`epic-65: done`) |
-| 2 | Backoffice unfreeze authorized for Epic 66 | Written authorization | ❌ HOLDING |
-| 3 | Typed API client covers user/role/company/outlet/audit endpoints | API contract verification | ⚠️ PARTIAL — Epic 65 typed client exists; endpoint contract verification remains required per Story 66 specs |
+| 2 | Backoffice unfreeze authorized for Epic 66 | Written authorization | ✅ COMPLETE — Ahmad approved Epic 66 execution on 2026-05-17 |
+| 3 | Typed API client covers user/role/company/outlet/audit endpoints | API contract verification | ✅ COMPLETE — Story-level runtime/generated contract verification completed with documented P2 follow-ups |
 | 4 | Route guards from Epic 65 functional | 65-5 completion | ✅ COMPLETE |
 | 5 | TanStack Query from Epic 65 available | 65-6 completion | ✅ COMPLETE |
 | 6 | Epic 66 story specs created | Story files | ✅ COMPLETE (`story-66-1.md` through `story-66-5.md`) |
 
-**Execution boundary:** Stories 66-1 through 66-5 MUST remain planning-only until precondition #2 is satisfied.
+**Execution boundary:** COMPLETE — precondition #2 was satisfied before implementation. Stories 66-1 through 66-5 are complete.
 
 ---
 
 ## 6) Exit Gate
 
-1. **Build Gate:** `npm run build` and `npm run typecheck` pass
-2. **User Admin Gate:** User CRUD, role assignment with permission preview, outlet scoping all functional
-3. **Role Admin Gate:** Permission matrix renders, system roles locked, custom roles editable, before/after diff on changes
-4. **Company/Outlet Gate:** CRUD functional, ScopeBadge renders on scope-sensitive pages
-5. **Permission UX Gate:** Navigation filtered, route guards enforce, action buttons hidden for unauthorized users
-6. **Audit Explorer Gate:** Filters functional, detail drawer shows before/after diff, deep-link support
-7. **Test Gate:** Unit tests for permission bits, matrix editor, diff calculation, audit list filtering all pass
-8. **SOLID/DRY/KISS Gate:** Full rescore passes at pre-close
+1. **Build Gate:** ✅ PASS — story validation logs recorded in completion reports
+2. **User Admin Gate:** ✅ PASS — Story 66-1 done
+3. **Role Admin Gate:** ✅ PASS — Story 66-2 done
+4. **Company/Outlet Gate:** ✅ PASS — Story 66-3 done
+5. **Permission UX Gate:** ✅ PASS — Story 66-4 done
+6. **Audit Explorer Gate:** ✅ PASS — Story 66-5 done
+7. **Test Gate:** ✅ PASS — focused and unit/integration validation logs recorded per story
+8. **SOLID/DRY/KISS Gate:** ✅ PASS — no reviewer P0/P1 blockers remain
 
 ---
 
@@ -260,4 +260,4 @@ npx tsx scripts/validate-sprint-status.ts --epic 66
 
 ---
 
-_Last Updated: 2026-05-17_
+_Last Updated: 2026-05-18_

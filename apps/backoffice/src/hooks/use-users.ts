@@ -9,6 +9,8 @@ import type {
   UserOutletsUpdateRequest,
   UserPasswordUpdateRequest,
   RoleResponse,
+  RolePermissionEntry,
+  RolePermissionsUpdateRequest,
   OutletResponse
 } from "@jurnapod/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -71,6 +73,24 @@ type UserSingleResponse = {
 type RolesListResponse = {
   success: true;
   data: RoleResponse[];
+};
+
+type RoleSingleResponse = {
+  success: true;
+  data: RoleResponse;
+};
+
+type RolePermissionsListResponse = {
+  success: true;
+  data: RolePermissionEntry[];
+};
+
+type RolePermissionsUpdateResponse = {
+  success: true;
+  data: {
+    role: RoleResponse;
+    permissions: RolePermissionEntry[];
+  };
 };
 
 type OutletsListResponse = {
@@ -266,6 +286,90 @@ export function useRoles(companyId?: number) {
 }
 
 /**
+ * Hook: useRole
+ * Fetches a single role by ID using the existing GET /roles/:id contract.
+ */
+export function useRole(roleId: number | null) {
+  const [data, setData] = useState<RoleResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refetch = useCallback(async () => {
+    if (!roleId) {
+      setData(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await apiRequest<RoleSingleResponse>(`/roles/${roleId}`);
+      setData(response.data);
+    } catch (fetchError) {
+      if (fetchError instanceof ApiError) {
+        setError(fetchError.message);
+      } else {
+        setError("Failed to load role");
+      }
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [roleId]);
+
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+
+  return { data, loading, error, refetch };
+}
+
+/**
+ * Hook: useRolePermissions
+ * Fetches role permission entries through GET /roles/:id/permissions.
+ */
+export function useRolePermissions(roleId: number | null) {
+  const [data, setData] = useState<RolePermissionEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refetch = useCallback(async () => {
+    if (!roleId) {
+      setData([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await apiRequest<RolePermissionsListResponse>(`/roles/${roleId}/permissions`);
+      setData(response.data);
+    } catch (fetchError) {
+      if (fetchError instanceof ApiError) {
+        setError(fetchError.message);
+      } else {
+        setError("Failed to load role permissions");
+      }
+      setData([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [roleId]);
+
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+
+  return { data, loading, error, refetch };
+}
+
+/**
  * Hook: useOutlets
  * Fetches list of outlets for a company
  */
@@ -451,6 +555,24 @@ export async function updateRole(
     `/roles/${roleId}`,
     {
       method: "PATCH",
+      body: JSON.stringify(data)
+    }
+  );
+  return response.data;
+}
+
+/**
+ * Mutation: updateRolePermissions
+ * Replaces custom-role permissions after UI change review confirmation.
+ */
+export async function updateRolePermissions(
+  roleId: number,
+  data: RolePermissionsUpdateRequest
+): Promise<RolePermissionsUpdateResponse["data"]> {
+  const response = await apiRequest<RolePermissionsUpdateResponse>(
+    `/roles/${roleId}/permissions`,
+    {
+      method: "PUT",
       body: JSON.stringify(data)
     }
   );

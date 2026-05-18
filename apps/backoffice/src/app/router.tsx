@@ -35,10 +35,12 @@ import {
   APP_ROUTES,
   DEFAULT_ROUTE_PATH,
   findRoute,
+  isRoleDetailPath,
   normalizeHashPath,
   userCanAccessRoute,
-  filterRoutesByModules
 } from "./routes";
+import { filterNavigation } from "./shell/use-nav-filtering";
+import { resolveEffectivePermissions, userSatisfiesRoutePermission } from "@/lib/auth/permissions";
 import {
   ShellProvider,
   useOutletSwitcher,
@@ -190,8 +192,9 @@ function RouteScreen(props: { path: string; user: SessionUser }) {
   if (props.path === "/users") {
     return renderLazyPage(<UsersPage user={props.user} />);
   }
-  if (props.path === "/roles") {
-    return renderLazyPage(<RolesPage user={props.user} />);
+  if (props.path === "/roles" || isRoleDetailPath(props.path)) {
+    const roleId = isRoleDetailPath(props.path) ? Number(props.path.split("/").at(-1)) : null;
+    return renderLazyPage(<RolesPage user={props.user} initialRoleId={roleId} />);
   }
   if (props.path === "/module-roles") {
     return renderLazyPage(<ModuleRolesPage user={props.user} />);
@@ -338,6 +341,12 @@ export function AppRouter() {
     loading: modulesLoading,
     source: modulesSource
   } = useModules(user?.company_id ?? null);
+
+  // Effective permissions: use explicit field when present, else derive
+  // from role codes via the canonical shared permission matrix.
+  const effectivePermissions = useMemo(() => {
+    return resolveEffectivePermissions(user);
+  }, [user]);
 
   const {
     count: alertCount,
@@ -517,12 +526,14 @@ export function AppRouter() {
     if (!user) {
       return APP_ROUTES;
     }
-    const roleFiltered = APP_ROUTES.filter((route) =>
-      userCanAccessRoute(user.roles, route, user.global_roles)
-    );
-    const moduleFiltered = filterRoutesByModules(roleFiltered, enabledModules);
-    return moduleFiltered;
-  }, [user, enabledModules]);
+    return filterNavigation(
+      APP_ROUTES,
+      user.roles,
+      user.global_roles,
+      enabledModules,
+      effectivePermissions,
+    ).visibleRoutes;
+  }, [user, enabledModules, effectivePermissions]);
 
   const shellState: ShellState = useMemo(() => ({
     user,
@@ -578,7 +589,11 @@ export function AppRouter() {
     user &&
     route &&
     userCanAccessRoute(user.roles, route, user.global_roles) &&
-    (!route.requiredModule || enabledModules[route.requiredModule] === true)
+    (!route.requiredModule || enabledModules[route.requiredModule] === true) &&
+    // Backend authority: API enforces deny-by-default.
+    // Client-side permission check is a UX convenience (deny-by-default for
+    // permissioned routes when effective permissions are insufficient).
+    userSatisfiesRoutePermission(route.permission, effectivePermissions)
   );
 
   async function handleSignIn(input: { companyCode: string; email: string; password: string }) {
@@ -683,7 +698,7 @@ export function AppRouter() {
       >
         {warningSource ? <ModuleConfigWarning source={warningSource} /> : null}
         {canAccess && route ? (
-          <RouteScreen path={route.path} user={user} />
+          <RouteScreen path={activePath} user={user} />
         ) : (
           <ForbiddenPage />
         )}

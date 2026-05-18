@@ -35,6 +35,10 @@ export {
 } from "./use-nav-filtering";
 
 export {
+  permissionsFromRoleCodes,
+} from "@/lib/auth/permissions";
+
+export {
   getStoredOutletId,
   setStoredOutletId,
   useOutletSwitcher,

@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { sql } from "kysely";
-import { toUtcIso } from "@jurnapod/shared";
+import { fromUtcIso, timestampMsToIso, toUtcIso } from "@jurnapod/shared";
 import type { AuditLogQuery, AuditLogResponse, AuditStatusCode } from "@jurnapod/shared";
 import type { KyselySchema } from "@jurnapod/db";
 
@@ -70,6 +70,10 @@ export async function queryAuditLogs(
     conditions.push(sql`entity_id = ${query.entity_id}`);
   }
 
+  if (query.outlet_id) {
+    conditions.push(sql`outlet_id = ${query.outlet_id}`);
+  }
+
   if (query.user_id) {
     conditions.push(sql`user_id = ${query.user_id}`);
   }
@@ -78,12 +82,19 @@ export async function queryAuditLogs(
     conditions.push(sql`action = ${query.action}`);
   }
 
-  if (query.from_date) {
-    conditions.push(sql`created_at >= ${query.from_date}`);
+  if (query.success !== undefined) {
+    conditions.push(sql`success = ${query.success ? 1 : 0}`);
   }
 
-  if (query.to_date) {
-    conditions.push(sql`created_at <= ${query.to_date}`);
+  const fromDate = query.from_ts !== undefined ? timestampMsToIso(query.from_ts) : query.from_date;
+  const toDate = query.to_ts !== undefined ? timestampMsToIso(query.to_ts) : query.to_date;
+
+  if (fromDate) {
+    conditions.push(sql`created_at >= ${fromUtcIso.mysql(fromDate)}`);
+  }
+
+  if (toDate) {
+    conditions.push(sql`created_at < ${fromUtcIso.mysql(toDate)}`);
   }
 
   const whereClause = sql.join(conditions, sql` AND `);
@@ -111,4 +122,25 @@ export async function queryAuditLogs(
     total,
     logs: rows.rows.map(normalizeAuditLog)
   };
+}
+
+/**
+ * Get one audit log by ID scoped to a company.
+ */
+export async function getAuditLogById(
+  db: AuditDbClient,
+  companyId: number,
+  auditLogId: number
+): Promise<AuditLogResponse | undefined> {
+  const row = await sql<AuditLogRow>`
+    SELECT id, company_id, outlet_id, user_id, entity_type, entity_id,
+           action, result, success, status, ip_address, payload_json, changes_json, created_at
+    FROM audit_logs
+    WHERE company_id = ${companyId}
+      AND id = ${auditLogId}
+    LIMIT 1
+  `.execute(db);
+
+  const first = row.rows[0];
+  return first ? normalizeAuditLog(first) : undefined;
 }

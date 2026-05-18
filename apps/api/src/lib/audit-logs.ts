@@ -2,7 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 // Thin adapter - core implementation moved to @jurnapod/modules-platform
-import { queryAuditLogs as platformQueryAuditLogs } from "@jurnapod/modules-platform/audit";
+import { getAuditLogById as platformGetAuditLogById, queryAuditLogs as platformQueryAuditLogs } from "@jurnapod/modules-platform/audit";
 import { getDb } from "./db";
 import type { AuditLogQuery, AuditLogResponse } from "@jurnapod/shared";
 
@@ -16,4 +16,15 @@ export async function queryAuditLogs(
 ): Promise<{ total: number; logs: AuditLogResponse[] }> {
   const db = getDb();
   return platformQueryAuditLogs(db, query);
+}
+
+/**
+ * Get one audit log by ID, tenant-scoped by company ID.
+ */
+export async function getAuditLogById(
+  companyId: number,
+  auditLogId: number
+): Promise<AuditLogResponse | undefined> {
+  const db = getDb();
+  return platformGetAuditLogById(db, companyId, auditLogId);
 }

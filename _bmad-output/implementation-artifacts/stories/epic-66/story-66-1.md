@@ -1,6 +1,6 @@
 # Story 66-1: User Management — List, Create, Edit, Role Assignment, Outlet Scoping
 
-Status: planned (queued — execution requires explicit `apps/backoffice` unfreeze for Epic 66)
+Status: done (implementation validation passed; reviewer GO recorded; owner sign-off recorded 2026-05-18)
 
 ## Story
 
@@ -10,8 +10,8 @@ So that **access can be administered safely with permission preview and review b
 
 ## Scope Boundary
 
-- This story is PLANNING-ONLY until Ahmad explicitly lifts the `apps/backoffice` freeze for Epic 66.
-- Implementation MUST NOT begin from this story file alone.
+- Ahmad approved Epic 66 implementation on 2026-05-17; `apps/backoffice` is unfrozen for Epic 66 scope only.
+- Implementation MUST stay within Story 66-1 user management scope.
 - Backend ACL enforcement MUST NOT change.
 - `apps/pos` MUST NOT be modified.
 - Domain screens outside platform user administration MUST NOT be implemented.
@@ -54,18 +54,30 @@ Epic 66 depends on this story for reusable role assignment and permission previe
 
 | Endpoint | Method | Expected Shape | Verified | Notes |
 |----------|--------|----------------|----------|-------|
-| `/api/users` | GET | `{ data: User[], pagination: Pagination }` | ❌ | Verify search, role, outlet, status filters |
-| `/api/users` | POST | `{ data: User }` or ADR-0006 envelope | ❌ | Verify required fields and validation errors |
-| `/api/users/:id` | PATCH | `{ data: User }` or ADR-0006 envelope | ❌ | Verify role/outlet/status update payload |
-| `/api/roles` | GET | `{ data: Role[] }` | ❌ | Required for role selector |
-| `/api/outlets` | GET | `{ data: Outlet[] }` | ❌ | Required for outlet assignment |
-| `/api/users/me` | GET | Effective user/session shape | ❌ | Verify permission source for action visibility |
+| `/api/users` | GET | `{ data: User[] }` envelope | ✅ | Runtime route verified in `apps/api/src/routes/users.ts`; pagination is client-side/legacy hook total fallback |
+| `/api/users` | POST | `{ data: User }` envelope | ✅ | Runtime route verified; supports role codes and outlet role assignments |
+| `/api/users/:id` | PATCH | `{ data: User }` envelope | ✅ | Runtime route verified for email updates; generated schema is stale |
+| `/api/roles` | GET | `{ data: Role[] }` envelope | ✅ | Runtime/generated route available for role selector |
+| `/api/outlets` | GET | `{ data: Outlet[] }` envelope | ✅ | Runtime/generated route available for outlet assignment |
+| `/api/users/me` | GET | Effective user/session shape | ✅ | Runtime/generated route available; client falls back to role-derived effective permissions if `permissions` field is absent |
 
 ### API Gaps Found
 
 | Gap | Impact | Resolution |
 |-----|--------|------------|
-| TBD after verification | TBD | Story MUST block or document approved workaround |
+| Generated schema omits some implemented user management routes (`PATCH /users/:id`, password/status endpoints) | Typed schema can drift from runtime API and user management hooks | Tracked as existing OpenAPI freshness P2; current hooks match runtime API routes in `apps/api/src/routes/users.ts` |
+
+### Implementation Validation Snapshot (2026-05-18)
+
+| Check | Result | Evidence |
+|-------|--------|----------|
+| Focused users tests | ✅ PASS — 45 tests | `logs/epic66-story66-1-validation-r5.log` |
+| Full unit suite | ✅ PASS — 15 files, 417 tests | `logs/epic66-story66-1-validation-r5.log` |
+| Lint | ✅ PASS | `logs/epic66-story66-1-validation-r5.log` |
+| Typecheck | ✅ PASS | `logs/epic66-story66-1-validation-r5.log` |
+| Build | ✅ PASS | `logs/epic66-story66-1-validation-r5.log` |
+
+Reviewer GO is recorded with no P0/P1 blockers. Story 66-1 is done. Owner sign-off recorded on 2026-05-18.
 
 ---
 

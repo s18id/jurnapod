@@ -2,7 +2,11 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import type { Module, ModuleRoleResponse, RoleResponse } from "@jurnapod/shared";
-import { ModuleSchema } from "@jurnapod/shared";
+import {
+  ModuleSchema,
+  PERMISSION_BITS as CANONICAL_PERMISSION_BITS,
+  PERMISSION_MASK as CANONICAL_PERMISSION_MASK,
+} from "@jurnapod/shared";
 import { Alert, Button, Checkbox, Group, Select, Stack, Text } from "@mantine/core";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useEffect, useMemo, useState } from "react";
@@ -36,17 +40,20 @@ const MODULE_LABELS: Record<Module, string> = {
   inventory: "Inventory",
   accounting: "Accounting",
   treasury: "Treasury",
+  purchasing: "Purchasing",
   reservations: "Reservations"
 };
 
 const PERMISSION_BITS = {
-  create: 1,
-  read: 2,
-  update: 4,
-  delete: 8
+  read: CANONICAL_PERMISSION_BITS.READ,
+  create: CANONICAL_PERMISSION_BITS.CREATE,
+  update: CANONICAL_PERMISSION_BITS.UPDATE,
+  delete: CANONICAL_PERMISSION_BITS.DELETE,
+  analyze: CANONICAL_PERMISSION_BITS.ANALYZE,
+  manage: CANONICAL_PERMISSION_BITS.MANAGE
 } as const;
 
-const FULL_PERMISSION_MASK = 15;
+const FULL_PERMISSION_MASK = CANONICAL_PERMISSION_MASK.CRUDAM;
 
 function buildEmptyMasks(): Record<Module, number> {
   return MODULES.reduce<Record<Module, number>>((acc, moduleName) => {
@@ -264,6 +271,22 @@ export function ModuleRolesPage(props: ModuleRolesPageProps) {
                   disabled={saving || moduleRolesQuery.loading || !selectedRoleId || isLockedRole}
                   onChange={(event) =>
                     handleToggle(moduleName, PERMISSION_BITS.delete, event.currentTarget.checked)
+                  }
+                />
+                <Checkbox
+                  label="Analyze"
+                  checked={hasPermission(mask, PERMISSION_BITS.analyze)}
+                  disabled={saving || moduleRolesQuery.loading || !selectedRoleId || isLockedRole}
+                  onChange={(event) =>
+                    handleToggle(moduleName, PERMISSION_BITS.analyze, event.currentTarget.checked)
+                  }
+                />
+                <Checkbox
+                  label="Manage"
+                  checked={hasPermission(mask, PERMISSION_BITS.manage)}
+                  disabled={saving || moduleRolesQuery.loading || !selectedRoleId || isLockedRole}
+                  onChange={(event) =>
+                    handleToggle(moduleName, PERMISSION_BITS.manage, event.currentTarget.checked)
                   }
                 />
               </Group>

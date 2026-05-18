@@ -2,12 +2,23 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import type { RoleCode } from "../lib/session";
+import { PERMISSION_BITS, type NavPermissionRequirement } from "../lib/auth/permissions";
 
 export type AppRoute = {
   path: string;
   label: string;
   allowedRoles: readonly RoleCode[];
   requiredModule?: string; // Module code that must be enabled
+  /**
+   * Permission requirement for resource-level access (Epic 39 canonical ACL).
+   * When set, the user must have at least this permission mask for the given
+   * module.resource combination to see the route in navigation.
+   *
+   * This is a UX convenience only. Backend deny-by-default remains authoritative.
+   * Setting permission metadata to `undefined` means the route relies on
+   * legacy role + module checking only.
+   */
+  permission?: NavPermissionRequirement;
 };
 
 export const APP_ROUTES: readonly AppRoute[] = [
@@ -179,13 +190,18 @@ export const APP_ROUTES: readonly AppRoute[] = [
     path: "/items",
     label: "Items",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
-    requiredModule: "inventory"
+    requiredModule: "inventory",
+    // Backend authority: API enforces inventory.items.READ.
+    // This metadata enables client-side nav filtering for inventory module users.
+    permission: { module: "inventory", resource: "items", permissionMask: PERMISSION_BITS.READ }
   },
   {
     path: "/prices",
     label: "Prices",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
-    requiredModule: "inventory"
+    requiredModule: "inventory",
+    // Backend authority: prices are governed by the canonical inventory.items resource.
+    permission: { module: "inventory", resource: "items", permissionMask: PERMISSION_BITS.READ }
   },
   // LEGACY: Hidden from menu, redirects to /items
   {
@@ -217,32 +233,46 @@ export const APP_ROUTES: readonly AppRoute[] = [
   {
     path: "/audit-logs",
     label: "Audit Logs",
-    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    // Backend authority: /api/audit/period-transitions verifies platform.settings.READ.
+    // Gap: no generated/runtime /api/audit-logs contract exists to verify a
+    // dedicated generic audit resource. Keep client UX deny-by-default here.
+    permission: { module: "platform", resource: "settings", permissionMask: PERMISSION_BITS.READ }
   },
   {
     path: "/companies",
     label: "Companies",
-    allowedRoles: ["SUPER_ADMIN", "OWNER"]
+    allowedRoles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    // Backend authority: API enforces platform.companies.READ.
+    permission: { module: "platform", resource: "companies", permissionMask: PERMISSION_BITS.READ }
   },
   {
     path: "/outlets",
     label: "Outlets (Branches)",
-    allowedRoles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN"]
+    allowedRoles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN"],
+    // Backend authority: API enforces platform.outlets.READ.
+    permission: { module: "platform", resource: "outlets", permissionMask: PERMISSION_BITS.READ }
   },
   {
     path: "/users",
     label: "Users",
-    allowedRoles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN"]
+    allowedRoles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN"],
+    // Backend authority: API enforces platform.users.READ.
+    permission: { module: "platform", resource: "users", permissionMask: PERMISSION_BITS.READ }
   },
   {
     path: "/roles",
     label: "Roles",
-    allowedRoles: ["SUPER_ADMIN", "OWNER"]
+    allowedRoles: ["SUPER_ADMIN", "OWNER"],
+    // Backend authority: API enforces platform.roles.READ.
+    permission: { module: "platform", resource: "roles", permissionMask: PERMISSION_BITS.READ }
   },
   {
     path: "/module-roles",
     label: "Module Roles",
-    allowedRoles: ["SUPER_ADMIN", "OWNER"]
+    allowedRoles: ["SUPER_ADMIN", "OWNER"],
+    // Backend authority: role-permission assignment management requires platform.roles.MANAGE.
+    permission: { module: "platform", resource: "roles", permissionMask: PERMISSION_BITS.MANAGE }
   },
   {
     path: "/modules",
@@ -268,6 +298,19 @@ export const APP_ROUTES: readonly AppRoute[] = [
 
 export const DEFAULT_ROUTE_PATH = APP_ROUTES[0].path;
 
+const ROLE_DETAIL_PATH_PATTERN = /^\/roles\/\d+$/;
+
+export function isRoleDetailPath(path: string): boolean {
+  return ROLE_DETAIL_PATH_PATTERN.test(path);
+}
+
+export function getRouteLookupPath(path: string): string {
+  if (isRoleDetailPath(path)) {
+    return "/roles";
+  }
+  return path;
+}
+
 export function normalizeHashPath(hash: string): string {
   const cleaned = hash.replace(/^#/, "").trim();
   if (cleaned.length === 0 || cleaned === "/") {
@@ -280,7 +323,8 @@ export function normalizeHashPath(hash: string): string {
 }
 
 export function findRoute(path: string): AppRoute | null {
-  return APP_ROUTES.find((route) => route.path === path) ?? null;
+  const lookupPath = getRouteLookupPath(path);
+  return APP_ROUTES.find((route) => route.path === lookupPath) ?? null;
 }
 
 export function userCanAccessRoute(

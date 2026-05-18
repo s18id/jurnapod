@@ -5,7 +5,7 @@ import { getDb } from "./db";
 import type { KyselySchema } from "@jurnapod/db";
 import { withTransactionRetry } from "@jurnapod/db";
 import { AuditService } from "@jurnapod/modules-platform";
-import { NumericIdSchema, RoleSchema } from "@jurnapod/shared";
+import { MODULE_ROLE_DEFAULTS_API, NumericIdSchema, ROLE_CODES, RoleSchema, type RolePermissionEntry } from "@jurnapod/shared";
 import { hashPassword, type PasswordHashPolicy } from "./password-hash";
 import { getAppEnv } from "./env";
 import { toUtcIso } from "@/lib/date-helpers";
@@ -15,6 +15,7 @@ export class UserEmailExistsError extends Error {}
 export class RoleNotFoundError extends Error {}
 export class RoleLevelViolationError extends Error {}
 export class RoleScopeViolationError extends Error {}
+export class RolePermissionMutationForbiddenError extends Error {}
 export class OutletNotFoundError extends Error {}
 export class SuperAdminProtectionError extends Error {}
 
@@ -65,6 +66,22 @@ type RoleSnapshot = {
   role_level: number;
   is_global: number;
 };
+
+const SYSTEM_ROLE_CODE_SET = new Set<string>(ROLE_CODES);
+const CANONICAL_ROLE_PERMISSION_KEYS = new Set(
+  MODULE_ROLE_DEFAULTS_API.map((entry) => `${entry.module}:${entry.resource}`)
+);
+
+function rolePermissionKey(module: string, resource: string): string {
+  return `${module}:${resource}`;
+}
+
+function isCanonicalRolePermission(module: string, resource: string | null | undefined): resource is string {
+  if (typeof resource !== "string") {
+    return false;
+  }
+  return CANONICAL_ROLE_PERMISSION_KEYS.has(rolePermissionKey(module, resource));
+}
 
 function buildAuditContext(companyId: number, actor: UserActor) {
   return {
@@ -1083,6 +1100,68 @@ export async function getRole(roleId: number): Promise<{
   };
 }
 
+type VisibleRole = {
+  id: number;
+  code: string;
+  name: string;
+  company_id: number | null;
+  is_global: boolean;
+  role_level: number;
+};
+
+async function getVisibleRoleForCompany(
+  db: KyselySchema,
+  companyId: number,
+  roleId: number
+): Promise<VisibleRole> {
+  const row = await db
+    .selectFrom('roles')
+    .where('id', '=', roleId)
+    .where((eb) => eb.or([
+      eb('company_id', '=', companyId),
+      eb('company_id', 'is', null)
+    ]))
+    .select(['id', 'code', 'name', 'company_id', 'is_global', 'role_level'])
+    .executeTakeFirst();
+
+  if (!row) {
+    throw new RoleNotFoundError(`Role with id ${roleId} not found`);
+  }
+
+  return {
+    id: Number(row.id),
+    code: row.code,
+    name: row.name,
+    company_id: row.company_id === null ? null : Number(row.company_id),
+    is_global: Boolean(row.is_global),
+    role_level: Number(row.role_level ?? 0)
+  };
+}
+
+async function getMutableCompanyRoleForUpdate(
+  db: KyselySchema,
+  companyId: number,
+  roleId: number,
+  actorUserId: number
+): Promise<VisibleRole> {
+  const role = await getVisibleRoleForCompany(db, companyId, roleId);
+
+  if (
+    role.company_id !== companyId ||
+    role.is_global ||
+    SYSTEM_ROLE_CODE_SET.has(role.code)
+  ) {
+    throw new RolePermissionMutationForbiddenError("System and global roles are immutable");
+  }
+
+  const actorMaxLevel = await getUserMaxRoleLevelForConnection(db, companyId, actorUserId);
+  if (role.role_level > actorMaxLevel) {
+    throw new RoleLevelViolationError("Insufficient role level to update module roles");
+  }
+
+  return role;
+}
+
 export async function getRoleWithPermissions(params: {
   roleId: number;
   companyId: number;
@@ -1321,6 +1400,149 @@ export type ModuleRoleResponse = {
 };
 
 export class ModuleRoleNotFoundError extends Error {}
+
+export async function listRolePermissions(params: {
+  companyId: number;
+  roleId: number;
+}): Promise<RolePermissionEntry[]> {
+  const db = getDb();
+  await getVisibleRoleForCompany(db, params.companyId, params.roleId);
+
+  const rows = await db
+    .selectFrom('module_roles')
+    .where('company_id', '=', params.companyId)
+    .where('role_id', '=', params.roleId)
+    .select(['module', 'resource', 'permission_mask'])
+    .orderBy('module', 'asc')
+    .orderBy('resource', 'asc')
+    .execute();
+
+  return rows
+    .filter((row) => isCanonicalRolePermission(row.module, row.resource))
+    .map((row) => ({
+      module: row.module as RolePermissionEntry["module"],
+      resource: row.resource,
+      mask: Number(row.permission_mask ?? 0)
+    }));
+}
+
+export async function replaceRolePermissions(params: {
+  companyId: number;
+  roleId: number;
+  permissions: RolePermissionEntry[];
+  actor: UserActor;
+}): Promise<{ role: VisibleRole; permissions: RolePermissionEntry[] }> {
+  const db = getDb();
+  const auditService = new AuditService(db);
+
+  return withTransactionRetry(db, async (trx) => {
+    const role = await getMutableCompanyRoleForUpdate(
+      trx,
+      params.companyId,
+      params.roleId,
+      params.actor.userId
+    );
+
+    const desiredByKey = new Map<string, RolePermissionEntry>();
+    for (const permission of params.permissions) {
+      const resource = permission.resource.trim();
+      const key = rolePermissionKey(permission.module, resource);
+      desiredByKey.set(key, {
+        module: permission.module,
+        resource,
+        mask: permission.mask
+      });
+    }
+
+    const existingRows = await trx
+      .selectFrom('module_roles')
+      .where('company_id', '=', params.companyId)
+      .where('role_id', '=', params.roleId)
+      .select(['id', 'module', 'resource', 'permission_mask'])
+      .execute();
+
+    const beforePermissions = existingRows
+      .filter((row) => isCanonicalRolePermission(row.module, row.resource))
+      .map((row) => ({
+        module: row.module as RolePermissionEntry["module"],
+        resource: row.resource,
+        mask: Number(row.permission_mask ?? 0)
+      }))
+      .sort((a, b) => a.module.localeCompare(b.module) || a.resource.localeCompare(b.resource));
+
+    const existingByKey = new Map(
+      existingRows.map((row) => [rolePermissionKey(row.module, row.resource), row])
+    );
+
+    for (const [key, desired] of desiredByKey.entries()) {
+      const existing = existingByKey.get(key);
+      if (existing) {
+        const currentMask = Number(existing.permission_mask ?? 0);
+        if (currentMask !== desired.mask) {
+          await trx
+            .updateTable('module_roles')
+            .set({ permission_mask: desired.mask })
+            .where('id', '=', Number(existing.id))
+            .where('company_id', '=', params.companyId)
+            .execute();
+        }
+      } else {
+        await trx
+          .insertInto('module_roles')
+          .values({
+            company_id: params.companyId,
+            role_id: params.roleId,
+            module: desired.module,
+            resource: desired.resource,
+            permission_mask: desired.mask
+          })
+          .execute();
+      }
+    }
+
+    for (const row of existingRows) {
+      const key = rolePermissionKey(row.module, row.resource);
+      if (isCanonicalRolePermission(row.module, row.resource) && !desiredByKey.has(key)) {
+        await trx
+          .deleteFrom('module_roles')
+          .where('id', '=', Number(row.id))
+          .where('company_id', '=', params.companyId)
+          .execute();
+      }
+    }
+
+    const updatedRows = await trx
+      .selectFrom('module_roles')
+      .where('company_id', '=', params.companyId)
+      .where('role_id', '=', params.roleId)
+      .select(['module', 'resource', 'permission_mask'])
+      .orderBy('module', 'asc')
+      .orderBy('resource', 'asc')
+      .execute();
+
+    const permissions = updatedRows
+      .filter((row) => isCanonicalRolePermission(row.module, row.resource))
+      .map((row) => ({
+        module: row.module as RolePermissionEntry["module"],
+        resource: row.resource,
+        mask: Number(row.permission_mask ?? 0)
+      }));
+
+    const afterPermissions = [...permissions].sort(
+      (a, b) => a.module.localeCompare(b.module) || a.resource.localeCompare(b.resource)
+    );
+
+    await auditService.logUpdate(
+      buildAuditContext(params.companyId, params.actor),
+      "setting",
+      params.roleId,
+      { type: "role_permissions", permissions: beforePermissions },
+      { type: "role_permissions", permissions: afterPermissions }
+    );
+
+    return { role, permissions };
+  });
+}
 
 export async function listModuleRoles(params: {
   companyId: number;

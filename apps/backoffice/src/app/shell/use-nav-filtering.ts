@@ -16,21 +16,29 @@ import type { RoleCode } from "@/lib/session";
 
 import { userCanAccessRoute, filterRoutesByModules } from "@/app/routes";
 
-// ---------------------------------------------------------------------------
-// Permission requirement shape (mirrors Epic 39 canonical format)
-// ---------------------------------------------------------------------------
+// Canonical permission helpers
+import {
+  userHasPermission,
+} from "@/lib/auth/permissions";
+import type {
+  NavPermissionRequirement,
+  UserPermissionEntry,
+} from "@/lib/auth/permissions";
 
-export interface NavPermissionRequirement {
-  /** Canonical module code */
-  module: string;
-  /** Resource within the module, or "*" for module-level */
-  resource: string;
-  /** Minimum permission bit mask required */
-  permissionMask: number;
-}
+// Re-export canonical permission helpers from the single source of truth.
+// These are consumed by guards.tsx, shell-model tests, and other consumers.
+export {
+  PERMISSION_BITS,
+  hasMinimumPermission,
+} from "@/lib/auth/permissions";
+
+export type {
+  NavPermissionRequirement,
+  UserPermissionEntry,
+} from "@/lib/auth/permissions";
 
 // ---------------------------------------------------------------------------
-// Navigation item with optional permission requirement
+// Navigation item with optional permission requirement (backward-compatible)
 // ---------------------------------------------------------------------------
 
 export interface NavItem {
@@ -46,40 +54,6 @@ export interface NavItem {
   permission?: NavPermissionRequirement;
 }
 
-// ---------------------------------------------------------------------------
-// Permission bit helpers (Epic 39 canonical values)
-// ---------------------------------------------------------------------------
-
-export const PERMISSION_BITS = {
-  READ: 1,
-  CREATE: 2,
-  UPDATE: 4,
-  DELETE: 8,
-  ANALYZE: 16,
-  MANAGE: 32,
-} as const;
-
-/**
- * Check if a user's permission mask satisfies a minimum requirement.
- * Permission bits are additive: a mask of 15 (CRUD) satisfies READ (1), CREATE (2), etc.
- */
-export function hasMinimumPermission(
-  userMask: number,
-  requiredMask: number,
-): boolean {
-  return (userMask & requiredMask) === requiredMask;
-}
-
-// ---------------------------------------------------------------------------
-// User permission map (simplified for client-side)
-// ---------------------------------------------------------------------------
-
-export interface UserPermissionEntry {
-  module: string;
-  resource: string;
-  mask: number;
-}
-
 /**
  * Check if a user's permissions satisfy a navigation item's permission requirement.
  *
@@ -93,12 +67,12 @@ export function userSatisfiesPermission(
   userPermissions: readonly UserPermissionEntry[],
   requirement: NavPermissionRequirement,
 ): boolean {
-  for (const entry of userPermissions) {
-    if (entry.module !== requirement.module) continue;
-    if (entry.resource !== requirement.resource && entry.resource !== "*") continue;
-    if (hasMinimumPermission(entry.mask, requirement.permissionMask)) return true;
-  }
-  return false;
+  return userHasPermission(
+    userPermissions,
+    requirement.module,
+    requirement.resource,
+    requirement.permissionMask,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -135,20 +109,16 @@ export function filterNavigation(
   // Step 2: Module-based filtering (existing)
   const moduleFiltered = filterRoutesByModules(roleFiltered, enabledModules);
 
-  // Step 3: Permission-based filtering applies when route metadata provides
-  // module.resource requirements. Existing legacy routes without permission
-  // metadata continue to rely on role + module visibility until migrated.
-  let permissionFiltered = moduleFiltered;
-  if (userPermissions && userPermissions.length > 0) {
-    permissionFiltered = moduleFiltered.filter((route) => {
-      const permission = (route as AppRoute & { permission?: NavPermissionRequirement }).permission;
-      if (!permission) {
-        return true;
-      }
+  // Step 3: Permission-based filtering uses formal AppRoute.permission metadata.
+  // Routes without permission metadata continue to rely on role + module visibility.
+  const loadedPermissions = userPermissions ?? [];
+  const permissionFiltered = moduleFiltered.filter((route) => {
+    if (!route.permission) {
+      return true;
+    }
 
-      return userSatisfiesPermission(userPermissions, permission);
-    });
-  }
+    return userSatisfiesPermission(loadedPermissions, route.permission);
+  });
 
   return {
     visibleRoutes: permissionFiltered,

@@ -1,6 +1,6 @@
 # Story 66-4: Permission-Aware Navigation and Route Guards
 
-Status: planned (queued — execution requires explicit `apps/backoffice` unfreeze for Epic 66)
+Status: done (implementation validated; reviewer GO; owner sign-off recorded 2026-05-18)
 
 ## Story
 
@@ -10,7 +10,7 @@ So that **the UI mirrors backend deny-by-default access without weakening backen
 
 ## Scope Boundary
 
-- This story is PLANNING-ONLY until Ahmad explicitly lifts the `apps/backoffice` freeze for Epic 66.
+- Ahmad approved Epic 66 implementation on 2026-05-17; `apps/backoffice` is unfrozen for Epic 66 scope only.
 - Frontend permission checks are UX-only. Backend remains authoritative.
 - Route guards and button visibility MUST use canonical `module.resource` requirements.
 - This story MUST formalize Epic 65's transitional route permission metadata before closing.

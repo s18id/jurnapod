@@ -7,6 +7,7 @@ import {
   storeAccessToken,
   storeCompanyTimezone
 } from "./auth-storage";
+import type { UserPermissionEntry } from "./auth/permissions";
 
 export {
   clearAccessToken,
@@ -46,6 +47,11 @@ export type SessionUser = {
   global_roles: RoleCode[];
   outlet_role_assignments: UserOutletRoleAssignment[];
   outlets: UserOutlet[];
+  /** Effective permissions derived from role grants (Epic 66).
+   *  When present, this is the canonical source for client-side
+   *  permission checks. When absent, the client falls back to
+   *  deriving permissions from role codes via permissionsFromRoleCodes(). */
+  permissions?: UserPermissionEntry[];
 };
 
 type LoginResponse = {

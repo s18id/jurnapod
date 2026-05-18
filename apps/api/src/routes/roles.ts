@@ -18,14 +18,24 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import { NumericIdSchema } from "@jurnapod/shared";
+import { NumericIdSchema, RolePermissionsUpdateRequestSchema } from "@jurnapod/shared";
 import {
   authenticateRequest,
   requireAccess,
   type AuthContext
 } from "../lib/auth-guard.js";
 import { errorResponse, successResponse } from "@jurnapod/shared";
-import { listRoles, getRole, createRole, updateRole, deleteRole, RoleLevelViolationError } from "../lib/users.js";
+import {
+  listRoles,
+  getRole,
+  createRole,
+  updateRole,
+  deleteRole,
+  RoleLevelViolationError,
+  RolePermissionMutationForbiddenError,
+  listRolePermissions,
+  replaceRolePermissions
+} from "../lib/users.js";
 import { readClientIp } from "@jurnapod/shared";
 
 declare module "hono" {
@@ -53,6 +63,18 @@ const CreateRoleSchema = z.object({
 const UpdateRoleSchema = z.object({
   name: z.string().trim().min(1).max(191).optional()
 });
+
+function hasDuplicatePermissionEntries(
+  entries: Array<{ module: string; resource: string }>
+): boolean {
+  const keys = new Set<string>();
+  for (const entry of entries) {
+    const key = `${entry.module}:${entry.resource.trim()}`;
+    if (keys.has(key)) return true;
+    keys.add(key);
+  }
+  return false;
+}
 
 // =============================================================================
 // Roles Routes
@@ -174,6 +196,94 @@ rolesRoutes.get("/:id", async (c) => {
   }
 });
 
+// GET /roles/:id/permissions - List company-scoped permissions for a visible role
+rolesRoutes.get("/:id/permissions", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "platform",
+    resource: "roles",
+    permission: "read"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const roleId = NumericIdSchema.parse(c.req.param("id"));
+    const permissions = await listRolePermissions({
+      companyId: auth.companyId,
+      roleId
+    });
+
+    return successResponse(permissions);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid role ID", 400);
+    }
+
+    if (error instanceof Error && error.message.includes("not found")) {
+      return errorResponse("NOT_FOUND", "Role not found", 404);
+    }
+
+    console.error("GET /roles/:id/permissions failed", error);
+    return errorResponse("INTERNAL_ERROR", "Role permissions request failed", 500);
+  }
+});
+
+// PUT /roles/:id/permissions - Replace permissions for a custom company role
+rolesRoutes.put("/:id/permissions", async (c) => {
+  const auth = c.get("auth");
+
+  const accessResult = await requireAccess({
+    module: "platform",
+    resource: "roles",
+    permission: "manage"
+  })(c.req.raw, auth);
+
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
+  try {
+    const roleId = NumericIdSchema.parse(c.req.param("id"));
+    const payload = await c.req.json();
+    const input = RolePermissionsUpdateRequestSchema.parse(payload);
+
+    if (hasDuplicatePermissionEntries(input.permissions)) {
+      return errorResponse("INVALID_REQUEST", "Duplicate permission entries are not allowed", 400);
+    }
+
+    const result = await replaceRolePermissions({
+      companyId: auth.companyId,
+      roleId,
+      permissions: input.permissions,
+      actor: {
+        userId: auth.userId,
+        ipAddress: readClientIp(c.req.raw)
+      }
+    });
+
+    return successResponse(result);
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return errorResponse("INVALID_REQUEST", "Invalid request body", 400);
+    }
+
+    if (error instanceof RolePermissionMutationForbiddenError || error instanceof RoleLevelViolationError) {
+      return errorResponse("FORBIDDEN", error.message, 403);
+    }
+
+    if (error instanceof Error && error.message.includes("not found")) {
+      return errorResponse("NOT_FOUND", "Role not found", 404);
+    }
+
+    console.error("PUT /roles/:id/permissions failed", error);
+    return errorResponse("INTERNAL_ERROR", "Failed to update role permissions", 500);
+  }
+});
+
 // PATCH /roles/:id - Update role
 rolesRoutes.patch("/:id", async (c) => {
   const auth = c.get("auth");
@@ -287,6 +397,16 @@ const RoleDataSchema = zodOpenApi.object({
   created_at: zodOpenApi.string().openapi({ description: "Created at" }),
   updated_at: zodOpenApi.string().openapi({ description: "Updated at" }),
 }).openapi("RoleData");
+
+const RolePermissionEntryDataSchema = zodOpenApi.object({
+  module: zodOpenApi.string().openapi({ description: "Canonical module code" }),
+  resource: zodOpenApi.string().openapi({ description: "Resource code" }),
+  mask: zodOpenApi.number().int().min(0).max(63).openapi({ description: "Permission mask" }),
+}).openapi("RolePermissionEntryData");
+
+const RolePermissionsUpdateRequestOpenApiSchema = zodOpenApi.object({
+  permissions: zodOpenApi.array(RolePermissionEntryDataSchema),
+}).openapi("RolePermissionsUpdateRequest");
 
 /**
  * Registers role routes with an OpenAPIHono instance.
@@ -425,6 +545,112 @@ export function registerRoleRoutes(app: OpenAPIHono): void {
       const roleId = NumericIdSchema.parse(c.req.param("id"));
       const role = await getRole(roleId);
       return c.json({ success: true, data: role });
+    }
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/roles/{id}/permissions",
+      operationId: "listRolePermissions",
+      summary: "List role permissions",
+      description: "List company-scoped permission entries for a visible role.",
+      tags: ["Roles"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          id: zodOpenApi.string().openapi({ description: "Role ID" }),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Role permissions",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.array(RolePermissionEntryDataSchema),
+              }).openapi("ListRolePermissionsResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid role ID" },
+        401: { description: "Unauthorized" },
+        403: { description: "Forbidden" },
+        404: { description: "Role not found" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "platform", resource: "roles", permission: "read" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const roleId = NumericIdSchema.parse(c.req.param("id"));
+      const permissions = await listRolePermissions({ companyId: auth.companyId, roleId });
+      return c.json({ success: true, data: permissions });
+    }
+  );
+
+  app.openapi(
+    createRoute({
+      method: "put",
+      path: "/roles/{id}/permissions",
+      operationId: "replaceRolePermissions",
+      summary: "Replace role permissions",
+      description: "Replace permission entries for a custom company role. System/global roles are immutable.",
+      tags: ["Roles"],
+      security: [{ BearerAuth: [] }],
+      request: {
+        params: zodOpenApi.object({
+          id: zodOpenApi.string().openapi({ description: "Role ID" }),
+        }),
+        body: {
+          content: {
+            "application/json": {
+              schema: RolePermissionsUpdateRequestOpenApiSchema,
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: "Role permissions updated",
+          content: {
+            "application/json": {
+              schema: zodOpenApi.object({
+                success: zodOpenApi.literal(true),
+                data: zodOpenApi.object({
+                  role: RoleDataSchema,
+                  permissions: zodOpenApi.array(RolePermissionEntryDataSchema),
+                }),
+              }).openapi("ReplaceRolePermissionsResponse"),
+            },
+          },
+        },
+        400: { description: "Invalid request" },
+        401: { description: "Unauthorized" },
+        403: { description: "Forbidden" },
+        404: { description: "Role not found" },
+      },
+    }),
+    async (c): Promise<any> => {
+      const auth = c.get("auth");
+      const accessResult = await requireAccess({ module: "platform", resource: "roles", permission: "manage" })(c.req.raw, auth);
+      if (accessResult !== null) return accessResult;
+
+      const roleId = NumericIdSchema.parse(c.req.param("id"));
+      const payload = await c.req.json();
+      const input = RolePermissionsUpdateRequestSchema.parse(payload);
+      if (hasDuplicatePermissionEntries(input.permissions)) {
+        return c.json({ success: false, error: { code: "INVALID_REQUEST", message: "Duplicate permission entries are not allowed" } }, 400);
+      }
+      const result = await replaceRolePermissions({
+        companyId: auth.companyId,
+        roleId,
+        permissions: input.permissions,
+        actor: { userId: auth.userId, ipAddress: readClientIp(c.req.raw) },
+      });
+      return c.json({ success: true, data: result });
     }
   );
 

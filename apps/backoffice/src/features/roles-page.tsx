@@ -15,7 +15,7 @@ import {
   Title,
   Select
 } from "@mantine/core";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { FilterBar } from "../components/FilterBar";
 import { PageCard } from "../components/PageCard";
@@ -28,17 +28,28 @@ import {
 } from "../components/ui/DataTable";
 import { useCompanies } from "../hooks/use-companies";
 import {
+  useRole,
+  useRolePermissions,
   useRoles,
   createRole,
   updateRole,
+  updateRolePermissions,
   deleteRole
 } from "../hooks/use-users";
 import { ApiError } from "../lib/api-client";
+import {
+  PERMISSION_BITS,
+  resolveEffectivePermissions,
+  SYSTEM_ROLE_CODES,
+  userHasPermission,
+} from "../lib/auth/permissions";
 import type { SessionUser } from "../lib/session";
+import { RoleDetailShell } from "./roles/role-detail-shell";
 
 
 type RolesPageProps = {
   user: SessionUser;
+  initialRoleId?: number | null;
 };
 
 type DialogMode = "create" | "edit" | null;
@@ -55,17 +66,10 @@ const emptyForm: RoleFormData = {
   role_level: 0
 };
 
-const SYSTEM_ROLE_CODES = new Set([
-  "SUPER_ADMIN",
-  "OWNER",
-  "COMPANY_ADMIN",
-  "ADMIN",
-  "CASHIER",
-  "ACCOUNTANT"
-]);
+const SYSTEM_ROLE_CODE_SET = new Set<string>(SYSTEM_ROLE_CODES);
 
 export function RolesPage(props: RolesPageProps) {
-  const { user } = props;
+  const { user, initialRoleId = null } = props;
   const userCompanyId = user.company_id;
   const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
   
@@ -74,7 +78,17 @@ export function RolesPage(props: RolesPageProps) {
   );
   
   const rolesQuery = useRoles(filterCompanyId);
+  const [selectedRoleId, setSelectedRoleId] = useState<number | null>(initialRoleId);
+  const selectedRoleQuery = useRole(selectedRoleId);
+  const selectedRolePermissionsQuery = useRolePermissions(selectedRoleId);
   const companiesQuery = useCompanies({ enabled: isSuperAdmin });
+  const effectivePermissions = useMemo(() => resolveEffectivePermissions(user), [user]);
+  const canManageRoles = userHasPermission(
+    effectivePermissions ?? [],
+    "platform",
+    "roles",
+    PERMISSION_BITS.MANAGE,
+  );
 
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingRole, setEditingRole] = useState<RoleResponse | null>(null);
@@ -95,6 +109,10 @@ export function RolesPage(props: RolesPageProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedRoleId(initialRoleId);
+  }, [initialRoleId]);
 
   const filteredRoles = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -130,6 +148,31 @@ export function RolesPage(props: RolesPageProps) {
     setDialogMode("edit");
     setError(null);
     setSuccessMessage(null);
+  };
+
+  const openRoleDetail = (role: RoleResponse) => {
+    setSelectedRoleId(role.id);
+    if (globalThis.location?.hash !== undefined) {
+      globalThis.location.hash = `#/roles/${role.id}`;
+    }
+  };
+
+  const closeRoleDetail = () => {
+    setSelectedRoleId(null);
+    if (globalThis.location?.hash?.startsWith("#/roles/")) {
+      globalThis.location.hash = "#/roles";
+    }
+  };
+
+  const handleSaveRolePermissions = async (permissions: Parameters<typeof updateRolePermissions>[1]["permissions"]) => {
+    if (!selectedRoleId) {
+      throw new Error("No role selected");
+    }
+
+    const result = await updateRolePermissions(selectedRoleId, { permissions });
+    setSuccessMessage(`Permissions updated for role "${result.role.name}"`);
+    await selectedRolePermissionsQuery.refetch();
+    await selectedRoleQuery.refetch();
   };
   
   const closeDialog = () => {
@@ -257,7 +300,7 @@ export function RolesPage(props: RolesPageProps) {
         isRowAction: true,
         cell: (info) => {
           const role = info.row.original;
-          const isSystem = SYSTEM_ROLE_CODES.has(role.code);
+          const isSystem = SYSTEM_ROLE_CODE_SET.has(role.code);
           const isCustomForOtherCompany = role.company_id !== null && role.company_id !== userCompanyId;
           const isLocked = role.is_global || isSystem || isCustomForOtherCompany;
           const systemTooltip = isLocked
@@ -267,6 +310,13 @@ export function RolesPage(props: RolesPageProps) {
             : undefined;
           return (
             <Group gap="xs" justify="flex-end" wrap="wrap">
+              <Button
+                size="xs"
+                variant="subtle"
+                onClick={() => openRoleDetail(role)}
+              >
+                View
+              </Button>
               <Button
                 size="xs"
                 variant="light"
@@ -291,7 +341,7 @@ export function RolesPage(props: RolesPageProps) {
         }
       }
     ];
-  }, [openEditDialog, userCompanyId]);
+  }, [openEditDialog, openRoleDetail, userCompanyId]);
 
   async function handleConfirmDelete() {
     if (!confirmState) {
@@ -395,6 +445,20 @@ export function RolesPage(props: RolesPageProps) {
             }
           />
         </PageCard>
+
+        {selectedRoleId ? (
+          <RoleDetailShell
+            role={selectedRoleQuery.data ?? filteredRoles.find((role) => role.id === selectedRoleId) ?? null}
+            loading={selectedRoleQuery.loading && selectedRoleQuery.data === null}
+            error={selectedRoleQuery.error}
+            permissions={selectedRolePermissionsQuery.data}
+            permissionsLoading={selectedRolePermissionsQuery.loading}
+            permissionsError={selectedRolePermissionsQuery.error}
+            canManageRoles={canManageRoles}
+            onSavePermissions={handleSaveRolePermissions}
+            onClose={closeRoleDetail}
+          />
+        ) : null}
       </Stack>
 
       <Modal

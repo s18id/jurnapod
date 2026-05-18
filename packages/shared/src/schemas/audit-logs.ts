@@ -123,13 +123,17 @@ export type AuditLogResponse = z.infer<typeof AuditLogResponseSchema>;
  */
 export const AuditLogQuerySchema = z.object({
   company_id: z.number().int().positive(),
-  entity_type: AuditEntityTypeSchema.optional(),
+  entity_type: z.string().min(1).max(64).optional(),
   entity_id: z.string().optional(),
+  outlet_id: z.number().int().positive().optional(),
   user_id: z.number().int().positive().optional(),
-  action: AuditActionSchema.optional(),
+  action: z.string().min(1).max(191).optional(),
+  success: z.boolean().optional(),
   from_date: z.string().datetime().optional(),
   to_date: z.string().datetime().optional(),
-  limit: z.number().int().positive().max(1000).default(100),
+  from_ts: z.number().int().nonnegative().optional(),
+  to_ts: z.number().int().nonnegative().optional(),
+  limit: z.number().int().positive().max(1000).default(25),
   offset: z.number().int().nonnegative().default(0)
 });
 

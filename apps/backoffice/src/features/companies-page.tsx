@@ -1,742 +1,401 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { CompanyResponse } from "@jurnapod/shared";
+import type { CompanyCreateRequest, CompanyUpdateRequest } from "@jurnapod/shared";
 import {
-  ActionIcon,
   Alert,
-  Badge,
   Button,
-  Divider,
-  Drawer,
   Group,
   Modal,
   Select,
+  SimpleGrid,
   Stack,
   Text,
   TextInput,
   Title,
-  Tooltip
 } from "@mantine/core";
-import { useMediaQuery } from "@mantine/hooks";
-import { IconEye } from "@tabler/icons-react";
 import { useMemo, useState } from "react";
 
-import { FilterBar } from "../components/FilterBar";
-import { PageCard } from "../components/PageCard";
-import {
-  DataTable,
-  type DataTableColumnDef,
-  type PaginationState,
-  type SortState,
-  type RowSelectionState,
-} from "../components/ui/DataTable";
-import { TIMEZONE_OPTIONS } from "../constants/timezones";
-import {
-  useCompanies,
-  createCompany,
-  updateCompany,
-  deleteCompany,
-  reactivateCompany
-} from "../hooks/use-companies";
-import { ApiError } from "../lib/api-client";
-import { storeCompanyTimezone, type SessionUser } from "../lib/session";
+import { FilterBar } from "@/components/FilterBar";
+import { PageCard } from "@/components/PageCard";
+import { DetailDrawer, EntityTable, ScopeDisplay, StatusBadge } from "@/components/data-grid";
+import type { DataTableColumnDef, PaginationState, RowSelectionState, SortState } from "@/components/ui/DataTable";
+import { TIMEZONE_OPTIONS } from "@/constants/timezones";
+import { useShell } from "@/app/shell";
+import type { SessionUser } from "@/lib/session";
+import { resolveEffectivePermissions } from "@/lib/auth/permissions";
 
+import {
+  type CompanyAdminRecord,
+  useCompanyAdminList,
+  useCreateCompanyAdmin,
+  useUpdateCompanyAdmin,
+} from "./companies-outlets/api";
+import {
+  buildScopeSummary,
+  companyStatusLabel,
+  DEFAULT_ADMIN_TIMEZONE,
+  getCompanyActionGates,
+  isCompanyInactive,
+  normalizeAdminTimezone,
+} from "./companies-outlets/admin-helpers";
 
 type CompaniesPageProps = {
   user: SessionUser;
 };
 
-type DialogMode = "create" | "edit" | "view" | null;
-type CompanyStatusFilter = "active" | "archived" | "all";
+type CompanyDialogMode = "create" | "edit" | null;
+type CompanyStatusFilter = "all" | "active" | "inactive";
 
-type CompanyFormData = {
-  code: string;
-  name: string;
-  legal_name: string;
-  tax_id: string;
-  email: string;
-  phone: string;
-  timezone: string;
-  address_line1: string;
-  address_line2: string;
-  city: string;
-  postal_code: string;
-};
+type CompanyFormData = CompanyCreateRequest;
 
-const emptyForm: CompanyFormData = {
+const emptyCompanyForm: CompanyFormData = {
   code: "",
   name: "",
-  legal_name: "",
-  tax_id: "",
-  email: "",
-  phone: "",
-  timezone: "",
-  address_line1: "",
-  address_line2: "",
-  city: "",
-  postal_code: ""
+  timezone: DEFAULT_ADMIN_TIMEZONE,
 };
 
-const statusOptions: Array<{ value: CompanyStatusFilter; label: string }> = [
-  { value: "active", label: "Active" },
-  { value: "archived", label: "Archived" },
-  { value: "all", label: "All" }
-];
+function normalizeOptional(value: string | null | undefined): string | undefined {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function companyPatchFromForm(company: CompanyAdminRecord, form: CompanyFormData): CompanyUpdateRequest {
+  const patch: CompanyUpdateRequest = {};
+  const fields: Array<keyof CompanyUpdateRequest> = [
+    "name",
+    "legal_name",
+    "tax_id",
+    "email",
+    "phone",
+    "timezone",
+    "currency_code",
+    "address_line1",
+    "address_line2",
+    "city",
+    "postal_code",
+  ];
+  for (const field of fields) {
+    const next = field === "name" || field === "timezone"
+      ? normalizeOptional(form[field])
+      : normalizeOptional(form[field] ?? null) ?? null;
+    const current = company[field] ?? (field === "name" || field === "timezone" ? undefined : null);
+    if (next !== current && next !== undefined) {
+      patch[field] = next as never;
+    }
+  }
+  return patch;
+}
+
+function CompanyForm(props: {
+  mode: CompanyDialogMode;
+  form: CompanyFormData;
+  onChange: (form: CompanyFormData) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  submitting: boolean;
+  error: string | null;
+}) {
+  const { mode, form, onChange, onSubmit, onCancel, submitting, error } = props;
+  return (
+    <Stack gap="md">
+      {mode === "create" ? (
+        <TextInput
+          label="Company code"
+          value={form.code}
+          onChange={(event) => onChange({ ...form, code: event.currentTarget.value.toUpperCase() })}
+          maxLength={32}
+          withAsterisk
+        />
+      ) : null}
+      <TextInput
+        label="Company name"
+        value={form.name}
+        onChange={(event) => onChange({ ...form, name: event.currentTarget.value })}
+        maxLength={191}
+        withAsterisk
+      />
+      <TextInput
+        label="Legal name"
+        value={form.legal_name ?? ""}
+        onChange={(event) => onChange({ ...form, legal_name: event.currentTarget.value })}
+        maxLength={191}
+      />
+      <Group grow>
+        <TextInput
+          label="Email"
+          value={form.email ?? ""}
+          onChange={(event) => onChange({ ...form, email: event.currentTarget.value })}
+          maxLength={191}
+        />
+        <TextInput
+          label="Phone"
+          value={form.phone ?? ""}
+          onChange={(event) => onChange({ ...form, phone: event.currentTarget.value })}
+          maxLength={50}
+        />
+      </Group>
+      <Group grow>
+        <TextInput
+          label="Tax ID"
+          value={form.tax_id ?? ""}
+          onChange={(event) => onChange({ ...form, tax_id: event.currentTarget.value })}
+          maxLength={64}
+        />
+        <TextInput
+          label="Currency"
+          value={form.currency_code ?? ""}
+          onChange={(event) => onChange({ ...form, currency_code: event.currentTarget.value.toUpperCase() })}
+          maxLength={3}
+        />
+      </Group>
+      <Select
+        label="Timezone"
+        data={TIMEZONE_OPTIONS}
+        value={normalizeAdminTimezone(form.timezone)}
+        onChange={(value) => onChange({ ...form, timezone: normalizeAdminTimezone(value) })}
+        searchable
+        allowDeselect={false}
+        withAsterisk
+      />
+      <TextInput
+        label="Address line 1"
+        value={form.address_line1 ?? ""}
+        onChange={(event) => onChange({ ...form, address_line1: event.currentTarget.value })}
+      />
+      <TextInput
+        label="Address line 2"
+        value={form.address_line2 ?? ""}
+        onChange={(event) => onChange({ ...form, address_line2: event.currentTarget.value })}
+      />
+      <Group grow>
+        <TextInput
+          label="City"
+          value={form.city ?? ""}
+          onChange={(event) => onChange({ ...form, city: event.currentTarget.value })}
+        />
+        <TextInput
+          label="Postal code"
+          value={form.postal_code ?? ""}
+          onChange={(event) => onChange({ ...form, postal_code: event.currentTarget.value })}
+        />
+      </Group>
+      {error ? <Alert color="red" title="Unable to save">{error}</Alert> : null}
+      <Group justify="flex-end">
+        <Button variant="default" onClick={onCancel} disabled={submitting}>Cancel</Button>
+        <Button onClick={onSubmit} loading={submitting} disabled={!form.name.trim() || (mode === "create" && !form.code.trim())}>
+          Save
+        </Button>
+      </Group>
+    </Stack>
+  );
+}
 
 export function CompaniesPage(props: CompaniesPageProps) {
   const { user } = props;
-  const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
-  
-  // Dialog state
-  const [dialogMode, setDialogMode] = useState<DialogMode>(null);
-  const [editingCompany, setEditingCompany] = useState<CompanyResponse | null>(null);
-  const [formData, setFormData] = useState<CompanyFormData>(emptyForm);
-  const [formErrors, setFormErrors] = useState<Partial<Record<keyof CompanyFormData, string>>>({});
-  
-  // UI state
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const shell = useShell();
+  const permissions = useMemo(() => resolveEffectivePermissions(user) ?? [], [user]);
+  const actor = useMemo(() => ({
+    companyId: user.company_id,
+    isSuperAdmin: user.roles.includes("SUPER_ADMIN") || user.global_roles.includes("SUPER_ADMIN"),
+  }), [user.company_id, user.global_roles, user.roles]);
 
-  const [statusFilter, setStatusFilter] = useState<CompanyStatusFilter>("active");
+  const companiesQuery = useCompanyAdminList();
+  const createMutation = useCreateCompanyAdmin();
+  const updateMutation = useUpdateCompanyAdmin();
+
   const [searchTerm, setSearchTerm] = useState("");
-
-  const [confirmState, setConfirmState] = useState<
-    { action: "deactivate" | "reactivate"; company: CompanyResponse } | null
-  >(null);
-
-  // Pagination, sort, and selection state for complex DataTable
-  const [pagination, setPagination] = useState<PaginationState>({
-    page: 1,
-    pageSize: 25
-  });
+  const [statusFilter, setStatusFilter] = useState<CompanyStatusFilter>("all");
+  const [selectedCompany, setSelectedCompany] = useState<CompanyAdminRecord | null>(null);
+  const [dialogMode, setDialogMode] = useState<CompanyDialogMode>(null);
+  const [form, setForm] = useState<CompanyFormData>(emptyCompanyForm);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 25 });
   const [sort, setSort] = useState<SortState | null>(null);
   const [selection, setSelection] = useState<RowSelectionState>({});
 
-  const isMobile = useMediaQuery("(max-width: 48em)");
-
-  // API hooks
-  const companiesQuery = useCompanies({
-    includeDeleted: isSuperAdmin && statusFilter !== "active",
-    pagination,
-    sort: sort ? { id: sort.id, direction: sort.direction } : undefined
+  const currentCompany = useMemo(
+    () => companiesQuery.data?.find((company) => company.id === user.company_id) ?? selectedCompany,
+    [companiesQuery.data, selectedCompany, user.company_id],
+  );
+  const pageScope = buildScopeSummary({
+    company: currentCompany,
+    fallbackCompanyId: user.company_id,
+    currentOutlet: shell.outlet.currentOutlet,
   });
-
-  // Reset pagination when filters change
-  const handleStatusFilterChange = (value: string | null) => {
-    setStatusFilter((value as CompanyStatusFilter) || "active");
-    setPagination((prev) => ({ ...prev, page: 1 }));
-  };
-
-  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchTerm(event.currentTarget.value);
-    setPagination((prev) => ({ ...prev, page: 1 }));
-  };
+  const pageGates = getCompanyActionGates(permissions, actor, user.company_id);
 
   const filteredCompanies = useMemo(() => {
-    const normalizedSearch = searchTerm.trim().toLowerCase();
-    return (companiesQuery.data || [])
+    const search = searchTerm.trim().toLowerCase();
+    return (companiesQuery.data ?? [])
       .filter((company) => {
-        if (!isSuperAdmin || statusFilter === "active") {
-          return !company.deleted_at;
-        }
-        if (statusFilter === "archived") {
-          return !!company.deleted_at;
-        }
+        if (statusFilter === "active") return !isCompanyInactive(company);
+        if (statusFilter === "inactive") return isCompanyInactive(company);
         return true;
       })
       .filter((company) => {
-        if (!normalizedSearch) {
-          return true;
-        }
-        return (
-          company.code.toLowerCase().includes(normalizedSearch) ||
-          company.name.toLowerCase().includes(normalizedSearch)
-        );
+        if (!search) return true;
+        return company.name.toLowerCase().includes(search) || company.code.toLowerCase().includes(search);
       });
-  }, [companiesQuery.data, isSuperAdmin, searchTerm, statusFilter]);
-  
-  // Handlers
-  const openCreateDialog = () => {
-    setFormData(emptyForm);
-    setFormErrors({});
-    setEditingCompany(null);
-    setDialogMode("create");
-    setError(null);
-    setSuccessMessage(null);
-  };
-  
-  const openDetailDrawer = (company: CompanyResponse) => {
-    setFormData({
-      code: company.code,
-      name: company.name,
-      legal_name: company.legal_name ?? "",
-      tax_id: company.tax_id ?? "",
-      email: company.email ?? "",
-      phone: company.phone ?? "",
-      timezone: company.timezone ?? "",
-      address_line1: company.address_line1 ?? "",
-      address_line2: company.address_line2 ?? "",
-      city: company.city ?? "",
-      postal_code: company.postal_code ?? ""
-    });
-    setEditingCompany(company);
-    setDialogMode("view");
-    setError(null);
-    setSuccessMessage(null);
-  };
+  }, [companiesQuery.data, searchTerm, statusFilter]);
 
-  const openEditDialog = (company: CompanyResponse) => {
-    setFormData({
-      code: company.code,
-      name: company.name,
-      legal_name: company.legal_name ?? "",
-      tax_id: company.tax_id ?? "",
-      email: company.email ?? "",
-      phone: company.phone ?? "",
-      timezone: company.timezone ?? "",
-      address_line1: company.address_line1 ?? "",
-      address_line2: company.address_line2 ?? "",
-      city: company.city ?? "",
-      postal_code: company.postal_code ?? ""
-    });
-    setFormErrors({});
-    setEditingCompany(company);
-    setDialogMode("edit");
-    setError(null);
-    setSuccessMessage(null);
-  };
-  
-  const closeDialog = () => {
-    setDialogMode(null);
-    setEditingCompany(null);
-    setFormData(emptyForm);
-    setFormErrors({});
-  };
+  const columns = useMemo<DataTableColumnDef<CompanyAdminRecord>[]>(() => [
+    { id: "code", header: "Code", sortable: true, cell: (info) => <Text fw={600}>{info.row.original.code}</Text> },
+    { id: "name", header: "Name", sortable: true, cell: (info) => <Text>{info.row.original.name}</Text> },
+    { id: "status", header: "Status", cell: (info) => <StatusBadge status={companyStatusLabel(info.row.original)} /> },
+    { id: "created_at", header: "Created", sortable: true, cell: (info) => <Text size="sm">{info.row.original.created_at}</Text> },
+    {
+      id: "actions",
+      header: "Actions",
+      cell: (info) => {
+        const company = info.row.original;
+        const gates = getCompanyActionGates(permissions, actor, company.id);
+        return (
+          <Group gap="xs" justify="flex-end">
+            <Button size="xs" variant="light" onClick={() => setSelectedCompany(company)}>View</Button>
+            {gates.edit && !isCompanyInactive(company) ? (
+              <Button
+                size="xs"
+                variant="light"
+                onClick={() => {
+                  setSelectedCompany(company);
+                  setForm({
+                    code: company.code,
+                    name: company.name,
+                    legal_name: company.legal_name ?? undefined,
+                    tax_id: company.tax_id ?? undefined,
+                    email: company.email ?? undefined,
+                    phone: company.phone ?? undefined,
+                    timezone: normalizeAdminTimezone(company.timezone),
+                    currency_code: company.currency_code ?? undefined,
+                    address_line1: company.address_line1 ?? undefined,
+                    address_line2: company.address_line2 ?? undefined,
+                    city: company.city ?? undefined,
+                    postal_code: company.postal_code ?? undefined,
+                  });
+                  setDialogMode("edit");
+                  setSaveError(null);
+                }}
+              >
+                Edit
+              </Button>
+            ) : null}
+          </Group>
+        );
+      },
+    },
+  ], [actor, permissions]);
 
-  const closeDrawer = () => {
-    setDialogMode(null);
-    setEditingCompany(null);
-    setFormData(emptyForm);
-    setError(null);
-    setSuccessMessage(null);
-  };
-  
-  const validateForm = (): boolean => {
-    const errors: Partial<Record<keyof CompanyFormData, string>> = {};
-    
-    if (dialogMode === "create") {
-      if (!formData.code.trim()) {
-        errors.code = "Company code is required";
-      } else if (!/^[A-Z0-9_-]+$/.test(formData.code)) {
-        errors.code = "Company code must be uppercase letters, numbers, hyphens, and underscores only";
-      }
-    }
-    
-    if (!formData.name.trim()) {
-      errors.name = "Company name is required";
-    }
-
-    if (!formData.timezone.trim()) {
-      errors.timezone = "Timezone is required";
-    }
-    
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-  
-  const handleSubmit = async () => {
-    if (!validateForm()) return;
-    
-    setSubmitting(true);
-    setError(null);
-    setSuccessMessage(null);
-    
+  async function handleSave() {
+    setSaveError(null);
     try {
       if (dialogMode === "create") {
-        await createCompany(
-          {
-            code: formData.code.trim().toUpperCase(),
-            name: formData.name.trim(),
-            legal_name: formData.legal_name.trim() || undefined,
-            tax_id: formData.tax_id.trim() || undefined,
-            email: formData.email.trim() || undefined,
-            phone: formData.phone.trim() || undefined,
-            timezone: formData.timezone.trim(),
-            address_line1: formData.address_line1.trim() || undefined,
-            address_line2: formData.address_line2.trim() || undefined,
-            city: formData.city.trim() || undefined,
-            postal_code: formData.postal_code.trim() || undefined
-          }
-        );
-        setSuccessMessage("Company created successfully");
-        await companiesQuery.refetch();
-        closeDialog();
-      } else if (dialogMode === "edit" && editingCompany) {
-        const updates: Parameters<typeof updateCompany>[1] = {};
-        
-        if (formData.name.trim() !== editingCompany.name) {
-          updates.name = formData.name.trim();
-        }
-        if (formData.legal_name.trim() !== (editingCompany.legal_name ?? "")) {
-          updates.legal_name = formData.legal_name.trim() || null;
-        }
-        if (formData.tax_id.trim() !== (editingCompany.tax_id ?? "")) {
-          updates.tax_id = formData.tax_id.trim() || null;
-        }
-        if (formData.email.trim() !== (editingCompany.email ?? "")) {
-          updates.email = formData.email.trim() || null;
-        }
-        if (formData.phone.trim() !== (editingCompany.phone ?? "")) {
-          updates.phone = formData.phone.trim() || null;
-        }
-        if (formData.timezone.trim() !== (editingCompany.timezone ?? "")) {
-          updates.timezone = formData.timezone.trim();
-        }
-        if (formData.address_line1.trim() !== (editingCompany.address_line1 ?? "")) {
-          updates.address_line1 = formData.address_line1.trim() || null;
-        }
-        if (formData.address_line2.trim() !== (editingCompany.address_line2 ?? "")) {
-          updates.address_line2 = formData.address_line2.trim() || null;
-        }
-        if (formData.city.trim() !== (editingCompany.city ?? "")) {
-          updates.city = formData.city.trim() || null;
-        }
-        if (formData.postal_code.trim() !== (editingCompany.postal_code ?? "")) {
-          updates.postal_code = formData.postal_code.trim() || null;
-        }
-
-        if (Object.keys(updates).length > 0) {
-          await updateCompany(editingCompany.id, updates);
-          if (editingCompany.id === user.company_id && updates.timezone !== undefined) {
-            storeCompanyTimezone(updates.timezone);
-          }
-          setSuccessMessage("Company updated successfully");
-          await companiesQuery.refetch();
-        }
-        closeDialog();
-      }
-    } catch (submitError) {
-      if (submitError instanceof ApiError) {
-        setError(submitError.message);
-      } else {
-        setError("An error occurred");
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const columns = useMemo<DataTableColumnDef<CompanyResponse>[]>(
-    () => [
-      {
-        id: "code",
-        header: "Code",
-        sortable: true,
-        cell: (info) => <Text fw={600}>{info.row.original.code}</Text>
-      },
-      {
-        id: "name",
-        header: "Name",
-        sortable: true,
-        cell: (info) => <Text>{info.row.original.name}</Text>
-      },
-      {
-        id: "status",
-        header: "Status",
-        cell: (info) => {
-          const isArchived = !!info.row.original.deleted_at;
-          return (
-            <Badge color={isArchived ? "red" : "green"} variant="light">
-              {isArchived ? "Archived" : "Active"}
-            </Badge>
-          );
-        }
-      },
-      {
-        id: "actions",
-        header: "Actions",
-        cell: (info) => {
-          const company = info.row.original;
-          return (
-            <Group gap="xs" justify="flex-end" wrap="wrap">
-              <Tooltip label="View details">
-                <ActionIcon variant="light" onClick={() => openDetailDrawer(company)} aria-label="View company details">
-                  <IconEye size={16} />
-                </ActionIcon>
-              </Tooltip>
-              {!company.deleted_at ? (
-                <Button
-                  size="xs"
-                  variant="light"
-                  onClick={() => openEditDialog(company)}
-                >
-                  Edit
-                </Button>
-              ) : null}
-              {isSuperAdmin && !company.deleted_at ? (
-                <Button
-                  size="xs"
-                  color="red"
-                  variant="light"
-                  onClick={() => setConfirmState({ action: "deactivate", company })}
-                >
-                  Deactivate
-                </Button>
-              ) : null}
-              {isSuperAdmin && company.deleted_at ? (
-                <Button
-                  size="xs"
-                  variant="light"
-                  onClick={() => setConfirmState({ action: "reactivate", company })}
-                >
-                  Reactivate
-                </Button>
-              ) : null}
-            </Group>
-          );
+        await createMutation.mutateAsync({
+          ...form,
+          code: form.code.trim().toUpperCase(),
+          name: form.name.trim(),
+          timezone: normalizeAdminTimezone(form.timezone),
+        });
+      } else if (dialogMode === "edit" && selectedCompany) {
+        const patch = companyPatchFromForm(selectedCompany, form);
+        if (Object.keys(patch).length > 0) {
+          await updateMutation.mutateAsync({ id: selectedCompany.id, patch });
         }
       }
-    ],
-    [isSuperAdmin, openDetailDrawer, openEditDialog]
-  );
-
-  async function handleConfirmAction() {
-    if (!confirmState) {
-      return;
-    }
-
-    setError(null);
-    setSuccessMessage(null);
-
-    try {
-      if (confirmState.action === "deactivate") {
-        await deleteCompany(confirmState.company.id);
-        setSuccessMessage(`Company "${confirmState.company.name}" deactivated successfully`);
-      } else {
-        await reactivateCompany(confirmState.company.id);
-        setSuccessMessage(`Company "${confirmState.company.name}" reactivated successfully`);
-      }
-      await companiesQuery.refetch();
-    } catch (actionError) {
-      if (actionError instanceof ApiError) {
-        setError(actionError.message);
-      } else {
-        setError(
-          confirmState.action === "deactivate"
-            ? "Failed to deactivate company"
-            : "Failed to reactivate company"
-        );
-      }
-    } finally {
-      setConfirmState(null);
+      setDialogMode(null);
+      setForm(emptyCompanyForm);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Unable to save company");
     }
   }
-  
+
   return (
-    <>
-      <Stack gap="md">
-        <PageCard
-          title="Company Management"
-          description="Manage companies in the system. Each company can have multiple users and outlets."
-          actions={
-            isSuperAdmin ? (
-              <Button onClick={openCreateDialog}>Create Company</Button>
-            ) : null
-          }
-        >
-          <Stack gap="sm">
-            <FilterBar>
-              <TextInput
-                label="Search"
-                placeholder="Search by code or name"
-                value={searchTerm}
-                onChange={handleSearchChange}
-                style={{ minWidth: 220 }}
-              />
-              {isSuperAdmin ? (
-                <Select
-                  label="Status"
-                  data={statusOptions}
-                  value={statusFilter}
-                  onChange={handleStatusFilterChange}
-                  style={{ minWidth: 160 }}
-                />
-              ) : null}
-            </FilterBar>
-
-            {companiesQuery.loading ? (
-              <Text size="sm" c="dimmed">
-                Loading companies...
-              </Text>
-            ) : null}
-
-            {companiesQuery.error ? (
-              <Alert color="red" title="Unable to load">
-                {companiesQuery.error}
-              </Alert>
-            ) : null}
-
-            {error ? (
-              <Alert color="red" title="Action failed">
-                {error}
-              </Alert>
-            ) : null}
-
-            {successMessage ? (
-              <Alert color="green" title="Success">
-                {successMessage}
-              </Alert>
-            ) : null}
-          </Stack>
-        </PageCard>
-
-        <PageCard title={`Companies (${companiesQuery.totalCount})`}>
-          <DataTable
-            columns={columns}
-            data={filteredCompanies}
-            getRowId={(company) => company.id.toString()}
-            pagination={pagination}
-            sort={sort}
-            selection={selection}
-            totalCount={companiesQuery.totalCount}
-            onPaginationChange={setPagination}
-            onSortChange={setSort}
-            onSelectionChange={setSelection}
-            emptyState={
-              searchTerm.trim().length > 0
-                ? "No companies match your search."
-                : "No companies available."
-            }
-          />
-        </PageCard>
-      </Stack>
-
-      <Modal
-        opened={dialogMode === "create" || dialogMode === "edit"}
-        onClose={closeDialog}
-        title={
-          <Title order={4}>
-            {dialogMode === "create" ? "Create New Company" : "Edit Company"}
-          </Title>
-        }
-        centered
+    <Stack gap="md">
+      <PageCard
+        title="Company Management"
+        description="Company administration with explicit tenant scope. Backend ACL remains authoritative."
+        actions={pageGates.create ? (
+          <Button onClick={() => { setForm(emptyCompanyForm); setDialogMode("create"); setSaveError(null); }}>
+            Create Company
+          </Button>
+        ) : null}
       >
-        <Stack gap="md">
-          <Divider label="Company Identity" my="sm" />
-
-          {dialogMode === "create" ? (
-            <TextInput
-              label="Company Code"
-              placeholder="e.g., ACME, COMPANY1"
-              value={formData.code}
-              onChange={(event) =>
-                setFormData({ ...formData, code: event.currentTarget.value.toUpperCase() })
-              }
-              maxLength={32}
-              error={formErrors.code}
-              description="Uppercase letters, numbers, hyphens, and underscores only"
-              withAsterisk
-            />
-          ) : (
-            <TextInput
-              label="Company Code"
-              value={editingCompany?.code ?? ""}
-              disabled
-              description="Code cannot be changed"
-            />
-          )}
-
-          <TextInput
-            label="Company Name"
-            placeholder="e.g., ACME Corporation"
-            value={formData.name}
-            onChange={(event) => setFormData({ ...formData, name: event.currentTarget.value })}
-            maxLength={191}
-            error={formErrors.name}
-            withAsterisk
-          />
-
-          <Divider label="Legal & Tax Information" my="sm" />
-
-          <TextInput
-            label="Legal Name"
-            placeholder="e.g., PT ACME Indonesia"
-            value={formData.legal_name}
-            onChange={(event) => setFormData({ ...formData, legal_name: event.currentTarget.value })}
-            maxLength={191}
-          />
-
-          <TextInput
-            label="Tax ID / NPWP"
-            placeholder="e.g., 01.234.567.8-901.000"
-            value={formData.tax_id}
-            onChange={(event) => setFormData({ ...formData, tax_id: event.currentTarget.value })}
-            maxLength={64}
-          />
-
-          <Divider label="Contact Information" my="sm" />
-
-          <TextInput
-            label="Email"
-            placeholder="e.g., contact@acme.com"
-            value={formData.email}
-            onChange={(event) => setFormData({ ...formData, email: event.currentTarget.value })}
-            maxLength={191}
-          />
-
-          <TextInput
-            label="Phone"
-            placeholder="e.g., +62 21 1234 5678"
-            value={formData.phone}
-            onChange={(event) => setFormData({ ...formData, phone: event.currentTarget.value })}
-            maxLength={32}
-          />
-
-          <Select
-            label="Timezone"
-            placeholder="Select timezone"
-            data={TIMEZONE_OPTIONS}
-            value={formData.timezone || null}
-            onChange={(value) => setFormData({ ...formData, timezone: value ?? "" })}
-            error={formErrors.timezone}
-            searchable
-            allowDeselect={false}
-          />
-
-          <Divider label="Address" my="sm" />
-
-          <TextInput
-            label="Address Line 1"
-            placeholder="Street address"
-            value={formData.address_line1}
-            onChange={(event) => setFormData({ ...formData, address_line1: event.currentTarget.value })}
-            maxLength={191}
-          />
-
-          <TextInput
-            label="Address Line 2"
-            placeholder="Additional address info"
-            value={formData.address_line2}
-            onChange={(event) => setFormData({ ...formData, address_line2: event.currentTarget.value })}
-            maxLength={191}
-          />
-
-          <Group grow>
-            <TextInput
-              label="City"
-              placeholder="e.g., Jakarta"
-              value={formData.city}
-              onChange={(event) => setFormData({ ...formData, city: event.currentTarget.value })}
-              maxLength={96}
-            />
-
-            <TextInput
-              label="Postal Code"
-              placeholder="e.g., 12345"
-              value={formData.postal_code}
-              onChange={(event) => setFormData({ ...formData, postal_code: event.currentTarget.value })}
-              maxLength={20}
-            />
-          </Group>
-
-          {error ? (
-            <Alert color="red" title="Unable to save">
-              {error}
+        <Stack gap="sm">
+          <ScopeDisplay {...pageScope} data-testid="company-page-scope" />
+          {!pageGates.create ? (
+            <Alert color="blue" title="Company creation gated" data-testid="company-create-blocked">
+              Company creation is exposed only when platform.companies.MANAGE is present and backend SUPER_ADMIN semantics allow it.
             </Alert>
           ) : null}
-
-          <Group justify="flex-end">
-            <Button variant="default" onClick={closeDialog} disabled={submitting}>
-              Cancel
-            </Button>
-            <Button onClick={handleSubmit} loading={submitting}>
-              Save
-            </Button>
-          </Group>
+          <FilterBar>
+            <TextInput label="Search" value={searchTerm} onChange={(event) => setSearchTerm(event.currentTarget.value)} />
+            <Select
+              label="Status"
+              data={[{ value: "all", label: "All" }, { value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }]}
+              value={statusFilter}
+              onChange={(value) => setStatusFilter((value as CompanyStatusFilter) ?? "all")}
+            />
+          </FilterBar>
+          {companiesQuery.error ? <Alert color="red" title="Unable to load companies">{companiesQuery.error.message}</Alert> : null}
         </Stack>
-      </Modal>
+      </PageCard>
 
-      <Modal
-        opened={confirmState !== null}
-        onClose={() => setConfirmState(null)}
-        title={<Title order={4}>Confirm Action</Title>}
-        centered
-      >
-        <Stack gap="md">
-          <Text size="sm">
-            {confirmState?.action === "deactivate"
-              ? `Deactivate company "${confirmState.company.name}"? Users will lose access, but SUPER_ADMIN can still view archived data.`
-              : `Reactivate company "${confirmState?.company.name}"? This will restore access for its users.`}
-          </Text>
-          <Group justify="flex-end">
-            <Button variant="default" onClick={() => setConfirmState(null)}>
-              Cancel
-            </Button>
-            <Button
-              color={confirmState?.action === "deactivate" ? "red" : "blue"}
-              onClick={handleConfirmAction}
-            >
-              {confirmState?.action === "deactivate" ? "Deactivate" : "Reactivate"}
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
+      <PageCard title={`Companies (${filteredCompanies.length})`}>
+        <EntityTable
+          entityName="companies"
+          columns={columns}
+          data={filteredCompanies}
+          getRowId={(company) => String(company.id)}
+          loading={companiesQuery.isLoading ? "loading" : "idle"}
+          pagination={pagination}
+          sort={sort}
+          selection={selection}
+          totalCount={filteredCompanies.length}
+          onPaginationChange={setPagination}
+          onSortChange={setSort}
+          onSelectionChange={setSelection}
+          emptyState="No companies match the current filters."
+        />
+      </PageCard>
 
-      <Drawer
-        opened={dialogMode === "view"}
-        onClose={closeDrawer}
-        position="right"
-        size={isMobile ? "100%" : "lg"}
-        withCloseButton
-        title={<Title order={4}>Company Details</Title>}
+      <DetailDrawer
+        opened={selectedCompany !== null && dialogMode === null}
+        onClose={() => setSelectedCompany(null)}
+        title="Company Detail"
+        size="lg"
+        data-testid="company-detail-drawer"
       >
-        {editingCompany ? (
+        {selectedCompany ? (
           <Stack gap="md">
-            <Divider label="Company Identity" my="sm" />
-
-            <TextInput label="Company Code" value={editingCompany.code} disabled />
-            <TextInput label="Company Name" value={editingCompany.name} disabled />
-            <TextInput label="Legal Name" value={editingCompany.legal_name ?? "—"} disabled />
-            <TextInput label="Tax ID / NPWP" value={editingCompany.tax_id ?? "—"} disabled />
-
-            <Divider label="Status" my="sm" />
-
-            <Badge
-              color={editingCompany.deleted_at ? "red" : "green"}
-              variant="light"
-              size="lg"
-            >
-              {editingCompany.deleted_at ? "Archived" : "Active"}
-            </Badge>
-
-            <Text size="xs" c="dimmed">
-              Created: {new Date(editingCompany.created_at).toLocaleString("id-ID")}
-            </Text>
-            <Text size="xs" c="dimmed">
-              Updated: {new Date(editingCompany.updated_at).toLocaleString("id-ID")}
-            </Text>
-
-            <Divider label="Contact Information" my="sm" />
-
-            <TextInput label="Email" value={editingCompany.email ?? "—"} disabled />
-            <TextInput label="Phone" value={editingCompany.phone ?? "—"} disabled />
-            <TextInput label="Timezone" value={editingCompany.timezone ?? "—"} disabled />
-
-            <Divider label="Address" my="sm" />
-
-            <TextInput label="Address Line 1" value={editingCompany.address_line1 ?? "—"} disabled />
-            <TextInput label="Address Line 2" value={editingCompany.address_line2 ?? "—"} disabled />
-            <TextInput label="City" value={editingCompany.city ?? "—"} disabled />
-            <TextInput label="Postal Code" value={editingCompany.postal_code ?? "—"} disabled />
-
-            <Group justify="flex-end" mt="md">
-              <Button onClick={() => openEditDialog(editingCompany)}>Edit Company</Button>
-            </Group>
+            <ScopeDisplay {...buildScopeSummary({ company: selectedCompany, fallbackCompanyId: user.company_id, currentOutlet: shell.outlet.currentOutlet })} />
+            {isCompanyInactive(selectedCompany) ? (
+              <Alert color="yellow" title="Inactive company context" data-testid="inactive-company-context">
+                Associated outlets MUST be treated as inactive context in this UI. No backend cascade is implied.
+              </Alert>
+            ) : null}
+            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+              <Text><strong>Code:</strong> {selectedCompany.code}</Text>
+              <Text><strong>Name:</strong> {selectedCompany.name}</Text>
+              <Text><strong>Email:</strong> {selectedCompany.email ?? "—"}</Text>
+              <Text><strong>Phone:</strong> {selectedCompany.phone ?? "—"}</Text>
+              <Text><strong>Created:</strong> {selectedCompany.created_at}</Text>
+              <Text><strong>Updated:</strong> {selectedCompany.updated_at}</Text>
+            </SimpleGrid>
           </Stack>
         ) : null}
-      </Drawer>
-    </>
+      </DetailDrawer>
+
+      <Modal opened={dialogMode !== null} onClose={() => setDialogMode(null)} title={<Title order={4}>{dialogMode === "create" ? "Create Company" : "Edit Company"}</Title>} centered>
+        <CompanyForm
+          mode={dialogMode}
+          form={form}
+          onChange={setForm}
+          onSubmit={handleSave}
+          onCancel={() => setDialogMode(null)}
+          submitting={createMutation.isPending || updateMutation.isPending}
+          error={saveError}
+        />
+      </Modal>
+    </Stack>
   );
 }

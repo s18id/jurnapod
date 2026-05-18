@@ -1,6 +1,6 @@
 # Backoffice Frontend Redesign & Hardening Program
 
-**Status:** Active program plan — Epic 65 complete; Epics 66–70 queued. Implementation of each queued backoffice epic requires explicit scope-freeze approval.
+**Status:** Active program plan — Epics 65–66 complete; Epics 67–70 queued. Implementation of each queued backoffice epic requires explicit scope-freeze approval.
 **Program Span:** 12 weeks (6 epics × 2 weeks each)
 **Squad:** 2 frontend engineers, 1 designer (part-time), 1 QA/shared automation engineer
 **Source:** `docs/frontend-research.md`
@@ -23,11 +23,11 @@ The current `Temporary Scope Freeze (Architecture-First)` policy (documented in 
 
 > **`apps/backoffice` — frozen except emergency / regulatory / security fixes explicitly approved**
 
-**EPIC 65 IS COMPLETE. EPICS 66–70 REMAIN PLANNING-ONLY.** They MUST NOT be executed until:
+**EPICS 65–66 ARE COMPLETE. EPICS 67–70 REMAIN PLANNING-ONLY.** They MUST NOT be executed until:
 1. The scope freeze is explicitly lifted for the specific backoffice epic, OR
 2. An explicit emergency/regulatory/security exception is approved for a specific epic.
 
-This program plan remains the current coordination artifact. Epic 66–70 charters are queued artifacts awaiting per-epic unfreeze authorization.
+This program plan remains the current coordination artifact. Epic 67–70 charters are queued artifacts awaiting per-epic unfreeze authorization.
 
 ---
 
@@ -111,7 +111,7 @@ apps/backoffice/src/
 | # | Epic | Title | Timebox | Primary Modules | Predecessor |
 |---|------|-------|---------|-----------------|-------------|
 | 65 | EP65 | Foundation — Shell, Router, Auth, Typed API Client, Data Grid Primitives | Weeks 1–2 | `apps/backoffice`, `packages/shared` | Complete |
-| 66 | EP66 | Core Admin — Users, Roles, Companies, Permissions UX | Weeks 3–4 | `apps/backoffice`, `packages/auth`, `packages/modules/platform` | Epic 65 complete; explicit Epic 66 unfreeze required |
+| 66 | EP66 | Core Admin — Users, Roles, Companies, Permissions UX | Weeks 3–4 | `apps/backoffice`, `packages/auth`, `packages/modules/platform` | Complete |
 | 67 | EP67 | Catalog Operations — Items, Prices, Import/Export Redesign | Weeks 5–6 | `apps/backoffice`, `packages/modules/inventory` | Epic 65 |
 | 68 | EP68 | Async Workflows — Operations, SSE, Notifications, Audit | Weeks 7–8 | `apps/backoffice`, `packages/shared` | Epic 65 |
 | 69 | EP69 | Finance & Purchasing — High-Risk Forms, Review Steps | Weeks 9–10 | `apps/backoffice`, `packages/modules/purchasing`, `packages/modules/accounting` | Epics 66, 67 |

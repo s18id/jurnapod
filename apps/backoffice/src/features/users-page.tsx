@@ -5,6 +5,7 @@ import type { Role, UserResponse } from "@jurnapod/shared";
 import {
   Alert,
   Badge,
+  Box,
   Button,
   Checkbox,
   Group,
@@ -38,7 +39,6 @@ import { OutletRoleMatrix } from "../components/OutletRoleMatrix";
 import { PageCard } from "../components/PageCard";
 import { DirtyConfirmDialog } from "../components/dirty-confirm-dialog";
 import {
-  DataTable,
   type DataTableColumnDef,
   type LoadingState,
   type PaginationState,
@@ -46,6 +46,7 @@ import {
   type RowSelectionState,
   type TableError,
 } from "../components/ui/DataTable";
+import { EntityTable } from "../components/data-grid";
 import { useCompanies } from "../hooks/use-companies";
 import {
   useUsers,
@@ -61,6 +62,18 @@ import {
 import { ApiError } from "../lib/api-client";
 import type { SessionUser } from "../lib/session";
 import { trackActionMenuOpen, trackActionSelect, trackActionError } from "../lib/telemetry";
+import {
+  getUserActionGates,
+} from "./users/admin-helpers";
+import {
+  resolveEffectivePermissions,
+  formatMaskLabel,
+} from "../lib/auth/permissions";
+import {
+  type AccessChangeReviewData,
+  computeAccessChangeReview,
+  previewAccessPermissions,
+} from "./users/access-review";
 
 
 type UsersPageProps = {
@@ -108,8 +121,19 @@ const emptyForm: UserFormData = {
 
 export function UsersPage(props: UsersPageProps) {
   const { user } = props;
-  const isSuperAdmin = user.roles.includes("SUPER_ADMIN");
-  
+  const isSuperAdmin = user.roles.includes("SUPER_ADMIN") || user.global_roles.includes("SUPER_ADMIN");
+
+  // --- Effective permissions & action gates (Story 66-1 AC6) ---
+  const effectivePermissions = useMemo(
+    () => resolveEffectivePermissions(user) ?? [],
+    [user],
+  );
+
+  const actionGates = useMemo(
+    () => getUserActionGates(effectivePermissions),
+    [effectivePermissions],
+  );
+   
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -208,6 +232,20 @@ export function UsersPage(props: UsersPageProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // --- Access change review state (Story 66-1 AC3/AC4) ---
+  const [reviewData, setReviewData] = useState<AccessChangeReviewData | null>(null);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+
+  // Inline permission preview for the access dialog
+  const accessPermissionPreview = useMemo(() => {
+    if (dialogMode !== "account-create" && dialogMode !== "access-create" && dialogMode !== "access-edit") return null;
+    return previewAccessPermissions(
+      accessFormData.global_role_codes,
+      accessFormData.outlet_role_assignments,
+    );
+  }, [dialogMode, accessFormData.global_role_codes, accessFormData.outlet_role_assignments]);
   
   // API hooks
   const activeCompanyId = isSuperAdmin ? selectedCompanyId : user.company_id;
@@ -284,10 +322,11 @@ export function UsersPage(props: UsersPageProps) {
   );
 
   const actorMaxRoleLevel = useMemo(() => {
+    if (isSuperAdmin) return Number.POSITIVE_INFINITY;
     const roleLevels = new Map(availableRoles.map((role) => [role.code, role.role_level]));
     const levels = user.roles.map((code) => roleLevels.get(code) ?? 0);
     return Math.max(0, ...levels);
-  }, [availableRoles, user.roles]);
+  }, [availableRoles, isSuperAdmin, user.roles]);
 
   const companyOptions = useMemo(
     () =>
@@ -526,128 +565,37 @@ export function UsersPage(props: UsersPageProps) {
         await updateUser(editingUser.id, {
           email: accountFormData.email !== editingUser.email ? accountFormData.email : undefined
         });
-        if (accountFormData.is_active !== editingUser.is_active) {
-          if (accountFormData.is_active) {
-            await reactivateUser(editingUser.id);
-          } else {
-            await deactivateUser(editingUser.id);
-          }
-        }
         setSuccessMessage("User account updated successfully");
         await usersQuery.refetch({ force: true });
         closeDialog();
       } else if (dialogMode === "access-edit" && editingUser) {
         if (editingUser.id === user.id) {
           setError("You cannot update your own access.");
+          setSubmitting(false);
           return;
         }
-        
-        const accessStartTime = Date.now();
-        const actorRole = user.global_roles[0] ?? "UNKNOWN";
-        
-        // Calculate delta for audit
-        const existingRoles = new Set<string>(editingUser.global_roles);
-        const desiredRoles = new Set<string>(accessFormData.global_role_codes);
-        const globalRoleAdditions = [...desiredRoles].filter(r => !existingRoles.has(r)).length;
-        const globalRoleRemovals = [...existingRoles].filter(r => !desiredRoles.has(r)).length;
-        
-        const existingOutletAssignments = new Map(
-          editingUser.outlet_role_assignments.map(a => [a.outlet_id, new Set(a.role_codes)])
+
+        // Compute review data for confirmation step (Story 66-1 AC3/AC4)
+        const review = computeAccessChangeReview(
+          editingUser,
+          {
+            global_role_codes: accessFormData.global_role_codes,
+            outlet_role_assignments: accessFormData.outlet_role_assignments,
+          },
+          availableRoles,
+          outletsQuery.data || [],
         );
-        const desiredOutletAssignments = new Map(
-          accessFormData.outlet_role_assignments.map(a => [a.outlet_id, new Set(a.role_codes)])
-        );
-        
-        let outletRoleAdditions = 0;
-        let outletRoleRemovals = 0;
-        
-        // Count additions and modifications
-        for (const [outletId, roles] of desiredOutletAssignments) {
-          const existing = existingOutletAssignments.get(outletId) ?? new Set<string>();
-          for (const role of roles) {
-            if (!existing.has(role)) outletRoleAdditions++;
-          }
+
+        if (!review.hasChanges) {
+          setError("No changes detected.");
+          setSubmitting(false);
+          return;
         }
-        
-        // Count removals
-        for (const [outletId, roles] of existingOutletAssignments) {
-          const desired = desiredOutletAssignments.get(outletId) ?? new Set<string>();
-          for (const role of roles) {
-            if (!desired.has(role)) outletRoleRemovals++;
-          }
-        }
-        
-        // Count outlet assignment removals (outlets removed entirely)
-        for (const outletId of existingOutletAssignments.keys()) {
-          if (!desiredOutletAssignments.has(outletId)) {
-            outletRoleRemovals += existingOutletAssignments.get(outletId)!.size;
-          }
-        }
-        
-        const deltaSize = globalRoleAdditions + globalRoleRemovals + outletRoleAdditions + outletRoleRemovals;
-        
-        try {
-          // Update global roles
-          if (accessFormData.global_role_codes) {
-            await updateUserRoles(editingUser.id, {
-              role_codes: accessFormData.global_role_codes as Role[]
-            });
-          }
-          
-          // Update outlet roles in parallel
-          const existingOutletIds = new Set(
-            editingUser.outlet_role_assignments.map((assignment) => assignment.outlet_id)
-          );
-          const desiredOutletIds = new Set(
-            accessFormData.outlet_role_assignments.map((assignment) => assignment.outlet_id)
-          );
 
-          const updatePromises = accessFormData.outlet_role_assignments.map((assignment) =>
-            updateUserRoles(editingUser.id, {
-              outlet_id: assignment.outlet_id,
-              role_codes: assignment.role_codes as Role[]
-            })
-          );
-
-          const deletePromises = [...existingOutletIds]
-            .filter(outletId => !desiredOutletIds.has(outletId))
-            .map(outletId =>
-              updateUserRoles(editingUser.id, {
-                outlet_id: outletId,
-                role_codes: []
-              })
-            );
-
-          await Promise.all([...updatePromises, ...deletePromises]);
-
-          const latencyMs = Date.now() - accessStartTime;
-          trackActionSelect("users", actorRole, "update-access", "success");
-          
-          // Audit log with delta and latency  
-          console.log(JSON.stringify({
-            event: "access-update",
-            page: "users",
-            actorRole,
-            targetUserId: editingUser.id,
-            targetUserEmail: editingUser.email,
-            deltaSize,
-            latencyMs,
-            globalRoleAdditions,
-            globalRoleRemovals,
-            outletRoleAdditions,
-            outletRoleRemovals,
-            outcome: "success",
-            timestamp: Date.now()
-          }));
-
-          setSuccessMessage("User access updated successfully");
-          await usersQuery.refetch({ force: true });
-          closeDialog();
-        } catch (accessError) {
-          const errorMsg = accessError instanceof ApiError ? accessError.message : "Failed to update access";
-          setError(errorMsg);
-          trackActionError("users", actorRole, "update-access", errorMsg);
-        }
+        setReviewData(review);
+        setShowReviewModal(true);
+        setSubmitting(false);
+        return;
       } else if (dialogMode === "password" && editingUser) {
         await updateUserPassword(editingUser.id, {
           password: formData.password
@@ -663,6 +611,75 @@ export function UsersPage(props: UsersPageProps) {
       }
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  /**
+   * Handle confirmation of the access change review.
+   * Executes the actual mutations after the admin has reviewed and confirmed.
+   */
+  const handleAccessChangeConfirm = async () => {
+    if (!editingUser || !reviewData) return;
+
+    if (editingUser.id === user.id) {
+      setError("You cannot update your own access.");
+      setShowReviewModal(false);
+      setReviewData(null);
+      return;
+    }
+
+    setReviewSubmitting(true);
+    setError(null);
+
+    const actorRole = user.global_roles[0] ?? "UNKNOWN";
+
+    try {
+      // Update global roles
+      if (accessFormData.global_role_codes) {
+        await updateUserRoles(editingUser.id, {
+          role_codes: accessFormData.global_role_codes as Role[]
+        });
+      }
+
+      // Update outlet roles in parallel
+      const existingOutletIds = new Set(
+        editingUser.outlet_role_assignments.map((assignment) => assignment.outlet_id)
+      );
+      const desiredOutletIds = new Set(
+        accessFormData.outlet_role_assignments.map((assignment) => assignment.outlet_id)
+      );
+
+      const updatePromises = accessFormData.outlet_role_assignments.map((assignment) =>
+        updateUserRoles(editingUser.id, {
+          outlet_id: assignment.outlet_id,
+          role_codes: assignment.role_codes as Role[]
+        })
+      );
+
+      const deletePromises = [...existingOutletIds]
+        .filter(outletId => !desiredOutletIds.has(outletId))
+        .map(outletId =>
+          updateUserRoles(editingUser.id, {
+            outlet_id: outletId,
+            role_codes: []
+          })
+        );
+
+      await Promise.all([...updatePromises, ...deletePromises]);
+
+      trackActionSelect("users", actorRole, "update-access", "success");
+
+      setSuccessMessage("User access updated successfully");
+      await usersQuery.refetch({ force: true });
+      setShowReviewModal(false);
+      setReviewData(null);
+      closeDialog();
+    } catch (accessError) {
+      const errorMsg = accessError instanceof ApiError ? accessError.message : "Failed to update access";
+      setError(errorMsg);
+      trackActionError("users", actorRole, "update-access", errorMsg);
+    } finally {
+      setReviewSubmitting(false);
     }
   };
 
@@ -969,18 +986,27 @@ export function UsersPage(props: UsersPageProps) {
           const targetUser = info.row.original;
           const isSelf = targetUser.id === user.id;
           const isSuperAdminUser = targetUser.global_roles.includes("SUPER_ADMIN");
-          const disableEditAction = isSuperAdminUser; // Super-admin users cannot be edited
-          const disablePasswordAction = isSuperAdminUser; // Super-admin passwords cannot be changed by others
-          const disableRoleAction = isSelf || isSuperAdminUser;
-          const disableDeactivateAction = isSelf || isSuperAdminUser;
+
+          // Permission-based gating (Story 66-1 AC6) — IN ADDITION to self/super-admin safeguards
+          const noEditPerm = !actionGates.edit;
+          const noDeletePerm = !actionGates.deactivate;
+
+          const disableEditAction = isSuperAdminUser || noEditPerm;
+          const disablePasswordAction = isSuperAdminUser || noEditPerm;
+          const disableRoleAction = isSelf || isSuperAdminUser || noEditPerm;
+          const disableDeactivateAction = isSelf || isSuperAdminUser || noDeletePerm;
+
           const selfTooltip = isSelf ? "You cannot modify your own access." : undefined;
           const superAdminTooltip = isSuperAdminUser ? "Cannot modify SUPER_ADMIN user." : undefined;
-          const editTooltip = isSuperAdminUser ? superAdminTooltip : undefined;
-          const passwordTooltip = isSuperAdminUser ? superAdminTooltip : undefined;
-          const roleTooltip = isSuperAdminUser ? superAdminTooltip : selfTooltip;
-          const deactivateTooltip = isSuperAdminUser ? superAdminTooltip : selfTooltip;
+          const permEditTooltip = noEditPerm ? "You lack platform.users.UPDATE permission" : undefined;
+          const permDeleteTooltip = noDeletePerm ? "You lack platform.users.DELETE permission" : undefined;
 
-          const actorRole = user.global_roles[0] ?? "UNKNOWN";
+          const editTooltip = superAdminTooltip ?? permEditTooltip;
+          const passwordTooltip = superAdminTooltip ?? permEditTooltip;
+          const roleTooltip = superAdminTooltip ?? selfTooltip ?? permEditTooltip;
+          const deactivateTooltip = superAdminTooltip ?? selfTooltip ?? permDeleteTooltip;
+
+          const actorRole = user.global_roles[0] ?? user.roles[0] ?? "UNKNOWN";
 
           return (
             <Menu>
@@ -997,7 +1023,6 @@ export function UsersPage(props: UsersPageProps) {
                 <Menu.Item
                   leftSection={<IconEdit size={14} />}
                   onClick={() => {
-                    trackActionSelect("users", actorRole, "edit-user", "success");
                     openAccountDialog(targetUser);
                   }}
                   disabled={disableEditAction}
@@ -1008,7 +1033,6 @@ export function UsersPage(props: UsersPageProps) {
                 <Menu.Item
                   leftSection={<IconShield size={14} />}
                   onClick={() => {
-                    trackActionSelect("users", actorRole, "manage-roles", "success");
                     openAccessDialog(targetUser);
                   }}
                   disabled={disableRoleAction}
@@ -1019,7 +1043,6 @@ export function UsersPage(props: UsersPageProps) {
                 <Menu.Item
                   leftSection={<IconBuildingStore size={14} />}
                   onClick={() => {
-                    trackActionSelect("users", actorRole, "assign-outlets", "success");
                     openAccessDialog(targetUser);
                   }}
                   disabled={disableRoleAction}
@@ -1030,7 +1053,6 @@ export function UsersPage(props: UsersPageProps) {
                 <Menu.Item
                   leftSection={<IconLock size={14} />}
                   onClick={() => {
-                    trackActionSelect("users", actorRole, "change-password", "success");
                     openPasswordDialog(targetUser);
                   }}
                   disabled={disablePasswordAction}
@@ -1046,7 +1068,6 @@ export function UsersPage(props: UsersPageProps) {
                     leftSection={<IconBan size={14} />}
                     color="red"
                     onClick={() => {
-                      trackActionSelect("users", actorRole, "deactivate", "success");
                       setConfirmState({ action: "deactivate", user: targetUser });}}
                     disabled={disableDeactivateAction}
                     title={deactivateTooltip}
@@ -1058,11 +1079,10 @@ export function UsersPage(props: UsersPageProps) {
                     leftSection={<IconCheck size={14} />}
                     color="green"
                     onClick={() => {
-                      trackActionSelect("users", actorRole, "reactivate", "success");
                       setConfirmState({ action: "reactivate", user: targetUser });
                     }}
-                    disabled={isSelf}
-                    title={selfTooltip}
+                    disabled={isSelf || isSuperAdminUser || noDeletePerm}
+                    title={superAdminTooltip ?? selfTooltip ?? permDeleteTooltip}
                   >
                     Reactivate
                   </Menu.Item>
@@ -1073,7 +1093,7 @@ export function UsersPage(props: UsersPageProps) {
         }
       }
     ];
-  }, [openAccountDialog, openAccessDialog, openPasswordDialog, user.id]);
+  }, [openAccountDialog, openAccessDialog, openPasswordDialog, user.id, user.global_roles, actionGates]);
   
   return (
     <>
@@ -1094,9 +1114,10 @@ export function UsersPage(props: UsersPageProps) {
               </Button>
               <Button
                 onClick={openCreateDialog}
-                disabled={isSuperAdmin && companyOptions.length === 0}
+                disabled={!actionGates.create || (isSuperAdmin && companyOptions.length === 0)}
                 leftSection={<IconUserPlus size={16} />}
                 size="sm"
+                title={!actionGates.create ? "You lack platform.users.CREATE permission" : undefined}
               >
                 Add User
               </Button>
@@ -1203,7 +1224,8 @@ export function UsersPage(props: UsersPageProps) {
                 )}
               </Group>
             </Group>
-          <DataTable
+          <EntityTable
+            entityName="Users"
             columns={columns}
             data={filteredUsers}
             getRowId={(row) => String(row.id)}
@@ -1274,6 +1296,10 @@ export function UsersPage(props: UsersPageProps) {
                       company_id: nextValue,
                       outlet_role_assignments: []
                     });
+                    setAccessFormData({
+                      global_role_codes: [],
+                      outlet_role_assignments: []
+                    });
                     setHasUnsavedChanges(true);
                   }}
                   error={formErrors.company_id}
@@ -1299,15 +1325,49 @@ export function UsersPage(props: UsersPageProps) {
                 />
               ) : null}
 
-              <Checkbox
-                label="Active"
-                checked={accountFormData.is_active}
-                onChange={(event) => {
-                  setAccountFormData({ ...accountFormData, is_active: event.currentTarget.checked });
-                  setHasUnsavedChanges(true);
-                }}
-                aria-label="User active status"
-              />
+              {dialogMode === "account-create" ? (
+                <Checkbox
+                  label="Active"
+                  checked={accountFormData.is_active}
+                  onChange={(event) => {
+                    setAccountFormData({ ...accountFormData, is_active: event.currentTarget.checked });
+                    setHasUnsavedChanges(true);
+                  }}
+                  aria-label="User active status"
+                />
+              ) : null}
+
+              {dialogMode === "account-create" && (
+                <>
+                  <Select
+                    label="Global Role"
+                    description="A user can have only one global role"
+                    placeholder="Select a global role (optional)"
+                    value={accessFormData.global_role_codes[0] ?? ""}
+                    onChange={(value) => {
+                      setAccessFormData({ ...accessFormData, global_role_codes: value ? [value] : [] });
+                      setHasUnsavedChanges(true);
+                    }}
+                    data={globalRoleOptions
+                      .filter((role) => role.role_level < actorMaxRoleLevel)
+                      .map((role) => ({ value: role.code, label: role.name }))}
+                    allowDeselect
+                    aria-label="Global role selection"
+                  />
+
+                  <OutletRoleMatrix
+                    title="Outlet Roles"
+                    outlets={outletsQuery.data || []}
+                    roles={outletRoleOptions}
+                    actorMaxRoleLevel={actorMaxRoleLevel}
+                    maxHeight={300}
+                    outletRoleCodesFor={accessOutletRoleCodesFor}
+                    onUpdateRoleCode={updateAccessOutletRoleCode}
+                    onSetRoleForOutlets={setAccessOutletRoleCodeForOutlets}
+                    onClearRolesForOutlets={clearAccessOutletRolesForOutlets}
+                  />
+                </>
+              )}
             </>
           )}
 
@@ -1340,7 +1400,39 @@ export function UsersPage(props: UsersPageProps) {
                 onSetRoleForOutlets={setAccessOutletRoleCodeForOutlets}
                 onClearRolesForOutlets={clearAccessOutletRolesForOutlets}
               />
+
             </>
+          )}
+
+          {/* Permission Preview (Story 66-1 AC4) */}
+          {accessPermissionPreview && accessPermissionPreview.length > 0 && (
+            <Box
+              p="sm"
+              style={(theme) => ({
+                backgroundColor: theme.colors.gray?.[0] ?? "#f8f9fa",
+                borderRadius: theme.radius.md,
+                border: `1px solid ${theme.colors.gray?.[2] ?? "#dee2e6"}`,
+              })}
+            >
+              <Text size="xs" fw={600} mb={4}>
+                Effective Permissions Preview
+              </Text>
+              <Text size="xs" c="dimmed" mb="xs">
+                Derived from selected roles. Backend deny-by-default remains authoritative.
+              </Text>
+              <Group gap="xs" wrap="wrap">
+                {accessPermissionPreview.map((entry) => (
+                  <Badge
+                    key={`${entry.module}.${entry.resource}`}
+                    variant="light"
+                    color={entry.mask >= 15 ? "blue" : entry.mask >= 6 ? "teal" : "gray"}
+                    size="sm"
+                  >
+                    {entry.module}.{entry.resource}: {formatMaskLabel(entry.mask)}
+                  </Badge>
+                ))}
+              </Group>
+            </Box>
           )}
 
           {dialogMode === "password" ? (
@@ -1397,6 +1489,151 @@ export function UsersPage(props: UsersPageProps) {
             </Button>
           </Group>
         </Stack>
+      </Modal>
+
+      {/* Access Change Review Modal (Story 66-1 AC3/AC4) */}
+      <Modal
+        opened={showReviewModal && reviewData !== null}
+        onClose={() => {
+          setShowReviewModal(false);
+          setReviewData(null);
+        }}
+        title={<Title order={4}>Review Access Changes</Title>}
+        centered
+        size="lg"
+      >
+        {reviewData && (
+          <Stack gap="md">
+            {error && (
+              <Alert color="red" title="Error" role="alert" aria-live="polite">
+                {error}
+              </Alert>
+            )}
+
+            {/* Change Summary */}
+            <Box>
+              <Text size="sm" fw={600} mb="xs">
+                Change Summary
+              </Text>
+              {reviewData.summary.length > 0 ? (
+                <Stack gap={4}>
+                  {reviewData.summary.map((s, i) => (
+                    <Group key={i} gap="xs" wrap="nowrap">
+                      <Badge
+                        variant="light"
+                        color={s.includes("add ") ? "green" : "red"}
+                        size="xs"
+                      >
+                        {s.includes("add ") ? "+" : "−"}
+                      </Badge>
+                      <Text size="sm">{s.replace(/^(add |remove )/, "")}</Text>
+                    </Group>
+                  ))}
+                </Stack>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  No role or outlet changes detected.
+                </Text>
+              )}
+            </Box>
+
+            {/* Global Role Before/After */}
+            <Box>
+              <Text size="sm" fw={600} mb={4}>
+                Global Roles
+              </Text>
+              <Group gap="xs" align="center">
+                <Badge variant="outline" color="gray" size="sm">
+                  {reviewData.globalRolesBefore.length > 0
+                    ? reviewData.globalRolesBefore.join(", ")
+                    : "None"}
+                </Badge>
+                <Text size="sm" c="dimmed">→</Text>
+                <Badge variant="filled" color="blue" size="sm">
+                  {reviewData.globalRolesAfter.length > 0
+                    ? reviewData.globalRolesAfter.join(", ")
+                    : "None"}
+                </Badge>
+              </Group>
+            </Box>
+
+            {/* Outlet Role Changes */}
+            {(reviewData.outletChanges.length > 0 || reviewData.removedOutlets.length > 0) && (
+              <Box>
+                <Text size="sm" fw={600} mb={4}>
+                  Outlet Roles
+                </Text>
+                <Stack gap="xs">
+                  {reviewData.outletChanges.map((oc) => (
+                    <Group key={oc.outletId} gap="xs" wrap="nowrap">
+                      <Badge variant="outline" color="gray" size="sm">
+                        {oc.outletName}
+                      </Badge>
+                      <Text size="xs">
+                        {oc.rolesBefore.length > 0 ? oc.rolesBefore.join(", ") : "None"}
+                      </Text>
+                      <Text size="xs" c="dimmed">→</Text>
+                      <Text size="xs">
+                        {oc.rolesAfter.length > 0 ? oc.rolesAfter.join(", ") : "None"}
+                      </Text>
+                    </Group>
+                  ))}
+                  {reviewData.removedOutlets.map((oc) => (
+                    <Group key={oc.outletId} gap="xs" wrap="nowrap">
+                      <Badge variant="outline" color="red" size="sm">
+                        {oc.outletName} (removed)
+                      </Badge>
+                      <Text size="xs">
+                        {oc.rolesBefore.join(", ")}
+                      </Text>
+                      <Text size="xs" c="dimmed">→</Text>
+                      <Text size="xs" c="dimmed">None</Text>
+                    </Group>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+
+            {/* Permission Diff Preview */}
+            {reviewData.permissionDiffs.length > 0 && (
+              <Box>
+                <Text size="sm" fw={600} mb={4}>
+                  Permission Changes
+                </Text>
+                <Text size="xs" c="dimmed" mb="xs">
+                  Derived from role codes. Backend deny-by-default remains authoritative.
+                </Text>
+                <Stack gap={2}>
+                  {reviewData.permissionDiffs.map((diff, i) => (
+                    <Text key={i} size="xs" ff="monospace">
+                      {diff}
+                    </Text>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+
+            <Group justify="flex-end">
+              <Button
+                variant="default"
+                onClick={() => {
+                  setShowReviewModal(false);
+                  setReviewData(null);
+                }}
+                disabled={reviewSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                color="blue"
+                onClick={handleAccessChangeConfirm}
+                loading={reviewSubmitting}
+              >
+                Confirm & Apply
+              </Button>
+            </Group>
+          </Stack>
+        )}
       </Modal>
 
       {/* Dirty confirmation dialog for unsaved changes */}

@@ -172,12 +172,26 @@ describe("createPermissionGuard", () => {
   };
 
   it("returns allowed when authenticated and authorized", () => {
-    const guard = createPermissionGuard("token", testRoute, ["OWNER"], [], { inventory: true });
+    const guard = createPermissionGuard(
+      "token",
+      testRoute,
+      ["OWNER"],
+      [],
+      { inventory: true },
+      [{ module: "inventory", resource: "items", mask: 1 }],
+    );
     expect(guard().allowed).toBe(true);
   });
 
   it("returns redirect when not authenticated", () => {
-    const guard = createPermissionGuard(null, testRoute, ["OWNER"], [], { inventory: true });
+    const guard = createPermissionGuard(
+      null,
+      testRoute,
+      ["OWNER"],
+      [],
+      { inventory: true },
+      [{ module: "inventory", resource: "items", mask: 1 }],
+    );
     const result = guard();
     expect(result.allowed).toBe(false);
     if (!result.allowed) {
@@ -186,7 +200,7 @@ describe("createPermissionGuard", () => {
   });
 
   it("returns redirect when not authorized", () => {
-    const guard = createPermissionGuard("token", testRoute, ["CASHIER"], [], { inventory: true });
+    const guard = createPermissionGuard("token", testRoute, ["CASHIER"], [], { inventory: true }, []);
     const result = guard();
     expect(result.allowed).toBe(false);
     if (!result.allowed) {

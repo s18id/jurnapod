@@ -16,7 +16,7 @@
 
 import type { RoleCode } from "@/lib/session";
 import { userCanAccessRoute, type AppRoute } from "@/app/routes";
-import { hasMinimumPermission, type UserPermissionEntry, type NavPermissionRequirement } from "@/app/shell/use-nav-filtering";
+import { hasMinimumPermission, type UserPermissionEntry, type NavPermissionRequirement } from "@/lib/auth/permissions";
 
 // ---------------------------------------------------------------------------
 // Auth guard types
@@ -63,6 +63,7 @@ export function checkRouteAccess(
   userRoles: readonly RoleCode[],
   userGlobalRoles: readonly RoleCode[],
   enabledModules: Record<string, boolean>,
+  userPermissions?: readonly UserPermissionEntry[],
 ): RoutePermissionCheck {
   if (!route) {
     return { allowed: false, reason: "Route not found" };
@@ -78,6 +79,18 @@ export function checkRouteAccess(
       allowed: false,
       reason: `Module "${route.requiredModule}" is not enabled`,
     };
+  }
+
+  if (route.permission && userPermissions === undefined) {
+    return {
+      allowed: false,
+      reason: `Permissions not loaded for ${route.path}`,
+    };
+  }
+
+  if (route.permission) {
+    const permissions = userPermissions ?? [];
+    return checkResourcePermission(permissions, route.permission);
   }
 
   return { allowed: true, reason: null };
@@ -132,6 +145,7 @@ export function createPermissionGuard(
   userRoles: readonly RoleCode[],
   userGlobalRoles: readonly RoleCode[],
   enabledModules: Record<string, boolean>,
+  userPermissions?: readonly UserPermissionEntry[],
 ): RouteGuardFn {
   return () => {
     const auth = checkAuth(accessToken);
@@ -139,7 +153,7 @@ export function createPermissionGuard(
       return { allowed: false, redirectTo: auth.redirectTo };
     }
 
-    const perm = checkRouteAccess(route, userRoles, userGlobalRoles, enabledModules);
+    const perm = checkRouteAccess(route, userRoles, userGlobalRoles, enabledModules, userPermissions);
     if (!perm.allowed) {
       return { allowed: false, redirectTo: "/items" }; // fallback to safe page
     }

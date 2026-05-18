@@ -13,6 +13,7 @@ import { createRoot } from "react-dom/client";
 
 import { AppRouter } from "./app/router";
 import { ThemeProvider } from "./app/theme-provider";
+import { QueryProvider } from "./lib/cache/query-client";
 
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
@@ -24,6 +25,8 @@ const root = document.createElement("div");
 document.body.appendChild(root);
 createRoot(root).render(
   <ThemeProvider>
-    <AppRouter />
+    <QueryProvider>
+      <AppRouter />
+    </QueryProvider>
   </ThemeProvider>
 );

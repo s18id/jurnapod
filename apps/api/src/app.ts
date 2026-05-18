@@ -50,6 +50,7 @@ import { progressRoutes } from './routes/progress.js';
 import { adminDashboardRoutes } from './routes/admin-dashboards/index.js';
 import { adminRunbookRoutes } from './routes/admin-runbook.js';
 import { auditRoutes } from './routes/audit.js';
+import { auditLogRoutes } from './routes/audit-logs.js';
 import { swaggerRoutes } from './routes/swagger.js';
 import { purchasingRoutes } from './routes/purchasing/index.js';
 import { apExceptionRoutes } from './routes/accounting/ap-exceptions.js';
@@ -232,6 +233,7 @@ export function createApp(): Hono {
 
   // Register audit routes
   app.route("/api/audit", auditRoutes);
+  app.route("/api/audit-logs", auditLogRoutes);
 
   // Register POS items routes
   app.route("/api/pos/items", posItemVariantsRoutes);
