@@ -1,4 +1,4 @@
-last_updated: 2026-05-09T22:00:00Z
+last_updated: 2026-05-18T00:00:00Z
 project: Jurnapod
 project_key: NOKEY
 tracking_system: file-system
@@ -758,3 +758,13 @@ development_status:
   67-3-pricing-management: done
   67-4-import-workflow-redesign: done
   67-5-export-workflow-redesign: done
+  epic-67-retrospective: done
+
+  # Epic 68: Backoffice Async Workflows — Operations, SSE, Notifications, Audit
+  epic-68: in-progress
+  68-0-sse-connectivity-verification: done
+  68-1-async-job-drawer: backlog
+  68-2-operations-center: backlog
+  68-3-notification-system: backlog
+  68-4-audit-timeline: backlog
+  68-5-layered-dashboards: backlog

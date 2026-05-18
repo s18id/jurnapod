@@ -1,6 +1,6 @@
 # Action Items Tracker
 
-**Last Updated:** 2026-05-09T13:30:00Z
+**Last Updated:** 2026-05-19T00:00:00Z
 **Review Cadence:** Monthly at sprint retrospective
 
 ---
@@ -11,9 +11,9 @@
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
 | P1 | 0 | 12 | 0 | 12 |
-| P2 | 0 | 14 | 0 | 14 |
+| P2 | 3 | 15 | 0 | 18 |
 | P3 | 1 | 5 | 3 | 9 |
-| **Total** | **1** | **35** | **3** | **39** |
+| **Total** | **5** | **35** | **3** | **43** |
 
 > **Note:** The Historical section (Pre-Epic 8) is tracked separately (32 items) and excluded from summary totals above.
 
@@ -35,10 +35,31 @@
 
 | ID | Action | From | Owner | Status |
 |----|--------|------|-------|--------|
-
+| E66-A1 | Introduce a dedicated `platform.audit` ACL resource and migrate generic audit explorer routes from `platform.settings.READ` when the ACL migration story is approved | Epic 66 retro | Architecture team | Open — deferred from Epic 67; disposition required before Story 68-4 starts |
+| E66-A2 | Align generated OpenAPI query parameter types with runtime Zod validation for generic audit list filters | Epic 66 retro | API platform team | Open — deferred from Epic 67; verify before Story 68-4 spec finalization |
+| ~~E67-A1~~ | ~~Verify backend bulk operation endpoint contracts before story specification~~ | ~~Epic 67 retro~~ | ~~Architecture~~ | ~~Closed — Story 68-0 delivered contract artifact `story-68-0-contract.md` with full backend operations/progress/import/export/sync transport contract~~ |
+| E67-A2 | Add rendered component interaction tests for ExportDialog and ImportWizard | Epic 67 retro | QA | Open — due at Epic 68 pre-close |
 
 
 ---
+
+---
+
+## Archive: Formally Closed Items
+
+### P0
+
+*(no changes)*
+
+### P1
+
+*(no changes)*
+
+### P2
+
+| ID | Action | From | Closed In | Notes |
+|----|--------|------|----------|-------|
+| **E67-A1** | Verify backend bulk operation endpoint contracts before story specification | Epic 67 retro | Epic 68 kickoff (Story 68-0) | Contract artifact `_bmad-output/implementation-artifacts/stories/epic-68/story-68-0-contract.md` delivered. Source-inspection evidence covers: route mounts, endpoint inventory, SSE/polling contracts, retry/cancel gaps, auth/CORS/proxy findings, WebSocket `/ws` P0 auth bypass, and dependent story impact table (68-1/68-2/68-3/68-5). |
 
 ---
 
@@ -191,4 +212,4 @@ Examples:
 - `E8-A1` = Epic 8, Action 1
 - `E15-A2` = Epic 15, Action 2
 
-_Last Updated: 2026-05-09T00:00:00Z_
+_Last Updated: 2026-05-18T00:00:00Z_

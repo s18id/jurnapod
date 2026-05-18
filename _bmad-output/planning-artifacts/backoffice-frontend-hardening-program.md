@@ -1,6 +1,6 @@
 # Backoffice Frontend Redesign & Hardening Program
 
-**Status:** Active program plan — Epics 65–66 complete; Epic 67 in-progress; Epics 68–70 queued. Implementation of each queued backoffice epic requires explicit scope-freeze approval.
+**Status:** Active program plan — Epics 65–67 complete; Epics 68–70 queued. Implementation of each queued backoffice epic requires explicit scope-freeze approval.
 **Program Span:** 12 weeks (6 epics × 2 weeks each)
 **Squad:** 2 frontend engineers, 1 designer (part-time), 1 QA/shared automation engineer
 **Source:** `docs/frontend-research.md`
@@ -23,11 +23,11 @@ The current `Temporary Scope Freeze (Architecture-First)` policy (documented in 
 
 > **`apps/backoffice` — frozen except emergency / regulatory / security fixes explicitly approved**
 
-**EPICS 65–66 ARE COMPLETE. EPICS 67–70 REMAIN PLANNING-ONLY.** They MUST NOT be executed until:
+**EPICS 65–67 ARE COMPLETE. EPICS 68–70 REMAIN PLANNING-ONLY.** They MUST NOT be executed until:
 1. The scope freeze is explicitly lifted for the specific backoffice epic, OR
 2. An explicit emergency/regulatory/security exception is approved for a specific epic.
 
-This program plan remains the current coordination artifact. Epic 67–70 charters are queued artifacts awaiting per-epic unfreeze authorization.
+This program plan remains the current coordination artifact. Epic 68–70 charters are queued artifacts awaiting per-epic unfreeze authorization.
 
 ---
 
@@ -268,8 +268,8 @@ All six epics MUST be complete with the following evidence:
 | Epic | State | Evidence |
 |------|-------|----------|
 | 65 | Complete | `epic-65: done` in sprint status; commit `e8c6f046` |
-| 66 | Backlog / planning-only | Story specs created; `epic-66: backlog`; explicit unfreeze required |
-| 67 | Queued / planning-only | Explicit unfreeze required |
+| 66 | Complete | `epic-66: done` in sprint status; commit `e5e7c9d1` |
+| 67 | Complete | `epic-67: done` in sprint status; commit `6b189ff3`; retrospective dated 2026-05-18 |
 | 68 | Queued / planning-only | Explicit unfreeze required |
 | 69 | Queued / planning-only | Explicit unfreeze required |
 | 70 | Queued / planning-only | Explicit unfreeze required |
@@ -341,4 +341,4 @@ npx tsx scripts/validate-sprint-status.ts --epic 70
 
 ---
 
-_Last Updated: 2026-05-17_
+_Last Updated: 2026-05-18_

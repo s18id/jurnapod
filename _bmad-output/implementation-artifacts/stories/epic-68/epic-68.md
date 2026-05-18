@@ -1,6 +1,6 @@
 # Epic 68: Async Workflows — Operations, SSE, Notifications, Audit
 
-**Status:** planned (queued — requires explicit backoffice unfreeze before execution)
+**Status:** in-progress (backoffice unfrozen per Ahmad authorization 2026-05-18; Story 68-0 ready-for-dev)
 **Sprint/Timebox:** Weeks 7–8 (of Backoffice Frontend Program)
 **Theme:** First-class async job monitoring with SSE-driven real-time progress, three-layer notification system (toast, inbox, banner), comprehensive audit surface, and layered dashboards (Global Admin Overview, Domain Dashboard, My Work panel).
 **Primary Modules:** `apps/backoffice`, `packages/shared`
@@ -24,7 +24,16 @@ Epic 68 delivers the operational visibility and user feedback layer that transfo
 - The repo already has admin dashboard routes and built-in HTML dashboards
 - The existing backoffice has route-level lazy loading and Dexie caches for frequently reused master data
 
-### 1.3 Non-Goals
+### 1.3 User Decisions (Ahmad, 2026-05-18)
+
+The following decisions govern Epic 68 scope and MUST be honored by all implementing agents:
+
+| # | Decision | Story | Rationale |
+|---|----------|-------|-----------|
+| D68-1 | Story 68-0 MUST verify the **full backend operations contract**, not only SSE connectivity. Scope explicitly includes: async jobs vs synchronous streaming; SSE vs polling; retry/cancel support; operation detail/list shape; auth/CORS/proxy behavior. | 68-0 | Prevents another Epic 67-5 style contract mismatch where async job+SSE was assumed but the backend provided synchronous streaming. |
+| D68-2 | Story 68-4 MUST take the **safe path** and **include/require a dedicated `platform.audit` ACL resource** instead of continuing the `platform.settings.READ` workaround. E66-A1 resolution is **in-scope for 68-4**, not deferred. | 68-4 | The `platform.settings.READ` workaround for audit access is technical debt that MUST NOT propagate into new audit UI. Resolving E66-A1 within 68-4 ensures the audit timeline ships with correct ACL semantics. |
+
+### 1.4 Non-Goals
 
 - No new backend operation/audit endpoints
 - No real-time collaboration features (multi-user editing)
@@ -62,21 +71,34 @@ Epic 68 delivers the operational visibility and user feedback layer that transfo
 
 ## 3) Story Breakdown
 
-### Story 68-0 — WebSocket/SSE connectivity verification for static SPA deployment
+### Story 68-0 — Backend Operations Contract Verification: SSE, Polling, Async Jobs, Streaming, Auth/CORS/Proxy
 
-**Status:** planned
-**Type:** spike / deployment verification
+**Status:** ready-for-dev
+**Type:** spike / contract verification
 **Risk:** High
-**Dependencies:** Epic 65 (auth/session baseline), staging static deployment access
+**Dependencies:** Epic 65 (auth/session baseline, typed API client), staging static deployment access
 
-Verify the transport layer required by operations progress and notification delivery before building SSE-dependent UI. The spike MUST test Nginx proxy behavior, CORS, cookies/auth, reconnect behavior, and polling fallback.
+Verify the **complete backend operations contract** before building any SSE-dependent UI. This spike MUST go far beyond "SSE connectivity" and document the exact transport mechanisms, endpoint shapes, and auth behaviors the frontend MUST handle. Scope explicitly includes:
+
+1. **Async jobs vs synchronous streaming:** Which endpoints return `{ operationId }` for later polling/SSE, and which return synchronous streaming responses (like Epic 67-5 export)?
+2. **SSE vs polling:** Which endpoints support SSE (`/ws`, `/api/operations/:id/progress`)? Which require polling fallback? What is the reconnect/backoff behavior?
+3. **Retry/cancel support:** Which operation types support retry? Which support cancel? What are the backend state machine transitions?
+4. **Operation detail/list shape:** Exact response shapes for `GET /api/operations`, `GET /api/operations/:id`, and progress endpoints.
+5. **Auth/CORS/proxy behavior:** How does the static SPA authenticate SSE/EventSource connections? How does Nginx proxy SSE? What CORS headers are required? Are cookies/credentials propagated correctly through the proxy?
+
+The spike MUST produce a written **Operations Backend Contract Document** that Story 68-1, 68-2, and 68-3 acceptance criteria MUST reference. No SSE-dependent UI story may enter implementation until this document is reviewed and approved.
 
 **Acceptance Criteria:**
-- Static backoffice deployment can connect to the operations progress endpoint with authenticated session context.
-- WebSocket or SSE transport works through Nginx/proxy configuration in staging.
-- CORS and credentials behavior is documented for the selected transport.
-- Polling fallback endpoint and interval are documented for unsupported transports.
+- Static backoffice deployment can connect to all operations endpoints with authenticated session context.
+- SSE/EventSource transport works through Nginx/proxy configuration in staging; CORS and credentials behavior is documented.
+- Polling fallback endpoint and interval are documented for each operation type that lacks SSE support.
+- Async job endpoints (`POST` operations that return `{ operationId }`) are enumerated with their state machines.
+- Synchronous streaming endpoints (that return `Response` directly) are enumerated and distinguished from async job endpoints.
+- Operation list/detail/progress response shapes are documented with field names, types, and nullability.
+- Retry and cancel capabilities are documented per operation type.
+- Auth behavior for SSE (cookie propagation, token refresh, 401 handling) is documented.
 - Any required deployment configuration changes are assigned to Epic 70-4 or the rollout runbook.
+- The **Operations Backend Contract Document** is stored at `_bmad-output/implementation-artifacts/stories/epic-68/story-68-0-contract.md`.
 
 ---
 
@@ -161,28 +183,41 @@ Notification sources are WebSocket/SSE events from the existing runtime transpor
 
 ---
 
-### Story 68-4 — Audit timeline view
+### Story 68-4 — Audit timeline view + dedicated `platform.audit` ACL resource
 
 **Status:** planned
-**Type:** feature
+**Type:** feature + ACL pre-work
 **Risk:** Medium
-**Dependencies:** 66-5 (audit log explorer patterns), Epic 65 (typed API client for audit endpoints)
+**Dependencies:** 66-5 (audit log explorer patterns), Epic 65 (typed API client for audit endpoints), Story 68-0 (backend contract verified)
 
-Implement an entity-scoped audit timeline:
-- Accessible from any entity detail page via an "Audit Trail" tab or button
-- Shows a vertical timeline of changes for that specific entity
-- Each entry: actor name, action type badge (CREATE/UPDATE/DELETE/VOID/REFUND), timestamp, before/after diff (JSON diff or formatted comparison)
-- Filter by action type and date range within the entity scope
-- Deep-link: `/audit?objectType=item&objectId=42`
-- The timeline component is reusable (AuditTimeline) and can be embedded in any detail page
+**Epic 66 carry-forward dependency (E66-A1):** This story **MUST resolve E66-A1** by introducing the dedicated `platform.audit` ACL resource. The `platform.settings.READ` workaround is **explicitly rejected** per User Decision D68-2. The story scope includes:
+
+1. **ACL pre-work (E66-A1 resolution):**
+   - Add `audit` to the `platform` module resource list in canonical ACL documentation
+   - Create or update database migration to add `platform.audit` permission rows for all canonical roles (SUPER_ADMIN, OWNER, COMPANY_ADMIN, ADMIN, ACCOUNTANT, CASHIER) with appropriate masks
+   - Update `requireAccess()` calls in audit-related API routes to use `module: 'platform', resource: 'audit'` instead of `module: 'platform', resource: 'settings'`
+   - Update frontend permission gates for audit UI to use `platform.audit.READ`
+   - Add integration tests verifying `platform.audit` permission enforcement
+   - Mark E66-A1 as **closed** in `action-items.md`
+
+2. **Audit timeline UI:**
+   - Accessible from any entity detail page via an "Audit Trail" tab or button
+   - Shows a vertical timeline of changes for that specific entity
+   - Each entry: actor name, action type badge (CREATE/UPDATE/DELETE/VOID/REFUND), timestamp, before/after diff (JSON diff or formatted comparison)
+   - Filter by action type and date range within the entity scope
+   - Deep-link: `/audit?objectType=item&objectId=42`
+   - The timeline component is reusable (AuditTimeline) and can be embedded in any detail page
 
 **Acceptance Criteria:**
+- Given the ACL pre-work, `platform.audit` exists as a canonical resource with READ permission for ADMIN, ACCOUNTANT, and CASHIER roles (minimum); OWNER/COMPANY_ADMIN/SUPER_ADMIN have full CRUDAM
+- Given an API route serves audit data, it enforces `requireAccess({ module: 'platform', resource: 'audit', permission: 'READ' })`
 - Given an entity with 5 audit entries, the timeline renders with all entries in reverse chronological order
 - Given an UPDATE entry, the before/after section shows the changed fields with old and new values
 - Given the user is viewing a journal entry, the "Audit Trail" button navigates to the audit timeline filtered for that journal
 - Given no audit entries exist, the timeline shows an empty state
 - Given a filter is applied (e.g., action=DELETE), only matching entries are shown
 - Unit tests verify: timeline rendering, diff formatting, filter behavior
+- Integration tests verify: `platform.audit` permission denied for roles without READ; granted for roles with READ
 
 ---
 
@@ -229,12 +264,14 @@ Implement the layered dashboard system:
 
 | # | Precondition | Enforcement | Status |
 |---|--------------|-------------|--------|
-| 1 | Epic 65 (Foundation) complete | sprint-status.yaml | ❌ (HOLDING) |
-| 2 | Backoffice unfreeze authorized | Written authorization | ❌ (HOLDING) |
-| 3 | Typed API client covers health, operations, audit, WebSocket endpoints | 65-2 completion | ❌ (HOLDING) |
+| 1 | Epic 65 (Foundation) complete | sprint-status.yaml | ✅ Complete |
+| 2 | Backoffice unfreeze authorized | Ahmad explicit authorization, 2026-05-18 | ✅ Complete |
+| 3 | Typed API client covers health, operations, audit, WebSocket endpoints | 65-2 completion and endpoint verification | ✅ Base client complete; endpoint contract verification required in 68-0 |
 | 4 | SSE/WebSocket connectivity verified from backoffice static deployment | Story 68-0 | ❌ (must verify CORS + proxy config) |
-| 5 | TanStack Query available with suspense/loading patterns | 65-6 completion | ❌ (HOLDING) |
-| 6 | EntityTable primitive from Epic 65 available | 65-7 completion | ❌ (HOLDING) |
+| 5 | TanStack Query available with suspense/loading patterns | 65-6 completion | ✅ Complete |
+| 6 | EntityTable primitive from Epic 65 available | 65-7 completion | ✅ Complete |
+| 7 | Epic 67 E67-A1 backend bulk operation endpoint contract verification | Story 68-0 scope | ❌ Assigned to Story 68-0 |
+| 8 | Epic 66 E66-A1 `platform.audit` ACL resource introduction | Story 68-4 scope | ❌ Story 68-4 includes dedicated `platform.audit` ACL pre-work; E66-A1 MUST be resolved within 68-4 |
 
 ---
 
@@ -286,4 +323,4 @@ npx tsx scripts/validate-sprint-status.ts --epic 68
 
 ---
 
-_Last Updated: 2026-05-17_
+_Last Updated: 2026-05-18_
