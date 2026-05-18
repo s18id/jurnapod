@@ -763,7 +763,7 @@ development_status:
   # Epic 68: Backoffice Async Workflows — Operations, SSE, Notifications, Audit
   epic-68: in-progress
   68-0-sse-connectivity-verification: done
-  68-1-async-job-drawer: in-progress
+  68-1-async-job-drawer: done
   68-2-operations-center: backlog
   68-3-notification-system: backlog
   68-4-audit-timeline: backlog

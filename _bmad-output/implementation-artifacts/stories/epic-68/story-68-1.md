@@ -1,6 +1,6 @@
 # Story 68-1: AsyncJobDrawer Component — Lifecycle, SSE Progress, Completion
 
-Status: backlog
+Status: review
 
 > ⚠️ **Sprint-Status Append-Only Rule (E45-A1 / E46-A1) — MANDATORY:**
 > If this story modifies `_bmad-output/implementation-artifacts/sprint-status.yaml`:
@@ -243,31 +243,31 @@ const startPolling = (id: string) => {
 ## Tasks / Subtasks
 
 ### Phase 1: Foundation
-1. **Review story-68-0-contract.md** — Confirm which operation types use SSE vs polling vs synchronous
-2. **Create `useAsyncJobDrawer` context** — Global drawer state (open/closed, operationId)
-3. **Create `AsyncJobDrawer` shell** — Mantine Drawer with header, body, footer
+1. [x] **Review story-68-0-contract.md** — Confirm which operation types use SSE vs polling vs synchronous
+2. [x] **Create `useAsyncJobDrawer` context** — Global drawer state (open/closed, operationId)
+3. [x] **Create `AsyncJobDrawer` shell** — Mantine Drawer with header, body, footer
 
 ### Phase 2: Progress transport
-4. **Create `useOperationProgress` hook** — SSE connect + polling fallback logic
-5. **Implement SSE path** — EventSource with reconnect, error handling
-6. **Implement polling fallback** — Interval-based fetching with cleanup
+4. [x] **Create `useOperationProgress` hook** — SSE connect + polling fallback logic
+5. [x] **Implement SSE path** — EventSource with reconnect, error handling
+6. [x] **Implement polling fallback** — Interval-based fetching with cleanup
 
 ### Phase 3: Visual states
-7. **Create `OperationStepper` component** — Stepper showing lifecycle states
-8. **Implement completed state** — Total/completed counts, details object if present
-9. **Implement failed state** — Error details from `details` if present, no generic retry endpoint
-11. **Implement cancelled state** — Timestamp, no retry
+7. [x] **Create `OperationStepper` component** — Stepper showing lifecycle states
+8. [x] **Implement completed state** — Total/completed counts, details object if present
+9. [x] **Implement failed state** — Error details from `details` if present, no generic retry endpoint
+11. [x] **Implement cancelled state** — Timestamp, no retry
 
 ### Phase 4: Integration
-12. **Wire into shell** — Add provider to app root
-13. **Trigger from operations center** — Story 68-2 will consume this
-14. **Trigger from notifications** — Story 68-3 will consume this
+12. [x] **Wire into shell** — Add provider to app root
+13. [x] **Trigger from operations center** — Story 68-2 will consume this (consumer integration deferred to Story 68-2; provider/hook surface is available)
+14. [x] **Trigger from notifications** — Story 68-3 will consume this (consumer integration deferred to Story 68-3; provider/hook surface is available)
 
 ### Phase 5: Testing
-15. **Unit tests for state machine** — All status transitions
-16. **Unit tests for SSE logic** — Mock EventSource, reconnect, fallback
-17. **Unit tests for polling logic** — Interval timing, cleanup, terminal state stop
-18. **Permission tests** — Denied state rendering
+15. [x] **Unit tests for state machine** — All status transitions
+16. [x] **Unit tests for SSE logic** — Mock EventSource, reconnect, fallback
+17. [x] **Unit tests for polling logic** — Interval timing, cleanup, terminal state stop
+18. [x] **Permission tests** — Denied state rendering
 
 ---
 
@@ -322,6 +322,8 @@ _Last Updated: 2026-05-18 (prepared by bmad-sm)
 - AC0 only: backend operations routes use explicit `platform.operations.READ`; no AsyncJobDrawer UI, retry endpoint, cancel endpoint, or `/ws` implementation.
 - Introduce `platform.operations` in canonical ACL constants/defaults and seed existing companies via idempotent migration.
 - Validate with DB-backed operations route integration tests for authorized access, CASHIER denial, and tenant scoping.
+- UI continuation (AC1-AC10): add backoffice drawer context, Mantine drawer host, lifecycle stepper, polling-first progress hook, optional bearer-capable fetch-stream SSE path, and `platform.operations.READ` client gating.
+- Use Story 68-0 actual progress endpoint `/operations/:operationId/progress` through canonical API client base; no `/api` double-prefix, `/ws`, generic retry controls, or generic cancel controls.
 
 ### Completion Notes
 
@@ -329,6 +331,14 @@ _Last Updated: 2026-05-18 (prepared by bmad-sm)
 - Added idempotent migration `0210_acl_platform_operations.sql` to seed existing company role permissions.
 - Added `requireAccess({ module: "platform", resource: "operations", permission: "read" })` enforcement to operations list and progress/SSE route paths.
 - Added focused integration coverage for `platform.operations.READ`, CASHIER 403 denial, and cross-company isolation.
+- Added `useAsyncJobDrawer` context/provider and mounted `AsyncJobDrawerHost` inside the authenticated backoffice shell.
+- Added `AsyncJobDrawer` Mantine shell gated by explicit backend-provided `platform.operations.READ`; denied users see "Access denied" and progress content is suppressed.
+- Added `useOperationProgress` polling-first controller using `/operations/:operationId/progress`; polling stops on `completed`, `failed`, and `cancelled`; close/unmount aborts timers/streams.
+- Added operation-id-aware progress state selection so operation switching/reopen does not expose stale progress, while same-operation 403/404/load errors remain visible.
+- Added runtime validation for progress payload shape/status and requested `operationId` match before data enters drawer state.
+- Added optional bearer-capable fetch-stream SSE path; default UI policy remains polling-first because Story 68-0 runtime SSE auth/proxy evidence is not verified.
+- Added `OperationStepper` for backend-supported statuses only: `running`, `completed`, `failed`, `cancelled`.
+- Confirmed no generic retry or cancel controls are rendered because backend endpoints do not exist.
 
 ### Validation Evidence (AC0)
 
@@ -341,17 +351,47 @@ _Last Updated: 2026-05-18 (prepared by bmad-sm)
 - `npm run lint -w @jurnapod/api` — passed with existing warning baseline; no errors.
 - `npm run test:single -w @jurnapod/api -- __test__/integration/operations/status.test.ts` — passed; 9 tests passed.
 
+### Validation Evidence (AC1-AC10 UI)
+
+- `npm run test:single -w @jurnapod/backoffice -- __test__/unit/components/async-job-drawer.test.tsx` — passed; 9 tests passed.
+- `npm run test:single -w @jurnapod/backoffice -- __test__/unit/hooks/use-operation-progress.test.ts` — passed; 12 tests passed.
+- `npm run lint -w @jurnapod/backoffice` — passed.
+- `npm run typecheck -w @jurnapod/backoffice` — passed.
+- `npm run build -w @jurnapod/backoffice` — passed; existing Vite chunk-size/dynamic-import warnings only.
+- `npx tsx scripts/validate-sprint-status.ts` — passed.
+
 ### Review Result (AC0)
 
 - Architecture review: GO.
 - Severity findings: P0 none, P1 none, P2 none, P3 none.
 - Reviewer notes: ACL enforcement, tenant isolation, migration safety, and test integrity verified for AC0 scope.
 
+### Review Result (AC1-AC10 UI)
+
+- Architecture review: GO after targeted fixes.
+- Initial findings resolved:
+  - P1: Removed role-derived permission fallback; drawer now requires explicit `user.permissions` entry for `platform.operations.READ`.
+  - P2: Added runtime progress payload validation and rejected unsupported/mismatched operation payloads.
+  - P2: Added operation-id-aware state selection and keyed drawer progress content to prevent stale progress exposure on operation switch/reopen.
+  - P2: Preserved same-operation error states so 403/404/load failures reach `ErrorState`.
+- Final severity findings: P0 none, P1 none, P2 none, P3 none.
+
 ### File List
 
 - `AGENTS.md`
 - `apps/api/src/routes/progress.ts`
 - `apps/api/__test__/integration/operations/status.test.ts`
+- `apps/backoffice/__test__/unit/components/async-job-drawer.test.tsx`
+- `apps/backoffice/__test__/unit/hooks/use-operation-progress.test.ts`
+- `apps/backoffice/src/app/layout.tsx`
+- `apps/backoffice/src/app/router.tsx`
+- `apps/backoffice/src/components/async-job-drawer.tsx`
+- `apps/backoffice/src/components/operation-stepper.tsx`
+- `apps/backoffice/src/hooks/index.ts`
+- `apps/backoffice/src/hooks/use-async-job-drawer.ts`
+- `apps/backoffice/src/hooks/use-operation-progress.ts`
+- `apps/backoffice/src/lib/auth/permissions.ts`
+- `apps/backoffice/vitest.config.ts`
 - `docs/acl-permissions.md`
 - `packages/db/migrations/0210_acl_platform_operations.sql`
 - `packages/shared/src/constants/resources.ts`
@@ -360,3 +400,4 @@ _Last Updated: 2026-05-18 (prepared by bmad-sm)
 ### Change Log
 
 - 2026-05-19: Implemented Story 68-1 Phase 0 / AC0 backend ACL pre-work only.
+- 2026-05-19: Implemented Story 68-1 AC1-AC10 backoffice UI/client phases and focused validation.

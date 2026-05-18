@@ -26,6 +26,7 @@ import type { ReactNode } from "react";
 import { useOnlineStatus } from "../lib/connection";
 import type { OutboxItem, AlertReadHistory } from "../lib/offline-db";
 import type { SessionUser } from "../lib/session";
+import { AsyncJobDrawerHost } from "../components/async-job-drawer";
 import { useShell } from "./shell";
 
 import type { AppRoute } from "./routes";
@@ -446,6 +447,8 @@ export function AppLayout(props: AppLayoutProps) {
           )}
         </Group>
       </AppShell.Footer>
+
+      <AsyncJobDrawerHost />
     </AppShell>
   );
 }

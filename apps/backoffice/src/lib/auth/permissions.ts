@@ -81,7 +81,7 @@ export type CanonicalModule = (typeof CANONICAL_MODULES)[number];
  * Modules with no resources listed are omitted; use `"*"` for module-level access.
  */
 export const CANONICAL_MODULE_RESOURCES: Readonly<Record<CanonicalModule, readonly string[]>> = {
-  platform: ["users", "roles", "companies", "outlets", "settings"],
+  platform: ["users", "roles", "companies", "outlets", "settings", "operations"],
   pos: ["transactions", "config"],
   sales: ["invoices", "orders", "payments"],
   inventory: ["items", "stock", "costing"],

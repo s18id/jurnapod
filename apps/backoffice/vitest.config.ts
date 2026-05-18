@@ -36,6 +36,8 @@ export default defineConfig({
       "__test__/unit/export/*.test.ts",
       "__test__/unit/features/prices/*.test.ts",
       "__test__/unit/features/prices/*.test.tsx",
+      "__test__/unit/components/*.test.tsx",
+      "__test__/unit/hooks/*.test.ts",
       "__test__/unit/app-router-guards-permissions.test.ts",
     ],
     testTimeout: 30000,
