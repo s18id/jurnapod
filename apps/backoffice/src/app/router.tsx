@@ -114,6 +114,7 @@ const TableBoardPage = lazyNamed(() => import("../features/table-board-page"), "
 const ItemImportPage = lazyNamed(() => import("../features/item-import-page"), "ItemImportPage");
 const PriceImportPage = lazyNamed(() => import("../features/price-import-page"), "PriceImportPage");
 const OperationsCenter = lazyNamed(() => import("../features/operations/operations-center"), "OperationsCenter");
+const AuditExplorerPage = lazyNamed(() => import("../features/audit/audit-explorer"), "AuditExplorerPage");
 
 function RouteLoadingFallback() {
   return <div style={{ padding: "1rem" }}>Loading…</div>;
@@ -331,6 +332,9 @@ function RouteScreen(props: { path: string; user: SessionUser }) {
   }
   if (props.path === "/audit-logs") {
     return renderLazyPage(<AuditLogsPage user={props.user} />);
+  }
+  if (props.path === "/audit") {
+    return renderLazyPage(<AuditExplorerPage user={props.user} />);
   }
   if (props.path === "/cash-bank") {
     return renderLazyPage(<CashBankPage user={props.user} />);

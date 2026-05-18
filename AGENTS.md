@@ -682,7 +682,7 @@ requireAccess({ module: 'inventory', permission: 'READ' })
 
 ### Module Resource Breakdown
 
-**platform**: users, roles, companies, outlets, settings, operations
+**platform**: users, roles, companies, outlets, settings, operations, audit
 **accounting**: journals, accounts, fiscal_years, reports
 **inventory**: items, stock, costing
 **treasury**: transactions

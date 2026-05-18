@@ -335,4 +335,109 @@ npx tsx scripts/validate-sprint-status.ts --epic 68
 
 ---
 
-_Last Updated: 2026-05-18 (prepared by bmad-sm)
+## Dev Record
+
+### 2026-05-19 — Story started
+
+- Pre-flight checks:
+  - `npm run lint -w @jurnapod/backoffice` — passed
+  - `npm run typecheck -w @jurnapod/backoffice` — passed
+  - `npm run build -w @jurnapod/backoffice` — passed with existing Vite warnings
+- Sprint status updated: `68-4-audit-timeline: in-progress`
+- Dependencies verified:
+  - Story 68-0 contract verified (operations backend contract available)
+  - Epic 66-5 audit log explorer patterns available (`apps/backoffice/src/features/audit/`)
+  - Epic 65 shell, typed API client, router available
+- Existing audit infrastructure inspected:
+  - `apps/api/src/routes/audit-logs.ts` — generic audit log routes; currently guarded by `platform.settings.READ` (line 43)
+  - `apps/api/src/routes/audit.ts` — period-transition audit routes; currently guarded by `platform.settings.READ` (line 51)
+  - `apps/backoffice/src/features/audit/api.ts` — existing `fetchAuditLogs`, `useAuditLogList`, `useAuditLogDetail`
+  - `apps/backoffice/src/features/audit/audit-helpers.ts` — existing filter helpers, query key builder, half-open date range support
+  - `AGENTS.md` — platform resources listed as `users, roles, companies, outlets, settings, operations`; `audit` is absent
+  - `action-items.md` — E66-A1 remains open
+  - No `platform.audit` rows exist in `module_roles` (verified by migration audit and grep)
+
+### Implementation Plan
+
+**Phase 1: ACL pre-work (E66-A1 resolution)**
+1. Create DB migration adding `platform.audit` permission rows for canonical roles (idempotent)
+2. Update `apps/api/src/routes/audit-logs.ts` — change `requireAccess` from `platform.settings` to `platform.audit`
+3. Update `apps/api/src/routes/audit.ts` — change `requireAccess` from `platform.settings` to `platform.audit`
+4. Update `AGENTS.md` — add `audit` to platform resources in ACL matrix
+5. Update `action-items.md` — mark E66-A1 as closed
+6. Add API integration tests verifying `platform.audit` permission denied for `CASHIER`, granted for `ADMIN`
+
+**Phase 2: Audit timeline UI**
+7. Create `AuditTimeline` component — vertical timeline rendering entries from `useAuditLogList`
+8. Create `AuditDiff` component — before/after diff for UPDATE entries
+9. Create `useAuditEntityLog` hook — TanStack Query hook scoped by `objectType` + `objectId`
+10. Create audit explorer page at `#/audit` with deep-link support for `objectType`/`objectId`
+11. Add "Audit Trail" tab/button capability for embedding in entity detail pages
+
+**Phase 3: Testing**
+12. Unit tests for `AuditTimeline` rendering, filtering, empty state
+13. Unit tests for `AuditDiff` formatting
+14. Integration tests for ACL enforcement
+
+### 2026-05-19 — Implementation Completed
+
+- All Phase 1 ACL pre-work completed:
+  - Migration `0211_acl_platform_audit.sql` created and applied
+  - API routes `audit-logs.ts` and `audit.ts` updated to use `platform.audit.READ`
+  - `AGENTS.md` updated with `audit` in platform resources
+  - `action-items.md` E66-A1 marked closed
+- All Phase 2 UI components completed:
+  - `AuditTimeline` component with reverse chronological order, action badges, diff preview
+  - `AuditDiff` component with before/after table formatting
+  - `useAuditEntityLog` hook for entity-scoped audit queries
+  - `AuditExplorerPage` at `#/audit` with deep-link support for `objectType`/`objectId`
+  - Route `/audit` added to backoffice router with `requiresExplicitPermission` gating
+
+### Validation Evidence
+
+```bash
+# Pre-flight
+npm run lint -w @jurnapod/backoffice    # passed
+npm run typecheck -w @jurnapod/backoffice # passed
+npm run build -w @jurnapod/backoffice     # passed with existing Vite warnings
+npm run lint -w @jurnapod/api             # passed (0 errors, 157 pre-existing warnings)
+npm run typecheck -w @jurnapod/api        # passed
+npm run build -w @jurnapod/api            # passed
+
+# Backoffice unit tests
+npm run test:single -w @jurnapod/backoffice -- __test__/unit/features/audit-timeline.test.tsx __test__/unit/features/audit-diff.test.tsx
+# Result: 2 files passed, 18 tests passed
+
+# API integration tests (ACL enforcement)
+npm run test:single -w @jurnapod/api -- __test__/integration/audit/audit-acl-permissions.test.ts
+# Result: 1 file passed, 6 tests passed
+
+# DB migration
+npm run db:migrate -w @jurnapod/db
+# Result: applied 0211_acl_platform_audit.sql
+
+# Sprint status
+npx tsx scripts/validate-sprint-status.ts --epic 68
+# Result: passed
+```
+
+### Review Result
+
+- Initial independent review: NO-GO with actionable P1/P2/P3 follow-ups.
+- P1 fixes completed:
+  - F-01: `/audit-logs` route permission metadata updated to `platform.audit.READ`.
+  - F-02: ACL integration tests expanded to cover ADMIN and ACCOUNTANT positive access.
+  - F-03: Audit Explorer UI now includes action, actor user ID, from date, and to date filters.
+- P2 fixes completed:
+  - F-04: `AuditTimeline` sort comparator guards against `NaN` from `Date.parse`.
+  - F-05/F-06: `AuditDiff` rendering tests strengthened with DOM assertions and `maxFields` overflow verification.
+  - F-07: `roles.defaults.json` updated with `platform.audit` entries for all canonical roles.
+  - F-09: `AuditExplorerPage` uses Mantine `TextInput` and `Select` consistently.
+- N-01 P1 fix completed:
+  - Date-range filters now use canonical `dateStringToEpochMs` and `nextDayEpochMs` helpers for correct half-open interval semantics.
+- Final targeted verification: GO.
+- Final severity findings: P0 none, P1 none, P2 none, P3 none.
+
+---
+
+_Last Updated: 2026-05-19 (implementation and review complete; owner sign-off pending)_

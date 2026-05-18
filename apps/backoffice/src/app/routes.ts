@@ -239,10 +239,8 @@ export const APP_ROUTES: readonly AppRoute[] = [
     path: "/audit-logs",
     label: "Audit Logs",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
-    // Backend authority: /api/audit/period-transitions verifies platform.settings.READ.
-    // Gap: no generated/runtime /api/audit-logs contract exists to verify a
-    // dedicated generic audit resource. Keep client UX deny-by-default here.
-    permission: { module: "platform", resource: "settings", permissionMask: PERMISSION_BITS.READ }
+    // Backend authority: API enforces platform.audit.READ.
+    permission: { module: "platform", resource: "audit", permissionMask: PERMISSION_BITS.READ }
   },
   {
     path: "/operations",
@@ -305,6 +303,13 @@ export const APP_ROUTES: readonly AppRoute[] = [
     path: "/platform-settings",
     label: "Platform Settings",
     allowedRoles: ["SUPER_ADMIN"]
+  },
+  {
+    path: "/audit",
+    label: "Audit Trail",
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    requiresExplicitPermission: true,
+    permission: { module: "platform", resource: "audit", permissionMask: PERMISSION_BITS.READ }
   }
 ];
 

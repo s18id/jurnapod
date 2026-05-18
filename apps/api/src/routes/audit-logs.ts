@@ -5,7 +5,7 @@
  * Generic read-only audit log routes.
  *
  * These endpoints expose tenant-scoped audit reads only. They do not create or
- * mutate audit entries. Backend ACL remains authoritative via platform.settings.READ.
+ * mutate audit entries. Backend ACL remains authoritative via platform.audit.READ.
  */
 
 import { Hono } from "hono";
@@ -40,7 +40,7 @@ auditLogRoutes.use("/*", async (c, next) => {
   const auth = c.get("auth");
   const accessResult = await requireAccess({
     module: "platform",
-    resource: "settings",
+    resource: "audit",
     permission: "read",
   })(c.req.raw, auth);
 
