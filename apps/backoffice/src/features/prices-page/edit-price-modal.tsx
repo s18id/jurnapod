@@ -8,6 +8,7 @@ import {
   NumberInput,
   Checkbox,
   Alert,
+  Drawer,
   Modal,
   Text,
 } from "@mantine/core";
@@ -22,6 +23,7 @@ export interface EditPriceModalProps {
   currentPrice: number;
   currentIsActive: boolean;
   submitting: boolean;
+  fullScreen?: boolean;
 }
 
 export function EditPriceModal({
@@ -32,6 +34,7 @@ export function EditPriceModal({
   currentPrice,
   currentIsActive,
   submitting,
+  fullScreen = false,
 }: EditPriceModalProps) {
   const [price, setPrice] = useState(currentPrice);
   const [isActive, setIsActive] = useState(currentIsActive);
@@ -58,8 +61,7 @@ export function EditPriceModal({
     onClose();
   };
 
-  return (
-    <Modal opened={opened} onClose={handleClose} title="Edit Price" size="md">
+  const content = (
       <Stack gap="md">
         {actionError && (
           <Alert color="red" icon={<IconAlertCircle size={16} />}>
@@ -96,6 +98,19 @@ export function EditPriceModal({
           </Button>
         </Group>
       </Stack>
-    </Modal>
+  );
+
+  if (fullScreen) {
+    return (
+      <Modal opened={opened} onClose={handleClose} title="Edit Price" fullScreen>
+        {content}
+      </Modal>
+    );
+  }
+
+  return (
+    <Drawer opened={opened} onClose={handleClose} title="Edit Price" position="right" size="md">
+      {content}
+    </Drawer>
   );
 }

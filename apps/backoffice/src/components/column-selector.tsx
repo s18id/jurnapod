@@ -137,6 +137,7 @@ export function ColumnSelector({
             variant="subtle"
             size="compact-xs"
             onClick={onSelectNone}
+            disabled={selectedCount <= 1}
           >
             None
           </Button>
@@ -179,7 +180,11 @@ export function ColumnSelector({
                     <Checkbox
                       checked={isFullySelected}
                       indeterminate={isPartiallySelected}
-                      onChange={() => toggleGroupColumns(group)}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => {
+                        event.stopPropagation();
+                        toggleGroupColumns(group);
+                      }}
                       size="sm"
                       label={
                         <Text size="sm" fw={500}>

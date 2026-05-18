@@ -20,6 +20,7 @@ import {
   ScrollArea,
 } from "@mantine/core";
 import { DatePickerInput } from "@mantine/dates";
+import { useMediaQuery } from "@mantine/hooks";
 import {
   IconDownload,
   IconX,
@@ -34,6 +35,14 @@ import {
 } from "@tabler/icons-react";
 import { ColumnSelector } from "./column-selector";
 import { FormatSelector } from "./format-selector";
+import {
+  buildExportScopeChips,
+  clearExportScopeFilter,
+  getExportDialogLayout,
+  getLargeExportWarningMessage,
+  getProgressDisplay,
+  shouldShowLargeExportWarning,
+} from "./export-dialog-helpers";
 import { useExportDialog, type ExportEntityType, type ExportFilters } from "../hooks/use-export";
 
 interface ExportDialogProps {
@@ -55,6 +64,7 @@ export function ExportDialog({
   initialFilters = {},
   estimatedRowCount = 0,
 }: ExportDialogProps) {
+  const isMobile = useMediaQuery("(max-width: 48em)");
   // Date range state for prices export
   const [showDateRange, setShowDateRange] = useState(false);
   const [dateFrom, setDateFrom] = useState<Date | null>(
@@ -63,7 +73,6 @@ export function ExportDialog({
   const [dateTo, setDateTo] = useState<Date | null>(
     initialFilters.dateTo ? new Date(initialFilters.dateTo) : null
   );
-
   // Column reordering mode
   const [reorderMode, setReorderMode] = useState(false);
 
@@ -72,6 +81,8 @@ export function ExportDialog({
     columns,
     availableGroups,
     selectedColumns,
+    columnsLoading,
+    columnsError,
     format,
     filters,
     toggleColumn,
@@ -134,7 +145,7 @@ export function ExportDialog({
 
   // Handle retry on error
   const handleRetry = useCallback(() => {
-    retry();
+    void retry();
   }, [retry]);
 
   // Reset state when dialog opens with new entity type
@@ -143,6 +154,20 @@ export function ExportDialog({
     setReorderMode(false);
     onClose();
   }, [onClose, initialFilters, setFilters]);
+
+  const scopeChips = useMemo(() => buildExportScopeChips(entityType, filters), [entityType, filters]);
+
+  const clearScopeFilter = useCallback((key: keyof ExportFilters) => {
+    if (key === "dateFrom") setDateFrom(null);
+    if (key === "dateTo") setDateTo(null);
+    setFilters(clearExportScopeFilter(filters, key));
+  }, [filters, setFilters]);
+
+  const clearAllScopeFilters = useCallback(() => {
+    setFilters({});
+    setDateFrom(null);
+    setDateTo(null);
+  }, [setFilters]);
 
   // Calculate export info
   const exportFilename = useMemo(() => {
@@ -156,14 +181,12 @@ export function ExportDialog({
     return `jurnapod-${entityPart}-${timestamp}.${formatExt}`;
   }, [entityType, format, filters.outletId]);
 
-  // Progress percentage for streaming
-  const progressPercent = useMemo(() => {
-    if (!progress || progress.phase === "preparing") return 0;
-    if (progress.phase === "complete") return 100;
-    if (progress.phase === "error") return 0;
-    // For streaming, we don't have total bytes info in this simplified version
-    return 50; // Indeterminate progress
-  }, [progress]);
+  const progressDisplay = useMemo(() => getProgressDisplay(progress), [progress]);
+  const showLargeExportWarning = useMemo(
+    () => shouldShowLargeExportWarning({ estimatedRowCount, progress }),
+    [estimatedRowCount, progress]
+  );
+  const layout = useMemo(() => getExportDialogLayout(Boolean(isMobile)), [isMobile]);
 
   // Get selected column details for reordering
   const selectedColumnDetails = useMemo(() => {
@@ -186,6 +209,7 @@ export function ExportDialog({
       }
       size="lg"
       centered
+      fullScreen={layout.fullScreen}
       closeOnClickOutside={!loading}
       closeOnEscape={!loading}
       withCloseButton={!loading}
@@ -226,12 +250,12 @@ export function ExportDialog({
                 Exporting...
               </Text>
               <Text size="xs" c="dimmed">
-                {progress?.phase === "preparing" && "Preparing export..."}
-                {progress?.phase === "streaming" && "Downloading export file..."}
+                {progressDisplay.label}
               </Text>
               <Progress
-                value={progressPercent}
-                animated={progress?.phase !== "complete"}
+                value={progressDisplay.indeterminate ? 100 : progressDisplay.value ?? 0}
+                animated={progressDisplay.indeterminate || progress?.phase !== "complete"}
+                striped={progressDisplay.indeterminate}
                 size="sm"
                 radius="xl"
               />
@@ -258,11 +282,9 @@ export function ExportDialog({
                 <Text size="sm" fw={500}>
                   {selectedColumns.length} column{selectedColumns.length !== 1 ? "s" : ""} selected
                 </Text>
-                {estimatedRowCount > 0 && (
-                  <Badge size="sm" color="blue" variant="light">
-                    ~{estimatedRowCount.toLocaleString()} rows
-                  </Badge>
-                )}
+                <Badge size="sm" color="blue" variant="light">
+                  ~{estimatedRowCount.toLocaleString()} rows
+                </Badge>
               </Group>
               <Text size="xs" c="dimmed">
                 Filename: {exportFilename}
@@ -278,12 +300,62 @@ export function ExportDialog({
               <Text size="xs">Large dataset detected. CSV format recommended for {estimatedRowCount.toLocaleString()} rows.</Text>
             </Alert>
           )}
+          {estimatedRowCount === 0 && (
+            <Alert icon={<IconAlertCircle size={14} />} color="yellow" variant="light" mt="xs">
+              <Text size="xs">Current scope has 0 rows. Export may produce a header-only file.</Text>
+            </Alert>
+          )}
+          {showLargeExportWarning && (
+            <Alert icon={<IconAlertCircle size={14} />} color="orange" variant="light" mt="xs">
+              <Text size="xs">{getLargeExportWarningMessage(estimatedRowCount)}</Text>
+            </Alert>
+          )}
+        </Paper>
+
+        <Divider />
+
+        {/* Inherited scope */}
+        <Paper p="sm" withBorder>
+          <Group justify="space-between" align="flex-start" gap="xs">
+            <Stack gap={4} style={{ flex: 1 }}>
+              <Text size="sm" fw={500}>Inherited Scope</Text>
+              {scopeChips.length > 0 ? (
+                <Group gap="xs">
+                  {scopeChips.map((chip) => (
+                    <Badge
+                      key={`${chip.key}-${chip.value}`}
+                      variant="light"
+                      rightSection={
+                        <ActionIcon
+                          size="xs"
+                          variant="transparent"
+                          aria-label={`Clear ${chip.label} filter`}
+                          onClick={() => clearScopeFilter(chip.key)}
+                        >
+                          <IconX size={10} />
+                        </ActionIcon>
+                      }
+                    >
+                      {chip.label}: {chip.value}
+                    </Badge>
+                  ))}
+                </Group>
+              ) : (
+                <Text size="xs" c="dimmed">No filters inherited; export includes the current entity scope.</Text>
+              )}
+            </Stack>
+            {scopeChips.length > 0 && (
+              <Button size="compact-xs" variant="subtle" onClick={clearAllScopeFilters}>
+                Clear scope
+              </Button>
+            )}
+          </Group>
         </Paper>
 
         <Divider />
 
         {/* Two-column layout */}
-        <Group align="flex-start" wrap="nowrap" gap="lg">
+        <Group align="flex-start" wrap={layout.contentWrap} gap="lg">
           {/* Left: Column selector or reorderer */}
           <Stack gap="md" style={{ flex: 1, minWidth: 200 }}>
             <Group justify="space-between">
@@ -299,7 +371,16 @@ export function ExportDialog({
               </Button>
             </Group>
 
-            {reorderMode ? (
+            {columnsLoading ? (
+              <Group justify="center" py="xl">
+                <Loader size="sm" />
+                <Text size="sm" c="dimmed">Loading export columns...</Text>
+              </Group>
+            ) : columnsError ? (
+              <Alert icon={<IconAlertCircle size={16} />} color="red" variant="light">
+                {columnsError}
+              </Alert>
+            ) : reorderMode ? (
               /* Column reordering view */
               <ScrollArea h={300} type="auto">
                 <Stack gap="xs">
@@ -331,9 +412,9 @@ export function ExportDialog({
                     </Paper>
                   ))}
                   {selectedColumnDetails.length === 0 && (
-                    <Text size="sm" c="dimmed" ta="center" py="xl">
-                      No columns selected. Select columns first.
-                    </Text>
+                  <Text size="sm" c="dimmed" ta="center" py="xl">
+                      Select at least one column before reordering.
+                  </Text>
                   )}
                 </Stack>
               </ScrollArea>
@@ -348,12 +429,13 @@ export function ExportDialog({
                 onSelectAll={selectAll}
                 onSelectDefault={selectDefault}
                 onSelectNone={selectNone}
+                compact={isMobile}
               />
             )}
           </Stack>
 
           {/* Divider */}
-          <Divider orientation="vertical" />
+          <Divider orientation={layout.dividerOrientation} />
 
           {/* Right: Format selector */}
           <Stack gap="md" style={{ flex: 1, minWidth: 200 }}>
@@ -416,7 +498,7 @@ export function ExportDialog({
         <Divider />
 
         {/* Actions */}
-        <Group justify="flex-end">
+        <Group justify="flex-end" grow={layout.actionsGrow}>
           <Button
             variant="default"
             leftSection={<IconX size={16} />}
@@ -429,7 +511,8 @@ export function ExportDialog({
             leftSection={<IconDownload size={16} />}
             onClick={handleExport}
             loading={loading}
-            disabled={selectedColumns.length === 0}
+            fullWidth={isMobile}
+            disabled={selectedColumns.length === 0 || columnsLoading || Boolean(columnsError)}
           >
             Export {selectedColumns.length} Column{selectedColumns.length !== 1 ? "s" : ""}
           </Button>

@@ -1,4 +1,11 @@
-export { EntityTable } from "./EntityTable";
+export {
+  EntityTable,
+  getEntityTableEffectiveColumns,
+  readEntityTableColumnVisibility,
+  resolveEntityTableVisibleColumnIds,
+  toggleEntityTableColumnVisibility,
+  writeEntityTableColumnVisibility,
+} from "./EntityTable";
 export { FilterBar } from "@/components/ui/FilterBar/FilterBar";
 export {
   DetailDrawer,
@@ -18,7 +25,11 @@ export {
   createSelectFilter,
   createStatusFilter,
 } from "./filter-factories";
-export type { EntityTableProps } from "./EntityTable";
+export type {
+  EntityTableColumnVisibilityConfig,
+  EntityTableProps,
+  StoredEntityTableColumnVisibility,
+} from "./EntityTable";
 export type { FilterBarProps } from "@/components/ui/FilterBar/FilterBar";
 export type { DetailDrawerProps } from "./DetailDrawer";
 export type {

@@ -1,7 +1,7 @@
 # Technical Debt Registry
 
 **Status:** Living Document  
-**Last Updated:** 2026-05-16  
+**Last Updated:** 2026-05-18
 **Review Cadence:** Per-epic (before closing epic retrospective)
 
 ---
@@ -180,15 +180,28 @@ This document serves as the central registry for all known technical debt in the
 
 ---
 
+### Epic 67: Backoffice Frontend Hardening — Catalog Operations
+
+| ID | Description | Priority | Status | ADR/Story |
+|----|-------------|----------|--------|-----------|
+| TD-041 | `GET /api/inventory/items` lacks true server-side pagination/search/type/group/sort semantics; Story 67-2 uses client fallback for current legacy array response compatibility | P2 | **Open** | Story 67-2 |
+| TD-042 | Item full-detail page mutation affordances require product/UX confirmation; Story 67-2 ships read-oriented detail page with drawer/list mutation actions preserved | P2 | **Open** | Story 67-2 |
+
+**Description:** Story 67-2 preserved frontend scope and avoided backend/API changes. The frontend sends future-compatible list query params and applies deterministic client fallback for current backend responses. Large catalogs MUST receive backend server-side filtering/pagination before the fallback becomes a performance risk. Product/UX MUST decide whether the full detail page requires edit/deactivate actions beyond the drawer/list actions.
+
+**Owner:** Backoffice Frontend + API Inventory Owner
+
+---
+
 ## Summary Statistics
 
 | Priority | Open | Resolved | Total |
 |----------|------|---------|-------|
 | P1 | 0 | 6 | 6 |
-| P2 | 1 | 18 | 19 |
+| P2 | 3 | 18 | 21 |
 | P3 | 0 | 9 | 9 |
 | P4 | 0 | 3 | 3 |
-| **Total** | **1** | **36** | **37** |
+| **Total** | **3** | **36** | **39** |
 
 ---
 
@@ -343,6 +356,7 @@ Run the [TD Health Check Template](./td-health-check-template.md) before every e
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-05-18 | Added TD-041 and TD-042 for Story 67-2 accepted P2 follow-ups: inventory list server-side semantics and item detail-page mutation affordance confirmation | Story 67-2 |
 | 2026-05-16 | Resolved TD-039 and TD-040 via CI/package graph, owner-package fixture-flow cleanup, auth DB env, AP snapshot retry, and fiscal-year replay hardening commits (`2fb9041e`, `d65e0924`, `cfb9073b`) | CI cleanup / Platform QA |
 | 2026-05-16 | Added TD-039 and TD-040 for pre-existing full-suite and fixture-flow blockers identified during Story 64.9 gate | Story 64.9 |
 | 2026-04-19 | Added TD-038 - 156 pre-existing no-explicit-any warnings in API package | Epic 45 Retro |

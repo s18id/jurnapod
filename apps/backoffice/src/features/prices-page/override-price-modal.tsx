@@ -7,6 +7,7 @@ import {
   Group,
   NumberInput,
   Alert,
+  Drawer,
   Modal,
   Text,
 } from "@mantine/core";
@@ -19,6 +20,7 @@ export interface OverridePriceModalProps {
   onCreate: (price: number) => Promise<void>;
   defaultPrice: number;
   submitting: boolean;
+  fullScreen?: boolean;
 }
 
 export function OverridePriceModal({
@@ -27,6 +29,7 @@ export function OverridePriceModal({
   onCreate,
   defaultPrice,
   submitting,
+  fullScreen = false,
 }: OverridePriceModalProps) {
   const [price, setPrice] = useState(String(defaultPrice));
   const [actionError, setActionError] = useState<string | null>(null);
@@ -53,8 +56,7 @@ export function OverridePriceModal({
     onClose();
   };
 
-  return (
-    <Modal opened={opened} onClose={handleClose} title="Set Outlet Override Price" size="md">
+  const content = (
       <Stack gap="md">
         {actionError && (
           <Alert color="red" icon={<IconAlertCircle size={16} />}>
@@ -92,6 +94,19 @@ export function OverridePriceModal({
           </Button>
         </Group>
       </Stack>
-    </Modal>
+  );
+
+  if (fullScreen) {
+    return (
+      <Modal opened={opened} onClose={handleClose} title="Set Outlet Override Price" fullScreen>
+        {content}
+      </Modal>
+    );
+  }
+
+  return (
+    <Drawer opened={opened} onClose={handleClose} title="Set Outlet Override Price" position="right" size="md">
+      {content}
+    </Drawer>
   );
 }

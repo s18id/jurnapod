@@ -1,6 +1,6 @@
 # Backoffice Frontend Redesign & Hardening Program
 
-**Status:** Active program plan — Epics 65–66 complete; Epics 67–70 queued. Implementation of each queued backoffice epic requires explicit scope-freeze approval.
+**Status:** Active program plan — Epics 65–66 complete; Epic 67 in-progress; Epics 68–70 queued. Implementation of each queued backoffice epic requires explicit scope-freeze approval.
 **Program Span:** 12 weeks (6 epics × 2 weeks each)
 **Squad:** 2 frontend engineers, 1 designer (part-time), 1 QA/shared automation engineer
 **Source:** `docs/frontend-research.md`

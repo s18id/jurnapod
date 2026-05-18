@@ -4,52 +4,35 @@
 import { Card, Stack, Group, Text, Badge, ThemeIcon, Menu, ActionIcon } from "@mantine/core";
 import {
   IconEdit,
+  IconPinned,
   IconTrash,
   IconDots,
   IconAlertTriangle,
 } from "@tabler/icons-react";
 
-import type { Item } from "../../hooks/use-items";
-
-export interface PriceWithItem {
-  id: number;
-  company_id: number;
-  outlet_id: number | null;
-  item_id: number;
-  price: number;
-  is_active: boolean;
-  updated_at: string;
-  item?: Item;
-  hasOverride?: boolean;
-  effectivePrice?: number;
-  defaultPrice?: number;
-}
+import {
+  calculatePriceDifferencePercent,
+  formatIdrCurrency,
+  getPriceActionAvailability,
+  type PriceWithItem,
+  type PricingViewMode,
+} from "@/features/prices/price-resolution";
 
 export interface PricesMobileCardProps {
   prices: PriceWithItem[];
-  viewMode: "defaults" | "outlet";
+  viewMode: PricingViewMode;
   getGroupName: (groupId: number | null) => string;
+  canUpdate: boolean;
   onEdit: (price: PriceWithItem) => void;
   onSetOverride: (itemId: number, defaultPrice: number) => void;
   onDelete: (price: PriceWithItem) => void;
-}
-
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    minimumFractionDigits: 0,
-  }).format(value);
-}
-
-function calculatePriceDifference(defaultPrice: number, overridePrice: number): number {
-  return Math.abs(((overridePrice - defaultPrice) / defaultPrice) * 100);
 }
 
 export function PricesMobileCard({
   prices,
   viewMode,
   getGroupName,
+  canUpdate,
   onEdit,
   onSetOverride,
   onDelete,
@@ -57,11 +40,9 @@ export function PricesMobileCard({
   return (
     <Stack gap="xs">
       {prices.map((price) => {
-        const differencePercent =
-          price.defaultPrice && price.hasOverride
-            ? calculatePriceDifference(price.defaultPrice, price.price)
-            : 0;
+        const differencePercent = calculatePriceDifferencePercent(price.defaultPrice, price.price);
         const isSignificantDifference = differencePercent > 20;
+        const actions = getPriceActionAvailability(price, canUpdate, viewMode);
 
         return (
           <Card key={price.id} withBorder>
@@ -92,13 +73,14 @@ export function PricesMobileCard({
                   <Stack gap={2}>
                     <Group gap={4} align="center">
                       <Text size="xs" c="dimmed" td="line-through">
-                        {formatCurrency(price.defaultPrice ?? 0)}
+                        {price.defaultPrice === undefined ? "No default" : formatIdrCurrency(price.defaultPrice)}
                       </Text>
                       <Badge color="blue" size="xs">Override</Badge>
                     </Group>
                     <Group gap={4} align="center">
+                      <IconPinned size={14} color="var(--mantine-color-blue-6)" />
                       <Text fw={500} c={isSignificantDifference ? "red" : undefined}>
-                        {formatCurrency(price.price)}
+                        {formatIdrCurrency(price.price)}
                       </Text>
                       {isSignificantDifference && (
                         <ThemeIcon color="red" size="sm" variant="light" title={`Price differs by ${differencePercent.toFixed(1)}% from default`}>
@@ -110,37 +92,47 @@ export function PricesMobileCard({
                 ) : viewMode === "outlet" ? (
                   <Group gap={4} align="center">
                     <Badge color="green" size="sm">Using Default</Badge>
-                    <Text>{formatCurrency(price.price)}</Text>
+                    <Text>{formatIdrCurrency(price.effectivePrice)}</Text>
+                  </Group>
+                ) : viewMode === "all_outlets" ? (
+                  <Group gap={4} align="center">
+                    <Badge color={price.hasOverride ? "blue" : "gray"} size="sm" variant="light">
+                      {price.outletOverrides?.length ?? 0} overrides
+                    </Badge>
+                    <Text fw={600}>Effective: {formatIdrCurrency(price.effectivePrice)}</Text>
                   </Group>
                 ) : (
                   <Group gap={4} align="center">
                     <Badge color="green" size="sm">Default</Badge>
-                    <Text fw={500}>{formatCurrency(price.price)}</Text>
+                    <Text fw={500}>{formatIdrCurrency(price.effectivePrice)}</Text>
                   </Group>
                 )}
 
                 <Menu>
                   <Menu.Target>
-                    <ActionIcon variant="subtle">
+                    <ActionIcon variant="subtle" aria-label={`Price actions for ${price.item?.name ?? price.item_id}`}>
                       <IconDots size={16} />
                     </ActionIcon>
                   </Menu.Target>
                   <Menu.Dropdown>
-                    <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => onEdit(price)}>
+                    {actions.canEdit && <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => onEdit(price)}>
                       Edit
-                    </Menu.Item>
-                    {viewMode === "outlet" && !price.hasOverride && (
-                      <Menu.Item onClick={() => onSetOverride(price.item_id, price.price)}>
+                    </Menu.Item>}
+                    {actions.canSetOverride && (
+                      <Menu.Item leftSection={<IconPinned size={14} />} onClick={() => onSetOverride(price.item_id, price.effectivePrice)}>
                         Set Override
                       </Menu.Item>
                     )}
-                    <Menu.Item
+                    {(actions.canRemoveOverride || actions.canDeleteDefault) && <Menu.Item
                       leftSection={<IconTrash size={14} />}
                       color="red"
                       onClick={() => onDelete(price)}
                     >
-                      Delete
-                    </Menu.Item>
+                      {actions.canRemoveOverride ? "Remove Override" : "Delete Default"}
+                    </Menu.Item>}
+                    {!actions.canEdit && !actions.canSetOverride && !actions.canRemoveOverride && !actions.canDeleteDefault && (
+                      <Menu.Item disabled>Read-only</Menu.Item>
+                    )}
                   </Menu.Dropdown>
                 </Menu>
               </Group>

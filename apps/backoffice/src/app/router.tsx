@@ -74,6 +74,7 @@ const DailySalesPage = lazyNamed(loadPagesModule, "DailySalesPage");
 const ForbiddenPage = lazyNamed(loadPagesModule, "ForbiddenPage");
 const ItemGroupsPage = lazyNamed(loadPagesModule, "ItemGroupsPage");
 const ItemsPage = lazyNamed(loadPagesModule, "ItemsPage");
+const ItemDetailPage = lazyNamed(loadPagesModule, "ItemDetailPage");
 const PricesPage = lazyNamed(loadPagesModule, "PricesPage");
 const JournalsPage = lazyNamed(loadPagesModule, "JournalsPage");
 const GeneralLedgerPage = lazyNamed(loadPagesModule, "GeneralLedgerPage");
@@ -207,6 +208,10 @@ function RouteScreen(props: { path: string; user: SessionUser }) {
   }
   if (props.path === "/items") {
     return renderLazyPage(<ItemsPage user={props.user} />);
+  }
+  if (/^\/items\/\d+$/.test(props.path)) {
+    const itemId = Number(props.path.split("/").at(-1));
+    return renderLazyPage(<ItemDetailPage user={props.user} itemId={itemId} />);
   }
   if (props.path === "/items/import") {
     return renderLazyPage(<ItemImportPage user={props.user} />);

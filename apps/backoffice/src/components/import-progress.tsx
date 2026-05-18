@@ -38,6 +38,25 @@ interface ImportProgressProps {
   entityName?: string;
 }
 
+export type ImportProgressDisplay = {
+  label: string;
+  detail: string;
+};
+
+export function getImportProgressDisplay(progress: ApplyProgress): ImportProgressDisplay {
+  if (progress.mode === "bytes") {
+    return {
+      label: "Request progress",
+      detail: `${progress.percentage}% complete`,
+    };
+  }
+
+  return {
+    label: "Rows processed",
+    detail: `${progress.currentRow.toLocaleString()} of ${progress.total.toLocaleString()} rows`,
+  };
+}
+
 export function ImportProgress({
   progress,
   loading,
@@ -125,6 +144,7 @@ export function ImportProgress({
 
   // Progress state
   if (loading && progress) {
+    const progressDisplay = getImportProgressDisplay(progress);
     return (
       <Stack gap="md">
         <Group justify="space-between" align="flex-start">
@@ -176,10 +196,10 @@ export function ImportProgress({
             <Stack gap="xs">
               <Group justify="space-between">
                 <Text size="sm" c="dimmed">
-                  Progress
+                  {progressDisplay.label}
                 </Text>
                 <Text size="sm" fw={500}>
-                  {progress.currentRow.toLocaleString()} of {progress.total.toLocaleString()} rows
+                  {progressDisplay.detail}
                 </Text>
               </Group>
               <Progress
@@ -188,10 +208,12 @@ export function ImportProgress({
                 animated
                 size="lg"
               />
-              <Text size="xs" c="dimmed" ta="center">
-                {progress.current.toLocaleString()} processed •{" "}
-                {Math.round((progress.current / Math.max(progress.total, 1)) * 100)}%
-              </Text>
+              {progress.mode !== "bytes" && (
+                <Text size="xs" c="dimmed" ta="center">
+                  {progress.current.toLocaleString()} processed •{" "}
+                  {Math.round((progress.current / Math.max(progress.total, 1)) * 100)}%
+                </Text>
+              )}
             </Stack>
 
             {/* Cancel Warning */}

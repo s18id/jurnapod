@@ -132,6 +132,16 @@ describe("AppRoute permission metadata (AC1)", () => {
     });
   });
 
+  it("item detail routes inherit inventory.items.READ permission", () => {
+    const route = findRoute("/items/123");
+    expect(route?.path).toBe("/items");
+    expect(route?.permission).toEqual({
+      module: "inventory",
+      resource: "items",
+      permissionMask: 1,
+    });
+  });
+
   it("prices route uses canonical inventory.items.READ permission", () => {
     const route = findRoute("/prices");
     expect(route?.permission).toEqual({

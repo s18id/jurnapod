@@ -11,6 +11,7 @@ import { FeatureSettingsPage as FeatureSettingsFeaturePage } from "./feature-set
 import { FiscalYearsPage as FiscalYearsManagementPage } from "./fiscal-years-page";
 import { FixedAssetsPage as FixedAssetsManagementPage } from "./fixed-assets/FixedAssetsPage";
 import { ItemGroupsPage as ItemGroupsManagementPage } from "./item-groups-page";
+import { ItemDetailPage as ItemDetailManagementPage } from "./items/item-detail-page";
 import { ItemsPage as ItemsManagementPage } from "./items-page";
 import { TransactionsPage as TransactionInputPage } from "./transactions-page";
 import { PricesPage as PricesManagementPage } from "./prices-page";
@@ -72,6 +73,8 @@ export const TransactionsPage = TransactionInputPage;
 export const TransactionTemplatesPage = TransactionTemplatesManagementPage;
 
 export const ItemsPage = ItemsManagementPage;
+
+export const ItemDetailPage = ItemDetailManagementPage;
 
 export const PricesPage = PricesManagementPage;
 

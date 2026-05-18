@@ -9,8 +9,6 @@ import {
   Group,
   Button,
   Select,
-  TextInput,
-  Badge,
   Alert,
   Loader,
   Modal,
@@ -19,7 +17,6 @@ import {
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import {
   IconAlertCircle,
-  IconSearch,
   IconPlus,
   IconDownload,
   IconPackage,
@@ -27,16 +24,31 @@ import {
 } from "@tabler/icons-react";
 import { useState, useMemo, useCallback, useEffect } from "react";
 
-import { ImportWizard, type ImportWizardConfig, type ImportResult } from "../components/import-wizard";
+import { ScopeBadge } from "@/components/data-grid";
+import { FilterBar } from "@/components/ui/FilterBar/FilterBar";
+import type { FilterValue } from "@/components/ui/FilterBar/types";
+import { createCatalogPriceFilterSchema } from "@/features/inventory/catalog-filter-config";
+import {
+  filterPriceRows,
+  derivePriceBuckets,
+  mapDefaultPrices,
+  resolveAllOutletPriceRows,
+  resolveOutletPriceRows,
+  type ItemPrice,
+  type OutletSummary,
+  type PriceWithItem,
+  type PricingViewMode,
+} from "@/features/prices/price-resolution";
+
 import { ExportDialog } from "../components/export-dialog";
 import { useItemGroups } from "../hooks/use-item-groups";
-import { useItems, type Item } from "../hooks/use-items";
+import { useItems } from "../hooks/use-items";
 import { apiRequest } from "../lib/api-client";
+import { actionGates, resolveEffectivePermissions } from "../lib/auth/permissions";
+import { canShowInventoryExport } from "../lib/export-permissions";
 import type { SessionUser } from "../lib/session";
 
-import {
-  type NormalizedPriceImportRow,
-} from "./item-prices-import-utils";
+import { StagedImportWorkflow } from "./import/staged-import-workflow";
 import {
   CreatePriceModal,
   EditPriceModal,
@@ -49,25 +61,6 @@ import {
 
 interface PricesPageProps {
   user: SessionUser;
-}
-
-type PricingViewMode = "defaults" | "outlet";
-
-interface ItemPrice {
-  id: number;
-  company_id: number;
-  outlet_id: number | null;
-  item_id: number;
-  price: number;
-  is_active: boolean;
-  updated_at: string;
-}
-
-interface PriceWithItem extends ItemPrice {
-  item?: Item;
-  hasOverride?: boolean;
-  effectivePrice?: number;
-  defaultPrice?: number;
 }
 
 export function PricesPage({ user }: PricesPageProps) {
@@ -126,9 +119,10 @@ export function PricesPage({ user }: PricesPageProps) {
   const urlOutletId = getOutletIdFromUrl();
   const initialOutletId = urlOutletId ?? user.outlets[0]?.id ?? 0;
   const [selectedOutletId, setSelectedOutletId] = useState<number>(initialOutletId);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [scopeFilter, setScopeFilter] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<boolean | null>(null);
+  const [filters, setFilters] = useState<Record<string, FilterValue>>({
+    search: "",
+    outlet_id: String(initialOutletId),
+  });
 
   // Modal states
   const [createModalOpen, { open: openCreateModal, close: closeCreateModal }] = useDisclosure(false);
@@ -144,6 +138,13 @@ export function PricesPage({ user }: PricesPageProps) {
   const [deletingIsDefault, setDeletingIsDefault] = useState(false);
   const [overrideTarget, setOverrideTarget] = useState<{ itemId: number; defaultPrice: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showAllOutletColumns, setShowAllOutletColumns] = useState(false);
+
+  const permissionGates = useMemo(() => {
+    const effectivePermissions = resolveEffectivePermissions(user) ?? [];
+    return actionGates(effectivePermissions, "inventory", "items", ["READ", "UPDATE"]);
+  }, [user]);
+  const canExport = useMemo(() => canShowInventoryExport(user), [user]);
 
   // Handle outlet selection change with URL update
   const handleOutletChange = useCallback((value: string | null) => {
@@ -153,6 +154,17 @@ export function PricesPage({ user }: PricesPageProps) {
       updateUrlWithOutlet(outletId);
     }
   }, [updateUrlWithOutlet]);
+
+  const handleFilterChange = useCallback((nextFilters: Record<string, FilterValue>) => {
+    setFilters(nextFilters);
+    const nextOutletId = typeof nextFilters.outlet_id === "string" && nextFilters.outlet_id.length > 0
+      ? Number(nextFilters.outlet_id)
+      : null;
+    if (viewMode === "outlet" && nextOutletId !== null && !Number.isNaN(nextOutletId) && nextOutletId !== selectedOutletId) {
+      setSelectedOutletId(nextOutletId);
+      updateUrlWithOutlet(nextOutletId);
+    }
+  }, [selectedOutletId, updateUrlWithOutlet, viewMode]);
 
   // Listen for hash changes to sync outlet selection (for deep linking)
   useEffect(() => {
@@ -177,19 +189,18 @@ export function PricesPage({ user }: PricesPageProps) {
     setPricesError(null);
 
     try {
-      const [pricesResponse, defaultsResponse] = await Promise.all([
-        apiRequest<{ data: ItemPrice[] }>(`/inventory/item-prices?outlet_id=${selectedOutletId}`, {}),
-        apiRequest<{ data: ItemPrice[] }>("/inventory/item-prices?scope=default", {}),
-      ]);
-
-      setPrices(pricesResponse.data);
-      setCompanyDefaults(defaultsResponse.data);
+      const pricesResponse = await apiRequest<{ data: ItemPrice[] }>("/inventory/item-prices", {});
+      const buckets = derivePriceBuckets(pricesResponse.data);
+      setCompanyDefaults(buckets.defaults);
+      setPrices(viewMode === "outlet"
+        ? buckets.outletOverrides.filter((price) => price.outlet_id === selectedOutletId)
+        : buckets.outletOverrides);
     } catch (err) {
       setPricesError(err instanceof Error ? err.message : "Failed to fetch prices");
     } finally {
       setPricesLoading(false);
     }
-  }, [selectedOutletId]);
+  }, [selectedOutletId, viewMode]);
 
   useEffect(() => {
     fetchPrices();
@@ -203,67 +214,102 @@ export function PricesPage({ user }: PricesPageProps) {
     }));
   }, [user.outlets]);
 
+  const selectedOutletName = useMemo(() => {
+    return user.outlets.find((outlet) => outlet.id === selectedOutletId)?.name;
+  }, [selectedOutletId, user.outlets]);
+
+  const filterSchema = useMemo(() => {
+    const schema = createCatalogPriceFilterSchema(viewMode === "all_outlets" ? "outlet" : viewMode, viewMode === "outlet" ? outletOptions : []);
+    return {
+      ...schema,
+      defaultValues: {
+        ...schema.defaultValues,
+        outlet_id: viewMode === "outlet" ? String(selectedOutletId) : undefined,
+      },
+    };
+  }, [outletOptions, selectedOutletId, viewMode]);
+
+  const outletColumns = useMemo<OutletSummary[]>(() => {
+    const latestOverrideByOutlet = new Map<number, ItemPrice>();
+    for (const price of prices) {
+      if (price.outlet_id === null) continue;
+      const existing = latestOverrideByOutlet.get(price.outlet_id);
+      if (!existing) {
+        latestOverrideByOutlet.set(price.outlet_id, price);
+        continue;
+      }
+      if (existing.is_active !== price.is_active) {
+        if (price.is_active) latestOverrideByOutlet.set(price.outlet_id, price);
+        continue;
+      }
+      if (price.updated_at.localeCompare(existing.updated_at) > 0) {
+        latestOverrideByOutlet.set(price.outlet_id, price);
+      }
+    }
+
+    const sortedOutlets = [...user.outlets].sort((left, right) => {
+      const leftLatest = latestOverrideByOutlet.get(left.id);
+      const rightLatest = latestOverrideByOutlet.get(right.id);
+      if (leftLatest && !rightLatest) return -1;
+      if (!leftLatest && rightLatest) return 1;
+      if (leftLatest && rightLatest) {
+        if (leftLatest.is_active !== rightLatest.is_active) return leftLatest.is_active ? -1 : 1;
+        const updatedComparison = rightLatest.updated_at.localeCompare(leftLatest.updated_at);
+        if (updatedComparison !== 0) return updatedComparison;
+      }
+      const nameComparison = left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+      if (nameComparison !== 0) return nameComparison;
+      return left.id - right.id;
+    });
+
+    return showAllOutletColumns ? sortedOutlets : sortedOutlets.slice(0, 5);
+  }, [prices, showAllOutletColumns, user.outlets]);
+
+  const hiddenOutletCount = viewMode === "all_outlets" && !showAllOutletColumns
+    ? Math.max(0, user.outlets.length - outletColumns.length)
+    : 0;
+
+  const handleViewModeChange = useCallback((value: string) => {
+    const nextMode = value as PricingViewMode;
+    setViewMode(nextMode);
+    setShowAllOutletColumns(false);
+    setFilters({
+      search: "",
+      outlet_id: nextMode === "outlet" ? String(selectedOutletId) : undefined,
+    });
+  }, [selectedOutletId]);
+
   // Merge prices with hierarchy info
   const pricesWithHierarchy = useMemo((): PriceWithItem[] => {
     if (viewMode === "defaults") {
-      return companyDefaults.map((price) => ({
-        ...price,
-        item: itemMap.get(price.item_id),
-      }));
+      return mapDefaultPrices(companyDefaults, itemMap);
     }
 
-    const merged = new Map<number, PriceWithItem>();
+    if (viewMode === "all_outlets") {
+      return resolveAllOutletPriceRows({ companyDefaults, outletPrices: prices, itemMap, outlets: user.outlets });
+    }
 
-    companyDefaults.forEach((defaultPrice) => {
-      merged.set(defaultPrice.item_id, {
-        ...defaultPrice,
-        item: itemMap.get(defaultPrice.item_id),
-        hasOverride: false,
-        effectivePrice: defaultPrice.price,
-        defaultPrice: defaultPrice.price,
-      });
-    });
-
-    prices.forEach((price) => {
-      const existing = merged.get(price.item_id);
-      if (existing) {
-        merged.set(price.item_id, {
-          ...price,
-          item: existing.item,
-          hasOverride: true,
-          effectivePrice: price.price,
-          defaultPrice: existing.defaultPrice,
-        });
-      }
-    });
-
-    return Array.from(merged.values());
-  }, [companyDefaults, prices, itemMap, viewMode]);
+    return resolveOutletPriceRows({ companyDefaults, outletPrices: prices, itemMap, selectedOutletName });
+  }, [companyDefaults, itemMap, prices, selectedOutletName, user.outlets, viewMode]);
 
   // Filter prices
   const filteredPrices = useMemo(() => {
-    return pricesWithHierarchy.filter((price) => {
-      if (searchTerm) {
-        const search = searchTerm.toLowerCase();
-        const nameMatch = price.item?.name.toLowerCase().includes(search) ?? false;
-        const skuMatch = price.item?.sku?.toLowerCase().includes(search) ?? false;
-        if (!nameMatch && !skuMatch) return false;
-      }
-
-      if (viewMode === "outlet" && scopeFilter) {
-        if (scopeFilter === "override" && !price.hasOverride) return false;
-        if (scopeFilter === "default" && price.hasOverride) return false;
-      }
-
-      if (statusFilter !== null && price.is_active !== statusFilter) {
-        return false;
-      }
-
-      return true;
+    const nextSearch = typeof filters.search === "string" ? filters.search : undefined;
+    const nextScope = typeof filters.scope === "string" ? filters.scope as "override" | "default" : null;
+    const nextStatus = typeof filters.status === "string" ? filters.status === "true" : null;
+    return filterPriceRows(pricesWithHierarchy, {
+      search: nextSearch,
+      scope: nextScope,
+      status: nextStatus,
+      viewMode,
     });
-  }, [pricesWithHierarchy, searchTerm, scopeFilter, statusFilter, viewMode]);
+  }, [filters.scope, filters.search, filters.status, pricesWithHierarchy, viewMode]);
 
-  const hasActiveFilters = searchTerm || scopeFilter || statusFilter !== null;
+  const hasActiveFilters = Boolean(
+    (typeof filters.search === "string" && filters.search.trim()) ||
+    filters.scope ||
+    filters.status
+  );
 
   const getGroupName = useCallback(
     (groupId: number | null) => {
@@ -275,9 +321,10 @@ export function PricesPage({ user }: PricesPageProps) {
   );
 
   const resetFilters = () => {
-    setSearchTerm("");
-    setScopeFilter(null);
-    setStatusFilter(null);
+    setFilters({
+      search: "",
+      outlet_id: viewMode === "outlet" ? String(selectedOutletId) : undefined,
+    });
   };
 
   // Action handlers
@@ -401,80 +448,13 @@ export function PricesPage({ user }: PricesPageProps) {
   // Build export filters from current filter state
   const getExportFilters = useCallback(() => {
     return {
-      search: searchTerm || undefined,
-      status: statusFilter,
+      search: typeof filters.search === "string" && filters.search.trim() ? filters.search.trim() : undefined,
+      status: typeof filters.status === "string" ? filters.status === "true" : null,
       outletId: viewMode === "outlet" ? selectedOutletId : undefined,
       viewMode: viewMode,
-      scopeFilter: scopeFilter as "override" | "default" | null,
+      scopeFilter: typeof filters.scope === "string" ? filters.scope as "override" | "default" : null,
     };
-  }, [searchTerm, statusFilter, viewMode, selectedOutletId, scopeFilter]);
-
-  // Import wizard config
-  const importConfig: ImportWizardConfig<NormalizedPriceImportRow> = useMemo(() => {
-    return {
-      title: "Import Prices",
-      entityName: "prices",
-      entityType: "prices",
-      csvTemplate: "item_sku,price,is_active,scope,outlet_id\nSKU001,25000,true,outlet,1\nSKU002,30000,true,default,",
-      csvDescription: "Format: item_sku, price, is_active, scope (default/outlet), outlet_id",
-      columns: [
-        { key: "item_sku", header: "Item SKU", required: true },
-        { key: "price", header: "Price", required: true },
-        { key: "is_active", header: "Active", required: false },
-        { key: "scope", header: "Scope", required: true },
-        { key: "outlet_id", header: "Outlet ID", required: false },
-      ],
-      parseRow: (row: Record<string, string>, _columnMap: Record<string, string>) => {
-        return {
-          item_sku: row.item_sku || "",
-          price: Number(row.price) || 0,
-          is_active: row.is_active?.toLowerCase() === "true",
-          scope: (row.scope?.toLowerCase() === "default" ? "default" : "outlet") as "default" | "outlet",
-          outlet_id: row.outlet_id ? Number(row.outlet_id) : null,
-        };
-      },
-      validateRow: (parsed: Partial<NormalizedPriceImportRow>) => {
-        if (!parsed.item_sku) return "Item SKU is required";
-        if (!parsed.price || parsed.price <= 0) return "Valid price is required";
-        if (!parsed.scope) return "Scope (default/outlet) is required";
-        if (parsed.scope === "outlet" && !parsed.outlet_id) {
-          return "Outlet ID is required for outlet scope";
-        }
-        return null;
-      },
-      importFn: async (rows) => {
-        const results: ImportResult = { success: 0, failed: 0, created: 0, updated: 0, skipped: 0, errors: [] };
-        
-        for (const row of rows) {
-          try {
-            await apiRequest(
-              "/inventory/item-prices",
-              {
-                method: "POST",
-                body: JSON.stringify({
-                  item_id: items.find(i => i.sku?.toLowerCase() === row.parsed.item_sku?.toLowerCase())?.id,
-                  price: row.parsed.price,
-                  is_active: row.parsed.is_active ?? true,
-                  outlet_id: row.parsed.scope === "default" ? null : row.parsed.outlet_id,
-                }),
-              }
-            );
-            results.success++;
-            results.created++;
-          } catch (err) {
-            results.failed++;
-            results.errors.push({
-              row: row.rowIndex,
-              error: err instanceof Error ? err.message : "Import failed",
-            });
-          }
-        }
-        
-        return results;
-      },
-      
-    };
-  }, [items]);
+  }, [filters.scope, filters.search, filters.status, viewMode, selectedOutletId]);
 
   const handleImportComplete = () => {
     closeImportModal();
@@ -526,26 +506,32 @@ export function PricesPage({ user }: PricesPageProps) {
           >
             View Items
           </Button>
-          <Button
-            variant="light"
-            leftSection={<IconUpload size={16} />}
-            onClick={openImportModal}
-          >
-            Import
-          </Button>
-          <Button
-            leftSection={<IconPlus size={16} />}
-            onClick={openCreateModal}
-          >
-            Create Price
-          </Button>
-          <Button
-            variant="default"
-            leftSection={<IconDownload size={16} />}
-            onClick={handleExport}
-          >
-            Export
-          </Button>
+          {permissionGates.UPDATE && viewMode !== "all_outlets" && (
+            <Button
+              variant="light"
+              leftSection={<IconUpload size={16} />}
+              onClick={openImportModal}
+            >
+              Import
+            </Button>
+          )}
+          {permissionGates.UPDATE && viewMode !== "all_outlets" && (
+            <Button
+              leftSection={<IconPlus size={16} />}
+              onClick={openCreateModal}
+            >
+              Create Price
+            </Button>
+          )}
+          {canExport && (
+            <Button
+              variant="default"
+              leftSection={<IconDownload size={16} />}
+              onClick={handleExport}
+            >
+              Export
+            </Button>
+          )}
         </Group>
       </Group>
 
@@ -555,10 +541,11 @@ export function PricesPage({ user }: PricesPageProps) {
           <Group justify="space-between" wrap="wrap">
             <SegmentedControl
               value={viewMode}
-              onChange={(value) => setViewMode(value as PricingViewMode)}
+              onChange={handleViewModeChange}
               data={[
                 { label: "Company Defaults", value: "defaults" },
                 { label: "Outlet Prices", value: "outlet" },
+                { label: "All Outlets", value: "all_outlets" },
               ]}
             />
             {viewMode === "outlet" && (
@@ -573,66 +560,36 @@ export function PricesPage({ user }: PricesPageProps) {
           </Group>
 
           <Alert icon={<IconAlertCircle size={16} />} color="blue" variant="light">
-            <Text size="sm">
-              <strong>Pricing Hierarchy:</strong> Company Default prices apply to all outlets. 
-              Outlet-specific overrides take precedence.
-            </Text>
+            <Group justify="space-between" gap="sm">
+              <Text size="sm">
+                <strong>Pricing Hierarchy:</strong> Company Default prices apply to all outlets.
+                Outlet-specific overrides take precedence.
+              </Text>
+              <ScopeBadge
+                label={viewMode === "defaults" ? "Default Prices" : viewMode === "all_outlets" ? "All Outlets" : `Outlet: ${selectedOutletName ?? selectedOutletId}`}
+                color={viewMode === "defaults" ? "green" : "blue"}
+              />
+            </Group>
           </Alert>
         </Stack>
       </Card>
 
       {/* Filters */}
       <Card>
-        <Stack gap="xs">
-          <Group gap="sm" wrap="wrap">
-            <TextInput
-              placeholder="Search item..."
-              leftSection={<IconSearch size={16} />}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              style={{ minWidth: 200 }}
-            />
-            {viewMode === "outlet" && (
-              <Select
-                placeholder="Scope"
-                value={scopeFilter}
-                onChange={setScopeFilter}
-                data={[
-                  { value: "override", label: "Override" },
-                  { value: "default", label: "Default" },
-                ]}
-                clearable
-                style={{ minWidth: 120 }}
-              />
-            )}
-            <Select
-              placeholder="Status"
-              value={statusFilter === null ? null : String(statusFilter)}
-              onChange={(v) => setStatusFilter(v === null ? null : v === "true")}
-              data={[
-                { value: "true", label: "Active" },
-                { value: "false", label: "Inactive" },
-              ]}
-              clearable
-              style={{ minWidth: 120 }}
-            />
-            {hasActiveFilters && (
-              <Button variant="subtle" size="sm" onClick={resetFilters}>
-                Clear All
-              </Button>
-            )}
+        <FilterBar
+          key={`${viewMode}-${selectedOutletId}`}
+          schema={filterSchema}
+          onFilterChange={handleFilterChange}
+          resultCount={filteredPrices.length}
+          isLoading={pricesLoading}
+          manageUrlState={false}
+          data-testid="prices-filter-bar"
+        />
+        {hasActiveFilters && (
+          <Group justify="flex-end" mt="xs">
+            <Button variant="subtle" size="sm" onClick={resetFilters}>Clear All</Button>
           </Group>
-          {hasActiveFilters && (
-            <Group gap="xs">
-              <Text size="xs" c="dimmed">Active filters:</Text>
-              {searchTerm && <Badge variant="light">Search: {searchTerm}</Badge>}
-              {scopeFilter && <Badge variant="light">Scope: {scopeFilter}</Badge>}
-              {statusFilter !== null && (
-                <Badge variant="light">Status: {statusFilter ? "Active" : "Inactive"}</Badge>
-              )}
-            </Group>
-          )}
-        </Stack>
+        )}
       </Card>
 
       {/* Prices Table */}
@@ -643,6 +600,8 @@ export function PricesPage({ user }: PricesPageProps) {
               ? "No prices match your filters."
               : viewMode === "defaults"
               ? "No company default prices."
+              : viewMode === "all_outlets"
+              ? "No prices found for any outlet."
               : "No prices for this outlet."}
           </Text>
         ) : isMobile ? (
@@ -650,6 +609,7 @@ export function PricesPage({ user }: PricesPageProps) {
             prices={filteredPrices}
             viewMode={viewMode}
             getGroupName={getGroupName}
+            canUpdate={permissionGates.UPDATE}
             onEdit={openEdit}
             onSetOverride={openSetOverride}
             onDelete={openDelete}
@@ -658,7 +618,11 @@ export function PricesPage({ user }: PricesPageProps) {
           <PricesTable
             prices={filteredPrices}
             viewMode={viewMode}
+            outletColumns={outletColumns}
+            hiddenOutletCount={hiddenOutletCount}
+            onShowMoreOutlets={() => setShowAllOutletColumns(true)}
             getGroupName={getGroupName}
+            canUpdate={permissionGates.UPDATE}
             onEdit={openEdit}
             onSetOverride={openSetOverride}
             onDelete={openDelete}
@@ -674,6 +638,7 @@ export function PricesPage({ user }: PricesPageProps) {
         items={items}
         isCompanyDefault={viewMode === "defaults"}
         submitting={submitting}
+        fullScreen={isMobile}
       />
 
       <OverridePriceModal
@@ -685,6 +650,7 @@ export function PricesPage({ user }: PricesPageProps) {
         onCreate={handleCreateOverride}
         defaultPrice={overrideTarget?.defaultPrice ?? 0}
         submitting={submitting}
+        fullScreen={isMobile}
       />
 
       <EditPriceModal
@@ -698,6 +664,7 @@ export function PricesPage({ user }: PricesPageProps) {
         currentPrice={editingPrice?.price ?? 0}
         currentIsActive={editingPrice?.is_active ?? true}
         submitting={submitting}
+        fullScreen={isMobile}
       />
 
       <DeletePriceModal
@@ -711,15 +678,16 @@ export function PricesPage({ user }: PricesPageProps) {
         submitting={submitting}
       />
 
-      {/* Import Wizard Modal */}
+      {/* Import Modal */}
       <Modal
         opened={importModalOpen}
         onClose={closeImportModal}
         title="Import Prices"
-        size="lg"
+        size="xl"
+        fullScreen={isMobile}
       >
-        <ImportWizard
-          config={importConfig}
+        <StagedImportWorkflow
+          entityType="prices"
           onComplete={handleImportComplete}
           onCancel={closeImportModal}
         />

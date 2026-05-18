@@ -324,6 +324,9 @@ export function normalizeHashPath(hash: string): string {
 
 export function findRoute(path: string): AppRoute | null {
   const lookupPath = getRouteLookupPath(path);
+  if (/^\/items\/\d+$/.test(lookupPath)) {
+    return APP_ROUTES.find((route) => route.path === "/items") ?? null;
+  }
   return APP_ROUTES.find((route) => route.path === lookupPath) ?? null;
 }
 

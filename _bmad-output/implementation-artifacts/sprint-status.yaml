@@ -750,3 +750,11 @@ development_status:
   66-4-permission-aware-navigation: done
   66-5-audit-log-explorer: done
   epic-66-retrospective: done
+
+  # Epic 67: Backoffice Catalog Operations — Items, Prices, Import/Export Redesign
+  epic-67: done
+  67-1-catalog-table-configurations: done
+  67-2-items-list-detail: done
+  67-3-pricing-management: done
+  67-4-import-workflow-redesign: done
+  67-5-export-workflow-redesign: done

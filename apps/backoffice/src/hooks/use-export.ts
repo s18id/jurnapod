@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, useCallback, useMemo } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiStreamingRequest } from "../lib/api-client";
 import { fromUtcIso, nowUTC } from "@jurnapod/shared";
+import { useExportColumns } from "./use-export-columns";
 
 // ============================================================================
 // Types
@@ -44,7 +45,7 @@ export interface ExportFilters {
   groupId?: number | null;
   status?: boolean | null;
   outletId?: number;
-  viewMode?: "defaults" | "outlet";
+  viewMode?: "defaults" | "outlet" | "all_outlets";
   scopeFilter?: "override" | "default" | null;
   /** Start date for date range filter (ISO string) */
   dateFrom?: string;
@@ -59,6 +60,9 @@ export interface ExportProgress {
   phase: "preparing" | "streaming" | "complete" | "error";
   rowsProcessed?: number;
   bytesWritten?: number;
+  bytesReceived?: number;
+  totalBytes?: number | null;
+  percentage?: number | null;
   error?: string;
 }
 
@@ -128,48 +132,6 @@ export const DEFAULT_PRICE_COLUMNS = ["item_sku", "item_name", "outlet_name", "b
 export const COLUMN_GROUPS = ["Basic Info", "Classification", "Pricing", "Status", "Timestamps", "Item Info", "Outlet Info", "Dates"];
 
 // ============================================================================
-// useExportColumns Hook
-// ============================================================================
-
-interface UseExportColumnsProps {
-  entityType: ExportEntityType;
-}
-
-interface UseExportColumnsReturn {
-  columns: ExportColumn[];
-  defaultColumns: string[];
-  availableGroups: string[];
-  getColumnsByGroup: (group: string) => ExportColumn[];
-}
-
-/**
- * Hook to get available columns for an entity type
- */
-export function useExportColumns({ entityType }: UseExportColumnsProps): UseExportColumnsReturn {
-  const columns = useMemo(() => {
-    return entityType === "items" ? ITEM_EXPORT_COLUMNS : PRICE_EXPORT_COLUMNS;
-  }, [entityType]);
-
-  const defaultColumns = useMemo(() => {
-    return entityType === "items" ? DEFAULT_ITEM_COLUMNS : DEFAULT_PRICE_COLUMNS;
-  }, [entityType]);
-
-  const availableGroups = useMemo(() => {
-    const groups = new Set(columns.map((col) => col.group));
-    return Array.from(groups);
-  }, [columns]);
-
-  const getColumnsByGroup = useCallback(
-    (group: string) => {
-      return columns.filter((col) => col.group === group);
-    },
-    [columns]
-  );
-
-  return { columns, defaultColumns, availableGroups, getColumnsByGroup };
-}
-
-// ============================================================================
 // Column Preferences Storage
 // ============================================================================
 
@@ -197,6 +159,222 @@ function saveColumns(entityType: ExportEntityType, columns: string[]): void {
   } catch {
     // Ignore storage errors
   }
+}
+
+export function buildExportSearchParams(config: {
+  format: ExportFormat;
+  selectedColumns: string[];
+  filters: ExportFilters;
+}): URLSearchParams {
+  const params = new URLSearchParams();
+  params.set("format", config.format);
+  params.set("columns", config.selectedColumns.join(","));
+
+  const { filters } = config;
+  if (filters.search) params.set("search", filters.search);
+  if (filters.type) params.set("type", filters.type);
+  if (filters.groupId) params.set("group_id", String(filters.groupId));
+  if (filters.status !== null && filters.status !== undefined) {
+    params.set("is_active", String(filters.status));
+  }
+  if (filters.outletId) params.set("outlet_id", String(filters.outletId));
+  if (filters.viewMode) params.set("view_mode", filters.viewMode);
+  if (filters.scopeFilter) params.set("scope_filter", filters.scopeFilter);
+  if (filters.dateFrom) params.set("date_from", filters.dateFrom);
+  if (filters.dateTo) params.set("date_to", filters.dateTo);
+
+  return params;
+}
+
+export function enforceAtLeastOneColumn(nextColumns: string[], availableColumns: string[]): string[] {
+  if (nextColumns.length > 0) return nextColumns;
+  return availableColumns[0] ? [availableColumns[0]] : [];
+}
+
+export function describeExportError(error: unknown, response?: Response): string {
+  if (response?.status === 400) {
+    return "Invalid export selection. Adjust filters, columns, or format and retry.";
+  }
+  if (response?.status === 401 || response?.status === 403) {
+    return "You do not have permission to export this data.";
+  }
+  if (response && response.status >= 500) {
+    return "Export generation failed on the server. Retry or narrow the export scope.";
+  }
+  if (error instanceof TypeError) {
+    return "Download interrupted by a network error. Retry the export.";
+  }
+  return error instanceof Error ? error.message : "Export failed";
+}
+
+export async function readStreamingBlob(
+  response: Response,
+  onProgress: (progress: { bytesReceived: number; totalBytes: number | null; percentage: number | null }) => void
+): Promise<Blob> {
+  const contentLength = response.headers.get("content-length");
+  const totalBytes = contentLength ? Number.parseInt(contentLength, 10) : null;
+  const reader = response.body?.getReader();
+
+  if (!reader) {
+    const blob = await response.blob();
+    onProgress({
+      bytesReceived: blob.size,
+      totalBytes: Number.isFinite(totalBytes) ? totalBytes : blob.size,
+      percentage: 100,
+    });
+    return blob;
+  }
+
+  const chunks: Uint8Array[] = [];
+  let bytesReceived = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    bytesReceived += value.length;
+    onProgress({
+      bytesReceived,
+      totalBytes: Number.isFinite(totalBytes) ? totalBytes : null,
+      percentage: Number.isFinite(totalBytes) && totalBytes && totalBytes > 0
+        ? Math.min(100, Math.round((bytesReceived / totalBytes) * 100))
+        : null,
+    });
+  }
+
+  return new Blob(chunks as BlobPart[]);
+}
+
+type ExportExecutionConfig = {
+  format: ExportFormat;
+  selectedColumns: string[];
+  filters: ExportFilters;
+};
+
+type ExportExecutionInput = {
+  current: ExportExecutionConfig;
+  overrideFilters?: Partial<ExportFilters>;
+  retryConfig?: ExportExecutionConfig | null;
+};
+
+type StreamingFilePickerHandle = {
+  createWritable: () => Promise<{
+    write: (chunk: Uint8Array) => Promise<void>;
+    close: () => Promise<void>;
+    abort?: () => Promise<void>;
+  }>;
+};
+
+type StreamingFilePickerWindow = Window & {
+  showSaveFilePicker?: (options: {
+    suggestedName: string;
+    types: Array<{
+      description: string;
+      accept: Record<string, string[]>;
+    }>;
+  }) => Promise<StreamingFilePickerHandle>;
+};
+
+export function resolveExportExecutionConfig({
+  current,
+  overrideFilters,
+  retryConfig,
+}: ExportExecutionInput): ExportExecutionConfig {
+  if (retryConfig) return retryConfig;
+  return {
+    ...current,
+    filters: overrideFilters ? { ...current.filters, ...overrideFilters } : current.filters,
+  };
+}
+
+export function buildExportRequestPath(entityType: ExportEntityType, config: ExportExecutionConfig): string {
+  const params = buildExportSearchParams(config);
+  return `/export/${entityType}?${params.toString()}`;
+}
+
+function getExportMimeType(format: ExportFormat): string {
+  return format === "xlsx"
+    ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    : "text/csv;charset=utf-8";
+}
+
+function canUseDirectToFileDownload(): boolean {
+  if (typeof window === "undefined") return false;
+  const pickerWindow = window as StreamingFilePickerWindow;
+  return typeof pickerWindow.showSaveFilePicker === "function" && window.isSecureContext !== false;
+}
+
+async function streamResponseToFile(
+  response: Response,
+  filename: string,
+  format: ExportFormat,
+  onProgress: (progress: { bytesReceived: number; totalBytes: number | null; percentage: number | null }) => void
+): Promise<{ fileSize: number; usedBlobFallback: false } | undefined> {
+  if (!canUseDirectToFileDownload()) return undefined;
+  const reader = response.body?.getReader();
+  if (!reader) return undefined;
+
+  const pickerWindow = window as StreamingFilePickerWindow;
+  const contentLength = response.headers.get("content-length");
+  const totalBytes = contentLength ? Number.parseInt(contentLength, 10) : null;
+  const mimeType = getExportMimeType(format);
+  const extension = format === "xlsx" ? ".xlsx" : ".csv";
+
+  const handle = await pickerWindow.showSaveFilePicker?.({
+    suggestedName: filename,
+    types: [{ description: `${format.toUpperCase()} export`, accept: { [mimeType]: [extension] } }],
+  });
+  if (!handle) return undefined;
+
+  const writable = await handle.createWritable();
+  let bytesReceived = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      await writable.write(value);
+      bytesReceived += value.length;
+      onProgress({
+        bytesReceived,
+        totalBytes: Number.isFinite(totalBytes) ? totalBytes : null,
+        percentage: Number.isFinite(totalBytes) && totalBytes && totalBytes > 0
+          ? Math.min(100, Math.round((bytesReceived / totalBytes) * 100))
+          : null,
+      });
+    }
+    await writable.close();
+    return { fileSize: bytesReceived, usedBlobFallback: false };
+  } catch (error) {
+    await writable.abort?.();
+    throw error;
+  }
+}
+
+export async function downloadStreamingResponse(
+  response: Response,
+  filename: string,
+  format: ExportFormat,
+  onProgress: (progress: { bytesReceived: number; totalBytes: number | null; percentage: number | null }) => void
+): Promise<{ fileSize: number; usedBlobFallback: boolean }> {
+  const hasKnownLength = response.headers.has("content-length");
+  const directResult = hasKnownLength
+    ? undefined
+    : await streamResponseToFile(response, filename, format, onProgress);
+  if (directResult) return directResult;
+
+  // Browser Blob fallback: this preserves existing automatic-download behavior,
+  // but it still buffers the final file in browser memory. The dialog surfaces
+  // this risk for high-row or unknown-length downloads.
+  const blob = await readStreamingBlob(response, onProgress);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  return { fileSize: blob.size, usedBlobFallback: true };
 }
 
 // ============================================================================
@@ -245,7 +423,7 @@ export function useExport(): UseExportReturn {
   const [estimatedRowCount] = useState(0);
 
   // Get columns for current entity type
-  const { columns: allColumns, defaultColumns } = useExportColumns({ entityType });
+  const { columns: allColumns, defaultColumns } = useExportColumns(entityType);
 
   // Set selected columns with session storage
   const setSelectedColumns = useCallback(
@@ -260,11 +438,14 @@ export function useExport(): UseExportReturn {
   const toggleColumn = useCallback(
     (key: string) => {
       const newColumns = selectedColumns.includes(key)
-        ? selectedColumns.filter((k) => k !== key)
+        ? enforceAtLeastOneColumn(
+          selectedColumns.filter((k) => k !== key),
+          allColumns.map((column) => column.key)
+        )
         : [...selectedColumns, key];
       setSelectedColumns(newColumns);
     },
-    [selectedColumns, setSelectedColumns]
+    [allColumns, selectedColumns, setSelectedColumns]
   );
 
   // Select all columns
@@ -279,8 +460,8 @@ export function useExport(): UseExportReturn {
 
   // Select no columns
   const selectNoColumns = useCallback(() => {
-    setSelectedColumns([]);
-  }, [setSelectedColumns]);
+    setSelectedColumns(enforceAtLeastOneColumn([], allColumns.map((column) => column.key)));
+  }, [allColumns, setSelectedColumns]);
 
   // Move column up/down in the order
   const moveColumn = useCallback((key: string, direction: "up" | "down") => {
@@ -309,28 +490,10 @@ export function useExport(): UseExportReturn {
     setProgress({ phase: "preparing" });
 
     try {
-      // Build query params
-      const params = new URLSearchParams();
-      params.set("format", format);
-      params.set("columns", selectedColumns.join(","));
-      
-      if (filters.search) params.set("search", filters.search);
-      if (filters.type) params.set("type", filters.type);
-      if (filters.groupId) params.set("group_id", String(filters.groupId));
-      if (filters.status !== null && filters.status !== undefined) {
-        params.set("is_active", String(filters.status));
-      }
-      if (filters.outletId) params.set("outlet_id", String(filters.outletId));
-      if (filters.viewMode) params.set("view_mode", filters.viewMode);
-      if (filters.scopeFilter) params.set("scope_filter", filters.scopeFilter);
-      if (filters.dateFrom) params.set("date_from", filters.dateFrom);
-      if (filters.dateTo) params.set("date_to", filters.dateTo);
-
       setProgress({ phase: "streaming" });
 
-      // Use fetch with streaming for large exports
       const response = await apiStreamingRequest(
-        `/export/${entityType}?${params.toString()}`,
+        buildExportRequestPath(entityType, { format, selectedColumns, filters }),
         { method: "POST" }
       );
 
@@ -340,7 +503,7 @@ export function useExport(): UseExportReturn {
 
       // Get filename from content-disposition header
       const contentDisposition = response.headers.get("content-disposition");
-      let filename = `export-${Date.now()}.${format}`;
+      let filename = `jurnapod-${entityType}-${fromUtcIso.dateOnly(nowUTC())}.${format}`;
       if (contentDisposition) {
         const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
         if (match) {
@@ -348,58 +511,22 @@ export function useExport(): UseExportReturn {
         }
       }
 
-      // Get total size for progress tracking
-      const contentLength = response.headers.get("content-length");
-      const totalBytes = contentLength ? parseInt(contentLength, 10) : 0;
-
-      // Stream the response
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error("Response body is not readable");
-      }
-
-      const chunks: Uint8Array[] = [];
-      let bytesReceived = 0;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        chunks.push(value);
-        bytesReceived += value.length;
-
-        // Update progress
-        if (totalBytes > 0) {
-          setProgress({
-            phase: "streaming",
-            bytesWritten: bytesReceived,
-          });
-        }
-      }
-
-      // Combine chunks into blob
-      const blob = new Blob(chunks as BlobPart[], {
-        type: format === "xlsx"
-          ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          : "text/csv;charset=utf-8",
+      const downloadResult = await downloadStreamingResponse(response, filename, format, (downloadProgress) => {
+        setProgress({
+          phase: "streaming",
+          bytesWritten: downloadProgress.bytesReceived,
+          bytesReceived: downloadProgress.bytesReceived,
+          totalBytes: downloadProgress.totalBytes,
+          percentage: downloadProgress.percentage,
+        });
       });
-
-      // Trigger download
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
 
       setProgress({ phase: "complete" });
 
       return {
         success: true,
         rowCount: selectedColumns.length, // Approximation
-        fileSize: blob.size,
+        fileSize: downloadResult.fileSize,
         filename,
       };
     } catch (err) {
@@ -450,6 +577,8 @@ interface UseExportDialogReturn {
   defaultColumns: string[];
   availableGroups: string[];
   selectedColumns: string[];
+  columnsLoading: boolean;
+  columnsError: string | null;
   
   // Format
   format: ExportFormat;
@@ -471,7 +600,7 @@ interface UseExportDialogReturn {
   loading: boolean;
   progress: ExportProgress | null;
   error: string | null;
-  retry: () => void;
+  retry: () => Promise<ExportResult | undefined>;
 }
 
 /**
@@ -481,26 +610,47 @@ export function useExportDialog({
   entityType,
   initialFilters = {},
 }: UseExportDialogProps): UseExportDialogReturn {
-  const { columns, defaultColumns, availableGroups } = useExportColumns({ entityType });
+  const { columns, defaultColumns, availableGroups, isLoading: columnsLoading, error: columnsError } = useExportColumns(entityType);
   const [format, setFormat] = useState<ExportFormat>("csv");
   const [selectedColumns, setSelectedColumns] = useState<string[]>(() => {
     const saved = loadSavedColumns(entityType);
-    return saved ?? defaultColumns;
+    return saved ?? [];
   });
   const [filters, setFilters] = useState<ExportFilters>(initialFilters);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const lastConfigRef = useRef<ExportExecutionConfig | null>(null);
+
+  useEffect(() => {
+    if (columns.length === 0) return;
+    setSelectedColumns((current) => {
+      const availableKeys = new Set(columns.map((column) => column.key));
+      const filtered = current.filter((key) => availableKeys.has(key));
+      const next = filtered.length > 0 ? filtered : columns.map((column) => column.key);
+      saveColumns(entityType, next);
+      return next;
+    });
+  }, [columns, entityType]);
+
+  useEffect(() => {
+    setFilters(initialFilters);
+  }, [initialFilters]);
 
   const toggleColumn = useCallback(
     (key: string) => {
       setSelectedColumns((prev) => {
-        const newColumns = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+        const newColumns = prev.includes(key)
+          ? enforceAtLeastOneColumn(
+            prev.filter((k) => k !== key),
+            columns.map((column) => column.key)
+          )
+          : [...prev, key];
         saveColumns(entityType, newColumns);
         return newColumns;
       });
     },
-    [entityType]
+    [columns, entityType]
   );
 
   const selectAll = useCallback(() => {
@@ -510,14 +660,16 @@ export function useExportDialog({
   }, [columns, entityType]);
 
   const selectDefault = useCallback(() => {
-    setSelectedColumns(defaultColumns);
-    saveColumns(entityType, defaultColumns);
-  }, [defaultColumns, entityType]);
+    const nextColumns = defaultColumns.length > 0 ? defaultColumns : columns.map((column) => column.key);
+    setSelectedColumns(nextColumns);
+    saveColumns(entityType, nextColumns);
+  }, [columns, defaultColumns, entityType]);
 
   const selectNone = useCallback(() => {
-    setSelectedColumns([]);
-    saveColumns(entityType, []);
-  }, [entityType]);
+    const nextColumns = enforceAtLeastOneColumn([], columns.map((column) => column.key));
+    setSelectedColumns(nextColumns);
+    saveColumns(entityType, nextColumns);
+  }, [columns, entityType]);
 
   const moveColumn = useCallback((key: string, direction: "up" | "down") => {
     setSelectedColumns((prev) => {
@@ -536,53 +688,33 @@ export function useExportDialog({
     });
   }, [entityType]);
 
-  const retry = useCallback(() => {
-    setError(null);
-    setProgress(null);
-  }, []);
-
-  const exportFn = useCallback(async (overrideFilters?: Partial<ExportFilters>): Promise<ExportResult> => {
+  const exportFn = useCallback(async (overrideFilters?: Partial<ExportFilters>, retryConfig?: typeof lastConfigRef.current): Promise<ExportResult> => {
     setLoading(true);
     setError(null);
     setProgress({ phase: "preparing" });
 
-    // Merge override filters with current filters
-    const effectiveFilters = overrideFilters 
-      ? { ...filters, ...overrideFilters }
-      : filters;
+    const executionConfig = resolveExportExecutionConfig({
+      current: { format, selectedColumns, filters },
+      overrideFilters,
+      retryConfig,
+    });
+    lastConfigRef.current = executionConfig;
 
     try {
-      // Build query params
-      const params = new URLSearchParams();
-      params.set("format", format);
-      params.set("columns", selectedColumns.join(","));
-
-      if (effectiveFilters.search) params.set("search", effectiveFilters.search);
-      if (effectiveFilters.type) params.set("type", effectiveFilters.type);
-      if (effectiveFilters.groupId) params.set("group_id", String(effectiveFilters.groupId));
-      if (effectiveFilters.status !== null && effectiveFilters.status !== undefined) {
-        params.set("is_active", String(effectiveFilters.status));
-      }
-      if (effectiveFilters.outletId) params.set("outlet_id", String(effectiveFilters.outletId));
-      if (effectiveFilters.viewMode) params.set("view_mode", effectiveFilters.viewMode);
-      if (effectiveFilters.scopeFilter) params.set("scope_filter", effectiveFilters.scopeFilter);
-      if (effectiveFilters.dateFrom) params.set("date_from", effectiveFilters.dateFrom);
-      if (effectiveFilters.dateTo) params.set("date_to", effectiveFilters.dateTo);
-
       setProgress({ phase: "streaming" });
 
       const response = await apiStreamingRequest(
-        `/export/${entityType}?${params.toString()}`,
+        buildExportRequestPath(entityType, executionConfig),
         { method: "POST" }
       );
 
       if (!response.ok) {
-        throw new Error(`Export failed with status ${response.status}`);
+        throw new Error(describeExportError(undefined, response));
       }
 
       // Get filename
       const contentDisposition = response.headers.get("content-disposition");
-      let filename = `jurnapod-${entityType}-${fromUtcIso.dateOnly(nowUTC())}.${format}`;
+      let filename = `jurnapod-${entityType}-${fromUtcIso.dateOnly(nowUTC())}.${executionConfig.format}`;
       if (contentDisposition) {
         const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
         if (match) {
@@ -590,39 +722,45 @@ export function useExportDialog({
         }
       }
 
-      // Stream and download
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      const downloadResult = await downloadStreamingResponse(response, filename, executionConfig.format, (downloadProgress) => {
+        setProgress({
+          phase: "streaming",
+          bytesWritten: downloadProgress.bytesReceived,
+          bytesReceived: downloadProgress.bytesReceived,
+          totalBytes: downloadProgress.totalBytes,
+          percentage: downloadProgress.percentage,
+        });
+      });
 
       setProgress({ phase: "complete" });
 
       return {
         success: true,
         filename,
-        fileSize: blob.size,
+        fileSize: downloadResult.fileSize,
       };
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Export failed";
+      const errorMessage = describeExportError(err);
       setError(errorMessage);
       setProgress({ phase: "error", error: errorMessage });
       return { success: false, error: errorMessage };
     } finally {
       setLoading(false);
     }
-  }, [entityType, format, selectedColumns, filters]);
+  }, [entityType, filters, format, selectedColumns]);
+
+  const retry = useCallback(async () => {
+    if (!lastConfigRef.current) return undefined;
+    return exportFn(undefined, lastConfigRef.current);
+  }, [exportFn]);
 
   return {
     columns,
     defaultColumns,
     availableGroups,
     selectedColumns,
+    columnsLoading,
+    columnsError: columnsError?.message ?? null,
     format,
     filters,
     toggleColumn,

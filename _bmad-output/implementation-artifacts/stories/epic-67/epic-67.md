@@ -1,6 +1,6 @@
 # Epic 67: Catalog Operations — Items, Prices, Import/Export Redesign
 
-**Status:** planned (queued — requires explicit backoffice unfreeze before execution)
+**Status:** in-progress
 **Sprint/Timebox:** Weeks 5–6 (of Backoffice Frontend Program)
 **Theme:** Data-dense item and pricing management with bulk import/export redesigned to align with the backend's staged batch API model. This epic consumes the shared EntityTable, FilterBar, DetailDrawer, and ScopeBadge primitives from Epic 65.
 **Primary Modules:** `apps/backoffice`, `packages/modules/inventory`
@@ -125,7 +125,7 @@ Implement items management using the primitives from 67-1:
 
 Implement pricing views that make "default vs outlet override" a visible state:
 - Price list: shows all items with their default price and outlet-specific overrides in adjacent columns
-- Price override editor: inline editing or drawer for setting outlet-specific price for an item
+- Price override editor: drawer for setting outlet-specific price for an item
 - Visual distinction: default price shown in normal weight; outlet override shown with a "pinned" icon and different background
 - ScopeBadge indicates whether viewing default prices or outlet-specific prices
 - TanStack Query caching with invalidation on price update
@@ -205,11 +205,11 @@ Implement the export workflow using the backend's async job model:
 
 | # | Precondition | Enforcement | Status |
 |---|--------------|-------------|--------|
-| 1 | Epic 65 (Foundation) complete | sprint-status.yaml | ❌ (HOLDING) |
-| 2 | Backoffice unfreeze authorized | Written authorization | ❌ (HOLDING) |
-| 3 | Typed API client covers inventory items, prices, import, export, operations endpoints | 65-2 completion | ❌ (HOLDING) |
-| 4 | TanStack Query cache hooks from Epic 65 available | 65-6 completion | ❌ (HOLDING) |
-| 5 | Import/export backend endpoints verified working (POST `/api/import/upload`, POST `/api/import/validate`, POST `/api/import/apply`, POST `/api/export/*`, GET `/api/operations/:id/progress`) | Technical spike | ❌ (must verify) |
+| 1 | Epic 65 (Foundation) complete | sprint-status.yaml | ✅ Complete |
+| 2 | Backoffice unfreeze for Epic 67 scope | User authorization | ✅ Approved |
+| 3 | Typed API client covers inventory items, prices, import, export, operations endpoints | 65-2 completion | ✅ Available |
+| 4 | TanStack Query cache hooks from Epic 65 available | 65-6 completion | ✅ Available |
+| 5 | Import/export backend endpoints verified working (POST `/api/import/upload`, POST `/api/import/validate`, POST `/api/import/apply`, POST `/api/export/*`, GET `/api/operations/:id/progress`) | Technical spike | ⚠️ Must verify before Stories 67-4/67-5 |
 
 ---
 
@@ -224,6 +224,45 @@ Implement the export workflow using the backend's async job model:
 7. **Component Documentation Gate:** EntityTable, FilterBar, DetailDrawer documented with usage examples
 8. **Test Gate:** Unit tests for all new components and workflows pass; e2e smoke test for import happy path passes
 9. **SOLID/DRY/KISS Gate:** Full rescore passes at pre-close
+
+---
+
+## 6.1) Adversarial Review Resolution
+
+**Review Date:** 2026-05-18
+**Reviewer:** BMAD Review Agent
+**Initial Decision:** NO-GO (4 P1, 8 P2, 3 P3 findings)
+**Status:** All P1 findings resolved; P2/P3 findings addressed
+
+### P1 Findings Resolved
+
+| Finding | Story | Issue | Resolution |
+|---------|-------|-------|------------|
+| P1-1 | 67-2 | AC8 referenced DELETE for deactivate, but backend hard-deletes | Changed to PATCH with `is_active: false`; added explicit "soft deactivate, not hard delete" note |
+| P1-2 | 67-4 | Session retry claimed "no re-upload" but session stored only in React state | Changed to sessionStorage; added session recovery AC; added session validation on mount |
+| P1-3 | 67-2 | "Complete rewrite" of items-page.tsx would destroy 6+ out-of-scope features | Changed to extract-and-replace: only table section replaced; all other features preserved |
+| P1-4 | 67-1 | Assumed EntityTable/FilterBar/DetailDrawer/ScopeBadge are stable from Epic 65 | Added explicit preconditions: verify each primitive renders without errors before starting |
+
+### P2 Findings Addressed
+
+| Finding | Story | Issue | Resolution |
+|---------|-------|-------|------------|
+| P2-5 | All | Permission resources used inconsistent `module.resource.permission` format | Standardized to canonical `requireAccess({ module, resource, permission })` format per Epic 39 |
+| P2-6 | 67-3 | "All Outlets" mode could create unbounded table width | Added 5-outlet column limit with "Show more" expander; added 2-second performance requirement |
+| P2-7 | 67-3 | AC7 ambiguous: "inline or drawer" | Chose drawer pattern for consistency with DetailDrawer primitive |
+| P2-8 | 67-5 | SSE used hardcoded relative URL `/api/operations/...` | Changed to `${API_BASE_URL}/operations/...` using configurable API base URL |
+| P2-9 | 67-5 | SSE reconnection logic missing; polling started immediately on error | Removed `eventSource.close()` from onerror; added 10-second timeout before polling fallback |
+| P2-10 | All | No mobile viewport strategy across any story | Added mobile viewport AC to all 5 stories with card view, FAB, simplified filters |
+| P2-11 | 67-2 | AC referenced "Tax Category" and "Unit of Measure" not in existing Item type | Added note to verify backend schema; fields shown only if present in API response |
+| P2-12 | 67-2, 67-3 | CacheService → TanStack Query migration could break other consumers | Added migration plan: create NEW hook, leave existing hook untouched, migrate incrementally |
+
+### P3 Findings Addressed
+
+| Finding | Story | Issue | Resolution |
+|---------|-------|-------|------------|
+| P3-13 | 67-5 | `/operations/:id` route existence unverified | Added precondition to verify route exists in React Router before starting story |
+| P3-14 | 67-5 | Estimated record count source unspecified | Added note: from list endpoint with `limit=0` or `count_only=true`; omit if unsupported |
+| P3-15 | 67-1 | No cleanup strategy for localStorage column preferences | Added schema versioning: `jurnapod.catalog.items.columns.v{version}`; reset on version mismatch |
 
 ---
 

@@ -172,8 +172,8 @@ export function uploadWithProgress<TResponse>(
         }
       } else {
         try {
-          const errorResp = JSON.parse(xhr.responseText);
-          reject(new Error(errorResp.message || `Upload failed with status ${xhr.status}`));
+          const errorResp = JSON.parse(xhr.responseText) as ApiErrorPayload & { message?: string };
+          reject(new Error(errorResp.message || errorResp.error?.message || errorResp.data?.message || `Upload failed with status ${xhr.status}`));
         } catch {
           reject(new Error(`Upload failed with status ${xhr.status}`));
         }
@@ -204,6 +204,7 @@ export type ApplyProgressCallback = (progress: {
   total: number;
   currentRow: number;
   percentage: number;
+  mode?: "bytes" | "rows";
 }) => void;
 
 export function applyWithProgress<TResponse>(
@@ -221,6 +222,7 @@ export function applyWithProgress<TResponse>(
           total: 100,
           currentRow: 0,
           percentage: Math.round((event.loaded / event.total) * 100),
+          mode: "bytes",
         });
       }
     });
@@ -232,6 +234,7 @@ export function applyWithProgress<TResponse>(
           total: 100,
           currentRow: 0,
           percentage: 50 + Math.round((event.loaded / event.total) * 50),
+          mode: "bytes",
         });
       }
     });
@@ -246,8 +249,8 @@ export function applyWithProgress<TResponse>(
         }
       } else {
         try {
-          const errorResp = JSON.parse(xhr.responseText);
-          reject(new Error(errorResp.message || `Request failed with status ${xhr.status}`));
+          const errorResp = JSON.parse(xhr.responseText) as ApiErrorPayload & { message?: string };
+          reject(new Error(errorResp.message || errorResp.error?.message || errorResp.data?.message || `Request failed with status ${xhr.status}`));
         } catch {
           reject(new Error(`Request failed with status ${xhr.status}`));
         }

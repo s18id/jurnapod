@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { apiRequest, apiStreamingRequest, uploadWithProgress, applyWithProgress } from "../lib/api-client";
 
 // ============================================================================
@@ -16,6 +16,8 @@ export interface UploadResponse {
   rowCount: number;
   columns: string[];
   sampleData: string[][];
+  fileHash?: string;
+  parseErrors?: Array<{ row?: number; message: string }>;
 }
 
 export interface ColumnMapping {
@@ -45,6 +47,7 @@ export interface ApplyProgress {
   total: number;
   currentRow: number;
   percentage: number;
+  mode?: "bytes" | "rows";
 }
 
 export interface ApplyResult {
@@ -53,13 +56,82 @@ export interface ApplyResult {
   created: number;
   updated: number;
   skipped: number;
-  errors: Array<{ row: number; error: string }>;
+  batchesCompleted?: number;
+  batchesFailed?: number;
+  rowsProcessed?: number;
+  failedAtBatch?: number;
+  rowsCommitted?: number;
+  canResume?: boolean;
+  resumed?: boolean;
+  skippedBatches?: number;
+  skippedRows?: number;
+  errors: Array<{ row: number; error?: string; message?: string; values?: Record<string, unknown> }>;
 }
 
 export interface TemplateInfo {
   filename: string;
   headers: string[];
   description: string;
+}
+
+type ApiEnvelope<T> = { success: true; data: T } | T;
+
+function unwrapApiData<T>(payload: ApiEnvelope<T>): T {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "success" in payload &&
+    (payload as { success?: unknown }).success === true &&
+    "data" in payload
+  ) {
+    return (payload as { data: T }).data;
+  }
+  return payload as T;
+}
+
+function isSessionExpiryError(error: unknown): boolean {
+  const maybeStatus = typeof error === "object" && error !== null && "status" in error
+    ? Number((error as { status?: unknown }).status)
+    : undefined;
+  if (maybeStatus === 404 || maybeStatus === 410) return true;
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return message.includes("session") && (message.includes("expired") || message.includes("not found"));
+}
+
+export function getImportSessionStorageKeys(entityType: ImportEntityType) {
+  const prefix = `jurnapod.import.${entityType}`;
+  return {
+    uploadId: `${prefix}.uploadId`,
+    fileHash: `${prefix}.fileHash`,
+    step: `${prefix}.step`,
+    columns: `${prefix}.columns`,
+    sampleData: `${prefix}.sampleData`,
+    mappings: `${prefix}.mappings`,
+  } as const;
+}
+
+export function clearImportSessionStorage(entityType: ImportEntityType): void {
+  if (typeof window === "undefined") return;
+  const keys = getImportSessionStorageKeys(entityType);
+  for (const key of Object.values(keys)) {
+    window.sessionStorage.removeItem(key);
+  }
+}
+
+export async function computeImportFileHash(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  if (typeof crypto !== "undefined" && crypto.subtle) {
+    const digest = await crypto.subtle.digest("SHA-256", buffer);
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  let hash = 0;
+  for (const byte of new Uint8Array(buffer)) {
+    hash = (hash * 31 + byte) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
 }
 
 // ============================================================================
@@ -106,12 +178,13 @@ export function useUpload({ entityType }: UseUploadProps): UseUploadReturn {
         const formData = new FormData();
         formData.append("file", file);
 
-        const result = await uploadWithProgress<UploadResponse>(
+        const payload = await uploadWithProgress<ApiEnvelope<UploadResponse>>(
           `/import/${entityType}/upload`,
           formData,
           (percentage) => setProgress(percentage)
         );
 
+        const result = unwrapApiData<UploadResponse>(payload);
         setProgress(100);
         return result;
       } catch (err) {
@@ -159,13 +232,14 @@ export function useValidate({ entityType }: UseValidateProps): UseValidateReturn
       setError(null);
 
       try {
-        const result = await apiRequest<ValidationResult>(
+        const payload = await apiRequest<ApiEnvelope<ValidationResult>>(
           `/import/${entityType}/validate`,
           {
             method: "POST",
             body: JSON.stringify({ uploadId, mappings }),
           }
         );
+        const result = unwrapApiData<ValidationResult>(payload);
         return result;
       } catch (err) {
         const message = err instanceof Error ? err.message : "Validation failed";
@@ -191,7 +265,7 @@ interface UseApplyProps {
 }
 
 interface UseApplyReturn {
-  apply: (uploadId: string) => Promise<ApplyResult>;
+  apply: (uploadId: string, mappings: ColumnMapping[], fileHash?: string) => Promise<ApplyResult>;
   loading: boolean;
   error: string | null;
   progress: ApplyProgress | null;
@@ -219,7 +293,7 @@ export function useApply({ entityType, onProgress }: UseApplyProps): UseApplyRet
   }, [cancel]);
 
   const apply = useCallback(
-    async (uploadId: string): Promise<ApplyResult> => {
+    async (uploadId: string, mappings: ColumnMapping[], fileHash?: string): Promise<ApplyResult> => {
       reset();
       setLoading(true);
       setError(null);
@@ -227,22 +301,31 @@ export function useApply({ entityType, onProgress }: UseApplyProps): UseApplyRet
       abortControllerRef.current = new AbortController();
 
       try {
-        const result = await applyWithProgress<ApplyResult>(
+        const payload = await applyWithProgress<ApiEnvelope<ApplyResult>>(
           `/import/${entityType}/apply`,
-          { uploadId },
+          { uploadId, mappings, fileHash },
           (prog) => {
             setProgress(prog);
             onProgress?.(prog);
           }
         );
 
-        setProgress({
+        const rawResult = unwrapApiData<ApplyResult>(payload);
+        const result: ApplyResult = {
+          ...rawResult,
+          skipped: rawResult.skipped ?? rawResult.skippedRows ?? 0,
+          errors: rawResult.errors ?? [],
+        };
+
+        const finalProgress = {
           current: result.success + result.failed,
           total: result.success + result.failed,
           currentRow: result.success + result.failed,
           percentage: 100,
-        });
-        onProgress?.(progress ?? { current: 0, total: 0, currentRow: 0, percentage: 100 });
+          mode: "rows" as const,
+        };
+        setProgress(finalProgress);
+        onProgress?.(finalProgress);
 
         return result;
       } catch (err) {
@@ -330,6 +413,7 @@ export type ImportWizardStep = "upload" | "mapping" | "validation" | "apply" | "
 export interface ImportWizardState {
   step: ImportWizardStep;
   uploadId: string | null;
+  fileHash: string | null;
   file: File | null;
   columns: string[];
   sampleData: string[][];
@@ -337,6 +421,8 @@ export interface ImportWizardState {
   validationResult: ValidationResult | null;
   applyResult: ApplyResult | null;
   progress: ApplyProgress | null;
+  recoveredFromSession: boolean;
+  sessionError: string | null;
 }
 
 interface UseImportWizardProps {
@@ -372,10 +458,93 @@ interface UseImportWizardReturn {
   // Navigation
   goToStep: (step: ImportWizardStep) => void;
   goBack: () => void;
+  updateMapping: (index: number, targetField: string) => void;
+  setMappings: (mappings: ColumnMapping[]) => void;
   reset: () => void;
 }
 
 const STEP_ORDER: ImportWizardStep[] = ["upload", "mapping", "validation", "apply", "results"];
+
+function parseStoredJson<T>(value: string | null, fallback: T): T {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function isImportWizardStep(value: string | null): value is ImportWizardStep {
+  return value === "upload" || value === "mapping" || value === "validation" || value === "apply" || value === "results";
+}
+
+export function normalizeRecoveredImportStep(input: {
+  storedStep: string | null;
+  hasUploadId: boolean;
+  hasMappingState: boolean;
+  hasValidationResult: boolean;
+  hasApplyResult: boolean;
+}): ImportWizardStep {
+  if (!input.hasUploadId) return "upload";
+  if (!input.hasMappingState) return "upload";
+  if (!isImportWizardStep(input.storedStep)) return "mapping";
+  if (input.storedStep === "validation" && input.hasValidationResult) return "validation";
+  if ((input.storedStep === "apply" || input.storedStep === "results") && input.hasApplyResult) return input.storedStep;
+  return "mapping";
+}
+
+function createInitialImportWizardState(entityType: ImportEntityType): ImportWizardState {
+  if (typeof window === "undefined") {
+    return {
+      step: "upload",
+      uploadId: null,
+      fileHash: null,
+      file: null,
+      columns: [],
+      sampleData: [],
+      mappings: [],
+      validationResult: null,
+      applyResult: null,
+      progress: null,
+      recoveredFromSession: false,
+      sessionError: null,
+    };
+  }
+
+  const keys = getImportSessionStorageKeys(entityType);
+  const uploadId = window.sessionStorage.getItem(keys.uploadId);
+  const storedStep = window.sessionStorage.getItem(keys.step);
+  const columns = parseStoredJson<string[]>(window.sessionStorage.getItem(keys.columns), []);
+  const sampleData = parseStoredJson<string[][]>(window.sessionStorage.getItem(keys.sampleData), []);
+  const mappings = parseStoredJson<ColumnMapping[]>(window.sessionStorage.getItem(keys.mappings), []);
+  const hasMappingState = columns.length > 0 && mappings.length > 0;
+  const step = normalizeRecoveredImportStep({
+    storedStep,
+    hasUploadId: Boolean(uploadId),
+    hasMappingState,
+    hasValidationResult: false,
+    hasApplyResult: false,
+  });
+
+  return {
+    step,
+    uploadId,
+    fileHash: window.sessionStorage.getItem(keys.fileHash),
+    file: null,
+    columns,
+    sampleData,
+    mappings,
+    validationResult: null,
+    applyResult: null,
+    progress: null,
+    recoveredFromSession: Boolean(uploadId),
+    sessionError: uploadId
+      ? hasMappingState
+        ? "Import session recovered. Review mappings and validate again."
+        : "Recovered import session is missing local mapping data. Restart import."
+      : null,
+  };
+}
 
 export function useImportWizard({ entityType }: UseImportWizardProps): UseImportWizardReturn {
   // Individual hooks
@@ -385,22 +554,30 @@ export function useImportWizard({ entityType }: UseImportWizardProps): UseImport
   const templateHook = useGetTemplate({ entityType });
 
   // Combined state
-  const [state, setState] = useState<ImportWizardState>({
-    step: "upload",
-    uploadId: null,
-    file: null,
-    columns: [],
-    sampleData: [],
-    mappings: [],
-    validationResult: null,
-    applyResult: null,
-    progress: null,
-  });
+  const [state, setState] = useState<ImportWizardState>(() => createInitialImportWizardState(entityType));
+
+  useEffect(() => {
+    setState(createInitialImportWizardState(entityType));
+  }, [entityType]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const keys = getImportSessionStorageKeys(entityType);
+    if (!state.uploadId) return;
+
+    window.sessionStorage.setItem(keys.uploadId, state.uploadId);
+    window.sessionStorage.setItem(keys.step, state.step);
+    if (state.fileHash) window.sessionStorage.setItem(keys.fileHash, state.fileHash);
+    if (state.columns.length > 0) window.sessionStorage.setItem(keys.columns, JSON.stringify(state.columns));
+    if (state.sampleData.length > 0) window.sessionStorage.setItem(keys.sampleData, JSON.stringify(state.sampleData));
+    if (state.mappings.length > 0) window.sessionStorage.setItem(keys.mappings, JSON.stringify(state.mappings));
+  }, [entityType, state.columns, state.fileHash, state.mappings, state.sampleData, state.step, state.uploadId]);
 
   // Upload file
   const uploadFile = useCallback(
     async (file: File): Promise<void> => {
       const response = await uploadHook.upload(file);
+      const fileHash = response.fileHash ?? await computeImportFileHash(file);
       
       // Auto-detect mappings based on column names
       const autoMappings: ColumnMapping[] = response.columns.map((col, idx) => {
@@ -417,7 +594,7 @@ export function useImportWizard({ entityType }: UseImportWizardProps): UseImport
         } else if (normalizedCol.includes("price") || normalizedCol.includes("amount")) {
           targetField = "price";
         } else if (normalizedCol.includes("type")) {
-          targetField = "type";
+          targetField = entityType === "items" ? "item_type" : "";
         } else if (normalizedCol.includes("group") || normalizedCol.includes("category")) {
           targetField = "item_group_id";
         } else if (normalizedCol.includes("active") || normalizedCol.includes("status") || normalizedCol.includes("isenable")) {
@@ -430,8 +607,6 @@ export function useImportWizard({ entityType }: UseImportWizardProps): UseImport
           targetField = "inventory_asset_account_id";
         } else if (normalizedCol.includes("outlet")) {
           targetField = "outlet_id";
-        } else if (normalizedCol.includes("scope")) {
-          targetField = "scope";
         } else if (normalizedCol.includes("item")) {
           targetField = "item_sku";
         }
@@ -447,38 +622,91 @@ export function useImportWizard({ entityType }: UseImportWizardProps): UseImport
         ...prev,
         step: "mapping",
         uploadId: response.uploadId,
+        fileHash,
         file,
         columns: response.columns,
         sampleData: response.sampleData,
         mappings: autoMappings,
+        recoveredFromSession: false,
+        sessionError: null,
       }));
     },
-    [uploadHook]
+    [entityType, uploadHook]
   );
 
   // Validate mappings
   const validateMappings = useCallback(async (): Promise<void> => {
-    const result = await validateHook.validate(state.uploadId!, state.mappings);
-    setState((prev) => ({
-      ...prev,
-      step: result.errorRows > 0 ? "validation" : "apply",
-      validationResult: result,
-    }));
-  }, [state.uploadId, state.mappings, validateHook]);
+    try {
+      const mappedFields = state.mappings.filter((mapping) => mapping.targetField);
+      const result = await validateHook.validate(state.uploadId!, mappedFields);
+      setState((prev) => ({
+        ...prev,
+        step: "validation",
+        validationResult: result,
+        sessionError: null,
+      }));
+    } catch (error) {
+      if (isSessionExpiryError(error)) {
+        clearImportSessionStorage(entityType);
+        setState((prev) => ({
+          ...prev,
+          step: "upload",
+          uploadId: null,
+          fileHash: null,
+          recoveredFromSession: false,
+          sessionError: "Session expired — restart required",
+        }));
+      }
+      throw error;
+    }
+  }, [entityType, state.uploadId, state.mappings, validateHook]);
 
   // Execute import
   const executeImport = useCallback(async (): Promise<void> => {
-    const result = await applyHook.apply(state.uploadId!);
-    setState((prev) => ({
-      ...prev,
-      step: "results",
-      applyResult: result,
-    }));
-  }, [state.uploadId, applyHook]);
+    try {
+      const mappedFields = state.mappings.filter((mapping) => mapping.targetField);
+      const result = await applyHook.apply(state.uploadId!, mappedFields, state.fileHash ?? undefined);
+      if (!result.canResume) {
+        clearImportSessionStorage(entityType);
+      }
+      setState((prev) => ({
+        ...prev,
+        step: "results",
+        applyResult: result,
+        sessionError: null,
+      }));
+    } catch (error) {
+      if (isSessionExpiryError(error)) {
+        clearImportSessionStorage(entityType);
+        setState((prev) => ({
+          ...prev,
+          step: "upload",
+          uploadId: null,
+          fileHash: null,
+          recoveredFromSession: false,
+          sessionError: "Session expired — restart required",
+        }));
+      }
+      throw error;
+    }
+  }, [applyHook, entityType, state.fileHash, state.mappings, state.uploadId]);
 
   // Navigation
   const goToStep = useCallback((step: ImportWizardStep) => {
     setState((prev) => ({ ...prev, step }));
+  }, []);
+
+  const updateMapping = useCallback((index: number, targetField: string) => {
+    setState((prev) => ({
+      ...prev,
+      mappings: prev.mappings.map((mapping, mappingIndex) =>
+        mappingIndex === index ? { ...mapping, targetField } : mapping
+      ),
+    }));
+  }, []);
+
+  const setMappings = useCallback((mappings: ColumnMapping[]) => {
+    setState((prev) => ({ ...prev, mappings }));
   }, []);
 
   const goBack = useCallback(() => {
@@ -489,12 +717,14 @@ export function useImportWizard({ entityType }: UseImportWizardProps): UseImport
   }, [state.step]);
 
   const reset = useCallback(() => {
+    clearImportSessionStorage(entityType);
     uploadHook.reset();
     validateHook.reset();
     applyHook.cancel();
     setState({
       step: "upload",
       uploadId: null,
+      fileHash: null,
       file: null,
       columns: [],
       sampleData: [],
@@ -502,8 +732,10 @@ export function useImportWizard({ entityType }: UseImportWizardProps): UseImport
       validationResult: null,
       applyResult: null,
       progress: null,
+      recoveredFromSession: false,
+      sessionError: null,
     });
-  }, [uploadHook, validateHook, applyHook]);
+  }, [entityType, uploadHook, validateHook, applyHook]);
 
   return {
     state,
@@ -523,6 +755,8 @@ export function useImportWizard({ entityType }: UseImportWizardProps): UseImport
     templateLoading: templateHook.loading,
     goToStep,
     goBack,
+    updateMapping,
+    setMappings,
     reset,
   };
 }

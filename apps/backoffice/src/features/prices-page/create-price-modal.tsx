@@ -9,6 +9,7 @@ import {
   NumberInput,
   Checkbox,
   Alert,
+  Drawer,
   Modal,
 } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
@@ -30,6 +31,7 @@ export interface CreatePriceModalProps {
   items: Item[];
   isCompanyDefault: boolean;
   submitting: boolean;
+  fullScreen?: boolean;
 }
 
 export function CreatePriceModal({
@@ -39,6 +41,7 @@ export function CreatePriceModal({
   items,
   isCompanyDefault,
   submitting,
+  fullScreen = false,
 }: CreatePriceModalProps) {
   const [formData, setFormData] = useState<PriceFormData>({
     item_id: 0,
@@ -100,13 +103,7 @@ export function CreatePriceModal({
     onClose();
   };
 
-  return (
-    <Modal
-      opened={opened}
-      onClose={handleClose}
-      title={isCompanyDefault ? "Create Default Price" : "Create Price"}
-      size="md"
-    >
+  const content = (
       <Stack gap="md">
         {actionError && (
           <Alert color="red" icon={<IconAlertCircle size={16} />}>
@@ -177,6 +174,21 @@ export function CreatePriceModal({
           </Button>
         </Group>
       </Stack>
-    </Modal>
+  );
+
+  const title = isCompanyDefault ? "Create Default Price" : "Create Price";
+
+  if (fullScreen) {
+    return (
+      <Modal opened={opened} onClose={handleClose} title={title} fullScreen>
+        {content}
+      </Modal>
+    );
+  }
+
+  return (
+    <Drawer opened={opened} onClose={handleClose} title={title} position="right" size="md">
+      {content}
+    </Drawer>
   );
 }
