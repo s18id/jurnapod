@@ -342,4 +342,97 @@ npx tsx scripts/validate-sprint-status.ts --epic 68
 
 ---
 
-_Last Updated: 2026-05-18 (prepared by bmad-sm)
+## Dev Record
+
+### 2026-05-19 — Story started
+
+- Pre-flight checks:
+  - `npm run lint -w @jurnapod/backoffice` — passed
+  - `npm run typecheck -w @jurnapod/backoffice` — passed
+  - `npm run build -w @jurnapod/backoffice` — passed with existing Vite warnings
+- Sprint status updated: `68-3-notification-system: in-progress`
+- Dependencies verified:
+  - Story 68-0 contract verified (operations backend contract available)
+  - Epic 65 shell, auth session, Mantine Notifications provider available
+  - Story 68-1 AsyncJobDrawer available for operation deep-links
+  - Story 68-4 audit explorer not yet available; audit deep-links will be stubbed
+- Key constraints from Epic 68:
+  - `/ws` MUST NOT be used for notifications (P0 auth bypass unresolved)
+  - SSE only if staging proves CORS/proxy/auth behavior; polling is safe default
+  - Notification persistence scoped by `company_id` + `user_id`
+  - No PII in persisted notifications
+  - Max 100 notifications in localStorage with eviction of oldest read
+
+### Implementation Plan
+
+1. **Phase 1: Notification context + state** — Create `NotificationProvider` with reducer for add/mark-read/mark-all-read/delete/evict
+2. **Phase 2: Toast layer** — Wrap Mantine Notifications; support types + auto-dismiss
+3. **Phase 3: Inbox layer** — Bell icon in shell header, inbox drawer/panel, unread badge
+4. **Phase 4: Banner layer** — Blocking banner for critical states (backend unreachable, session expiry, sync failure)
+5. **Phase 5: Sources** — Polling fallback from operations/health endpoints; SSE optional if enabled
+6. **Phase 6: Deep-linking** — Navigate to operations center + AsyncJobDrawer, entity pages, audit explorer (stubbed)
+7. **Phase 7: Tests** — Unit tests for toast, inbox, banner, sources, deduplication, persistence
+
+### 2026-05-19 — Implementation Completed
+
+- Implemented notification domain types, state reducer, provider, source polling hook, toast wrapper, inbox, and blocking banner.
+- Integrated notification provider, Mantine notifications styles/provider, shell inbox icon, and banner into the backoffice app shell/router.
+- Polling remains the safe default. `/ws` is unused. SSE stream support is gated behind `VITE_BACKOFFICE_NOTIFICATION_SSE === "1"` and uses `getApiBaseUrl()` when enabled.
+- Persistence is scoped by `company_id` + `user_id` via `jurnapod.notifications.{companyId}.{userId}`.
+- Logout/company/user switch removes the previous scoped localStorage key and clears in-memory notifications per AC4.
+- Persisted data is sanitized to canonical fields only and rejects malformed enum/deep-link fields.
+- Notification cap is 100 persisted notifications with oldest-read eviction before unread entries.
+- Operation notifications deep-link to `#/operations` and open `AsyncJobDrawer` when `operationId` is present.
+- Audit notifications deep-link to `#/audit?objectType=X&objectId=Y` pending Story 68-4 audit surface implementation.
+
+### Validation Evidence
+
+- `npm run test:single -w @jurnapod/backoffice -- __test__/unit/features/notification-inbox.test.tsx __test__/unit/features/notification-toast.test.tsx __test__/unit/features/notification-banner.test.tsx __test__/unit/hooks/use-notifications.test.ts __test__/unit/hooks/use-notification-source.test.ts` — passed; 5 files, 29 tests.
+- `npm run lint -w @jurnapod/backoffice` — passed.
+- `npm run typecheck -w @jurnapod/backoffice` — passed.
+- `npm run build -w @jurnapod/backoffice` — passed with existing Vite chunk/dynamic-import warnings only.
+- `npx tsx scripts/validate-sprint-status.ts` — passed.
+
+### Review Result
+
+- Initial independent review: GO with actionable P2/P3 follow-ups.
+- P2 fixes completed:
+  - Added source tests for polling, SSE normalization, deduplication, and banner clearing.
+  - Extended inbox tests for handler wiring and operation deep-link/AsyncJobDrawer target behavior.
+  - Extended banner tests for acknowledge interaction.
+  - Switched gated SSE stream URL to `getApiBaseUrl()`.
+  - Sorted audit polling notifications newest-first before normalization.
+  - Exported and reused canonical `currentUiEpochMs` helper.
+  - Removed scoped localStorage key on logout/company/user switch and explicit clear.
+  - Validated persisted notification enum fields.
+- P3 fix completed:
+  - Added `aria-live="assertive"` for the blocking banner.
+  - Rejected malformed persisted deep-link fields before hydration.
+- Final targeted verification: GO.
+- Final severity findings: P0 none, P1 none, P2 none, P3 none.
+
+### File List
+
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `_bmad-output/implementation-artifacts/stories/epic-68/story-68-3.md`
+- `apps/backoffice/src/app/layout.tsx`
+- `apps/backoffice/src/app/router.tsx`
+- `apps/backoffice/src/app/theme-provider.tsx`
+- `apps/backoffice/src/main.tsx`
+- `apps/backoffice/src/features/notifications/notification-types.ts`
+- `apps/backoffice/src/features/notifications/notification-state.ts`
+- `apps/backoffice/src/features/notifications/notification-provider.tsx`
+- `apps/backoffice/src/features/notifications/notification-toast.tsx`
+- `apps/backoffice/src/features/notifications/notification-inbox.tsx`
+- `apps/backoffice/src/features/notifications/notification-banner.tsx`
+- `apps/backoffice/src/hooks/use-notifications.ts`
+- `apps/backoffice/src/hooks/use-notification-source.ts`
+- `apps/backoffice/__test__/unit/features/notification-inbox.test.tsx`
+- `apps/backoffice/__test__/unit/features/notification-toast.test.tsx`
+- `apps/backoffice/__test__/unit/features/notification-banner.test.tsx`
+- `apps/backoffice/__test__/unit/hooks/use-notifications.test.ts`
+- `apps/backoffice/__test__/unit/hooks/use-notification-source.test.ts`
+
+---
+
+_Last Updated: 2026-05-19 (implementation review complete; owner sign-off pending)_

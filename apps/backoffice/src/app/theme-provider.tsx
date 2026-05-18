@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { MantineProvider } from "@mantine/core";
+import { Notifications } from "@mantine/notifications";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { buildMantineTheme, getStoredThemeVariant, setStoredThemeVariant, type ThemeVariant } from "./theme";
@@ -40,6 +41,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   return (
     <ThemeContext.Provider value={value}>
       <MantineProvider theme={theme} defaultColorScheme="light">
+        <Notifications position="top-right" autoClose={5000} limit={3} />
         {children}
       </MantineProvider>
     </ThemeContext.Provider>

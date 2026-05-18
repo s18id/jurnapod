@@ -32,6 +32,7 @@ import { ResetPasswordPage } from "../features/reset-password-page";
 import { VerifyEmailPage } from "../features/verify-email-page";
 import { OPERATIONS_LIST_REFETCH_MS, useOperationsList } from "../hooks/use-operations-list";
 import { canReadOperations } from "../lib/operations-permissions";
+import { NotificationProvider } from "@/features/notifications/notification-provider";
 
 import { AppLayout } from "./layout";
 import {
@@ -711,28 +712,30 @@ export function AppRouter() {
   return (
     <ShellProvider state={shellState}>
       <AsyncJobDrawerProvider>
-        <AppLayout
-          user={user}
-          routes={availableRoutes}
-          activePath={route?.path ?? DEFAULT_ROUTE_PATH}
-          onNavigate={ensureHash}
-          onSignOut={handleSignOut}
-          alertCount={alertCount}
-          alertItems={alertItems}
-          alertReadItems={alertReadItems}
-          alertsLoading={alertsLoading}
-          alertsRefreshing={alertsRefreshing}
-          onRefreshAlerts={refreshAlerts}
-          onMarkAllAlertsRead={markAllAlertsRead}
-        >
-          {warningSource ? <ModuleConfigWarning source={warningSource} /> : null}
-          {canAccess && route ? (
-            <RouteScreen path={activePath} user={user} />
-          ) : (
-            <ForbiddenPage />
-          )}
-        </AppLayout>
-        <SyncNotification userId={user.id} />
+        <NotificationProvider companyId={user.company_id} userId={user.id}>
+          <AppLayout
+            user={user}
+            routes={availableRoutes}
+            activePath={route?.path ?? DEFAULT_ROUTE_PATH}
+            onNavigate={ensureHash}
+            onSignOut={handleSignOut}
+            alertCount={alertCount}
+            alertItems={alertItems}
+            alertReadItems={alertReadItems}
+            alertsLoading={alertsLoading}
+            alertsRefreshing={alertsRefreshing}
+            onRefreshAlerts={refreshAlerts}
+            onMarkAllAlertsRead={markAllAlertsRead}
+          >
+            {warningSource ? <ModuleConfigWarning source={warningSource} /> : null}
+            {canAccess && route ? (
+              <RouteScreen path={activePath} user={user} />
+            ) : (
+              <ForbiddenPage />
+            )}
+          </AppLayout>
+          <SyncNotification userId={user.id} />
+        </NotificationProvider>
       </AsyncJobDrawerProvider>
     </ShellProvider>
   );

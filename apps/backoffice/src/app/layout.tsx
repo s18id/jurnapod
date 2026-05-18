@@ -23,13 +23,15 @@ import { useDisclosure } from "@mantine/hooks";
 import { IconBell, IconRefresh, IconAlertTriangle } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 
-import { useOnlineStatus } from "../lib/connection";
-import type { OutboxItem, AlertReadHistory } from "../lib/offline-db";
-import type { SessionUser } from "../lib/session";
-import { AsyncJobDrawerHost } from "../components/async-job-drawer";
-import { useShell } from "./shell";
+import { AsyncJobDrawerHost } from "@/components/async-job-drawer";
+import { NotificationBanner } from "@/features/notifications/notification-banner";
+import { NotificationInbox } from "@/features/notifications/notification-inbox";
+import { useOnlineStatus } from "@/lib/connection";
+import type { OutboxItem, AlertReadHistory } from "@/lib/offline-db";
+import type { SessionUser } from "@/lib/session";
+import { useShell } from "@/app/shell";
 
-import type { AppRoute } from "./routes";
+import type { AppRoute } from "@/app/routes";
 
 type AppLayoutProps = {
   user: SessionUser;
@@ -215,6 +217,7 @@ export function AppLayout(props: AppLayoutProps) {
                 aria-label="Switch outlet"
               />
             )}
+            <NotificationInbox />
             <Popover
               width={320}
               position="bottom-end"
@@ -422,6 +425,7 @@ export function AppLayout(props: AppLayoutProps) {
       </AppShell.Navbar>
 
       <AppShell.Main>
+        <NotificationBanner />
         <Container size="lg" px={0}>
           {props.children}
         </Container>
