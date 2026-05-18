@@ -141,7 +141,7 @@ graph LR
 
 | Module | Resources | Purpose |
 |--------|-----------|---------|
-| **platform** | users, roles, companies, outlets, settings | Organization & identity management |
+| **platform** | users, roles, companies, outlets, settings, operations | Organization, identity, and system operation visibility |
 | **accounting** | journals, accounts, fiscal_years, reports | Financial ledger & reporting |
 | **inventory** | items, stock, costing | Inventory management |
 | **treasury** | transactions, accounts | Cash/bank management |
@@ -156,6 +156,7 @@ Permissions are specified using `module.resource` format:
 ```typescript
 // Examples
 "platform.users"          // User management
+"platform.operations"     // Async operation visibility
 "accounting.journals"     // Journal entries
 "inventory.items"         // Item master data
 "sales.invoices"          // Sales invoicing

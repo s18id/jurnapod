@@ -312,3 +312,51 @@ npx tsx scripts/validate-sprint-status.ts --epic 68
 ---
 
 _Last Updated: 2026-05-18 (prepared by bmad-sm)
+
+---
+
+## Dev Agent Record
+
+### Implementation Plan
+
+- AC0 only: backend operations routes use explicit `platform.operations.READ`; no AsyncJobDrawer UI, retry endpoint, cancel endpoint, or `/ws` implementation.
+- Introduce `platform.operations` in canonical ACL constants/defaults and seed existing companies via idempotent migration.
+- Validate with DB-backed operations route integration tests for authorized access, CASHIER denial, and tenant scoping.
+
+### Completion Notes
+
+- Added `platform.operations` resource to shared resource constants, role defaults, root ACL documentation, and ACL permissions docs.
+- Added idempotent migration `0210_acl_platform_operations.sql` to seed existing company role permissions.
+- Added `requireAccess({ module: "platform", resource: "operations", permission: "read" })` enforcement to operations list and progress/SSE route paths.
+- Added focused integration coverage for `platform.operations.READ`, CASHIER 403 denial, and cross-company isolation.
+
+### Validation Evidence (AC0)
+
+- `npm run db:migrate -w @jurnapod/db` — passed; applied `0210_acl_platform_operations.sql` locally.
+- `npm run lint:migrations` — passed.
+- `npm run build:libs` — passed.
+- `npm run typecheck -w @jurnapod/api` — passed.
+- `npm run lint:fixture-flow` — passed.
+- `npx tsx scripts/validate-sprint-status.ts` — passed.
+- `npm run lint -w @jurnapod/api` — passed with existing warning baseline; no errors.
+- `npm run test:single -w @jurnapod/api -- __test__/integration/operations/status.test.ts` — passed; 9 tests passed.
+
+### Review Result (AC0)
+
+- Architecture review: GO.
+- Severity findings: P0 none, P1 none, P2 none, P3 none.
+- Reviewer notes: ACL enforcement, tenant isolation, migration safety, and test integrity verified for AC0 scope.
+
+### File List
+
+- `AGENTS.md`
+- `apps/api/src/routes/progress.ts`
+- `apps/api/__test__/integration/operations/status.test.ts`
+- `docs/acl-permissions.md`
+- `packages/db/migrations/0210_acl_platform_operations.sql`
+- `packages/shared/src/constants/resources.ts`
+- `packages/shared/src/constants/roles.defaults.json`
+
+### Change Log
+
+- 2026-05-19: Implemented Story 68-1 Phase 0 / AC0 backend ACL pre-work only.

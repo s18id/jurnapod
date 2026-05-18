@@ -15,6 +15,7 @@ import { createRoute, z as zodOpenApi } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import {
   authenticateRequest,
+  requireAccess,
   type AuthContext
 } from "../lib/auth-guard.js";
 import { toUtcIso } from "@/lib/date-helpers";
@@ -166,6 +167,12 @@ export function cleanupStaleSseControllers(): number {
 
 const progressRoutes = new Hono();
 
+const requireOperationsRead = requireAccess({
+  module: "platform",
+  resource: "operations",
+  permission: "read",
+});
+
 // Auth middleware
 progressRoutes.use("/*", async (c, next) => {
   const authResult = await authenticateRequest(c.req.raw);
@@ -177,6 +184,16 @@ progressRoutes.use("/*", async (c, next) => {
     });
   }
   c.set("auth", authResult.auth);
+  await next();
+});
+
+progressRoutes.use("/*", async (c, next) => {
+  const auth = c.get("auth");
+  const accessResult = await requireOperationsRead(c.req.raw, auth);
+  if (accessResult !== null) {
+    return accessResult;
+  }
+
   await next();
 });
 
@@ -472,10 +489,16 @@ export function registerProgressRoutes(app: OpenAPIHono): void {
         },
         404: { description: "Operation not found" },
         401: { description: "Unauthorized" },
+        403: { description: "Forbidden" },
       },
     }),
     async (c): Promise<any> => {
       const auth = c.get("auth");
+      const accessResult = await requireOperationsRead(c.req.raw, auth);
+      if (accessResult !== null) {
+        return accessResult;
+      }
+
       const operationId = c.req.param("operationId");
 
       try {
@@ -540,10 +563,15 @@ export function registerProgressRoutes(app: OpenAPIHono): void {
           },
         },
         401: { description: "Unauthorized" },
+        403: { description: "Forbidden" },
       },
     }),
     async (c): Promise<any> => {
       const auth = c.get("auth");
+      const accessResult = await requireOperationsRead(c.req.raw, auth);
+      if (accessResult !== null) {
+        return accessResult;
+      }
 
       const status = c.req.query("status") as OperationStatus | undefined;
       const type = c.req.query("type") as OperationType | undefined;

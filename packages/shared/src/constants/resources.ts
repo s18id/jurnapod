@@ -5,15 +5,16 @@
  * Resource codes for fine-grained RBAC within modules.
  * Format: {MODULE}_{RESOURCE} for clear namespacing.
  * 
- * 21 resources across 7 canonical modules.
+ * 22 resources across 7 resource-code modules.
  */
 export const RESOURCE_CODES = {
-  // platform: 5 resources
+  // platform: 6 resources
   PLATFORM_USERS: 'users',
   PLATFORM_ROLES: 'roles',
   PLATFORM_COMPANIES: 'companies',
   PLATFORM_OUTLETS: 'outlets',
   PLATFORM_SETTINGS: 'settings',
+  PLATFORM_OPERATIONS: 'operations',
   // accounting: 4 resources
   ACCOUNTING_JOURNALS: 'journals',
   ACCOUNTING_ACCOUNTS: 'accounts',
