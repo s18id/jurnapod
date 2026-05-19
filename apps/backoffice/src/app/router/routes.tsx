@@ -82,6 +82,7 @@ export const ROUTE_PATHS = {
   PURCHASING_SUPPLIERS: "/purchasing/suppliers",
   PURCHASING_ORDERS: "/purchasing/orders",
   PURCHASING_RECEIPTS: "/purchasing/receipts",
+  PURCHASING_INVOICES: "/purchasing/invoices",
 
   // Settings
   AUDIT_LOGS: "/audit-logs",

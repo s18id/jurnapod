@@ -11,15 +11,17 @@
  * - POST /purchasing/invoices/:id/post - Post a draft PI (creates journal)
  * - POST /purchasing/invoices/:id/void - Void a posted PI (reverses journal)
  *
- * Required ACL: purchasing.invoices resource with READ/CREATE/UPDATE permissions
+ * Required ACL: purchasing.invoices resource with READ/CREATE/UPDATE/DELETE permissions
  */
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { Temporal } from "@js-temporal/polyfill";
 import {
   PurchaseInvoiceCreateSchema,
+  PurchaseInvoiceListQuerySchema,
   NumericIdSchema,
-  UtcIsoSchema,
+  toPurchaseInvoiceStatusCode,
 } from "@jurnapod/shared";
 import { requireAccess, authenticateRequest, type AuthContext } from "../../lib/auth-guard.js";
 import { errorResponse, successResponse } from "@jurnapod/shared";
@@ -51,6 +53,16 @@ declare module "hono" {
 
 const invoiceRoutes = new Hono();
 
+function isValidDateOnly(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  try {
+    Temporal.PlainDate.from(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Auth middleware
 invoiceRoutes.use("/*", async (c, next) => {
   const authResult = await authenticateRequest(c.req.raw);
@@ -78,29 +90,36 @@ invoiceRoutes.get("/", async (c) => {
     }
 
     const url = new URL(c.req.raw.url);
-    const rawDateFrom = UtcIsoSchema.optional().parse(url.searchParams.get("date_from") ?? undefined);
-    const rawDateTo = UtcIsoSchema.optional().parse(url.searchParams.get("date_to") ?? undefined);
-    const queryParams = {
-      supplierId: url.searchParams.get("supplier_id") ? Number(url.searchParams.get("supplier_id")) : undefined,
-      status: url.searchParams.get("status") ? Number(url.searchParams.get("status")) : undefined,
-      dateFrom: rawDateFrom ? new Date(rawDateFrom) : undefined,
-      dateTo: rawDateTo ? new Date(rawDateTo) : undefined,
-      limit: url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : 20,
-      offset: url.searchParams.get("offset") ? Number(url.searchParams.get("offset")) : 0
-    };
+    const rawDateFrom = url.searchParams.get("date_from") ?? undefined;
+    const rawDateTo = url.searchParams.get("date_to") ?? undefined;
+    if ((rawDateFrom && !isValidDateOnly(rawDateFrom)) || (rawDateTo && !isValidDateOnly(rawDateTo))) {
+      return errorResponse("INVALID_REQUEST", "Invalid purchase invoice filters", 400);
+    }
+    const queryParams = PurchaseInvoiceListQuerySchema.parse({
+      supplier_id: url.searchParams.get("supplier_id") ?? undefined,
+      status: url.searchParams.get("status") ?? undefined,
+      date_from: rawDateFrom,
+      date_to: rawDateTo,
+      limit: url.searchParams.get("limit") ?? undefined,
+      offset: url.searchParams.get("offset") ?? undefined,
+    });
+    const statusCode = queryParams.status ? toPurchaseInvoiceStatusCode(queryParams.status) : undefined;
 
     const result = await listPIs({
       companyId: auth.companyId,
-      supplierId: queryParams.supplierId,
-      status: queryParams.status,
-      dateFrom: queryParams.dateFrom,
-      dateTo: queryParams.dateTo,
+      supplierId: queryParams.supplier_id,
+      status: statusCode,
+      dateFrom: queryParams.date_from,
+      dateTo: queryParams.date_to,
       limit: queryParams.limit,
       offset: queryParams.offset,
     });
 
     return successResponse(result);
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid purchase invoice filters", 400);
+    }
     console.error("GET /purchasing/invoices failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to fetch purchase invoices", 500);
   }

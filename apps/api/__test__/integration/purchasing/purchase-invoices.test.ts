@@ -31,6 +31,41 @@ let cashierToken: string;
 let testSupplierId: number;
 let piTagCounter = 0;
 
+function authHeaders(token: string): HeadersInit {
+  return {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  };
+}
+
+async function createDraftInvoice(input: { invoiceNo?: string; invoiceDate?: string } = {}): Promise<{ id: number; invoice_no: string; status: string }> {
+  const invoiceNo = input.invoiceNo ?? makeTag('PI69C', 32);
+  const res = await fetch(`${baseUrl}/api/purchasing/invoices`, {
+    method: 'POST',
+    headers: authHeaders(ownerToken),
+    body: JSON.stringify({
+      supplier_id: testSupplierId,
+      invoice_no: invoiceNo,
+      invoice_date: input.invoiceDate ?? '2026-04-18',
+      currency_code: 'IDR',
+      lines: [{ description: 'Story 69-2-c service', qty: '1', unit_price: '10000.00', line_type: 'SERVICE' }]
+    })
+  });
+  expect(res.status).toBe(201);
+  const body = await res.json();
+  return body.data;
+}
+
+async function getInvoice(invoiceId: number) {
+  const res = await fetch(`${baseUrl}/api/purchasing/invoices/${invoiceId}`, {
+    method: 'GET',
+    headers: authHeaders(ownerToken),
+  });
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  return body.data;
+}
+
 describe('purchasing.invoices', { timeout: 30000 }, () => {
   beforeAll(async () => {
     await acquireReadLock();
@@ -184,6 +219,70 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
     const body = await res.json();
     expect(body.data.limit).toBe(5);
     expect(body.data.offset).toBe(0);
+  });
+
+  it('accepts status label filters DRAFT, POSTED, and VOID', async () => {
+    await createDraftInvoice({ invoiceDate: '2026-04-18' });
+
+    for (const status of ['DRAFT', 'POSTED', 'VOID']) {
+      const res = await fetch(`${baseUrl}/api/purchasing/invoices?status=${status}`, {
+        method: 'GET',
+        headers: authHeaders(ownerToken),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+      expect(Array.isArray(body.data.invoices)).toBe(true);
+    }
+  });
+
+  it('accepts date_from/date_to as YYYY-MM-DD date-only filters', async () => {
+    await createDraftInvoice({ invoiceDate: '2026-04-19' });
+    const res = await fetch(`${baseUrl}/api/purchasing/invoices?date_from=2026-04-01&date_to=2026-04-30`, {
+      method: 'GET',
+      headers: authHeaders(ownerToken),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(Array.isArray(body.data.invoices)).toBe(true);
+  });
+
+  it.each([
+    ['status', 'ARCHIVED'],
+    ['date_from', '2026-04-99'],
+    ['date_to', 'not-a-date'],
+    ['supplier_id', 'abc'],
+    ['limit', '0'],
+    ['limit', '101'],
+    ['offset', '-1'],
+  ])('returns 400 INVALID_REQUEST for invalid %s filter instead of 500', async (key, value) => {
+    const res = await fetch(`${baseUrl}/api/purchasing/invoices?${key}=${encodeURIComponent(value)}`, {
+      method: 'GET',
+      headers: authHeaders(ownerToken),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('INVALID_REQUEST');
+  });
+
+  it('returns 403 when CASHIER tries to post a purchase invoice', async () => {
+    const draft = await createDraftInvoice();
+    const res = await fetch(`${baseUrl}/api/purchasing/invoices/${draft.id}/post`, {
+      method: 'POST',
+      headers: authHeaders(cashierToken),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 403 when CASHIER tries to void a purchase invoice', async () => {
+    const draft = await createDraftInvoice();
+    const res = await fetch(`${baseUrl}/api/purchasing/invoices/${draft.id}/void`, {
+      method: 'POST',
+      headers: authHeaders(cashierToken),
+    });
+    expect(res.status).toBe(403);
   });
 
   // -------------------------------------------------------------------------
@@ -432,6 +531,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
     expect(postBody.success).toBe(true);
     expect(postBody.data.journal_batch_id).toBeDefined();
     expect(postBody.data.journal_batch_id).toBeGreaterThan(0);
+    expect(postBody.data.status).toBeUndefined();
 
     // Verify the PI status is now POSTED
     const getRes = await fetch(`${baseUrl}/api/purchasing/invoices/${piId}`, {
@@ -700,6 +800,7 @@ describe('purchasing.invoices', { timeout: 30000 }, () => {
     expect(voidBody.success).toBe(true);
     expect(voidBody.data.reversal_batch_id).toBeDefined();
     expect(voidBody.data.reversal_batch_id).toBeGreaterThan(0);
+    expect(voidBody.data.status).toBeUndefined();
 
     // Verify the PI status is now VOID
     const getRes = await fetch(`${baseUrl}/api/purchasing/invoices/${piId}`, {
