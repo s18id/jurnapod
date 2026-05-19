@@ -68,6 +68,22 @@ export function getReviewSectionStatus(params: { active: boolean; complete: bool
   return "incomplete";
 }
 
+function focusFirstInvalidField(sectionId: string): void {
+  if (typeof window === "undefined") return;
+  window.requestAnimationFrame(() => {
+    const panel = document.getElementById(`${sectionId}-panel`);
+    const firstInvalidField = panel?.querySelector<HTMLElement>([
+      "[aria-invalid='true']",
+      "[data-invalid='true']",
+      "input:invalid",
+      "textarea:invalid",
+      "select:invalid",
+      "[role='alert']",
+    ].join(","));
+    firstInvalidField?.focus();
+  });
+}
+
 export function ReviewPanel({
   title,
   description,
@@ -113,6 +129,7 @@ export function ReviewPanel({
     const section = sections.find((item) => item.id === id);
     if (section?.errors?.length) {
       setActiveSectionId(id);
+      focusFirstInvalidField(id);
       return;
     }
     setCompletedSectionIds((current) => new Set([...Array.from(current), id]));

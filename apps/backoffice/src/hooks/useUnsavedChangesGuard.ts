@@ -111,14 +111,26 @@ export function createHashNavigationAdapter(options: HashNavigationAdapterOption
   return {
     subscribe(listener) {
       let previousHash = options.windowLike.location?.hash ?? "";
+      let suppressNextHashChange = false;
+      const setHashWithoutReentry = (hash: string) => {
+        previousHash = hash;
+        if (!options.windowLike.location || options.windowLike.location.hash === hash) return;
+        suppressNextHashChange = true;
+        options.windowLike.location.hash = hash;
+      };
       const onHashChange = () => {
         const nextHash = options.windowLike.location?.hash ?? "";
+        if (suppressNextHashChange) {
+          suppressNextHashChange = false;
+          previousHash = nextHash;
+          return;
+        }
         listener({
           source: "hash",
           target: nextHash,
-          retry: () => { previousHash = nextHash; },
+          retry: () => { setHashWithoutReentry(nextHash); },
           cancel: () => {
-            if (options.windowLike.location) options.windowLike.location.hash = previousHash;
+            setHashWithoutReentry(previousHash);
           },
         });
       };
@@ -131,13 +143,15 @@ export function createHashNavigationAdapter(options: HashNavigationAdapterOption
         const href = anchor?.getAttribute("href");
         const targetWindow = anchor?.getAttribute("target");
         if (targetWindow && targetWindow !== "_self") return;
-        if (!href || (!href.startsWith("#") && !href.startsWith("/"))) return;
+        // This adapter can safely replay hash navigation. Do not intercept absolute
+        // app paths here because replaying them requires the active app router.
+        if (!href || !href.startsWith("#")) return;
         event.preventDefault();
         listener({
           source: "link",
           target: href,
           retry: () => {
-            if (options.windowLike.location && href.startsWith("#")) options.windowLike.location.hash = href;
+            if (href.startsWith("#")) setHashWithoutReentry(href);
           },
         });
       };

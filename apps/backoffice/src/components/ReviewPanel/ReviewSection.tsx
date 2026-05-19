@@ -73,7 +73,7 @@ export function ReviewSection({
         <Collapse in={expanded} id={panelId} aria-expanded={expanded}>
           <Stack gap="md">
             {children}
-            <Button onClick={() => onComplete?.(id)} disabled={status === "invalid"} aria-label={`Complete ${title} section`}>
+            <Button onClick={() => onComplete?.(id)} aria-label={`Complete ${title} section`}>
               Mark section complete
             </Button>
           </Stack>

@@ -248,6 +248,21 @@ describe("useUnsavedChangesGuard controller", () => {
     Object.defineProperty(globalThis, "MouseEvent", { configurable: true, value: originalMouseEvent });
   });
 
+  it("does not swallow non-hash internal path links", () => {
+    const fakeWindow = new FakeWindow();
+    const fakeDocument = new FakeDocument();
+    const targets: string[] = [];
+    const unsubscribe = createHashNavigationAdapter({ windowLike: fakeWindow, documentLike: fakeDocument }).subscribe((event) => targets.push(event.target));
+
+    const event = new Event("click", { cancelable: true });
+    attachAnchorTarget(event, "/purchasing/suppliers");
+    fakeDocument.dispatch("click", event);
+
+    expect(targets).toEqual([]);
+    expect(event.defaultPrevented).toBe(false);
+    unsubscribe();
+  });
+
   it("cancels pending navigation when user chooses to stay", async () => {
     const calls: string[] = [];
     const controller = new UnsavedChangesGuardController({
