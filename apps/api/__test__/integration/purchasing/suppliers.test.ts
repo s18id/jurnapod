@@ -23,6 +23,11 @@ let ownerToken: string;
 let cashierToken: string;
 let cashierCompanyId: number;
 
+type SupplierListItem = {
+  id: number;
+  code: string;
+};
+
 describe('purchasing.suppliers', { timeout: 30000 }, () => {
   beforeAll(async () => {
     await acquireReadLock();
@@ -96,6 +101,52 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
       })
     });
     expect(res.status).toBe(403);
+  });
+
+  it('returns 403 when CASHIER tries supplier contact mutations directly', async () => {
+    const code = makeTag('SUPCCL');
+    const createSupplierRes = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        company_id: cashierCompanyId,
+        code,
+        name: 'Contact ACL Supplier',
+        currency: 'USD'
+      })
+    });
+    expect(createSupplierRes.status).toBe(201);
+    const createdSupplier = await createSupplierRes.json();
+    const supplierId = createdSupplier.data.id;
+
+    const ownerCreateContactRes = await fetch(`${baseUrl}/api/purchasing/suppliers/${supplierId}/contacts`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Owner Contact' })
+    });
+    expect(ownerCreateContactRes.status).toBe(201);
+    const createdContact = await ownerCreateContactRes.json();
+    const contactId = createdContact.data.id;
+
+    const cashierCreateRes = await fetch(`${baseUrl}/api/purchasing/suppliers/${supplierId}/contacts`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${cashierToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Cashier Contact' })
+    });
+    expect(cashierCreateRes.status).toBe(403);
+
+    const cashierPatchRes = await fetch(`${baseUrl}/api/purchasing/suppliers/${supplierId}/contacts/${contactId}`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${cashierToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Cashier Patch' })
+    });
+    expect(cashierPatchRes.status).toBe(403);
+
+    const cashierDeleteRes = await fetch(`${baseUrl}/api/purchasing/suppliers/${supplierId}/contacts/${contactId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${cashierToken}` }
+    });
+    expect(cashierDeleteRes.status).toBe(403);
   });
 
   // -------------------------------------------------------------------------
@@ -208,6 +259,45 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
     expect(err.error.code).toBe('CONFLICT');
   });
 
+  it('returns standard validation envelope for invalid supplier payloads', async () => {
+    const res = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        company_id: cashierCompanyId,
+        code: makeTag('SUPINV'),
+        name: 'Invalid Supplier',
+        email: 'not-an-email',
+        currency: 'US',
+        credit_limit: '-1',
+        payment_terms_days: 500
+      })
+    });
+
+    expect(res.status).toBe(400);
+    const err = await res.json();
+    expect(err.success).toBe(false);
+    expect(err.error.code).toBe('INVALID_REQUEST');
+    expect(typeof err.error.message).toBe('string');
+  });
+
+  it('requires company_id in supplier create payload', async () => {
+    const res = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: makeTag('SUPNOCOMP'),
+        name: 'Missing Company Supplier',
+        currency: 'USD'
+      })
+    });
+
+    expect(res.status).toBe(400);
+    const err = await res.json();
+    expect(err.success).toBe(false);
+    expect(err.error.code).toBe('INVALID_REQUEST');
+  });
+
   // -------------------------------------------------------------------------
   // AC: GET list and GET by id
   // -------------------------------------------------------------------------
@@ -258,8 +348,54 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
     });
     expect(inactiveRes.status).toBe(200);
     const inactiveResult = await inactiveRes.json();
-    const found = inactiveResult.data.suppliers.find((s: any) => s.id === supplierId);
+    const found = (inactiveResult.data.suppliers as SupplierListItem[]).find((supplier) => supplier.id === supplierId);
     expect(found).toBeDefined();
+  });
+
+  it('supports explicit active and inactive filters with limit/offset pagination', async () => {
+    const activeCode = makeTag('SUPFIA');
+    const inactiveCode = makeTag('SUPFII');
+
+    const activeCreate = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ company_id: cashierCompanyId, code: activeCode, name: 'Active Supported Filter', currency: 'USD' })
+    });
+    expect(activeCreate.status).toBe(201);
+
+    const inactiveCreate = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ company_id: cashierCompanyId, code: inactiveCode, name: 'Inactive Supported Filter', currency: 'USD' })
+    });
+    expect(inactiveCreate.status).toBe(201);
+    const inactiveSupplier = await inactiveCreate.json();
+
+    const deactivate = await fetch(`${baseUrl}/api/purchasing/suppliers/${inactiveSupplier.data.id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${ownerToken}` }
+    });
+    expect(deactivate.status).toBe(200);
+
+    const activeList = await fetch(`${baseUrl}/api/purchasing/suppliers?is_active=true&limit=10&offset=0&search=Supported%20Filter`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' }
+    });
+    expect(activeList.status).toBe(200);
+    const activePayload = await activeList.json();
+    expect(activePayload.data.limit).toBe(10);
+    expect(activePayload.data.offset).toBe(0);
+    expect((activePayload.data.suppliers as SupplierListItem[]).some((supplier) => supplier.code === activeCode)).toBe(true);
+    expect((activePayload.data.suppliers as SupplierListItem[]).some((supplier) => supplier.code === inactiveCode)).toBe(false);
+
+    const inactiveList = await fetch(`${baseUrl}/api/purchasing/suppliers?is_active=false&limit=10&offset=0&search=Supported%20Filter`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' }
+    });
+    expect(inactiveList.status).toBe(200);
+    const inactivePayload = await inactiveList.json();
+    expect((inactivePayload.data.suppliers as SupplierListItem[]).some((supplier) => supplier.code === inactiveCode)).toBe(true);
+    expect((inactivePayload.data.suppliers as SupplierListItem[]).some((supplier) => supplier.code === activeCode)).toBe(false);
   });
 
   it('searches by name or code', async () => {
@@ -394,7 +530,7 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
     });
     expect(listRes.status).toBe(200);
     const list = await listRes.json();
-    const found = list.data.suppliers.find((s: any) => s.id === supplierId);
+    const found = (list.data.suppliers as SupplierListItem[]).find((supplier) => supplier.id === supplierId);
     expect(found).toBeUndefined();
   });
 
@@ -417,6 +553,83 @@ describe('purchasing.suppliers', { timeout: 30000 }, () => {
     });
 
     expect(res.status).toBe(403);
+  });
+
+  it('returns 404 when a contact is accessed under the wrong supplier', async () => {
+    const firstSupplierRes = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        company_id: cashierCompanyId,
+        code: makeTag('SUPWCA'),
+        name: 'Wrong Contact Supplier A',
+        currency: 'USD'
+      })
+    });
+    expect(firstSupplierRes.status).toBe(201);
+    const firstSupplier = await firstSupplierRes.json();
+
+    const secondSupplierRes = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        company_id: cashierCompanyId,
+        code: makeTag('SUPWCB'),
+        name: 'Wrong Contact Supplier B',
+        currency: 'USD'
+      })
+    });
+    expect(secondSupplierRes.status).toBe(201);
+    const secondSupplier = await secondSupplierRes.json();
+
+    const contactRes = await fetch(`${baseUrl}/api/purchasing/suppliers/${firstSupplier.data.id}/contacts`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Scoped Contact' })
+    });
+    expect(contactRes.status).toBe(201);
+    const contact = await contactRes.json();
+
+    const wrongSupplierRes = await fetch(`${baseUrl}/api/purchasing/suppliers/${secondSupplier.data.id}/contacts/${contact.data.id}`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${ownerToken}` }
+    });
+    expect(wrongSupplierRes.status).toBe(404);
+    const err = await wrongSupplierRes.json();
+    expect(err.success).toBe(false);
+    expect(err.error.code).toBe('NOT_FOUND');
+  });
+
+  it('returns 404 for contact creation on an inactive supplier', async () => {
+    const supplierRes = await fetch(`${baseUrl}/api/purchasing/suppliers`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        company_id: cashierCompanyId,
+        code: makeTag('SUPICN'),
+        name: 'Inactive Contact Supplier',
+        currency: 'USD'
+      })
+    });
+    expect(supplierRes.status).toBe(201);
+    const supplierPayload = await supplierRes.json();
+    const supplierId = supplierPayload.data.id;
+
+    const deactivateRes = await fetch(`${baseUrl}/api/purchasing/suppliers/${supplierId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${ownerToken}` }
+    });
+    expect(deactivateRes.status).toBe(200);
+
+    const contactCreateRes = await fetch(`${baseUrl}/api/purchasing/suppliers/${supplierId}/contacts`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Inactive Supplier Contact' })
+    });
+    expect(contactCreateRes.status).toBe(404);
+    const err = await contactCreateRes.json();
+    expect(err.success).toBe(false);
+    expect(err.error.code).toBe('NOT_FOUND');
   });
 
   // -------------------------------------------------------------------------

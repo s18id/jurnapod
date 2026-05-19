@@ -233,6 +233,13 @@ export const APP_ROUTES: readonly AppRoute[] = [
     requiredModule: "inventory"
   },
   {
+    path: "/purchasing/suppliers",
+    label: "Suppliers",
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "purchasing",
+    permission: { module: "purchasing", resource: "suppliers", permissionMask: PERMISSION_BITS.READ }
+  },
+  {
     path: "/inventory-settings",
     label: "Inventory Settings",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],

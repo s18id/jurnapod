@@ -778,7 +778,7 @@ development_status:
   69-4-financial-review-ux: backlog
   69-5-ap-exception-worklist: backlog
   69-2-e-reviewpanel-domain-interaction-hardening: done
-  69-2-a-supplier-management-contacts: backlog
+  69-2-a-supplier-management-contacts: done
   69-2-b-purchase-orders-receipts: backlog
   69-2-c-ap-invoices-audit-links: backlog
   69-2-d-ap-payments-credits: backlog

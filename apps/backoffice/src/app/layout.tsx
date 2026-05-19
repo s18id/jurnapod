@@ -94,6 +94,10 @@ const NAV_GROUPS: Array<{ label: string; paths: string[] }> = [
     paths: ["/item-groups", "/items", "/prices", "/supplies", "/fixed-assets", "/inventory-settings"]
   },
   {
+    label: "Purchasing",
+    paths: ["/purchasing/suppliers"]
+  },
+  {
     label: "Settings",
     paths: [
       "/audit-logs",
