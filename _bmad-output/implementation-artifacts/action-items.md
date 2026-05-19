@@ -11,9 +11,9 @@
 |----------|------|------|-----------|-------|
 | P0 | 0 | 4 | 0 | 4 |
 | P1 | 0 | 12 | 0 | 12 |
-| P2 | 3 | 15 | 0 | 18 |
+| P2 | 2 | 16 | 0 | 18 |
 | P3 | 1 | 5 | 3 | 9 |
-| **Total** | **5** | **35** | **3** | **43** |
+| **Total** | **3** | **37** | **3** | **43** |
 
 > **Note:** The Historical section (Pre-Epic 8) is tracked separately (32 items) and excluded from summary totals above.
 
@@ -35,10 +35,8 @@
 
 | ID | Action | From | Owner | Status |
 |----|--------|------|-------|--------|
-| ~~E66-A1~~ | ~~Introduce a dedicated `platform.audit` ACL resource and migrate generic audit explorer routes from `platform.settings.READ` when the ACL migration story is approved~~ | ~~Epic 66 retro~~ | ~~Architecture team~~ | ~~Closed — Story 68-4 delivered migration `0211_acl_platform_audit.sql`, updated API routes to `platform.audit.READ`, updated AGENTS.md ACL matrix, and integration tests for permission enforcement~~ |
-| E66-A2 | Align generated OpenAPI query parameter types with runtime Zod validation for generic audit list filters | Epic 66 retro | API platform team | Open — deferred from Epic 67; verify before Story 68-4 spec finalization |
-| ~~E67-A1~~ | ~~Verify backend bulk operation endpoint contracts before story specification~~ | ~~Epic 67 retro~~ | ~~Architecture~~ | ~~Closed — Story 68-0 delivered contract artifact `story-68-0-contract.md` with full backend operations/progress/import/export/sync transport contract~~ |
-| E67-A2 | Add rendered component interaction tests for ExportDialog and ImportWizard | Epic 67 retro | QA | Open — due at Epic 68 pre-close |
+| E66-A2 | Align generated OpenAPI query parameter types with runtime Zod validation for generic audit list filters | Epic 66 retro | API platform team | Open — deferred from Epic 68; verify at Epic 69 kickoff |
+| E67-A2 | Add rendered component interaction tests for ExportDialog and ImportWizard | Epic 67 retro | QA | Open — deferred from Epic 68; due at Epic 69 pre-close |
 
 
 ---
@@ -59,6 +57,7 @@
 
 | ID | Action | From | Closed In | Notes |
 |----|--------|------|----------|-------|
+| **E66-A1** | Introduce a dedicated `platform.audit` ACL resource and migrate generic audit explorer routes from `platform.settings.READ` when the ACL migration story is approved | Epic 66 retro | Epic 68 Story 68-4 | Story 68-4 delivered migration `0211_acl_platform_audit.sql`, updated API routes to `platform.audit.READ`, updated AGENTS.md ACL matrix, and integration tests for permission enforcement. |
 | **E67-A1** | Verify backend bulk operation endpoint contracts before story specification | Epic 67 retro | Epic 68 kickoff (Story 68-0) | Contract artifact `_bmad-output/implementation-artifacts/stories/epic-68/story-68-0-contract.md` delivered. Source-inspection evidence covers: route mounts, endpoint inventory, SSE/polling contracts, retry/cancel gaps, auth/CORS/proxy findings, WebSocket `/ws` P0 auth bypass, and dependent story impact table (68-1/68-2/68-3/68-5). |
 
 ---

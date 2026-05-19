@@ -1,6 +1,6 @@
 # Epic 69: Finance & Purchasing — High-Risk Forms, Review Steps, Evidence UX
 
-**Status:** planned (queued — requires explicit backoffice unfreeze before execution)
+**Status:** planned (queued — backoffice unfreeze approved 2026-05-19; implementation remains gated by story-level sign-offs and API contract verification)
 **Sprint/Timebox:** Weeks 9–10 (of Backoffice Frontend Program)
 **Theme:** Financial-grade form patterns for high-risk domains: purchasing (suppliers, POs, goods receipts, AP invoices, payments, credits) and accounting (journals, accounts, fiscal period controls, reports). Staged review steps with before/after diff, autosaved drafts, unsaved-changes guards, and audit trail links.
 **Primary Modules:** `apps/backoffice`, `packages/modules/purchasing`, `packages/modules/accounting`
@@ -219,10 +219,10 @@ Implement the AP exception worklist UI (data from Epic 47 backend):
 
 | # | Precondition | Enforcement | Status |
 |---|--------------|-------------|--------|
-| 1 | Epic 66 (Core Admin) complete — permission model for financial access control | sprint-status.yaml | ❌ (HOLDING) |
-| 2 | Epic 65 complete — EntityTable and FilterBar primitives available | sprint-status.yaml | ❌ (HOLDING) |
-| 3 | Backoffice unfreeze authorized | Written authorization | ❌ (HOLDING) |
-| 4 | Typed API client covers all purchasing and accounting endpoints | 65-2 completion | ❌ (HOLDING) |
+| 1 | Epic 66 (Core Admin) complete — permission model for financial access control | sprint-status.yaml | ✅ MET — `epic-66: done` |
+| 2 | Epic 65 complete — EntityTable and FilterBar primitives available | sprint-status.yaml | ✅ MET — `epic-65: done` |
+| 3 | Backoffice unfreeze authorized | Written authorization | ✅ MET — Ahmad approved unfreeze on 2026-05-19 |
+| 4 | Typed API client covers all purchasing and accounting endpoints | 65-2 completion | ✅ MET for foundation; endpoint-specific contracts MUST be verified before 69-2/69-3/69-5 |
 | 5 | Epic 47 AP exception worklist endpoint exists and is stable | Technical spike | ❌ (must verify) |
 
 ---
