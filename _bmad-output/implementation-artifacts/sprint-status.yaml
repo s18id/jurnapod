@@ -771,8 +771,8 @@ development_status:
   epic-68-retrospective: done
 
   # Epic 69: Finance & Purchasing — High-Risk Forms, Review Steps, Evidence UX
-  epic-69: backlog
-  69-1-reviewpanel-staged-forms: ready-for-dev
+  epic-69: in-progress
+  69-1-reviewpanel-staged-forms: done
   69-2-purchasing-domain-screens: backlog
   69-3-accounting-domain-screens: backlog
   69-4-financial-review-ux: backlog

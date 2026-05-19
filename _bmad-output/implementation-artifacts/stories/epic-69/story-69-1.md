@@ -1,6 +1,6 @@
 # Story 69-1: ReviewPanel and Staged Forms Pattern
 
-Status: ready-for-dev
+Status: done
 
 > **Sprint-Status Append-Only Rule (E45-A1 / E46-A1) — MANDATORY:**
 > If this story modifies `_bmad-output/implementation-artifacts/sprint-status.yaml`:
@@ -323,6 +323,11 @@ High
 - **Navigation guard:** Use the active backoffice navigation model. Current hash/custom navigation MUST be protected through a navigation adapter. Browser hard reload/close MUST be protected through `beforeunload`. React Router `useBlocker` MAY be added only when the RouterBridge/cutover is active.
 - **Accessibility:** All badges, alerts, and dialogs MUST have ARIA labels and keyboard navigation
 - **Cleanup Policy (MANDATORY):** Any code change in this story MUST include a cleanup pass for resolved TODO/FIXME comments, outdated comments, and dead code paths in the modified area.
+
+### Review Fix Dev Notes — 2026-05-19
+
+- R01 MUST be covered by a focused hook integration test for dirty form navigation, blocked state re-render, and confirm-leave retry behavior. Owner: implementation agent. Deadline: Story 69-1 review rerun.
+- R03/R04/R09 remaining interactive component coverage MUST be completed with Playwright component tests before Story 69-2 consumes ReviewPanel in a domain route. Owner: Story 69-2 implementer. Deadline: before first purchasing/accounting domain screen PR review. Success criterion: keyboard-only progression, focus movement to invalid fields, and dialog focus behavior are exercised in `qa:ct` or equivalent component coverage.
 
 ## Cross-Cutting Concerns
 
