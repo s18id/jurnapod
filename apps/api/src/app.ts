@@ -55,6 +55,7 @@ import { swaggerRoutes } from './routes/swagger.js';
 import { purchasingRoutes } from './routes/purchasing/index.js';
 import { apExceptionRoutes } from './routes/accounting/ap-exceptions.js';
 import { accountingRoutes } from './routes/accounting/index.js';
+import { dashboardRoutes } from './routes/dashboard.js';
 
 const HTTP_LOG_ENABLED = process.env.JP_HTTP_LOG === "1";
 
@@ -258,6 +259,9 @@ export function createApp(): Hono {
 
   // Register progress routes
   app.route("/api/operations", progressRoutes);
+
+  // Register layered dashboard summary routes
+  app.route("/api/dashboard", dashboardRoutes);
 
   // Register admin dashboard routes
   app.route("/admin/dashboard", adminDashboardRoutes);

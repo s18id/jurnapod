@@ -25,6 +25,9 @@ export { getV6RedirectForHash, HASH_TO_V6_ROUTE };
  * Includes deprecated paths that redirect to their replacement.
  */
 export const LEGACY_HASH_REDIRECTS: Record<string, string> = {
+  "#/admin/dashboard": "/dashboard",
+  "#/admin/dashboard/financial": "/dashboard",
+  "#/admin/dashboard/sync": "/dashboard",
   "#/items-prices": "/items",
   "#/feature-flags": "/modules",
   "#/feature-settings": "/outlet-settings",

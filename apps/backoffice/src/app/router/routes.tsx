@@ -33,6 +33,7 @@ export const ROUTE_PATHS = {
 
   // Authenticated root (shell wrapper)
   ROOT: "/",
+  DASHBOARD: "/dashboard",
 
   // Core
   DAILY_SALES: "/daily-sales",
@@ -103,6 +104,9 @@ export const ROUTE_PATHS = {
  * Map from legacy hash paths to v6 route paths.
  */
 export const HASH_TO_V6_ROUTE: Record<string, string> = {
+  "#/admin/dashboard": "/dashboard",
+  "#/admin/dashboard/financial": "/dashboard",
+  "#/admin/dashboard/sync": "/dashboard",
   "#/items-prices": "/items",
   "#/feature-flags": "/modules",
   "#/feature-settings": "/outlet-settings",

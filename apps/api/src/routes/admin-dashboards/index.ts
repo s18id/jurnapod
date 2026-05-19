@@ -74,6 +74,32 @@ adminDashboardRoutes.use("/*", async (c, next) => {
 // Mount Sub-Routers
 // =============================================================================
 
+function renderDashboardDeprecationNotice(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard Moved - Jurnapod</title>
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
+    main { max-width: 720px; margin: 10vh auto; padding: 2rem; background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08); }
+    a { color: #2563eb; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Dashboard moved</h1>
+    <p>The built-in HTML dashboard is deprecated. Use the layered backoffice dashboard for system health, operations, domain summaries, and My Work.</p>
+    <p><a href="/#/dashboard">Open the new dashboard</a></p>
+  </main>
+</body>
+</html>`;
+}
+
+adminDashboardRoutes.get("/", (c) => c.html(renderDashboardDeprecationNotice()));
+adminDashboardRoutes.get("/*", (c) => c.html(renderDashboardDeprecationNotice()));
+
 // Sync dashboard routes - GET /admin/dashboard/sync
 adminDashboardRoutes.route("/sync", syncDashboardRoutes);
 

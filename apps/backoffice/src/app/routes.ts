@@ -29,6 +29,11 @@ export type AppRoute = {
 export const APP_ROUTES: readonly AppRoute[] = [
   // === CORE ===
   {
+    path: "/dashboard",
+    label: "Dashboard",
+    allowedRoles: ["SUPER_ADMIN", "OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT", "CASHIER"]
+  },
+  {
     path: "/daily-sales",
     label: "Daily Sales",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
@@ -315,6 +320,12 @@ export const APP_ROUTES: readonly AppRoute[] = [
 
 export const DEFAULT_ROUTE_PATH = APP_ROUTES[0].path;
 
+const OLD_DASHBOARD_PATH_PATTERN = /^\/admin\/dashboard(?:\/.*)?$/;
+
+export function getDashboardRedirectTarget(path: string): string | null {
+  return OLD_DASHBOARD_PATH_PATTERN.test(path) ? "/dashboard" : null;
+}
+
 const ROLE_DETAIL_PATH_PATTERN = /^\/roles\/\d+$/;
 
 export function isRoleDetailPath(path: string): boolean {
@@ -336,6 +347,10 @@ export function normalizeHashPath(hash: string): string {
   
   // Strip query parameters from the path
   const pathWithoutQuery = cleaned.split('?')[0];
+  const dashboardRedirect = getDashboardRedirectTarget(pathWithoutQuery);
+  if (dashboardRedirect) {
+    return dashboardRedirect;
+  }
   return pathWithoutQuery.startsWith("/") ? pathWithoutQuery : `/${pathWithoutQuery}`;
 }
 

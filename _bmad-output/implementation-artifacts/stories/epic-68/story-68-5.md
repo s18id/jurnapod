@@ -1,6 +1,6 @@
 # Story 68-5: Layered Dashboards — Global Admin, Domain, My Work
 
-Status: backlog
+Status: in-progress
 
 > ⚠️ **Sprint-Status Append-Only Rule (E45-A1 / E46-A1) — MANDATORY:**
 > If this story modifies `_bmad-output/implementation-artifacts/sprint-status.yaml`:
@@ -39,12 +39,12 @@ This story integrates data from multiple sources: health endpoints, operations c
 
 ### Pre-Implementation Checklist
 
-- [ ] **Happy paths identified:** Global Admin shows health, jobs, exceptions; Domain shows module summaries; My Work shows personal tasks
-- [ ] **Error paths identified:** Health endpoint failure; API timeout; permission denied for domain data
-- [ ] **Edge cases identified:** Empty dashboard (no failed jobs, no pending tasks); all systems operational; very high failure count
-- [ ] **Test fixture needs identified:** Mock health responses; mock operation lists; mock domain summaries
-- [ ] **Integration test scope defined:** Unit tests for dashboard cards; integration tests for data fetching
-- [ ] **Negative auth test role selected:** `CASHIER` or custom low-privilege role for Global Admin (lacks required resource-level permissions)
+- [x] **Happy paths identified:** Global Admin shows health, jobs, exceptions; Domain shows module summaries; My Work shows personal tasks
+- [x] **Error paths identified:** Health endpoint failure; API timeout; permission denied for domain data
+- [x] **Edge cases identified:** Empty dashboard (no failed jobs, no pending tasks); all systems operational; very high failure count
+- [x] **Test fixture needs identified:** Mock health responses; mock operation lists; mock domain summaries
+- [x] **Integration test scope defined:** Unit tests for dashboard cards; API integration tests for DB-backed summary endpoints
+- [x] **Negative auth test role selected:** `CASHIER` or custom low-privilege role for Global Admin (lacks required resource-level permissions)
 
 ### Review Outcome
 
@@ -60,7 +60,7 @@ This story integrates data from multiple sources: health endpoints, operations c
 | Permission denied hides admin cards | Error | Unit |
 | Old dashboard URL redirects to new dashboard | Happy | Unit |
 
-**Sign-off:** Test scenarios reviewed and approved before implementation begins.
+**Sign-off:** Test scenarios reviewed. Implementation MAY begin with the mandatory data-source, route, ACL, and validation rules in this Dev Record.
 
 ---
 
@@ -68,10 +68,10 @@ This story integrates data from multiple sources: health endpoints, operations c
 
 ### Pre-Implementation Checklist
 
-- [ ] Producer error classes: `HealthCheckError`, `DashboardDataError`
-- [ ] Consumer catch paths: Individual card shows error state; dashboard remains functional
-- [ ] Fallback handling: Generic "Unable to load dashboard data" for failed cards
-- [ ] Error response mapping: 500 → card error state; 503 → backend unreachable banner
+- [x] Producer error classes: `HealthCheckError`, `DashboardDataError`
+- [x] Consumer catch paths: Individual card shows error state; dashboard remains functional
+- [x] Fallback handling: Generic "Unable to load dashboard data" for failed cards
+- [x] Error response mapping: 500 → card error state; 503 → backend unreachable banner
 
 ### Verified Error Paths
 
@@ -115,9 +115,9 @@ This story integrates data from multiple sources: health endpoints, operations c
 **Given** a user navigates to a domain dashboard  
 **When** the dashboard loads  
 **Then** it shows module-specific summaries:
-- **Inventory:** Total items, low stock alerts, recent stock movements
+- **Inventory:** Total items and low stock alerts; recent stock movements MUST render an API-gap state unless an existing company/outlet-safe source is verified during implementation
 - **Accounting:** Pending reconciliations, fiscal period status, journal entry count
-- **Purchasing:** Pending approvals, overdue invoices, open purchase orders
+- **Purchasing:** Overdue invoices and open purchase orders; pending approvals MUST render an API-gap state until an approvals workflow exists
 
 **And** each summary card links to the relevant domain page  
 **And** data is scoped to the current company and outlet
@@ -127,7 +127,7 @@ This story integrates data from multiple sources: health endpoints, operations c
 **When** the My Work panel loads  
 **Then** it shows personalized tasks:
 - **Recent Jobs:** Recent operations available from the operations center; user-specific filtering is deferred unless backend adds `createdBy` or an equivalent source
-- **Pending Approvals:** Documents awaiting approval (if user has approver role)
+- **Pending Approvals:** API-gap state because no verified approvals workflow or `/api/approvals` endpoint exists
 - **Saved Drafts:** Unsaved form drafts (from localStorage or Dexie)
 - **Unresolved Validation Failures:** Import/validation errors requiring attention
 
@@ -187,16 +187,44 @@ This story integrates data from multiple sources: health endpoints, operations c
 
 ### Data Sources
 
-| Card | Source Endpoint | Refresh Interval |
-|------|-----------------|-----------------|
-| System Health | `GET /api/health/live`, `GET /api/health/ready` | 60s |
-| Failed Jobs | `GET /api/operations?status=failed&limit=5` | 30s |
-| Pending Exceptions | `GET /api/purchasing/exceptions?status=pending` | 60s |
-| Inventory Summary | `GET /api/inventory/summary` | 300s |
-| Accounting Summary | `GET /api/accounting/summary` | 300s |
-| Purchasing Summary | `GET /api/purchasing/summary` | 300s |
-| My Work — Recent Jobs | `GET /api/operations?limit=5&offset=0` | 60s |
-| My Work — Pending Approvals | `GET /api/approvals?status=pending&assignee=me` | 120s |
+| Card | Source Endpoint | Refresh Interval | Implementation Rule |
+|------|-----------------|------------------|---------------------|
+| System Health | `GET /api/health?detailed=true` | 60s | MUST use detailed subsystem health for API, DB, import/export, and sync indicators; `/live` and `/ready` MAY be secondary probes only |
+| Failed Jobs | `GET /api/operations?status=failed&limit=5&offset=0` | 30s | MUST use existing Story 68-2 contract (`limit` + `offset`) |
+| Pending Exceptions | `GET /api/dashboard/pending-exceptions` | 60s | MUST aggregate existing AP exception, reconciliation, and operations sources without new tables |
+| Inventory Summary | `GET /api/dashboard/inventory-summary` | 300s | MUST be count-only over existing inventory sources |
+| Accounting Summary | `GET /api/dashboard/accounting-summary` | 300s | MUST be count-only over existing accounting sources |
+| Purchasing Summary | `GET /api/dashboard/purchasing-summary` | 300s | MUST be count-only over existing purchasing sources |
+| My Work — Recent Jobs | `GET /api/operations?limit=5&offset=0` | 60s | MUST be labelled company recent jobs because operations rows do not include user ownership |
+| My Work — Pending Approvals | none | n/a | MUST render a non-count API-gap state: "Approvals workflow not available yet"; MUST NOT display hardcoded `0` as if backed by data |
+
+### Backend Architecture Requirements (MANDATORY)
+
+- `apps/api/src/routes/dashboard.ts` MUST be a thin HTTP adapter only.
+- DB-backed query logic MUST live in `apps/api/src/lib/dashboard/dashboard-summaries.ts` or an equivalent API library module.
+- Dashboard routes MUST NOT import `getDbPool()` directly, contain SQL strings, or perform raw DB access in route handlers.
+- Dashboard summary functions MUST use existing tables only; this story MUST NOT add new tables or new business-write paths.
+- DB-backed dashboard summary tests MUST be integration tests with the real test DB.
+
+### Permission Matrix (MANDATORY)
+
+| Dashboard Area | Required Permission |
+|----------------|---------------------|
+| Global health card | Authenticated user only; no role-name gate |
+| Failed jobs card | `platform.operations.READ` |
+| Pending exceptions card | `accounting.journals.ANALYZE` OR `purchasing.suppliers.ANALYZE` |
+| Audit quick link | `platform.audit.READ` |
+| Settings quick link | Route-specific platform settings permission if available; otherwise hide unless route is accessible through existing shell route checks |
+| Inventory summary | `inventory.items.READ` |
+| Accounting summary | `accounting.reports.ANALYZE` |
+| Purchasing summary | `purchasing.reports.ANALYZE` |
+| My Work recent jobs | `platform.operations.READ`; hide when missing |
+| My Work drafts | Authenticated user only; local browser storage scoped by company/user |
+
+### Explicit API Gaps
+
+- Pending approvals have no verified backend workflow or `/api/approvals` endpoint. The dashboard MUST render a non-count API-gap state instead of `0`.
+- Recent stock movements have no verified dashboard-safe count/list source in this story. Inventory summary MUST display total items and low-stock counts only unless an existing endpoint with company/outlet-safe metadata is verified during implementation.
 
 ### Parallel Data Fetching
 ```typescript
@@ -283,6 +311,9 @@ type DashboardCardState =
 - [ ] Auto-refresh behavior verified (60s default, respects tab visibility)
 - [ ] Old dashboard URLs redirect to new dashboard
 - [ ] Each card has proper loading, empty, and error states
+- [ ] `npm run typecheck -w @jurnapod/api` passes if API dashboard stubs are changed
+- [ ] `npm run build -w @jurnapod/api` passes if API dashboard stubs are changed
+- [ ] API DB-backed dashboard summary integration tests pass if API dashboard stubs are changed
 - [ ] `npm run typecheck -w @jurnapod/backoffice` passes
 - [ ] `npm run build -w @jurnapod/backoffice` passes
 - [ ] Code review completed with no blockers
@@ -301,6 +332,8 @@ type DashboardCardState =
 
 ```bash
 # Pre-flight
+npm run typecheck -w @jurnapod/api
+npm run build -w @jurnapod/api
 npm run lint -w @jurnapod/backoffice
 npm run typecheck -w @jurnapod/backoffice
 npm run build -w @jurnapod/backoffice
@@ -308,10 +341,96 @@ npm run build -w @jurnapod/backoffice
 # Unit tests
 npm run test:single -w @jurnapod/backoffice -- __test__/unit/features/dashboards.test.tsx
 
+# API integration tests (required if API dashboard stubs are implemented)
+npm run test:single -w @jurnapod/api -- __test__/integration/dashboard/dashboard-summary.test.ts
+
 # Sprint status
 npx tsx scripts/validate-sprint-status.ts --epic 68
 ```
 
 ---
 
-_Last Updated: 2026-05-18 (prepared by bmad-sm)
+## Dev Record
+
+### Endpoint Verification Results (Pre-Implementation)
+
+**Verified on 2026-05-19:**
+
+| Endpoint | Status | Notes |
+|----------|--------|-------|
+| `GET /api/health` | ✅ Exists | Returns `status`, `timestamp`, `subsystems` (database, import, export, sync) |
+| `GET /api/health/live` | ✅ Exists | Liveness probe — no auth required |
+| `GET /api/health/ready` | ✅ Exists | Readiness probe — checks DB health |
+| `GET /api/operations` | ✅ Exists | Lists operations with `status`, `type`, `limit`, `offset` filters (Story 68-2) |
+| `GET /api/operations/:id/progress` | ✅ Exists | Returns operation progress (Story 8.3) |
+| `GET /api/sync/health` | ✅ Exists | Sync module health check |
+| `GET /api/accounting/ap-exceptions/worklist` | ✅ Exists | AC8 detect-then-list flow (Story 47.4) |
+| `GET /api/accounting/reports/ap-reconciliation/summary` | ✅ Exists | AP vs GL reconciliation summary |
+| `GET /api/accounting/reports/inventory-reconciliation/summary` | ✅ Exists | Inventory vs GL reconciliation summary |
+| `GET /admin/dashboard/financial` | ✅ Exists | Built-in financial health HTML dashboard; mounted outside `/api` |
+| `GET /admin/dashboard/sync` | ✅ Exists | Built-in sync health HTML dashboard; mounted outside `/api` |
+| `GET /api/purchasing/orders` | ✅ Exists | Purchase orders list with status filter |
+| `GET /api/purchasing/invoices` | ✅ Exists | Purchase invoices list |
+| `GET /api/inventory/items` | ✅ Exists | Items list with `is_active` filter |
+
+**Missing Endpoints (API Gaps):**
+
+| Endpoint | Gap | Mitigation |
+|----------|-----|------------|
+| `GET /api/dashboard/inventory-summary` | ❌ Does not exist | **Create stub** — count-only query over `items` table |
+| `GET /api/dashboard/accounting-summary` | ❌ Does not exist | **Create stub** — count-only query over `ap_exceptions`, `journal_batches`/`journal_lines`, `fiscal_years` |
+| `GET /api/dashboard/purchasing-summary` | ❌ Does not exist | **Create stub** — count-only query over `purchase_orders`, `purchase_invoices` |
+| `GET /api/dashboard/pending-exceptions` | ❌ Does not exist | **Create stub** — count query over `ap_exceptions` with status filter |
+| `GET /api/dashboard/pending-approvals` | ❌ Does not exist | **Defer** — no approvals workflow exists; UI MUST render a non-count API-gap state |
+| `GET /api/approvals` | ❌ Does not exist | **Defer** — no approvals API exists |
+
+**Stub Strategy (Layer 0):**
+- Create `apps/api/src/routes/dashboard.ts` as a thin HTTP adapter only
+- Create `apps/api/src/lib/dashboard/dashboard-summaries.ts` for DB-backed count queries
+- No new tables; query existing tables only
+- Each stub guarded by canonical resource-level ACL
+- Returns structured JSON with counts and simple aggregates
+- My Work panel uses existing `/api/operations` endpoint for recent jobs
+- Pending approvals card MUST show "Approvals workflow not available yet" without a numeric count
+
+### Implementation Order
+
+1. **Backend stubs** (`apps/api/src/routes/dashboard.ts` + `apps/api/src/lib/dashboard/dashboard-summaries.ts`) — count-only queries via library-first route architecture
+2. **Route registration** (`apps/api/src/app.ts`)
+3. **Front-end hooks** (`use-dashboard-data.ts`, `use-health-status.ts`)
+4. **DashboardCard primitive** (`dashboard-card.tsx`)
+5. **Global Admin Overview** (`global-admin-overview.tsx`)
+6. **Domain Dashboards** (`domain-dashboard.tsx`)
+7. **My Work panel** (`my-work-panel.tsx`)
+8. **Route + redirect** (`routes.ts`, `router.tsx`)
+9. **Tests** (`__test__/unit/features/dashboards.test.tsx`)
+10. **Validation + review**
+
+### Implementation Notes (2026-05-19)
+
+- Implemented API dashboard summary endpoints under `/api/dashboard` with thin route adapters and DB-backed library functions in `apps/api/src/lib/dashboard/dashboard-summaries.ts`.
+- Implemented front-end layered dashboard at `/dashboard` and made it the default route.
+- Implemented detailed health source via `/api/health?detailed=true`; missing subsystems render `unknown`, not healthy.
+- Implemented per-card refresh defaults: failed jobs 30s, recent jobs/pending exceptions 60s, domain summaries 300s; user interval override remains available.
+- Implemented selected-outlet stock summary scoping. `GET /api/dashboard/inventory-summary` requires `outlet_id`, validates it, ACL-checks it, and filters low-stock counts by that outlet.
+- Implemented API-gap rendering for pending approvals, validation failures, recent stock movements, and reconciliation counts where no verified dashboard-safe source exists.
+- Implemented old built-in dashboard deprecation notice for `/admin/dashboard/*` with link to `/#/dashboard`.
+- Independent review result: GO after fixes. Remaining P3 cleanup: legacy admin dashboard handlers/sub-router mounts are unreachable after deprecation catch-all and MAY be removed in a cleanup story after deprecation behavior is finalized.
+
+### Validation Evidence (2026-05-19)
+
+```bash
+npm run typecheck -w @jurnapod/api                          # PASS
+npm run build -w @jurnapod/api                              # PASS
+npm run lint -w @jurnapod/backoffice                        # PASS
+npm run typecheck -w @jurnapod/backoffice                   # PASS
+npm run build -w @jurnapod/backoffice                       # PASS (existing Vite chunk warnings)
+npm run test:single -w @jurnapod/backoffice -- __test__/unit/features/dashboards.test.tsx
+# PASS: 1 file, 6 tests
+npm run test:single -w @jurnapod/api -- __test__/integration/dashboard/dashboard-summary.test.ts
+# PASS: 1 file, 9 tests
+```
+
+---
+
+_Last Updated: 2026-05-19 (preparing for implementation)

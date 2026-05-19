@@ -39,6 +39,7 @@ import {
   APP_ROUTES,
   DEFAULT_ROUTE_PATH,
   findRoute,
+  getDashboardRedirectTarget,
   isRoleDetailPath,
   normalizeHashPath,
   userCanAccessRoute,
@@ -115,6 +116,7 @@ const ItemImportPage = lazyNamed(() => import("../features/item-import-page"), "
 const PriceImportPage = lazyNamed(() => import("../features/price-import-page"), "PriceImportPage");
 const OperationsCenter = lazyNamed(() => import("../features/operations/operations-center"), "OperationsCenter");
 const AuditExplorerPage = lazyNamed(() => import("../features/audit/audit-explorer"), "AuditExplorerPage");
+const LayeredDashboardPage = lazyNamed(() => import("../features/dashboards/global-admin-overview"), "LayeredDashboardPage");
 
 function RouteLoadingFallback() {
   return <div style={{ padding: "1rem" }}>Loading…</div>;
@@ -143,6 +145,11 @@ function ensureHash(path: string): void {
 function resolvePathFromLocation(): string {
   if (globalThis.location.hash.length > 0) {
     return normalizeHashPath(globalThis.location.hash);
+  }
+
+  const dashboardRedirect = getDashboardRedirectTarget(globalThis.location.pathname.replace(/\/+$/, ""));
+  if (dashboardRedirect) {
+    return dashboardRedirect;
   }
 
   const publicSlug = getPublicStaticSlugFromLocation(globalThis.location);
@@ -191,6 +198,15 @@ function RedirectToPath(props: { targetPath: string; user: SessionUser }) {
 }
 
 function RouteScreen(props: { path: string; user: SessionUser }) {
+  const dashboardRedirect = getDashboardRedirectTarget(props.path);
+  if (dashboardRedirect) {
+    return <RedirectToPath targetPath={dashboardRedirect} user={props.user} />;
+  }
+
+  if (props.path === "/dashboard") {
+    return renderLazyPage(<LayeredDashboardPage user={props.user} />);
+  }
+
   // Handle legacy /items-prices route redirect
   if (props.path === "/items-prices") {
     return <RedirectToPath targetPath="/items" user={props.user} />;
