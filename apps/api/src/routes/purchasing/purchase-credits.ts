@@ -11,11 +11,12 @@
  * - POST /purchasing/credits/:id/apply - Apply/post purchase credit
  * - POST /purchasing/credits/:id/void - Void applied purchase credit
  *
- * Required ACL: purchasing.credits resource with READ/CREATE/UPDATE permissions
+ * Required ACL: purchasing.credits resource with READ/CREATE/UPDATE/DELETE permissions
  */
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { Temporal } from "@js-temporal/polyfill";
 import {
   PurchaseCreditCreateSchema,
   PurchaseCreditListQuerySchema,
@@ -57,6 +58,16 @@ declare module "hono" {
 
 const creditRoutes = new Hono();
 
+function isValidDateOnly(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  try {
+    Temporal.PlainDate.from(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 creditRoutes.use("/*", async (c, next) => {
   const authResult = await authenticateRequest(c.req.raw);
   if (!authResult.success) {
@@ -82,15 +93,20 @@ creditRoutes.get("/", async (c) => {
     }
 
     const url = new URL(c.req.raw.url);
+    const rawDateFrom = url.searchParams.get("date_from") ?? undefined;
+    const rawDateTo = url.searchParams.get("date_to") ?? undefined;
+    if ((rawDateFrom && !isValidDateOnly(rawDateFrom)) || (rawDateTo && !isValidDateOnly(rawDateTo))) {
+      return errorResponse("INVALID_REQUEST", "Invalid query parameters", 400);
+    }
     let query;
     try {
       query = PurchaseCreditListQuerySchema.parse({
-        supplier_id: url.searchParams.get("supplier_id") ? Number(url.searchParams.get("supplier_id")) : undefined,
+        supplier_id: url.searchParams.get("supplier_id") ?? undefined,
         status: url.searchParams.get("status") ?? undefined,
-        date_from: url.searchParams.get("date_from") ?? undefined,
-        date_to: url.searchParams.get("date_to") ?? undefined,
-        limit: url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : 20,
-        offset: url.searchParams.get("offset") ? Number(url.searchParams.get("offset")) : 0,
+        date_from: rawDateFrom,
+        date_to: rawDateTo,
+        limit: url.searchParams.get("limit") ?? undefined,
+        offset: url.searchParams.get("offset") ?? undefined,
       });
     } catch (e) {
       if (e instanceof z.ZodError) {
@@ -108,14 +124,17 @@ creditRoutes.get("/", async (c) => {
       companyId: auth.companyId,
       supplierId: query.supplier_id,
       status: statusCode,
-      dateFrom: query.date_from ? new Date(query.date_from) : undefined,
-      dateTo: query.date_to ? new Date(query.date_to) : undefined,
+      dateFrom: query.date_from,
+      dateTo: query.date_to,
       limit: query.limit,
       offset: query.offset,
     });
 
     return successResponse(result);
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid query parameters", 400);
+    }
     console.error("GET /purchasing/credits failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to fetch purchase credits", 500);
   }
@@ -329,7 +348,7 @@ creditRoutes.post("/:id/void", async (c) => {
     const accessResult = await requireAccess({
       module: "purchasing",
       resource: "credits",
-      permission: "update",
+      permission: "delete",
     })(c.req.raw, auth);
 
     if (accessResult !== null) {

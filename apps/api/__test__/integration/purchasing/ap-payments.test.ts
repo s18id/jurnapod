@@ -25,6 +25,7 @@ import {
   setTestSupplierActive,
   setTestBankAccountActive,
   setTestPurchasingDefaultApAccount,
+  createTestRole,
 } from '../../fixtures';
 
 import { makeTag } from "../../helpers/tags";
@@ -33,6 +34,8 @@ let baseUrl: string;
 let ownerToken: string;
 let testCompanyId: number;
 let cashierToken: string;
+let updateOnlyPaymentToken: string;
+let deleteOnlyPaymentToken: string;
 let testSupplierId: number;
 let bankAccountId: number;
 let apAccountId: number;
@@ -42,7 +45,54 @@ let postedPi2Id: number;  // PI for full payment tests
 let postedPi3Id: number;  // PI for multi-line payment tests
 let apTagCounter = 0;
 
+function authHeaders(token: string): HeadersInit {
+  return {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  };
+}
+
 describe('purchasing.ap-payments', { timeout: 30000 }, () => {
+  async function createPostedInvoiceForPayment(amount = '10000.0000'): Promise<number> {
+    const createRes = await fetch(`${baseUrl}/api/purchasing/invoices`, {
+      method: 'POST',
+      headers: authHeaders(ownerToken),
+      body: JSON.stringify({
+        supplier_id: testSupplierId,
+        invoice_no: makeTag('APPIPERM', 32),
+        invoice_date: '2026-04-26',
+        currency_code: 'IDR',
+        lines: [{ description: 'AP payment permission invoice', qty: '1', unit_price: amount, line_type: 'SERVICE' }]
+      })
+    });
+    expect(createRes.status).toBe(201);
+    const createBody = await createRes.json();
+    const invoiceId = Number(createBody.data.id);
+    const postRes = await fetch(`${baseUrl}/api/purchasing/invoices/${invoiceId}/post`, {
+      method: 'POST',
+      headers: authHeaders(ownerToken),
+    });
+    expect(postRes.status).toBe(200);
+    return invoiceId;
+  }
+
+  async function createDraftPaymentForPermission(): Promise<number> {
+    const invoiceId = await createPostedInvoiceForPayment();
+    const res = await fetch(`${baseUrl}/api/purchasing/payments`, {
+      method: 'POST',
+      headers: authHeaders(ownerToken),
+      body: JSON.stringify({
+        payment_date: '2026-04-26',
+        bank_account_id: bankAccountId,
+        supplier_id: testSupplierId,
+        lines: [{ purchase_invoice_id: invoiceId, allocation_amount: '1000.0000' }]
+      })
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    return Number(body.data.id);
+  }
+
   beforeAll(async () => {
     await acquireReadLock();
     baseUrl = getTestBaseUrl();
@@ -73,6 +123,7 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       ['purchasing', 'invoices'],
       ['purchasing', 'suppliers'],
       ['purchasing', 'exchange_rates'],
+      ['platform', 'roles'],
     ] as [string, string][]) {
       await setModulePermission(testCompanyId, ownerRoleId, module, resource, 63, { allowSystemRoleMutation: true });
     }
@@ -103,6 +154,20 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       baseUrl
     );
     cashierToken = cashier.accessToken;
+
+    const updateRole = await createTestRole(baseUrl, ownerToken, 'AP Payment Update Only');
+    await setModulePermission(testCompanyId, updateRole.id, 'purchasing', 'payments', 4);
+    const updateUserEmail = `ap-pay-update-${++apTagCounter}@example.com`;
+    const updateUser = await createTestUser(testCompanyId, { email: updateUserEmail, name: 'AP Payment Update Only', password: 'TestPassword123!' });
+    await assignUserGlobalRole(updateUser.id, updateRole.id);
+    updateOnlyPaymentToken = await loginForTest(baseUrl, testCompany.code, updateUserEmail, 'TestPassword123!');
+
+    const deleteRole = await createTestRole(baseUrl, ownerToken, 'AP Payment Delete Only');
+    await setModulePermission(testCompanyId, deleteRole.id, 'purchasing', 'payments', 8);
+    const deleteUserEmail = `ap-pay-delete-${++apTagCounter}@example.com`;
+    const deleteUser = await createTestUser(testCompanyId, { email: deleteUserEmail, name: 'AP Payment Delete Only', password: 'TestPassword123!' });
+    await assignUserGlobalRole(deleteUser.id, deleteRole.id);
+    deleteOnlyPaymentToken = await loginForTest(baseUrl, testCompany.code, deleteUserEmail, 'TestPassword123!');
 
     // Create and post purchase invoices for payment tests
     // PI 1 - for partial payment test (total 100000, we'll pay 50000)
@@ -276,6 +341,89 @@ describe('purchasing.ap-payments', { timeout: 30000 }, () => {
       })
     });
     expect(res.status).toBe(403);
+  });
+
+  it.each([
+    ['status', 'ARCHIVED'],
+    ['date_from', '2026-04-99'],
+    ['date_to', 'not-a-date'],
+    ['supplier_id', 'abc'],
+    ['limit', '0'],
+    ['limit', '101'],
+    ['offset', '-1'],
+  ])('returns 400 INVALID_REQUEST for invalid %s filter', async (key, value) => {
+    const res = await fetch(`${baseUrl}/api/purchasing/payments?${key}=${encodeURIComponent(value)}`, {
+      method: 'GET',
+      headers: authHeaders(ownerToken),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('INVALID_REQUEST');
+  });
+
+  it('accepts payment status labels and date-only filters', async () => {
+    for (const status of ['DRAFT', 'POSTED', 'VOID']) {
+      const res = await fetch(`${baseUrl}/api/purchasing/payments?status=${status}&date_from=2026-04-01&date_to=2026-04-30`, {
+        method: 'GET',
+        headers: authHeaders(ownerToken),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(Array.isArray(body.data.payments)).toBe(true);
+    }
+  });
+
+  it('returns 403 when CASHIER tries to post or void an AP payment', async () => {
+    const draftPaymentId = await createDraftPaymentForPermission();
+    const postDenied = await fetch(`${baseUrl}/api/purchasing/payments/${draftPaymentId}/post`, {
+      method: 'POST',
+      headers: authHeaders(cashierToken),
+    });
+    expect(postDenied.status).toBe(403);
+
+    const postedPaymentId = await createDraftPaymentForPermission();
+    const ownerPost = await fetch(`${baseUrl}/api/purchasing/payments/${postedPaymentId}/post`, {
+      method: 'POST',
+      headers: authHeaders(ownerToken),
+    });
+    expect(ownerPost.status).toBe(200);
+    const voidDenied = await fetch(`${baseUrl}/api/purchasing/payments/${postedPaymentId}/void`, {
+      method: 'POST',
+      headers: authHeaders(cashierToken),
+    });
+    expect(voidDenied.status).toBe(403);
+  });
+
+  it('separates UPDATE post permission from DELETE void permission for AP payments', async () => {
+    const updateOnlyPaymentId = await createDraftPaymentForPermission();
+    const updatePost = await fetch(`${baseUrl}/api/purchasing/payments/${updateOnlyPaymentId}/post`, {
+      method: 'POST',
+      headers: authHeaders(updateOnlyPaymentToken),
+    });
+    expect(updatePost.status).toBe(200);
+    const updateVoidDenied = await fetch(`${baseUrl}/api/purchasing/payments/${updateOnlyPaymentId}/void`, {
+      method: 'POST',
+      headers: authHeaders(updateOnlyPaymentToken),
+    });
+    expect(updateVoidDenied.status).toBe(403);
+
+    const deleteOnlyPaymentId = await createDraftPaymentForPermission();
+    const deletePostDenied = await fetch(`${baseUrl}/api/purchasing/payments/${deleteOnlyPaymentId}/post`, {
+      method: 'POST',
+      headers: authHeaders(deleteOnlyPaymentToken),
+    });
+    expect(deletePostDenied.status).toBe(403);
+    const ownerPost = await fetch(`${baseUrl}/api/purchasing/payments/${deleteOnlyPaymentId}/post`, {
+      method: 'POST',
+      headers: authHeaders(ownerToken),
+    });
+    expect(ownerPost.status).toBe(200);
+    const deleteVoid = await fetch(`${baseUrl}/api/purchasing/payments/${deleteOnlyPaymentId}/void`, {
+      method: 'POST',
+      headers: authHeaders(deleteOnlyPaymentToken),
+    });
+    expect(deleteVoid.status).toBe(200);
   });
 
   // -------------------------------------------------------------------------

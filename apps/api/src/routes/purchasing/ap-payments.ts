@@ -11,11 +11,12 @@
  * - POST /purchasing/payments/:id/post - Post a draft payment (creates journal)
  * - POST /purchasing/payments/:id/void - Void a posted payment (reverses journal)
  *
- * Required ACL: purchasing.payments resource with READ/CREATE/UPDATE permissions
+ * Required ACL: purchasing.payments resource with READ/CREATE/UPDATE/DELETE permissions
  */
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { Temporal } from "@js-temporal/polyfill";
 import {
   ApPaymentCreateSchema,
   ApPaymentListQuerySchema,
@@ -60,6 +61,16 @@ declare module "hono" {
 
 const paymentRoutes = new Hono();
 
+function isValidDateOnly(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  try {
+    Temporal.PlainDate.from(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Auth middleware
 paymentRoutes.use("/*", async (c, next) => {
   const authResult = await authenticateRequest(c.req.raw);
@@ -87,24 +98,21 @@ paymentRoutes.get("/", async (c) => {
     }
 
     const url = new URL(c.req.raw.url);
-    const rawQuery = {
-      supplier_id: url.searchParams.get("supplier_id"),
-      status: url.searchParams.get("status"),
-      date_from: url.searchParams.get("date_from"),
-      date_to: url.searchParams.get("date_to"),
-      limit: url.searchParams.get("limit"),
-      offset: url.searchParams.get("offset"),
-    };
+    const rawDateFrom = url.searchParams.get("date_from") ?? undefined;
+    const rawDateTo = url.searchParams.get("date_to") ?? undefined;
+    if ((rawDateFrom && !isValidDateOnly(rawDateFrom)) || (rawDateTo && !isValidDateOnly(rawDateTo))) {
+      return errorResponse("INVALID_REQUEST", "Invalid query parameters", 400);
+    }
 
     let query;
     try {
       query = ApPaymentListQuerySchema.parse({
-        supplier_id: rawQuery.supplier_id ? Number(rawQuery.supplier_id) : undefined,
-        status: rawQuery.status ?? undefined,
-        date_from: rawQuery.date_from ?? undefined,
-        date_to: rawQuery.date_to ?? undefined,
-        limit: rawQuery.limit ? Number(rawQuery.limit) : 20,
-        offset: rawQuery.offset ? Number(rawQuery.offset) : 0,
+        supplier_id: url.searchParams.get("supplier_id") ?? undefined,
+        status: url.searchParams.get("status") ?? undefined,
+        date_from: rawDateFrom,
+        date_to: rawDateTo,
+        limit: url.searchParams.get("limit") ?? undefined,
+        offset: url.searchParams.get("offset") ?? undefined,
       });
     } catch (e) {
       if (e instanceof z.ZodError) {
@@ -122,14 +130,17 @@ paymentRoutes.get("/", async (c) => {
       companyId: auth.companyId,
       supplierId: query.supplier_id,
       status: statusCode,
-      dateFrom: query.date_from ? new Date(query.date_from) : undefined,
-      dateTo: query.date_to ? new Date(query.date_to) : undefined,
+      dateFrom: query.date_from,
+      dateTo: query.date_to,
       limit: query.limit,
       offset: query.offset,
     });
 
     return successResponse(result);
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid query parameters", 400);
+    }
     console.error("GET /purchasing/payments failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to fetch AP payments", 500);
   }
@@ -355,7 +366,7 @@ paymentRoutes.post("/:id/void", async (c) => {
     const accessResult = await requireAccess({
       module: "purchasing",
       resource: "payments",
-      permission: "update"
+      permission: "delete"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {

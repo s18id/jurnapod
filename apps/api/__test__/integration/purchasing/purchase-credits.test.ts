@@ -17,6 +17,7 @@ import {
   createTestSupplier,
   createTestPurchasingAccounts,
   getOrCreateTestCashierForPermission,
+  createTestRole,
 } from "../../fixtures";
 
 import { makeTag } from "../../helpers/tags";
@@ -25,6 +26,8 @@ let baseUrl: string;
 let testCompanyId: number;
 let ownerToken: string;
 let cashierToken: string;
+let updateOnlyCreditToken: string;
+let deleteOnlyCreditToken: string;
 let supplierId: number;
 let pcTagCounter = 0;
 
@@ -106,6 +109,9 @@ describe("purchasing.purchase-credits", { timeout: 30000 }, () => {
     await setModulePermission(testCompanyId, ownerRoleId, "purchasing", "credits", 63, {
       allowSystemRoleMutation: true,
     });
+    await setModulePermission(testCompanyId, ownerRoleId, "platform", "roles", 63, {
+      allowSystemRoleMutation: true,
+    });
 
     await createTestPurchasingAccounts(testCompanyId);
 
@@ -124,6 +130,20 @@ describe("purchasing.purchase-credits", { timeout: 30000 }, () => {
       baseUrl
     );
     cashierToken = cashier.accessToken;
+
+    const updateRole = await createTestRole(baseUrl, ownerToken, "Purchase Credit Update Only");
+    await setModulePermission(testCompanyId, updateRole.id, "purchasing", "credits", 4);
+    const updateEmail = `pc-update-${++pcTagCounter}@example.com`;
+    const updateUser = await createTestUser(testCompanyId, { email: updateEmail, name: "Purchase Credit Update Only", password: "TestPassword123!" });
+    await assignUserGlobalRole(updateUser.id, updateRole.id);
+    updateOnlyCreditToken = await loginForTest(baseUrl, company.code, updateEmail, "TestPassword123!");
+
+    const deleteRole = await createTestRole(baseUrl, ownerToken, "Purchase Credit Delete Only");
+    await setModulePermission(testCompanyId, deleteRole.id, "purchasing", "credits", 8);
+    const deleteEmail = `pc-delete-${++pcTagCounter}@example.com`;
+    const deleteUser = await createTestUser(testCompanyId, { email: deleteEmail, name: "Purchase Credit Delete Only", password: "TestPassword123!" });
+    await assignUserGlobalRole(deleteUser.id, deleteRole.id);
+    deleteOnlyCreditToken = await loginForTest(baseUrl, company.code, deleteEmail, "TestPassword123!");
   });
 
   afterAll(async () => {
@@ -183,6 +203,90 @@ describe("purchasing.purchase-credits", { timeout: 30000 }, () => {
   it("returns 403 when CASHIER lists credits", async () => {
     const res = await getJson("/api/purchasing/credits", cashierToken);
     expect(res.status).toBe(403);
+  });
+
+  it.each([
+    ['status', 'ARCHIVED'],
+    ['date_from', '2026-04-99'],
+    ['date_to', 'not-a-date'],
+    ['supplier_id', 'abc'],
+    ['limit', '0'],
+    ['limit', '101'],
+    ['offset', '-1'],
+  ])('returns 400 INVALID_REQUEST for invalid %s credit filter', async (key, value) => {
+    const res = await getJson(`/api/purchasing/credits?${key}=${encodeURIComponent(value)}`, ownerToken);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('INVALID_REQUEST');
+  });
+
+  it('accepts credit status labels and date-only filters', async () => {
+    for (const status of ['DRAFT', 'PARTIAL', 'APPLIED', 'VOID']) {
+      const res = await getJson(`/api/purchasing/credits?status=${status}&date_from=2026-04-01&date_to=2026-04-30`, ownerToken);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(Array.isArray(body.data.credits)).toBe(true);
+    }
+  });
+
+  it("returns 403 when CASHIER creates, applies, or voids credits", async () => {
+    const createDenied = await postJson("/api/purchasing/credits", cashierToken, {
+      supplier_id: supplierId,
+      credit_no: makeTag('PCCASH', 32),
+      credit_date: "2026-04-19",
+      lines: [{ description: "Denied", qty: "1", unit_price: "1.0000", reason: "denied" }],
+    });
+    expect(createDenied.status).toBe(403);
+
+    const creditRes = await postJson("/api/purchasing/credits", ownerToken, {
+      supplier_id: supplierId,
+      credit_no: makeTag('PCAUTH', 32),
+      credit_date: "2026-04-20",
+      lines: [{ description: "Auth", qty: "1", unit_price: "5.0000", reason: "auth" }],
+    });
+    expect(creditRes.status).toBe(201);
+    const creditBody = await creditRes.json();
+    const creditId = Number(creditBody.data.id);
+
+    const applyDenied = await postJson(`/api/purchasing/credits/${creditId}/apply`, cashierToken);
+    expect(applyDenied.status).toBe(403);
+
+    const voidDenied = await postJson(`/api/purchasing/credits/${creditId}/void`, cashierToken);
+    expect(voidDenied.status).toBe(403);
+  });
+
+  it("separates UPDATE apply permission from DELETE void permission for credits", async () => {
+    const invoiceId = await createAndPostInvoice({ invoiceNo: makeTag('PCACLP1', 32), invoiceDate: "2026-04-20", amount: "10.0000" });
+    const creditRes = await postJson("/api/purchasing/credits", ownerToken, {
+      supplier_id: supplierId,
+      credit_no: makeTag('PCACL1', 32),
+      credit_date: "2026-04-20",
+      lines: [{ purchase_invoice_id: invoiceId, description: "ACL", qty: "1", unit_price: "5.0000", reason: "acl" }],
+    });
+    expect(creditRes.status).toBe(201);
+    const creditId = Number((await creditRes.json()).data.id);
+
+    const updateApply = await postJson(`/api/purchasing/credits/${creditId}/apply`, updateOnlyCreditToken);
+    expect(updateApply.status).toBe(200);
+    const updateVoidDenied = await postJson(`/api/purchasing/credits/${creditId}/void`, updateOnlyCreditToken);
+    expect(updateVoidDenied.status).toBe(403);
+
+    const deleteInvoiceId = await createAndPostInvoice({ invoiceNo: makeTag('PCACLP2', 32), invoiceDate: "2026-04-20", amount: "10.0000" });
+    const deleteCreditRes = await postJson("/api/purchasing/credits", ownerToken, {
+      supplier_id: supplierId,
+      credit_no: makeTag('PCACL2', 32),
+      credit_date: "2026-04-20",
+      lines: [{ purchase_invoice_id: deleteInvoiceId, description: "ACL delete", qty: "1", unit_price: "5.0000", reason: "acl" }],
+    });
+    expect(deleteCreditRes.status).toBe(201);
+    const deleteCreditId = Number((await deleteCreditRes.json()).data.id);
+    const deleteApplyDenied = await postJson(`/api/purchasing/credits/${deleteCreditId}/apply`, deleteOnlyCreditToken);
+    expect(deleteApplyDenied.status).toBe(403);
+    const ownerApply = await postJson(`/api/purchasing/credits/${deleteCreditId}/apply`, ownerToken);
+    expect(ownerApply.status).toBe(200);
+    const deleteVoid = await postJson(`/api/purchasing/credits/${deleteCreditId}/void`, deleteOnlyCreditToken);
+    expect(deleteVoid.status).toBe(200);
   });
 
   it("creates a draft purchase credit and computes total_credit_amount", async () => {
