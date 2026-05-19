@@ -779,7 +779,7 @@ development_status:
   69-5-ap-exception-worklist: backlog
   69-2-e-reviewpanel-domain-interaction-hardening: done
   69-2-a-supplier-management-contacts: done
-  69-2-b-purchase-orders-receipts: backlog
+  69-2-b-purchase-orders-receipts: done
   69-2-c-ap-invoices-audit-links: backlog
   69-2-d-ap-payments-credits: backlog
 

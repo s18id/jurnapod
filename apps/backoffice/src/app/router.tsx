@@ -118,6 +118,8 @@ const OperationsCenter = lazyNamed(() => import("../features/operations/operatio
 const AuditExplorerPage = lazyNamed(() => import("../features/audit/audit-explorer"), "AuditExplorerPage");
 const LayeredDashboardPage = lazyNamed(() => import("../features/dashboards/global-admin-overview"), "LayeredDashboardPage");
 const PurchasingSuppliersPage = lazyNamed(() => import("../features/purchasing/suppliers"), "PurchasingSuppliersPage");
+const PurchasingOrdersPage = lazyNamed(() => import("../features/purchasing/orders-receipts"), "PurchasingOrdersPage");
+const PurchasingReceiptsPage = lazyNamed(() => import("../features/purchasing/orders-receipts"), "PurchasingReceiptsPage");
 
 function RouteLoadingFallback() {
   return <div style={{ padding: "1rem" }}>Loading…</div>;
@@ -256,6 +258,12 @@ function RouteScreen(props: { path: string; user: SessionUser }) {
   }
   if (props.path === "/purchasing/suppliers") {
     return renderLazyPage(<PurchasingSuppliersPage user={props.user} />);
+  }
+  if (props.path === "/purchasing/orders") {
+    return renderLazyPage(<PurchasingOrdersPage user={props.user} />);
+  }
+  if (props.path === "/purchasing/receipts") {
+    return renderLazyPage(<PurchasingReceiptsPage user={props.user} />);
   }
   if (props.path === "/sales-invoices") {
     return renderLazyPage(<SalesInvoicesPage user={props.user} />);

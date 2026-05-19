@@ -41,8 +41,8 @@ Story 69-2 has been split into the following implementation-ready stories. **Do 
 | Split Key | Title | Scope | Dependencies | Status |
 |-----------|-------|-------|--------------|--------|
 | `69-2-e` | ReviewPanel Domain Interaction Hardening | Playwright/component tests for keyboard progression, invalid-field focus, modal focus behavior, hook DOM integration | Story 69-1 (done) | `done` |
-| `69-2-a` | Supplier Management + Contacts | Supplier list, create/edit, contacts, permissions | 69-1 (done), **69-2-e** | `backlog` |
-| `69-2-b` | Purchase Orders + Goods Receipts | PO list, create with lines, status changes, receipts from PO | 69-1 (done), 69-2-e, **69-2-a** | `backlog` |
+| `69-2-a` | Supplier Management + Contacts | Supplier list, create/edit, contacts, permissions | 69-1 (done), **69-2-e** | `done` |
+| `69-2-b` | Purchase Orders + Goods Receipts | PO list, create with lines, status changes, receipts from PO | 69-1 (done), 69-2-e, **69-2-a** | `done` |
 | `69-2-c` | AP Invoices Post/Void + Audit Links | AP invoice list, create, post, void with reason, audit deep-links | 69-1 (done), 69-2-e, **69-2-b** | `backlog` |
 | `69-2-d` | AP Payments + Supplier Credits | Payment list, create/allocate, post, void; credit create, apply, void | 69-1 (done), 69-2-e, **69-2-c** | `backlog` |
 

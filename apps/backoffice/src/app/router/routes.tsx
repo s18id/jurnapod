@@ -79,6 +79,9 @@ export const ROUTE_PATHS = {
   SUPPLIES: "/supplies",
   FIXED_ASSETS: "/fixed-assets",
   INVENTORY_SETTINGS: "/inventory-settings",
+  PURCHASING_SUPPLIERS: "/purchasing/suppliers",
+  PURCHASING_ORDERS: "/purchasing/orders",
+  PURCHASING_RECEIPTS: "/purchasing/receipts",
 
   // Settings
   AUDIT_LOGS: "/audit-logs",

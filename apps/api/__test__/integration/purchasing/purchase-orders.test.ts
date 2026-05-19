@@ -115,6 +115,35 @@ describe('purchasing.orders', { timeout: 30000 }, () => {
     expect(res.status).toBe(403);
   });
 
+  it('returns 403 when CASHIER tries to change purchase order status', async () => {
+    const createRes = await fetch(`${baseUrl}/api/purchasing/orders`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ownerToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        supplier_id: testSupplierId,
+        order_date: '2026-04-02',
+        lines: [{ qty: '10', unit_price: '100.00', tax_rate: '0.10' }]
+      })
+    });
+    expect(createRes.status).toBe(201);
+    const created = await createRes.json();
+    createdPOIds.push(created.data.id);
+
+    const res = await fetch(`${baseUrl}/api/purchasing/orders/${created.data.id}/status`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${cashierToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ status: 'SENT' })
+    });
+
+    expect(res.status).toBe(403);
+  });
+
   // -------------------------------------------------------------------------
   // AC: List purchase orders with filters (OWNER)
   // -------------------------------------------------------------------------

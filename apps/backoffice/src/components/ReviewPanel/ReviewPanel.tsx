@@ -46,6 +46,7 @@ export interface ReviewPanelProps {
   autosaveWarning?: string;
   featureFlag?: ReviewPanelFeatureFlag;
   saveLabel?: string;
+  saveDisabled?: boolean;
   submitting?: boolean;
   unsavedDialogOpened?: boolean;
   onSubmit: () => void;
@@ -95,6 +96,7 @@ export function ReviewPanel({
   autosaveWarning,
   featureFlag,
   saveLabel = "Save and log change",
+  saveDisabled = false,
   submitting = false,
   unsavedDialogOpened = false,
   onSubmit,
@@ -214,7 +216,7 @@ export function ReviewPanel({
           />
           <Group justify="space-between">
             <Button variant="light" color="red" onClick={onDiscardDraft}>Discard draft</Button>
-            <Button onClick={submit} disabled={!allSectionsComplete || !confirmed || submitting} loading={submitting}>
+            <Button onClick={submit} disabled={!allSectionsComplete || !confirmed || saveDisabled || submitting} loading={submitting}>
               {saveLabel}
             </Button>
           </Group>

@@ -240,6 +240,20 @@ export const APP_ROUTES: readonly AppRoute[] = [
     permission: { module: "purchasing", resource: "suppliers", permissionMask: PERMISSION_BITS.READ }
   },
   {
+    path: "/purchasing/orders",
+    label: "Purchase Orders",
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "purchasing",
+    permission: { module: "purchasing", resource: "orders", permissionMask: PERMISSION_BITS.READ }
+  },
+  {
+    path: "/purchasing/receipts",
+    label: "Goods Receipts",
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "purchasing",
+    permission: { module: "purchasing", resource: "receipts", permissionMask: PERMISSION_BITS.READ }
+  },
+  {
     path: "/inventory-settings",
     label: "Inventory Settings",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
