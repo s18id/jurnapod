@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import type { JournalBatchResponse } from "@jurnapod/shared";
+import { Temporal } from "@js-temporal/polyfill";
+import type { JournalEntryResponse } from "@jurnapod/shared";
 import { useEffect, useMemo, useState } from "react";
 
 import { QueueStatusBadge } from "../components/queue-status-badge";
@@ -17,6 +18,25 @@ import type { SessionUser } from "../lib/session";
 type TransactionsPageProps = {
   user: SessionUser;
 };
+
+function formatJournalDateTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  return value.replace("T", " ").replace(/\.\d+Z?$/, " UTC").replace(/Z$/, " UTC");
+}
+
+function journalAccountingDate(entry: JournalEntryResponse): string {
+  if (entry.status === "DRAFT") return entry.entry_date;
+  return entry.lines?.[0]?.line_date ?? "—";
+}
+
+function currentBusinessDate(companyTimezone?: string | null): string {
+  const timezone = companyTimezone?.trim() || "UTC";
+  return Temporal.Now.plainDateISO(timezone).toString();
+}
+
+function currentMetadataTimestamp(): string {
+  return Temporal.Now.instant().toString();
+}
 
 type JournalLine = {
   id: string; // Temporary ID for UI
@@ -147,9 +167,9 @@ export function TransactionsPage({ user }: TransactionsPageProps) {
   const { data: journalBatches, loading: loadingBatches, refetch: refetchBatches } = useJournalBatches(companyId, filters);
 
   // Detail modal state
-  const [selectedBatch, setSelectedBatch] = useState<JournalBatchResponse | null>(null);
+  const [selectedBatch, setSelectedBatch] = useState<JournalEntryResponse | null>(null);
 
-  const [entryDate, setEntryDate] = useState(new Date().toISOString().split("T")[0]);
+  const [entryDate, setEntryDate] = useState(() => currentBusinessDate(user.company_timezone));
   const [description, setDescription] = useState("");
   const [lines, setLines] = useState<JournalLine[]>([
     { ...emptyLine, id: "1" },
@@ -185,7 +205,7 @@ export function TransactionsPage({ user }: TransactionsPageProps) {
   }
 
   function clearForm() {
-    setEntryDate(new Date().toISOString().split("T")[0]);
+    setEntryDate(currentBusinessDate(user.company_timezone));
     setDescription("");
     setLines([
       { ...emptyLine, id: "1" },
@@ -232,7 +252,7 @@ export function TransactionsPage({ user }: TransactionsPageProps) {
       return;
     }
 
-    const timestamp = new Date().toISOString();
+    const timestamp = currentMetadataTimestamp();
     const newTemplate: TransactionTemplate = {
       id: createId(),
       name: name.trim(),
@@ -765,7 +785,7 @@ export function TransactionsPage({ user }: TransactionsPageProps) {
               </tr>
             </thead>
             <tbody>
-              {journalBatches.map((entry: JournalBatchResponse) => {
+              {journalBatches.map((entry: JournalEntryResponse) => {
                 const totalDebit = entry.lines?.reduce((sum, l) => sum + (l.debit || 0), 0) || 0;
                 const totalCredit = entry.lines?.reduce((sum, l) => sum + (l.credit || 0), 0) || 0;
                 return (
@@ -774,7 +794,7 @@ export function TransactionsPage({ user }: TransactionsPageProps) {
                     onClick={() => setSelectedBatch(entry)}
                     style={{ cursor: "pointer" }}
                   >
-                    <td style={cellStyle}>{new Date(entry.posted_at).toLocaleDateString()}</td>
+                    <td style={cellStyle}>{journalAccountingDate(entry)}</td>
                     <td style={cellStyle}>{entry.doc_type}</td>
                     <td style={cellStyle}>
                       #{entry.id}
@@ -851,7 +871,9 @@ export function TransactionsPage({ user }: TransactionsPageProps) {
             </div>
             
             <div style={{ marginBottom: "16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-              <div><strong>Date:</strong> {new Date(selectedBatch.posted_at).toLocaleString()}</div>
+              <div><strong>Date:</strong> {journalAccountingDate(selectedBatch)}</div>
+              <div><strong>Posted at:</strong> {formatJournalDateTime(selectedBatch.posted_at)}</div>
+              <div><strong>Status:</strong> {selectedBatch.status}</div>
               <div><strong>Type:</strong> {selectedBatch.doc_type}</div>
               {selectedBatch.doc_type === "POS_SALE" && (
                 <div><strong>POS Ref:</strong> #{selectedBatch.doc_id}</div>

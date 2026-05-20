@@ -898,6 +898,38 @@ export interface JournalBatches {
   updated_at: Generated<Date>;
 }
 
+export interface JournalDrafts {
+  client_ref: Generated<string | null>;
+  company_id: number;
+  created_at: Generated<Date>;
+  created_by_user_id: Generated<number | null>;
+  description: string;
+  entry_date: Date;
+  id: Generated<number>;
+  outlet_id: Generated<number | null>;
+  posted_at: Generated<Date | null>;
+  posted_batch_id: Generated<number | null>;
+  posted_by_user_id: Generated<number | null>;
+  reference: Generated<string | null>;
+  status: Generated<string>;
+  updated_at: Generated<Date>;
+}
+
+export interface JournalDraftLines {
+  account_id: number;
+  company_id: number;
+  created_at: Generated<Date>;
+  credit: Generated<Decimal>;
+  debit: Generated<Decimal>;
+  description: string;
+  id: Generated<number>;
+  journal_draft_id: number;
+  line_date: Date;
+  line_no: number;
+  outlet_id: Generated<number | null>;
+  updated_at: Generated<Date>;
+}
+
 export interface JournalLines {
   account_id: number;
   company_id: number;
@@ -2032,6 +2064,8 @@ export interface DB {
   item_variants: ItemVariants;
   items: Items;
   journal_batches: JournalBatches;
+  journal_draft_lines: JournalDraftLines;
+  journal_drafts: JournalDrafts;
   journal_lines: JournalLines;
   module_roles: ModuleRoles;
   modules: Modules;

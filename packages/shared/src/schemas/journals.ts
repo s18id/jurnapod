@@ -2,6 +2,7 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { z } from "zod";
+import { DateOnlySchema } from "./datetime.js";
 import { JournalLineSchema } from "./posting.js";
 
 /**
@@ -13,7 +14,21 @@ export const JournalLineResponseSchema = JournalLineSchema.extend({
   journal_batch_id: z.number().int().positive(),
   company_id: z.number().int().positive(),
   outlet_id: z.number().int().positive().nullable(),
-  line_date: z.string(), // ISO date string
+  line_date: DateOnlySchema,
+  created_at: z.string(),
+  updated_at: z.string()
+});
+
+export const JournalStatusSchema = z.enum(["DRAFT", "POSTED"]);
+
+export const JournalEntryLineResponseSchema = JournalLineSchema.extend({
+  id: z.number().int().positive(),
+  journal_id: z.number().int().positive(),
+  journal_batch_id: z.number().int().positive().nullable().optional(),
+  journal_draft_id: z.number().int().positive().nullable().optional(),
+  company_id: z.number().int().positive(),
+  outlet_id: z.number().int().positive().nullable(),
+  line_date: DateOnlySchema,
   created_at: z.string(),
   updated_at: z.string()
 });
@@ -35,6 +50,10 @@ export const JournalBatchResponseSchema = z.object({
   id: z.number().int().positive(),
   company_id: z.number().int().positive(),
   outlet_id: z.number().int().positive().nullable(),
+  status: JournalStatusSchema.default("POSTED"),
+  reference: z.string().nullable().optional(),
+  total_debits: z.number().nonnegative().optional(),
+  total_credits: z.number().nonnegative().optional(),
   doc_type: z.string(),
   doc_id: z.number().int().positive(),
   client_ref: z.string().uuid().nullable().optional(),
@@ -52,7 +71,7 @@ export const ManualJournalEntryCreateRequestSchema = z.object({
   company_id: z.number().int().positive(),
   outlet_id: z.number().int().positive().nullable().optional(),
   client_ref: z.string().uuid().optional(),
-  entry_date: z.string(), // ISO date string
+  entry_date: DateOnlySchema,
   reference: z.string().max(100).optional(),
   description: z.string().max(500),
   lines: z.array(
@@ -82,14 +101,52 @@ export const ManualJournalEntryCreateRequestSchema = z.object({
   )
 });
 
+export const ManualJournalEntryUpdateRequestSchema = ManualJournalEntryCreateRequestSchema.omit({
+  company_id: true,
+  client_ref: true,
+}).extend({
+  company_id: z.number().int().positive().optional(),
+  client_ref: z.string().uuid().optional(),
+});
+
+export const JournalDraftResponseSchema = z.object({
+  id: z.number().int().positive(),
+  company_id: z.number().int().positive(),
+  outlet_id: z.number().int().positive().nullable(),
+  status: z.literal("DRAFT"),
+  reference: z.string().nullable(),
+  description: z.string(),
+  entry_date: DateOnlySchema,
+  doc_type: z.literal("MANUAL"),
+  doc_id: z.number().int().positive(),
+  client_ref: z.string().uuid().nullable().optional(),
+  posted_at: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  total_debits: z.number().nonnegative(),
+  total_credits: z.number().nonnegative(),
+  lines: z.array(JournalEntryLineResponseSchema),
+});
+
+export const JournalEntryResponseSchema = z.union([
+  JournalDraftResponseSchema,
+  JournalBatchResponseSchema.extend({
+    status: z.literal("POSTED"),
+    reference: z.string().nullable().optional(),
+    total_debits: z.number().nonnegative(),
+    total_credits: z.number().nonnegative(),
+    lines: z.array(JournalEntryLineResponseSchema),
+  }),
+]);
+
 /**
  * Query parameters for listing journal entries
  */
 export const JournalListQuerySchema = z.object({
   company_id: z.number().int().positive(),
   outlet_id: z.number().int().positive().optional(),
-  start_date: z.string().optional(), // ISO date
-  end_date: z.string().optional(), // ISO date
+  start_date: DateOnlySchema.optional(),
+  end_date: DateOnlySchema.optional(),
   doc_type: z.string().optional(),
   account_id: z.number().int().positive().optional(),
   limit: z.number().int().positive().max(1000).default(100),
@@ -112,8 +169,13 @@ export const TransactionTypeSchema = z.enum([
  * Type exports
  */
 export type JournalLineResponse = z.infer<typeof JournalLineResponseSchema>;
+export type JournalStatus = z.infer<typeof JournalStatusSchema>;
+export type JournalEntryLineResponse = z.infer<typeof JournalEntryLineResponseSchema>;
 export type JournalBatch = z.infer<typeof JournalBatchSchema>;
 export type JournalBatchResponse = z.infer<typeof JournalBatchResponseSchema>;
 export type ManualJournalEntryCreateRequest = z.infer<typeof ManualJournalEntryCreateRequestSchema>;
+export type ManualJournalEntryUpdateRequest = z.infer<typeof ManualJournalEntryUpdateRequestSchema>;
+export type JournalDraftResponse = z.infer<typeof JournalDraftResponseSchema>;
+export type JournalEntryResponse = z.infer<typeof JournalEntryResponseSchema>;
 export type JournalListQuery = z.infer<typeof JournalListQuerySchema>;
 export type TransactionType = z.infer<typeof TransactionTypeSchema>;

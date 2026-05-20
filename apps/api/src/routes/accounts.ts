@@ -49,6 +49,7 @@ import {
   getAccountById,
   getAccountTree,
   AccountCodeExistsError,
+  AccountInUseError,
   AccountNotFoundError,
   CircularReferenceError,
   ParentAccountCompanyMismatchError,
@@ -786,7 +787,7 @@ accountRoutes.post("/depreciation/run", async (c) => {
 });
 
 // GET /accounts/:id - Get single account
-accountRoutes.get("/:id", async (c) => {
+accountRoutes.get("/:id{[0-9]+}", async (c) => {
   const auth = c.get("auth");
 
   // Check access permission
@@ -912,6 +913,14 @@ accountRoutes.put("/:id", async (c) => {
       return errorResponse("DUPLICATE_CODE", "Account code already exists", 409);
     }
 
+    if (error instanceof AccountNotFoundError) {
+      return errorResponse("NOT_FOUND", "Account not found", 404);
+    }
+
+    if (error instanceof AccountInUseError) {
+      return errorResponse("ACCOUNT_IN_USE", error.message, 409);
+    }
+
     if (error instanceof ParentAccountCompanyMismatchError) {
       return errorResponse("INVALID_PARENT", "Parent account not found or belongs to different company", 400);
     }
@@ -1024,6 +1033,11 @@ accountRoutes.get("/fiscal-years", async (c) => {
     const companyId = companyIdParam ? NumericIdSchema.parse(companyIdParam) : auth.companyId;
     const status = statusParam as "OPEN" | "CLOSED" | undefined;
     const includeClosed = includeClosedParam === "true";
+
+    // Tenant isolation: fiscal-year listing MUST use the authenticated company only.
+    if (companyId !== auth.companyId) {
+      return errorResponse("COMPANY_MISMATCH", "Company ID mismatch", 400);
+    }
 
     const fiscalYears = await listFiscalYears({
       company_id: companyId,

@@ -2,8 +2,9 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import type {
-  JournalBatchResponse,
+  JournalEntryResponse,
   ManualJournalEntryCreateRequest,
+  ManualJournalEntryUpdateRequest,
   JournalListQuery
 } from "@jurnapod/shared";
 import { useCallback, useEffect, useState } from "react";
@@ -15,12 +16,12 @@ import { apiRequest, ApiError } from "../lib/api-client";
  */
 type JournalBatchListResponse = {
   success: true;
-  data: JournalBatchResponse[];
+  data: JournalEntryResponse[];
 };
 
 type JournalBatchSingleResponse = {
   success: true;
-  data: JournalBatchResponse;
+  data: JournalEntryResponse;
 };
 
 /**
@@ -29,13 +30,21 @@ type JournalBatchSingleResponse = {
  */
 export function useJournalBatches(
   companyId: number,
-  filters?: Partial<Omit<JournalListQuery, "company_id">>
+  filters?: Partial<Omit<JournalListQuery, "company_id">>,
+  options?: { enabled?: boolean }
 ) {
-  const [data, setData] = useState<JournalBatchResponse[]>([]);
+  const [data, setData] = useState<JournalEntryResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refetch = useCallback(async () => {
+    if (options?.enabled === false) {
+      setData([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
@@ -86,7 +95,8 @@ export function useJournalBatches(
     filters?.doc_type,
     filters?.account_id,
     filters?.limit,
-    filters?.offset
+    filters?.offset,
+    options?.enabled
   ]);
 
   useEffect(() => {
@@ -103,7 +113,7 @@ export function useJournalBatches(
 export function useJournalBatch(
   batchId: number | null
 ) {
-  const [data, setData] = useState<JournalBatchResponse | null>(null);
+  const [data, setData] = useState<JournalEntryResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -146,13 +156,37 @@ export function useJournalBatch(
  */
 export async function createManualJournalEntry(
   data: ManualJournalEntryCreateRequest
-): Promise<JournalBatchResponse> {
+): Promise<JournalEntryResponse> {
   const response = await apiRequest<JournalBatchSingleResponse>(
     `/journals`,
     {
       method: "POST",
       body: JSON.stringify(data)
     }
+  );
+  return response.data;
+}
+
+export async function updateManualJournalEntry(
+  journalId: number,
+  data: ManualJournalEntryUpdateRequest
+): Promise<JournalEntryResponse> {
+  const response = await apiRequest<JournalBatchSingleResponse>(
+    `/journals/${journalId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(data)
+    }
+  );
+  return response.data;
+}
+
+export async function postManualJournalEntry(
+  journalId: number
+): Promise<JournalEntryResponse> {
+  const response = await apiRequest<JournalBatchSingleResponse>(
+    `/journals/${journalId}/post`,
+    { method: "POST" }
   );
   return response.data;
 }

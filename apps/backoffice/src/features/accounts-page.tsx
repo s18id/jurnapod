@@ -14,9 +14,7 @@ import {
   Button,
   Card,
   Checkbox,
-  Collapse,
   Container,
-  Divider,
   Group,
   Loader,
   Paper,
@@ -30,21 +28,21 @@ import {
   ThemeIcon,
   Title
 } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
 import { useState, useMemo, useEffect } from "react";
 
+import { ReviewPanel, type ReviewPanelSection } from "@/components/ReviewPanel";
 import { OfflinePage } from "../components/offline-page";
 import { StaleDataWarning } from "../components/stale-data-warning";
 import { useAccountTree, useAccountTypes ,
   createAccount,
-  updateAccount,
-  deactivateAccount,
-  reactivateAccount
+  updateAccount
 } from "../hooks/use-accounts";
 import { ApiError } from "../lib/api-client";
+import { actionGates, resolveEffectivePermissions } from "../lib/auth/permissions";
 import { buildCacheKey } from "../lib/cache-service";
 import { useOnlineStatus } from "../lib/connection";
 import type { SessionUser } from "../lib/session";
+import type { DiffChange } from "../lib/diff-engine";
 
 
 type AccountsPageProps = {
@@ -52,6 +50,7 @@ type AccountsPageProps = {
 };
 
 type FormMode = "create" | "edit" | null;
+type AccountViewMode = "tree" | "flat";
 
 type AccountFormData = {
   code: string;
@@ -89,11 +88,73 @@ const normalBalanceOptions = [
   { value: "K", label: "K (Kredit)" }
 ];
 
+export function validateAccountForm(data: AccountFormData): Record<string, string> {
+  const errors: Record<string, string> = {};
+  if (!data.code.trim()) errors.code = "Account code is required";
+  if (!data.name.trim()) errors.name = "Account name is required";
+  return errors;
+}
+
+export function formatAccountApiError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.code === "DUPLICATE_CODE") return "Account code already exists.";
+    if (error.code === "INVALID_PARENT") return "Parent account is invalid or belongs to a different company.";
+    if (error.code === "INVALID_ACCOUNT_TYPE") return "Account type is invalid or belongs to a different company.";
+    if (error.code === "CIRCULAR_REFERENCE") return "Parent selection creates a circular account hierarchy.";
+    if (error.code === "NOT_FOUND") return "Account was not found. Refresh the list and try again.";
+    if (error.code === "ACCOUNT_IN_USE") return "Account is in use and cannot be deactivated.";
+    if (error.code === "FORBIDDEN") return "You do not have permission to perform this account action.";
+    return error.message;
+  }
+  return "Failed to save account";
+}
+
+function formatNullable(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return String(value);
+}
+
+function accountResponseToTreeNode(account: AccountResponse): AccountTreeNode {
+  return { ...account, children: [] };
+}
+
+export function buildAccountDiffChanges(before: AccountResponse | null, after: AccountFormData): DiffChange[] {
+  const fields: Array<{ key: keyof AccountFormData; label: string; type?: DiffChange["valueType"] }> = [
+    { key: "code", label: "Code" },
+    { key: "name", label: "Name" },
+    { key: "parent_account_id", label: "Parent account", type: "number" },
+    { key: "is_group", label: "Group account", type: "boolean" },
+    { key: "account_type_id", label: "Classification template", type: "number" },
+    { key: "type_name", label: "Type name" },
+    { key: "normal_balance", label: "Normal balance" },
+    { key: "report_group", label: "Report group" },
+    { key: "is_payable", label: "Payment destination", type: "boolean" },
+    { key: "is_active", label: "Active", type: "boolean" },
+  ];
+  return fields.flatMap((field): DiffChange[] => {
+    const oldValue = before ? before[field.key as keyof AccountResponse] : undefined;
+    const newValue = after[field.key];
+    if (formatNullable(oldValue) === formatNullable(newValue)) return [];
+    return [{
+      path: String(field.key),
+      label: field.label,
+      kind: before ? "changed" : "added",
+      oldValue,
+      newValue,
+      oldFormatted: formatNullable(oldValue),
+      newFormatted: formatNullable(newValue),
+      valueType: field.type ?? "string",
+    }];
+  });
+}
+
 export function AccountsPage(props: AccountsPageProps) {
   const isOnline = useOnlineStatus();
   const [searchTerm, setSearchTerm] = useState("");
   const [showInactive, setShowInactive] = useState(false);
   const [reportGroupFilter, setReportGroupFilter] = useState<ReportGroup | "ALL">("ALL");
+  const [viewMode, setViewMode] = useState<AccountViewMode>("tree");
   const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
   
   const [formMode, setFormMode] = useState<FormMode>(null);
@@ -103,17 +164,25 @@ export function AccountsPage(props: AccountsPageProps) {
   const [submitLoading, setSubmitLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [selectedAccount, setSelectedAccount] = useState<AccountTreeNode | null>(null);
 
-  const [formOpened, { open: openForm, close: closeForm }] = useDisclosure(false);
+  const formOpened = formMode !== null;
+
+  const permissions = useMemo(() => {
+    const effective = resolveEffectivePermissions(props.user) ?? [];
+    return actionGates(effective, "accounting", "accounts", ["READ", "CREATE", "UPDATE"]);
+  }, [props.user]);
 
   const { data: tree, loading, error: treeError, refetch } = useAccountTree(
     props.user.company_id,
-    showInactive
+    showInactive,
+    { enabled: permissions.READ }
   );
 
   const { data: accountTypes, loading: accountTypesLoading } = useAccountTypes(
     props.user.company_id,
-    { is_active: undefined }
+    { is_active: undefined },
+    { enabled: permissions.READ }
   );
 
   const flatAccounts = useMemo(() => {
@@ -238,12 +307,193 @@ export function AccountsPage(props: AccountsPageProps) {
     [filteredTree]
   );
 
+  const filteredFlatAccounts = useMemo(() => {
+    const rows: AccountTreeNode[] = [];
+    function walk(nodes: AccountTreeNode[]) {
+      for (const node of nodes) {
+        rows.push(node);
+        if (node.children && node.children.length > 0) walk(node.children);
+      }
+    }
+    walk(filteredTree);
+    return rows;
+  }, [filteredTree]);
+
+  const editingAccount = useMemo(
+    () => (editingId ? flatAccounts.find((account) => account.id === editingId) ?? null : null),
+    [editingId, flatAccounts]
+  );
+
+  const parentAccountData = useMemo(() => [
+    { value: "", label: "None (Top Level)" },
+    ...flatAccounts
+      .filter((acc) => formMode === "edit" ? acc.id !== editingId : true)
+      .map((acc) => ({
+        value: String(acc.id),
+        label: `${acc.code} - ${acc.name}`
+      }))
+  ], [editingId, flatAccounts, formMode]);
+
+  const accountTypeData = useMemo(() => [
+    { value: "", label: "None (manual entry)" },
+    ...accountTypes.map((type) => ({
+      value: String(type.id),
+      label: `${type.category ? `[${type.category}] ` : ""}${type.name}${type.normal_balance ? ` [${type.normal_balance}]` : ""}${type.report_group ? ` - ${type.report_group}` : ""}`
+    }))
+  ], [accountTypes]);
+
+  const reviewSections: ReviewPanelSection[] = useMemo(() => [
+    {
+      id: "account-identity",
+      title: "Account identity",
+      description: "Code, name, parent account, and classification fields sent to the verified accounts contract.",
+      errors: [formErrors.code, formErrors.name].filter((item): item is string => Boolean(item)),
+      content: (
+        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+          <TextInput
+            label="Code"
+            placeholder="e.g., 1000, CASH-01"
+            value={formData.code}
+            onChange={(e) => setFormData({ ...formData, code: e.currentTarget.value })}
+            error={formErrors.code}
+            withAsterisk
+          />
+          <TextInput
+            label="Name"
+            placeholder="e.g., Cash in Bank"
+            value={formData.name}
+            onChange={(e) => setFormData({ ...formData, name: e.currentTarget.value })}
+            error={formErrors.name}
+            withAsterisk
+          />
+          <Select
+            label="Parent Account"
+            placeholder="Select parent account"
+            data={parentAccountData}
+            value={formData.parent_account_id != null ? String(formData.parent_account_id) : ""}
+            onChange={(value) =>
+              setFormData({
+                ...formData,
+                parent_account_id: value ? Number(value) : null
+              })
+            }
+            clearable
+            searchable
+          />
+          <Select
+            label="Classification (Template)"
+            placeholder="Select a template"
+            data={accountTypeData}
+            value={formData.account_type_id != null ? String(formData.account_type_id) : ""}
+            onChange={(value) => {
+              const typeId = value ? Number(value) : null;
+              const selectedType = accountTypes.find(t => t.id === typeId);
+              setFormData({
+                ...formData,
+                account_type_id: typeId,
+                type_name: selectedType?.name ?? formData.type_name,
+                normal_balance: selectedType?.normal_balance ?? formData.normal_balance,
+                report_group: selectedType?.report_group ?? formData.report_group
+              });
+            }}
+            disabled={accountTypesLoading}
+            clearable
+            searchable
+          />
+          <TextInput
+            label="Type Name"
+            placeholder="e.g., Kas, Bank, Pendapatan"
+            value={formData.type_name ?? ""}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                type_name: e.currentTarget.value || null
+              })
+            }
+            description="Leave empty to inherit from parent account"
+          />
+          <Select
+            label="Normal Balance"
+            placeholder="Select normal balance"
+            data={[
+              { value: "", label: "Inherit from parent" },
+              ...normalBalanceOptions
+            ]}
+            value={formData.normal_balance ?? ""}
+            onChange={(value) =>
+              setFormData({
+                ...formData,
+                normal_balance: (value as NormalBalance) || null
+              })
+            }
+            clearable
+          />
+          <Select
+            label="Report Group"
+            placeholder="Select report group"
+            data={[
+              { value: "", label: "Inherit from parent" },
+              ...reportGroupOptions
+            ]}
+            value={formData.report_group ?? ""}
+            onChange={(value) =>
+              setFormData({
+                ...formData,
+                report_group: (value as ReportGroup) || null
+              })
+            }
+            clearable
+          />
+        </SimpleGrid>
+      )
+    },
+    {
+      id: "account-controls",
+      title: "Controls and impact",
+      description: "Activation, group, and payable settings. Deactivation is submitted through PUT and backend ACCOUNT_IN_USE guards remain authoritative.",
+      content: (
+        <Stack gap="xs">
+          <Checkbox
+            label="Is Group Account"
+            description="Group accounts can have child accounts"
+            checked={formData.is_group}
+            onChange={(e) => setFormData({ ...formData, is_group: e.currentTarget.checked })}
+          />
+          <Checkbox
+            label="Active"
+            checked={formData.is_active}
+            onChange={(e) => setFormData({ ...formData, is_active: e.currentTarget.checked })}
+          />
+          <Checkbox
+            label="Payment Destination"
+            description="Allow this account to receive POS and sales payments"
+            checked={formData.is_payable}
+            onChange={(e) => setFormData({ ...formData, is_payable: e.currentTarget.checked })}
+          />
+          <Alert color="blue" title="History scope">
+            Journal-line history is unavailable until a verified backend contract exists. This screen does not fetch or fabricate journal history.
+          </Alert>
+        </Stack>
+      )
+    }
+  ], [accountTypeData, accountTypes, accountTypesLoading, formData, formErrors.code, formErrors.name, parentAccountData]);
+
   if (!isOnline) {
     return (
       <OfflinePage
         title="Connect to Manage Master Data"
         message="Chart of accounts changes require a connection."
       />
+    );
+  }
+
+  if (!permissions.READ) {
+    return (
+      <Container size="lg" py="md">
+        <Alert color="red" title="Access denied">
+          You need accounting.accounts READ permission to view the chart of accounts.
+        </Alert>
+      </Container>
     );
   }
 
@@ -267,12 +517,12 @@ export function AccountsPage(props: AccountsPageProps) {
     setError(null);
     setSuccessMessage(null);
     setExpandedNodes(new Set());
-    openForm();
   }
 
   function openEditForm(account: AccountTreeNode) {
     setFormMode("edit");
     setEditingId(account.id);
+    setSelectedAccount(account);
     setFormData({
       code: account.code,
       name: account.name,
@@ -288,7 +538,6 @@ export function AccountsPage(props: AccountsPageProps) {
     setFormErrors({});
     setError(null);
     setSuccessMessage(null);
-    openForm();
   }
 
   function closeFormHandler() {
@@ -296,19 +545,10 @@ export function AccountsPage(props: AccountsPageProps) {
     setEditingId(null);
     setFormData(emptyForm);
     setFormErrors({});
-    closeForm();
   }
 
   function validateForm(): boolean {
-    const errors: Record<string, string> = {};
-    
-    if (!formData.code.trim()) {
-      errors.code = "Account code is required";
-    }
-    if (!formData.name.trim()) {
-      errors.name = "Account name is required";
-    }
-
+    const errors = validateAccountForm(formData);
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   }
@@ -323,8 +563,9 @@ export function AccountsPage(props: AccountsPageProps) {
     setSuccessMessage(null);
 
     try {
+      let savedAccount: AccountResponse | null = null;
       if (formMode === "create") {
-        await createAccount(
+        savedAccount = await createAccount(
           {
             company_id: props.user.company_id,
             code: formData.code.trim(),
@@ -341,7 +582,7 @@ export function AccountsPage(props: AccountsPageProps) {
         );
         setSuccessMessage("Account created successfully");
       } else if (formMode === "edit" && editingId) {
-        await updateAccount(
+        savedAccount = await updateAccount(
           editingId,
           {
             code: formData.code.trim(),
@@ -360,57 +601,12 @@ export function AccountsPage(props: AccountsPageProps) {
       }
 
       await refetch();
+      setSelectedAccount(savedAccount ? accountResponseToTreeNode(savedAccount) : null);
       closeFormHandler();
     } catch (submitError) {
-      if (submitError instanceof ApiError) {
-        setError(submitError.message);
-      } else {
-        setError("Failed to save account");
-      }
+      setError(formatAccountApiError(submitError));
     } finally {
       setSubmitLoading(false);
-    }
-  }
-
-  async function handleDeactivate(account: AccountTreeNode) {
-    if (!window.confirm(`Are you sure you want to deactivate account "${account.code} - ${account.name}"?`)) {
-      return;
-    }
-
-    setError(null);
-    setSuccessMessage(null);
-
-    try {
-      await deactivateAccount(account.id);
-      setSuccessMessage("Account deactivated successfully");
-      await refetch();
-    } catch (deactivateError) {
-      if (deactivateError instanceof ApiError) {
-        if (deactivateError.code === "ACCOUNT_IN_USE") {
-          setError("Cannot deactivate: Account is in use (has journal entries or child accounts)");
-        } else {
-          setError(deactivateError.message);
-        }
-      } else {
-        setError("Failed to deactivate account");
-      }
-    }
-  }
-
-  async function handleReactivate(account: AccountTreeNode) {
-    setError(null);
-    setSuccessMessage(null);
-
-    try {
-      await reactivateAccount(account.id);
-      setSuccessMessage("Account reactivated successfully");
-      await refetch();
-    } catch (reactivateError) {
-      if (reactivateError instanceof ApiError) {
-        setError(reactivateError.message);
-      } else {
-        setError("Failed to reactivate account");
-      }
     }
   }
 
@@ -512,30 +708,19 @@ export function AccountsPage(props: AccountsPageProps) {
               <Group gap={4}>
                 <Button
                   size="xs"
+                  variant="default"
+                  onClick={() => setSelectedAccount(node)}
+                >
+                  Details
+                </Button>
+                <Button
+                  size="xs"
                   variant="light"
                   onClick={() => openEditForm(node)}
+                  disabled={!permissions.UPDATE}
                 >
                   Edit
                 </Button>
-                {node.is_active ? (
-                  <Button
-                    size="xs"
-                    variant="light"
-                    color="red"
-                    onClick={() => handleDeactivate(node)}
-                  >
-                    Deactivate
-                  </Button>
-                ) : (
-                  <Button
-                    size="xs"
-                    variant="light"
-                    color="green"
-                    onClick={() => handleReactivate(node)}
-                  >
-                    Reactivate
-                  </Button>
-                )}
               </Group>
             </Group>
           </Stack>
@@ -550,24 +735,6 @@ export function AccountsPage(props: AccountsPageProps) {
     );
   }
 
-  const parentAccountData = [
-    { value: "", label: "None (Top Level)" },
-    ...flatAccounts
-      .filter((acc) => formMode === "edit" ? acc.id !== editingId : true)
-      .map((acc) => ({
-        value: String(acc.id),
-        label: `${acc.code} - ${acc.name}`
-      }))
-  ];
-
-  const accountTypeData = [
-    { value: "", label: "None (manual entry)" },
-    ...accountTypes.map((type) => ({
-      value: String(type.id),
-      label: `${type.category ? `[${type.category}] ` : ""}${type.name}${type.normal_balance ? ` [${type.normal_balance}]` : ""}${type.report_group ? ` - ${type.report_group}` : ""}`
-    }))
-  ];
-
   return (
     <Container size="lg" py="md">
       <Stack gap="md">
@@ -581,10 +748,18 @@ export function AccountsPage(props: AccountsPageProps) {
                   Manage your company&apos;s chart of accounts for financial reporting.
                 </Text>
               </div>
-              <Button onClick={openCreateForm}>
-                Create Account
-              </Button>
+              {permissions.CREATE && (
+                <Button onClick={openCreateForm}>
+                  Create Account
+                </Button>
+              )}
             </Group>
+
+            {!permissions.CREATE && (
+              <Alert color="blue" title="Read-only access">
+                You can view accounts, but accounting.accounts CREATE permission is required to create new accounts.
+              </Alert>
+            )}
 
             <StaleDataWarning
               cacheKey={buildCacheKey("accounts", { companyId: props.user.company_id })}
@@ -650,171 +825,55 @@ export function AccountsPage(props: AccountsPageProps) {
           </Stack>
         </Card>
 
-        {/* Account Form Card */}
-        <Collapse in={formOpened}>
+        {/* Account Form Review */}
+        {formOpened && (
           <Card>
-            <Stack gap="md">
-              <Group justify="space-between">
-                <Title order={4}>
-                  {formMode === "create" ? "Create New Account" : "Edit Account"}
-                </Title>
-                <Button variant="subtle" size="xs" onClick={closeFormHandler}>
-                  Close
-                </Button>
-              </Group>
-              
-              <Divider />
-              
-              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-                <TextInput
-                  label="Code"
-                  placeholder="e.g., 1000, CASH-01"
-                  value={formData.code}
-                  onChange={(e) => setFormData({ ...formData, code: e.currentTarget.value })}
-                  error={formErrors.code}
-                  withAsterisk
-                />
-                
-                <TextInput
-                  label="Name"
-                  placeholder="e.g., Cash in Bank"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.currentTarget.value })}
-                  error={formErrors.name}
-                  withAsterisk
-                />
-                
-                <Select
-                  label="Parent Account"
-                  placeholder="Select parent account"
-                  data={parentAccountData}
-                  value={formData.parent_account_id != null ? String(formData.parent_account_id) : ""}
-                  onChange={(value) =>
-                    setFormData({
-                      ...formData,
-                      parent_account_id: value ? Number(value) : null
-                    })
-                  }
-                  clearable
-                  searchable
-                />
-                
-                <Select
-                  label="Classification (Template)"
-                  placeholder="Select a template"
-                  data={accountTypeData}
-                  value={formData.account_type_id != null ? String(formData.account_type_id) : ""}
-                  onChange={(value) => {
-                    const typeId = value ? Number(value) : null;
-                    const selectedType = accountTypes.find(t => t.id === typeId);
-                    setFormData({
-                      ...formData,
-                      account_type_id: typeId,
-                      type_name: selectedType?.name ?? formData.type_name,
-                      normal_balance: selectedType?.normal_balance ?? formData.normal_balance,
-                      report_group: selectedType?.report_group ?? formData.report_group
-                    });
-                  }}
-                  disabled={accountTypesLoading}
-                  clearable
-                  searchable
-                />
-                
-                <TextInput
-                  label="Type Name"
-                  placeholder="e.g., Kas, Bank, Pendapatan"
-                  value={formData.type_name ?? ""}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      type_name: e.currentTarget.value || null
-                    })
-                  }
-                  description="Leave empty to inherit from parent account"
-                />
-                
-                <Select
-                  label="Normal Balance"
-                  placeholder="Select normal balance"
-                  data={[
-                    { value: "", label: "Inherit from parent" },
-                    ...normalBalanceOptions
-                  ]}
-                  value={formData.normal_balance ?? ""}
-                  onChange={(value) =>
-                    setFormData({
-                      ...formData,
-                      normal_balance: (value as NormalBalance) || null
-                    })
-                  }
-                  clearable
-                />
-                
-                <Select
-                  label="Report Group"
-                  placeholder="Select report group"
-                  data={[
-                    { value: "", label: "Inherit from parent" },
-                    ...reportGroupOptions
-                  ]}
-                  value={formData.report_group ?? ""}
-                  onChange={(value) =>
-                    setFormData({
-                      ...formData,
-                      report_group: (value as ReportGroup) || null
-                    })
-                  }
-                  clearable
-                />
-                
-                <div />
-                
-                <Stack gap="xs">
-                  <Checkbox
-                    label="Is Group Account"
-                    description="Group accounts can have child accounts"
-                    checked={formData.is_group}
-                    onChange={(e) => setFormData({ ...formData, is_group: e.currentTarget.checked })}
-                  />
-                  
-                  <Checkbox
-                    label="Active"
-                    checked={formData.is_active}
-                    onChange={(e) => setFormData({ ...formData, is_active: e.currentTarget.checked })}
-                  />
-                  
-                  <Checkbox
-                    label="Payment Destination"
-                    description="Allow this account to receive POS and sales payments"
-                    checked={formData.is_payable}
-                    onChange={(e) => setFormData({ ...formData, is_payable: e.currentTarget.checked })}
-                  />
-                </Stack>
-              </SimpleGrid>
-              
-              <Divider />
-              
-              <Group justify="flex-end">
-                <Button variant="default" onClick={closeFormHandler} disabled={submitLoading}>
-                  Cancel
-                </Button>
-                <Button onClick={handleSubmit} loading={submitLoading}>
-                  Save
-                </Button>
-              </Group>
-            </Stack>
+            <ReviewPanel
+              title={formMode === "create" ? "Create account" : "Edit account"}
+              description="Review account identity and control fields before submitting to the verified accounting accounts API."
+              sections={reviewSections}
+              scopeBadges={[{ label: "Scope", value: `company:${props.user.company_id}` }]}
+              summaryItems={[
+                { label: "Action", value: formMode === "create" ? "Create account" : "Update account" },
+                { label: "Account", value: `${formData.code || "New code"} - ${formData.name || "New name"}` },
+                { label: "Endpoint", value: formMode === "create" ? "POST /accounts" : `PUT /accounts/${editingId ?? "{id}"}` },
+              ]}
+              diffChanges={buildAccountDiffChanges(formMode === "edit" ? editingAccount : null, formData)}
+              autosaveWarning="Account drafts are held only in this browser session; no autosave API exists for chart of accounts."
+              saveLabel={formMode === "create" ? "Create account" : "Update account"}
+              saveDisabled={formMode === "create" ? !permissions.CREATE : !permissions.UPDATE}
+              submitting={submitLoading}
+              onSubmit={handleSubmit}
+              onDiscardDraft={closeFormHandler}
+            />
           </Card>
-        </Collapse>
+        )}
 
         {/* Accounts Tree Card */}
         <Card>
           <Stack gap="sm">
             <Group justify="space-between" align="center" wrap="wrap">
               <Title order={4}>
-                Accounts Tree ({filteredTree.length})
+                Accounts ({viewMode === "tree" ? filteredTree.length : filteredFlatAccounts.length})
               </Title>
 
               <Group gap="xs" wrap="wrap">
+                <Button.Group>
+                  <Button
+                    size="xs"
+                    variant={viewMode === "tree" ? "filled" : "default"}
+                    onClick={() => setViewMode("tree")}
+                  >
+                    Tree
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant={viewMode === "flat" ? "filled" : "default"}
+                    onClick={() => setViewMode("flat")}
+                  >
+                    Flat
+                  </Button>
+                </Button.Group>
                 <Badge variant="light" color="gray">
                   Expanded {Math.min(expandedNodes.size, expandableFilteredNodeIds.length)}/{expandableFilteredNodeIds.length}
                 </Badge>
@@ -854,9 +913,39 @@ export function AccountsPage(props: AccountsPageProps) {
             ) : (
               <ScrollArea type="auto" scrollbarSize={8}>
                 <Stack gap={0}>
-                  {filteredTree.map((node) => renderTreeNode(node, 0))}
+                  {viewMode === "tree"
+                    ? filteredTree.map((node) => renderTreeNode(node, 0))
+                    : filteredFlatAccounts.map((node) => renderTreeNode({ ...node, children: [] }, 0))}
                 </Stack>
               </ScrollArea>
+            )}
+          </Stack>
+        </Card>
+
+        <Card>
+          <Stack gap="sm">
+            <Title order={4}>Account Detail</Title>
+            {selectedAccount ? (
+              <Stack gap="xs">
+                <Group gap="xs" wrap="wrap">
+                  <Badge variant="light">{selectedAccount.code}</Badge>
+                  <Text fw={600}>{selectedAccount.name}</Text>
+                  <Badge color={selectedAccount.is_active ? "green" : "red"} variant="light">
+                    {selectedAccount.is_active ? "Active" : "Inactive"}
+                  </Badge>
+                </Group>
+                <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
+                  <Text size="sm">Type: {selectedAccount.type_name ?? "Inherited / unspecified"}</Text>
+                  <Text size="sm">Report group: {selectedAccount.report_group ?? "Inherited / unspecified"}</Text>
+                  <Text size="sm">Normal balance: {selectedAccount.normal_balance ?? "Inherited / unspecified"}</Text>
+                  <Text size="sm">Payment destination: {selectedAccount.is_payable ? "Yes" : "No"}</Text>
+                </SimpleGrid>
+                <Alert color="gray" title="Journal history unavailable">
+                  Journal-line history is intentionally not shown because Story 69-3-b has no verified journal history API contract. No fabricated audit or journal links are rendered.
+                </Alert>
+              </Stack>
+            ) : (
+              <Text c="dimmed">Select Details on an account to view verified account fields. Journal-line history remains unavailable until a verified API contract exists.</Text>
             )}
           </Stack>
         </Card>

@@ -404,8 +404,7 @@ export class AccountsService {
     // Verify account exists and get before state
     const before = await this.getAccountById(accountId, companyId);
 
-    const updateFields: string[] = [];
-    const params: any[] = [];
+    const updateFields: Record<string, string | number | null> = {};
 
     // Track classification state for inheritance resolution
     let newParentId = before.parent_account_id;
@@ -418,13 +417,11 @@ export class AccountsService {
 
     if (data.code !== undefined) {
       await this.validateAccountCode(data.code, companyId, accountId);
-      updateFields.push("code = ?");
-      params.push(data.code);
+      updateFields.code = data.code;
     }
 
     if (data.name !== undefined) {
-      updateFields.push("name = ?");
-      params.push(data.name);
+      updateFields.name = data.name;
     }
 
     // Handle account_type_id as optional template metadata only
@@ -432,49 +429,47 @@ export class AccountsService {
       if (data.account_type_id !== null) {
         await this.validateAccountType(data.account_type_id, companyId);
       }
-      updateFields.push("account_type_id = ?");
-      params.push(data.account_type_id);
+      updateFields.account_type_id = data.account_type_id;
     }
 
     // Handle explicit classification fields (primary source of truth)
     // These take priority over any inheritance
     if (data.type_name !== undefined && data.type_name !== null) {
-      updateFields.push("type_name = ?");
-      params.push(data.type_name);
+      updateFields.type_name = data.type_name;
     }
 
     if (data.normal_balance !== undefined && data.normal_balance !== null) {
-      updateFields.push("normal_balance = ?");
-      params.push(data.normal_balance);
+      updateFields.normal_balance = data.normal_balance;
     }
 
     if (data.report_group !== undefined && data.report_group !== null) {
-      updateFields.push("report_group = ?");
-      params.push(data.report_group);
+      updateFields.report_group = data.report_group;
     }
 
     if (data.parent_account_id !== undefined) {
       if (data.parent_account_id !== null) {
         await this.validateParentAccount(data.parent_account_id, accountId, companyId);
       }
-      updateFields.push("parent_account_id = ?");
-      params.push(data.parent_account_id);
+      updateFields.parent_account_id = data.parent_account_id;
       newParentId = data.parent_account_id;
     }
 
     if (data.is_group !== undefined) {
-      updateFields.push("is_group = ?");
-      params.push(data.is_group ? 1 : 0);
+      updateFields.is_group = data.is_group ? 1 : 0;
     }
 
     if (data.is_payable !== undefined) {
-      updateFields.push("is_payable = ?");
-      params.push(data.is_payable ? 1 : 0);
+      updateFields.is_payable = data.is_payable ? 1 : 0;
     }
 
     if (data.is_active !== undefined) {
-      updateFields.push("is_active = ?");
-      params.push(data.is_active ? 1 : 0);
+      if (data.is_active === false) {
+        const inUse = await this.isAccountInUse(accountId, companyId);
+        if (inUse) {
+          throw new AccountInUseError(accountId, "has journal lines or active child accounts");
+        }
+      }
+      updateFields.is_active = data.is_active ? 1 : 0;
     }
 
     // Inheritance resolution: if classification was cleared or parent changed while inheriting
@@ -522,7 +517,7 @@ export class AccountsService {
       shouldResolveReportGroup;
 
     if (needsInheritanceResolution) {
-      const updatedFieldsSet = new Set(updateFields.map(f => f.split(" = ?")[0]));
+      const updatedFieldsSet = new Set(Object.keys(updateFields));
       const templateAccountTypeId =
         data.account_type_id !== undefined ? data.account_type_id : before.account_type_id;
 
@@ -530,18 +525,15 @@ export class AccountsService {
         const typeMeta = await this.getAccountTypeMetadata(templateAccountTypeId, companyId);
         if (typeMeta) {
           if (shouldResolveTypeName && !updatedFieldsSet.has("type_name")) {
-            updateFields.push("type_name = ?");
-            params.push(typeMeta.name);
+            updateFields.type_name = typeMeta.name;
             updatedFieldsSet.add("type_name");
           }
           if (shouldResolveNormalBalance && !updatedFieldsSet.has("normal_balance")) {
-            updateFields.push("normal_balance = ?");
-            params.push(typeMeta.normal_balance);
+            updateFields.normal_balance = typeMeta.normal_balance;
             updatedFieldsSet.add("normal_balance");
           }
           if (shouldResolveReportGroup && !updatedFieldsSet.has("report_group")) {
-            updateFields.push("report_group = ?");
-            params.push(typeMeta.report_group);
+            updateFields.report_group = typeMeta.report_group;
             updatedFieldsSet.add("report_group");
           }
         }
@@ -551,34 +543,28 @@ export class AccountsService {
         const ancestor = await this.findNearestAncestorWithType(newParentId, companyId);
         if (ancestor) {
           if (shouldResolveTypeName && !updatedFieldsSet.has("type_name")) {
-            updateFields.push("type_name = ?");
-            params.push(ancestor.name);
+            updateFields.type_name = ancestor.name;
             updatedFieldsSet.add("type_name");
           }
           if (shouldResolveNormalBalance && !updatedFieldsSet.has("normal_balance")) {
-            updateFields.push("normal_balance = ?");
-            params.push(ancestor.normal_balance);
+            updateFields.normal_balance = ancestor.normal_balance;
             updatedFieldsSet.add("normal_balance");
           }
           if (shouldResolveReportGroup && !updatedFieldsSet.has("report_group")) {
-            updateFields.push("report_group = ?");
-            params.push(ancestor.report_group);
+            updateFields.report_group = ancestor.report_group;
             updatedFieldsSet.add("report_group");
           }
         } else if (!templateAccountTypeId) {
           if (shouldResolveTypeName && !updatedFieldsSet.has("type_name")) {
-            updateFields.push("type_name = ?");
-            params.push(null);
+            updateFields.type_name = null;
             updatedFieldsSet.add("type_name");
           }
           if (shouldResolveNormalBalance && !updatedFieldsSet.has("normal_balance")) {
-            updateFields.push("normal_balance = ?");
-            params.push(null);
+            updateFields.normal_balance = null;
             updatedFieldsSet.add("normal_balance");
           }
           if (shouldResolveReportGroup && !updatedFieldsSet.has("report_group")) {
-            updateFields.push("report_group = ?");
-            params.push(null);
+            updateFields.report_group = null;
             updatedFieldsSet.add("report_group");
           }
         }
@@ -590,39 +576,50 @@ export class AccountsService {
         
         if (!hasTemplateApplied && !templateAccountTypeId) {
           if (shouldResolveTypeName && !updatedFieldsSet.has("type_name")) {
-            updateFields.push("type_name = ?");
-            params.push(null);
+            updateFields.type_name = null;
             updatedFieldsSet.add("type_name");
           }
           if (shouldResolveNormalBalance && !updatedFieldsSet.has("normal_balance")) {
-            updateFields.push("normal_balance = ?");
-            params.push(null);
+            updateFields.normal_balance = null;
             updatedFieldsSet.add("normal_balance");
           }
           if (shouldResolveReportGroup && !updatedFieldsSet.has("report_group")) {
-            updateFields.push("report_group = ?");
-            params.push(null);
+            updateFields.report_group = null;
             updatedFieldsSet.add("report_group");
           }
         }
       }
     }
 
-    if (updateFields.length === 0) {
+    if (Object.keys(updateFields).length === 0) {
       // No fields to update, return current account
       return this.getAccountById(accountId, companyId);
     }
 
-    // Build params in correct order: field values first, then WHERE values
-    const allParams = [...params, accountId, companyId];
-    const setClause = updateFields.join(", ");
-
     const after = await withTransactionRetry(this.db, async (trx) => {
-      // Execute update using raw SQL (complex dynamic SQL is already built)
-      await sql`UPDATE accounts SET ${sql.raw(setClause)} WHERE id = ${accountId} AND company_id = ${companyId}`.execute(trx);
+      await trx
+        .updateTable('accounts')
+        .set(updateFields)
+        .where('id', '=', accountId)
+        .where('company_id', '=', companyId)
+        .execute();
 
-      // Fetch updated account
-      const updated = await this.getAccountById(accountId, companyId);
+      // Fetch updated account through the same transaction so returned data reflects the write.
+      const updatedRow = await trx
+        .selectFrom('accounts')
+        .where('id', '=', accountId)
+        .where('company_id', '=', companyId)
+        .select([
+          'id', 'company_id', 'code', 'name', 'account_type_id', 'type_name', 'normal_balance', 'report_group',
+          'parent_account_id', 'is_group', 'is_payable', 'is_active', 'created_at', 'updated_at'
+        ])
+        .executeTakeFirst();
+
+      if (!updatedRow) {
+        throw new AccountNotFoundError(accountId, companyId);
+      }
+
+      const updated = this.mapRowToAccountResponse(updatedRow);
 
       // Audit log (inside transaction)
       if (this.auditService && userId) {

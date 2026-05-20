@@ -16,19 +16,6 @@ import { CacheService } from "../lib/cache-service";
 import { useOnlineStatus } from "../lib/connection";
 
 /**
- * Account Usage Check Response
- */
-type AccountUsagePayload = {
-  account_id: number;
-  in_use: boolean;
-};
-
-type AccountUsageResponse = {
-  success: true;
-  data: AccountUsagePayload;
-};
-
-/**
  * API Response Types
  */
 type AccountsListResponse = {
@@ -99,7 +86,8 @@ export function useAccountTypes(
     is_active?: boolean;
     search?: string;
     category?: string;
-  }
+  },
+  options?: { enabled?: boolean }
 ) {
   const [data, setData] = useState<AccountTypeResponse[]>([]);
   const [loading, setLoading] = useState(false);
@@ -107,6 +95,12 @@ export function useAccountTypes(
   const isOnline = useOnlineStatus();
 
   const refetch = useCallback(async () => {
+    if (options?.enabled === false) {
+      setData([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -145,7 +139,7 @@ export function useAccountTypes(
     } finally {
       setLoading(false);
     }
-  }, [companyId, isOnline, filters?.is_active, filters?.search, filters?.category]);
+  }, [companyId, isOnline, filters?.is_active, filters?.search, filters?.category, options?.enabled]);
 
   useEffect(() => {
     refetch();
@@ -273,7 +267,8 @@ export function useAccounts(
  */
 export function useAccountTree(
   companyId: number,
-  includeInactive?: boolean
+  includeInactive?: boolean,
+  options?: { enabled?: boolean }
 ) {
   const [data, setData] = useState<AccountTreeNode[]>([]);
   const [loading, setLoading] = useState(false);
@@ -281,6 +276,12 @@ export function useAccountTree(
   const isOnline = useOnlineStatus();
 
   const refetch = useCallback(async () => {
+    if (options?.enabled === false) {
+      setData([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -311,7 +312,7 @@ export function useAccountTree(
     } finally {
       setLoading(false);
     }
-  }, [companyId, includeInactive, isOnline]);
+  }, [companyId, includeInactive, isOnline, options?.enabled]);
 
   useEffect(() => {
     refetch();
@@ -376,54 +377,6 @@ export function useAccount(
 }
 
 /**
- * Hook: useAccountUsage
- * Checks if an account is in use (has journal lines or child accounts)
- */
-export function useAccountUsage(
-  accountId: number | null,
-  companyId: number
-) {
-  const [data, setData] = useState<AccountUsagePayload | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const refetch = useCallback(async () => {
-    if (!accountId) {
-      setData(null);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ company_id: String(companyId) });
-      const response = await apiRequest<AccountUsageResponse>(
-        `/accounts/${accountId}/usage?${params.toString()}`,
-        {}
-      );
-      setData(response.data);
-    } catch (fetchError) {
-      if (fetchError instanceof ApiError) {
-        setError(fetchError.message);
-      } else {
-        setError("Failed to check account usage");
-      }
-      setData(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [accountId, companyId]);
-
-  useEffect(() => {
-    refetch();
-  }, [refetch]);
-
-  return { data, loading, error, refetch };
-}
-
-/**
  * Mutation: createAccount
  * Creates a new account
  */
@@ -453,37 +406,6 @@ export async function updateAccount(
     {
       method: "PUT",
       body: JSON.stringify(data)
-    }
-  );
-  return response.data;
-}
-
-/**
- * Mutation: deactivateAccount
- * Deactivates (soft delete) an account
- */
-export async function deactivateAccount(
-  accountId: number
-): Promise<void> {
-  await apiRequest<{ success: true; data: AccountResponse }>(
-    `/accounts/${accountId}`,
-    {
-      method: "DELETE"
-    }
-  );
-}
-
-/**
- * Mutation: reactivateAccount
- * Reactivates a deactivated account
- */
-export async function reactivateAccount(
-  accountId: number
-): Promise<AccountResponse> {
-  const response = await apiRequest<AccountSingleResponse>(
-    `/accounts/${accountId}/reactivate`,
-    {
-      method: "POST"
     }
   );
   return response.data;

@@ -773,8 +773,8 @@ development_status:
   # Epic 69: Finance & Purchasing — High-Risk Forms, Review Steps, Evidence UX
   epic-69: in-progress
   69-1-reviewpanel-staged-forms: done
-  69-2-purchasing-domain-screens: backlog
-  69-3-accounting-domain-screens: backlog
+  69-2-purchasing-domain-screens: done
+  69-3-accounting-domain-screens: in-progress
   69-4-financial-review-ux: backlog
   69-5-ap-exception-worklist: backlog
   69-2-e-reviewpanel-domain-interaction-hardening: done
@@ -782,4 +782,10 @@ development_status:
   69-2-b-purchase-orders-receipts: done
   69-2-c-ap-invoices-audit-links: done
   69-2-d-ap-payments-credits: done
+  69-3-a-accounting-contract-fixture-readiness: done
+  69-3-b-chart-of-accounts-screens: done
+  69-3-c-journal-entry-create-post-flow: done
+  69-3-d-journal-void-reversal-evidence-flow: backlog
+  69-3-e-fiscal-period-close-ux: backlog
+  69-3-f-financial-reports-csv-export: backlog
 

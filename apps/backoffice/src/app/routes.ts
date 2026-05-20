@@ -56,7 +56,8 @@ export const APP_ROUTES: readonly AppRoute[] = [
   {
     path: "/journals",
     label: "Journals & Trial Balance",
-    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    permission: { module: "accounting", resource: "journals", permissionMask: PERMISSION_BITS.READ }
   },
   {
     path: "/accounting-worksheet",
@@ -73,7 +74,8 @@ export const APP_ROUTES: readonly AppRoute[] = [
   {
     path: "/chart-of-accounts",
     label: "Chart of Accounts",
-    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    permission: { module: "accounting", resource: "accounts", permissionMask: PERMISSION_BITS.READ }
   },
   {
     path: "/fiscal-years",

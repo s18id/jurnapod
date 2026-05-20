@@ -13,6 +13,7 @@ import { FixedAssetsPage as FixedAssetsManagementPage } from "./fixed-assets/Fix
 import { ItemGroupsPage as ItemGroupsManagementPage } from "./item-groups-page";
 import { ItemDetailPage as ItemDetailManagementPage } from "./items/item-detail-page";
 import { ItemsPage as ItemsManagementPage } from "./items-page";
+import { JournalsPage as JournalEntriesPage } from "./journals-page";
 import { TransactionsPage as TransactionInputPage } from "./transactions-page";
 import { PricesPage as PricesManagementPage } from "./prices-page";
 import { TransactionTemplatesPage as TransactionTemplatesManagementPage } from "./transaction-templates-page";
@@ -20,7 +21,6 @@ import {
   AccountingWorksheetPage as AccountingWorksheetReportPage,
   DailySalesPage as DailySalesReportPage,
   GeneralLedgerPage as GeneralLedgerReportPage,
-  JournalsPage as JournalsReportPage,
   ProfitLossPage as ProfitLossReportPage,
   PosPaymentsPage as PosPaymentsReportPage,
   PosTransactionsPage as PosTransactionsReportPage
@@ -92,7 +92,7 @@ export const DailySalesPage = DailySalesReportPage;
 
 export const GeneralLedgerPage = GeneralLedgerReportPage;
 
-export const JournalsPage = JournalsReportPage;
+export const JournalsPage = JournalEntriesPage;
 
 export const ProfitLossPage = ProfitLossReportPage;
 
