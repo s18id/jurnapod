@@ -46,7 +46,7 @@ import {
   userCanAccessRoute,
 } from "./routes";
 import { filterNavigation } from "./shell/use-nav-filtering";
-import { resolveEffectivePermissions, userSatisfiesRoutePermission } from "@/lib/auth/permissions";
+import { resolveEffectivePermissions, userSatisfiesAnyRoutePermission, userSatisfiesRoutePermission } from "@/lib/auth/permissions";
 import {
   ShellProvider,
   useOutletSwitcher,
@@ -126,6 +126,7 @@ const PurchasingOrdersPage = lazyNamed(() => import("../features/purchasing/orde
 const PurchasingReceiptsPage = lazyNamed(() => import("../features/purchasing/orders-receipts"), "PurchasingReceiptsPage");
 const PurchasingInvoicesPage = lazyNamed(() => import("../features/purchasing/invoices"), "PurchasingInvoicesPage");
 const PurchasingPaymentsCreditsPage = lazyNamed(() => import("../features/purchasing/payments-credits"), "PurchasingPaymentsCreditsPage");
+const PurchasingApExceptionsPage = lazyNamed(() => import("../features/purchasing/ap-exceptions"), "PurchasingApExceptionsPage");
 
 function RouteLoadingFallback() {
   return <div style={{ padding: "1rem" }}>Loading…</div>;
@@ -143,6 +144,10 @@ const STATIC_SLUG_PATTERN = /^[a-z0-9-]+$/;
 function ensureHash(path: string): void {
   const publicSlug = getPublicStaticSlugFromLocation(globalThis.location);
   if (publicSlug && globalThis.location.pathname === `/${publicSlug}`) {
+    return;
+  }
+
+  if (globalThis.location.hash && normalizeHashPath(globalThis.location.hash) === path) {
     return;
   }
 
@@ -276,6 +281,9 @@ function RouteScreen(props: { path: string; user: SessionUser }) {
   }
   if (props.path === "/purchasing/payments" || props.path === "/purchasing/credits") {
     return renderLazyPage(<PurchasingPaymentsCreditsPage user={props.user} />);
+  }
+  if (props.path === "/purchasing/ap-exceptions") {
+    return renderLazyPage(<PurchasingApExceptionsPage user={props.user} />);
   }
   if (props.path === "/sales-invoices") {
     return renderLazyPage(<SalesInvoicesPage user={props.user} />);
@@ -676,7 +684,8 @@ export function AppRouter() {
     // Backend authority: API enforces deny-by-default.
     // Client-side permission check is a UX convenience (deny-by-default for
     // permissioned routes when effective permissions are insufficient).
-    userSatisfiesRoutePermission(route.permission, route.requiresExplicitPermission ? user.permissions : effectivePermissions)
+    userSatisfiesRoutePermission(route.permission, route.requiresExplicitPermission ? user.permissions : effectivePermissions) &&
+    userSatisfiesAnyRoutePermission(route.permissionAny, route.requiresExplicitPermission ? user.permissions : effectivePermissions)
   );
 
   async function handleSignIn(input: { companyCode: string; email: string; password: string }) {

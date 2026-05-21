@@ -771,12 +771,12 @@ development_status:
   epic-68-retrospective: done
 
   # Epic 69: Finance & Purchasing — High-Risk Forms, Review Steps, Evidence UX
-  epic-69: in-progress
+  epic-69: done
   69-1-reviewpanel-staged-forms: done
   69-2-purchasing-domain-screens: done
   69-3-accounting-domain-screens: done
   69-4-financial-review-ux: done
-  69-5-ap-exception-worklist: backlog
+  69-5-ap-exception-worklist: done
   69-2-e-reviewpanel-domain-interaction-hardening: done
   69-2-a-supplier-management-contacts: done
   69-2-b-purchase-orders-receipts: done

@@ -19,6 +19,7 @@ import { userCanAccessRoute, filterRoutesByModules } from "@/app/routes";
 // Canonical permission helpers
 import {
   userHasPermission,
+  userSatisfiesAnyRoutePermission,
 } from "@/lib/auth/permissions";
 import type {
   NavPermissionRequirement,
@@ -113,7 +114,7 @@ export function filterNavigation(
   // Step 3: Permission-based filtering uses formal AppRoute.permission metadata.
   // Routes without permission metadata continue to rely on role + module visibility.
   const permissionFiltered = moduleFiltered.filter((route) => {
-    if (!route.permission) {
+    if (!route.permission && (!route.permissionAny || route.permissionAny.length === 0)) {
       return true;
     }
 
@@ -121,10 +122,12 @@ export function filterNavigation(
       if (explicitUserPermissions === undefined) {
         return false;
       }
-      return userSatisfiesPermission(explicitUserPermissions, route.permission);
+      return (!route.permission || userSatisfiesPermission(explicitUserPermissions, route.permission)) &&
+        userSatisfiesAnyRoutePermission(route.permissionAny, explicitUserPermissions);
     }
 
-    return userSatisfiesPermission(userPermissions ?? [], route.permission);
+    return (!route.permission || userSatisfiesPermission(userPermissions ?? [], route.permission)) &&
+      userSatisfiesAnyRoutePermission(route.permissionAny, userPermissions ?? []);
   });
 
   return {

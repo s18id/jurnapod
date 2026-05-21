@@ -20,6 +20,11 @@ export type AppRoute = {
    */
   permission?: NavPermissionRequirement;
   /**
+   * Alternative permission requirements where any one grant is sufficient.
+   * Use this when the backend enforces an OR ACL policy for a route.
+   */
+  permissionAny?: readonly NavPermissionRequirement[];
+  /**
    * When true, route permission checks MUST use backend-supplied user.permissions only.
    * Role-derived fallback permissions MUST NOT grant this route.
    */
@@ -292,6 +297,16 @@ export const APP_ROUTES: readonly AppRoute[] = [
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "purchasing",
     permission: { module: "purchasing", resource: "reports", permissionMask: PERMISSION_BITS.ANALYZE }
+  },
+  {
+    path: "/purchasing/ap-exceptions",
+    label: "AP Exceptions",
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "purchasing",
+    permissionAny: [
+      { module: "accounting", resource: "journals", permissionMask: PERMISSION_BITS.ANALYZE },
+      { module: "purchasing", resource: "suppliers", permissionMask: PERMISSION_BITS.ANALYZE },
+    ],
   },
   {
     path: "/inventory-settings",

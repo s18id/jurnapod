@@ -484,3 +484,13 @@ export function userSatisfiesRoutePermission(
   }
   return false;
 }
+
+export function userSatisfiesAnyRoutePermission(
+  routePermissions: readonly NavPermissionRequirement[] | undefined,
+  effectivePermissions: readonly UserPermissionEntry[] | undefined,
+): boolean {
+  if (!routePermissions || routePermissions.length === 0) return true;
+  return routePermissions.some((routePermission) =>
+    userSatisfiesRoutePermission(routePermission, effectivePermissions),
+  );
+}
