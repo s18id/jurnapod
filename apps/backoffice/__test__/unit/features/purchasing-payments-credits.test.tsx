@@ -162,6 +162,7 @@ describe("Purchasing payments and credits backoffice", () => {
     const voidedPayment = await voidApPaymentAndRefetch({ paymentId: 1, overrideReason: "" });
     expect(voidedPayment.payment.status).toBe("VOID");
     expect(String(mockedApiRequest.mock.calls[0]?.[1]?.body ?? "")).not.toContain("void_reason");
+    expect(String(mockedApiRequest.mock.calls[0]?.[1]?.body ?? "")).not.toContain("override_reason");
     expect(mockedApiRequest.mock.calls[1]?.[0]).toBe("/purchasing/payments/1");
 
     const voidedCredit = await voidPurchaseCreditAndRefetch({ creditId: 2 });
@@ -171,6 +172,8 @@ describe("Purchasing payments and credits backoffice", () => {
 
     const paymentHtml = renderToStaticMarkup(createElement(MantineProvider, {}, createElement(PaymentVoidReviewForm, { payment: { ...payment, status: "POSTED", journal_batch_id: 77 }, overrideReason: "", trace: voidedPayment, submitting: false, onOverrideReasonChange: () => undefined, onDiscard: () => undefined, onSubmit: async () => true })));
     expect(paymentHtml).toContain("No distinct void_reason is submitted");
+    expect(paymentHtml).toContain("I confirm this action is correct and authorized");
+    expect(paymentHtml).not.toContain("href=\"#/audit");
     const creditHtml = renderToStaticMarkup(createElement(MantineProvider, {}, createElement(CreditVoidReviewForm, { credit: { ...credit, status: "APPLIED", journal_batch_id: 88 }, overrideReason: "", trace: voidedCredit, submitting: false, onOverrideReasonChange: () => undefined, onDiscard: () => undefined, onSubmit: async () => true })));
     expect(creditHtml).toContain("Reversal batch");
   });

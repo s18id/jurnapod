@@ -3,7 +3,7 @@
 
 import { Temporal } from "@js-temporal/polyfill";
 import type { AccountResponse, JournalEntryResponse, ManualJournalEntryCreateRequest } from "@jurnapod/shared";
-import { Alert, Button, Group, Stack, Text } from "@mantine/core";
+import { Alert, Button, Card, Group, Stack, Text } from "@mantine/core";
 import type { FormEvent } from "react";
 import { useMemo, useState } from "react";
 
@@ -21,6 +21,7 @@ import { useOnlineStatus } from "@/lib/connection";
 import { diffValues, type DiffChange } from "@/lib/diff-engine";
 import { ApiError } from "@/lib/api-client";
 import { actionGates, resolveEffectivePermissions } from "@/lib/auth/permissions";
+import { buildJournalLineReviewGroups } from "@/lib/financial-review-formatters";
 import type { SessionUser } from "@/lib/session";
 
 type JournalsPageProps = {
@@ -285,6 +286,15 @@ export function journalVoidResultMessages(entry: JournalEntryResponse): { succes
   };
 }
 
+export function journalTraceSummary(entry: JournalEntryResponse): string {
+  const journalBatchId = entry.lines.find((line) => line.journal_batch_id != null)?.journal_batch_id ?? null;
+  const traceParts = [`Journal ID ${entry.id}`];
+  if (journalBatchId != null) traceParts.push(`journal_batch_id ${journalBatchId}`);
+  if (entry.reversal_journal_id != null) traceParts.push(`reversal_journal_id ${entry.reversal_journal_id}`);
+  if (entry.original_journal_id != null) traceParts.push(`original_journal_id ${entry.original_journal_id}`);
+  return traceParts.join("; ");
+}
+
 function accountLabel(accounts: AccountResponse[], accountId: number): string {
   const account = accounts.find((item) => item.id === accountId);
   return account ? `${account.code} - ${account.name}` : `Account #${accountId}`;
@@ -358,6 +368,36 @@ function JournalLinesTable(props: { entry: JournalEntryResponse; accounts: Accou
         </tr>
       </tfoot>
     </table>
+  );
+}
+
+function JournalLineReviewEvidence(props: { entry: JournalEntryResponse; accounts: AccountResponse[] }) {
+  const groupedEvidence = buildJournalLineReviewGroups({
+    beforeLines: props.entry.lines,
+    resolveAccountLabel: (accountId) => accountLabel(props.accounts, accountId),
+  });
+
+  if (!groupedEvidence.isComplex) {
+    return <JournalLinesTable entry={props.entry} accounts={props.accounts} />;
+  }
+
+  return (
+    <Stack gap="xs" aria-label="Complex journal line review groups">
+      <Alert color="blue">
+        Complex journal evidence: {groupedEvidence.totalUnchangedLineCount} unchanged backend-returned lines collapsed; {groupedEvidence.totalChangedLineCount} changed lines shown. Line grouping is display-only and does not recompute accounting effects.
+      </Alert>
+      {groupedEvidence.groups.map((group) => (
+        <Card key={group.accountKey} withBorder radius="sm" p="sm">
+          <Stack gap={4}>
+            <Text fw={600}>{group.accountLabel}</Text>
+            {group.changedLines.map((line) => (
+              <Text key={line.id} size="sm">Line {line.id}: {line.description}; debit {formatMoney(line.debit)}; credit {formatMoney(line.credit)}</Text>
+            ))}
+            {group.unchangedLineCount > 0 ? <Text size="sm" c="dimmed">{group.unchangedLineCount} unchanged lines</Text> : null}
+          </Stack>
+        </Card>
+      ))}
+    </Stack>
   );
 }
 
@@ -477,7 +517,7 @@ export function JournalsPage({ user }: JournalsPageProps) {
       setReviewEntry(null);
       setVoidReviewEntry(null);
       setForm(emptyForm(user.company_timezone));
-      setSuccessMessage("Journal posted. Posted journals are now immutable in the UI.");
+      setSuccessMessage(`Journal posted. Posted journals are now immutable in the UI. Trace: ${journalTraceSummary(posted)}.`);
       await refetch();
     } catch (requestError) {
       setSubmitError(formatJournalApiError(requestError));
@@ -548,7 +588,7 @@ export function JournalsPage({ user }: JournalsPageProps) {
             <DetailField label="Total debits" value={formatMoney(reviewEntry.total_debits)} />
             <DetailField label="Total credits" value={formatMoney(reviewEntry.total_credits)} />
           </Group>
-          <JournalLinesTable entry={reviewEntry} accounts={accounts} />
+          <JournalLineReviewEvidence entry={reviewEntry} accounts={accounts} />
         </Stack>
       ),
     },
@@ -583,7 +623,7 @@ export function JournalsPage({ user }: JournalsPageProps) {
             <DetailField label="Total debits" value={formatMoney(voidReviewEntry.total_debits)} />
             <DetailField label="Total credits" value={formatMoney(voidReviewEntry.total_credits)} />
           </Group>
-          <JournalLinesTable entry={voidReviewEntry} accounts={accounts} />
+          <JournalLineReviewEvidence entry={voidReviewEntry} accounts={accounts} />
         </Stack>
       ),
       errors: !isVoidEligibleJournal(voidReviewEntry) ? ["Only posted manual journals can be voided."] : undefined,

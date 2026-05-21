@@ -144,6 +144,7 @@ describe("Purchasing invoices backoffice", () => {
     const html = renderToStaticMarkup(createElement(MantineProvider, {}, createElement(InvoicePostReviewForm, { invoice: invoiceDetail, overrideReason: "", trace: result, submitting: false, onOverrideReasonChange: () => undefined, onDiscard: () => undefined, onSubmit: async () => true })));
     expect(html).toContain("Journal batch 77 created");
     expect(html).toContain("Rounded tax");
+    expect(html).toContain("I confirm this action is correct and authorized");
   });
 
   it("void ReviewPanel calls partial endpoint without void_reason, displays reversal trace, then refetches detail", async () => {
@@ -157,11 +158,14 @@ describe("Purchasing invoices backoffice", () => {
     expect(result.invoice.status).toBe("VOID");
     expect(mockedApiRequest.mock.calls[0]?.[0]).toBe("/purchasing/invoices/9001/void");
     expect(String(mockedApiRequest.mock.calls[0]?.[1]?.body ?? "")).not.toContain("void_reason");
+    expect(String(mockedApiRequest.mock.calls[0]?.[1]?.body ?? "")).not.toContain("override_reason");
     expect(mockedApiRequest.mock.calls[1]?.[0]).toBe("/purchasing/invoices/9001");
 
     const html = renderToStaticMarkup(createElement(MantineProvider, {}, createElement(InvoiceVoidReviewForm, { invoice: posted, overrideReason: "", trace: result, submitting: false, onOverrideReasonChange: () => undefined, onDiscard: () => undefined, onSubmit: async () => true })));
     expect(html).toContain("Reversal batch 88 created");
     expect(html).toContain("No distinct void reason is submitted");
+    expect(html).toContain("I confirm this action is correct and authorized");
+    expect(html).not.toContain("href=\"#/audit");
   });
 
   it("renders 409 PERIOD_CLOSED as non-retryable by status/code without instanceof", () => {

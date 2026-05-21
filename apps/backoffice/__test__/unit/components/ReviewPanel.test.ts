@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ReviewPanel, getReviewSectionStatus, shouldRenderReviewPanel } from "@/components/ReviewPanel";
+import { canSubmitReviewPanel } from "@/components/ReviewPanel/ReviewPanel";
 import { diffValues } from "@/lib/diff-engine";
 
 function renderPanel(overrides: Partial<Parameters<typeof ReviewPanel>[0]> = {}): string {
@@ -52,7 +53,16 @@ describe("ReviewPanel", () => {
     expect(html).toContain("aria-expanded=\"true\"");
     expect(html).toContain("aria-expanded=\"false\"");
     expect(html).toContain("Final review");
+    expect(html).toContain("I confirm this action is correct and authorized");
     expect(html).toContain("Save and log change");
+  });
+
+  it("requires completed sections and final checkbox confirmation before submit is enabled", () => {
+    expect(canSubmitReviewPanel({ allSectionsComplete: true, confirmed: true })).toBe(true);
+    expect(canSubmitReviewPanel({ allSectionsComplete: false, confirmed: true })).toBe(false);
+    expect(canSubmitReviewPanel({ allSectionsComplete: true, confirmed: false })).toBe(false);
+    expect(canSubmitReviewPanel({ allSectionsComplete: true, confirmed: true, saveDisabled: true })).toBe(false);
+    expect(canSubmitReviewPanel({ allSectionsComplete: true, confirmed: true, submitting: true })).toBe(false);
   });
 
   it("shows before/after money diff with cents and high-value warning", () => {

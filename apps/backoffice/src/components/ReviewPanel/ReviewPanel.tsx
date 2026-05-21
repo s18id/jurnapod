@@ -55,6 +55,15 @@ export interface ReviewPanelProps {
   onLeave?: () => void;
 }
 
+export function canSubmitReviewPanel(params: {
+  allSectionsComplete: boolean;
+  confirmed: boolean;
+  saveDisabled?: boolean;
+  submitting?: boolean;
+}): boolean {
+  return params.allSectionsComplete && params.confirmed && !params.saveDisabled && !params.submitting;
+}
+
 export function shouldRenderReviewPanel(featureFlag?: ReviewPanelFeatureFlag): boolean {
   if (!featureFlag) return true;
   if (featureFlag.mode === "off") return false;
@@ -121,6 +130,7 @@ export function ReviewPanel({
   const invalidSection = sections.find((section) => section.errors?.length);
   const allSectionsComplete = sections.length > 0 && sections.every((section) => completedSectionIds.has(section.id) && !section.errors?.length);
   const highValueWarning = highValueThreshold !== undefined && hasHighValueMoneyDelta(diffChanges, highValueThreshold);
+  const submitEnabled = canSubmitReviewPanel({ allSectionsComplete, confirmed, saveDisabled, submitting });
 
   if (!shouldRenderReviewPanel(featureFlag)) return null;
 
@@ -144,7 +154,7 @@ export function ReviewPanel({
       setActiveSectionId(invalidSection.id);
       return;
     }
-    if (allSectionsComplete && confirmed) onSubmit();
+    if (submitEnabled) onSubmit();
   };
 
   return (
@@ -211,12 +221,13 @@ export function ReviewPanel({
           <Checkbox
             checked={confirmed}
             onChange={(event) => setConfirmed(event.currentTarget.checked)}
-            label="I reviewed the sections, validation messages, and before/after changes."
+            label="I confirm this action is correct and authorized"
             aria-label="Confirm final review"
+            required
           />
           <Group justify="space-between">
             <Button variant="light" color="red" onClick={onDiscardDraft}>Discard draft</Button>
-            <Button onClick={submit} disabled={!allSectionsComplete || !confirmed || saveDisabled || submitting} loading={submitting}>
+            <Button onClick={submit} disabled={!submitEnabled} loading={submitting}>
               {saveLabel}
             </Button>
           </Group>

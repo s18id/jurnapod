@@ -28,6 +28,7 @@ import {
   formForEntrySelection,
   isVoidEligibleJournal,
   isJournalDraftDirty,
+  journalTraceSummary,
   journalVoidResultMessages,
   journalReviewBlockReason,
   JournalsPage,
@@ -231,6 +232,11 @@ describe("Journal create/post backoffice screen", () => {
       success: null,
       error: "VOID_EVIDENCE_INCOMPLETE: Backend void response did not include reversal_journal_id. Refresh the list and contact support before relying on this correction evidence.",
     });
+  });
+
+  it("formats journal trace IDs as text evidence without audit-entry links", () => {
+    expect(journalTraceSummary({ ...postedJournal, lines: postedJournal.lines.map((line) => ({ ...line, journal_batch_id: 88 })) })).toBe("Journal ID 88; journal_batch_id 88");
+    expect(journalTraceSummary(voidedJournal)).toBe("Journal ID 89; journal_batch_id 89; reversal_journal_id 90");
   });
 
   it("gates create/update actions for read-only journal users", () => {
