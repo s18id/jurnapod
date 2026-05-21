@@ -1,16 +1,65 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { Button } from "@mantine/core";
+import { Button, Stack, Text } from "@mantine/core";
 import { IconFileTypeCsv } from "@tabler/icons-react";
 import { useState } from "react";
 
-import type { AggregatedCustomer, ReceivablesAgeingReport } from "../../../types/reports/receivables-ageing";
+import type { ReceivablesAgeingReport } from "../../../types/reports/receivables-ageing";
+import { apiStreamingRequest } from "../../../lib/api-client";
+import { downloadStreamingResponse } from "../../../hooks/use-export";
+
+export function formatReceivablesExportError(status: number): string {
+  if (status === 401) return "Your session expired. Sign in again before exporting receivables ageing.";
+  if (status === 403) return "You do not have accounting.reports ANALYZE permission to export receivables ageing.";
+  if (status >= 500) return "Receivables ageing export failed on the server. Try again or narrow the report filters.";
+  return `Receivables ageing export failed with status ${status}.`;
+}
+
+async function readExportError(response: Response): Promise<string> {
+  const fallback = formatReceivablesExportError(response.status);
+  const payload = await response.json().catch(() => null) as { error?: { message?: string }; data?: { message?: string }; message?: string } | null;
+  return payload?.error?.message ?? payload?.data?.message ?? payload?.message ?? fallback;
+}
+
+export function canExportReceivablesAgeing(report: ReceivablesAgeingReport | null): boolean {
+  return report !== null;
+}
+
+export function buildReceivablesAgeingExportPath(input: { asOfDate: string; outletId?: number | null }): string {
+  const params = new URLSearchParams({ as_of_date: input.asOfDate, format: "csv" });
+  if (input.outletId) {
+    params.set("outlet_id", String(input.outletId));
+  }
+  return `/reports/receivables-ageing/export?${params.toString()}`;
+}
+
+export async function executeReceivablesAgeingCsvExport(input: {
+  path: string;
+  fallbackFilename: string;
+  request: typeof apiStreamingRequest;
+  download: typeof downloadStreamingResponse;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const response = await input.request(input.path, { method: "GET" });
+    if (!response.ok) {
+      return { ok: false, error: await readExportError(response) };
+    }
+
+    const contentDisposition = response.headers.get("content-disposition");
+    const filenameMatch = contentDisposition?.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+    const filename = filenameMatch?.[1]?.replace(/["']/g, "") ?? input.fallbackFilename;
+    await input.download(response, filename, "csv", () => undefined);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Network error during receivables ageing export." };
+  }
+}
 
 interface AgeingExportButtonProps {
   report: ReceivablesAgeingReport | null;
-  customers: AggregatedCustomer[];
   asOfDate: string;
+  outletId?: number | null;
   outletName?: string;
   isLoading?: boolean;
 }
@@ -20,106 +69,47 @@ interface AgeingExportButtonProps {
  */
 export function AgeingExportButton({
   report,
-  customers,
   asOfDate,
+  outletId,
   outletName = "All",
   isLoading,
 }: AgeingExportButtonProps) {
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const handleExport = async () => {
-    if (!report || customers.length === 0) return;
+    if (!report) return;
 
     setExporting(true);
+    setExportError(null);
     try {
-      // Get current timestamp for generation time
-      const generatedAt = new Date().toISOString();
-
-      // Build CSV content with metadata header
-      const metadataRows: string[][] = [
-        ["Receivables Ageing Report"],
-        [`As-of Date,${asOfDate}`],
-        [`Generated,${generatedAt}`],
-        [`Outlet,${outletName}`],
-        [""],
-      ];
-
-      const headers: string[][] = [
-        [
-          "Customer",
-          "Current",
-          "1-30 Days",
-          "31-60 Days",
-          "61-90 Days",
-          "90+ Days",
-          "Total Outstanding",
-        ],
-      ];
-
-      const rows = customers.map((customer) => [
-        customer.customer_name,
-        customer.current.toFixed(2),
-        customer.bucket_1_30.toFixed(2),
-        customer.bucket_31_60.toFixed(2),
-        customer.bucket_61_90.toFixed(2),
-        customer.bucket_90_plus.toFixed(2),
-        customer.total_outstanding.toFixed(2),
-      ]);
-
-      // Add grand totals
-      const grandTotals = customers.reduce(
-        (acc, customer) => ({
-          current: acc.current + customer.current,
-          bucket_1_30: acc.bucket_1_30 + customer.bucket_1_30,
-          bucket_31_60: acc.bucket_31_60 + customer.bucket_31_60,
-          bucket_61_90: acc.bucket_61_90 + customer.bucket_61_90,
-          bucket_90_plus: acc.bucket_90_plus + customer.bucket_90_plus,
-          total_outstanding: acc.total_outstanding + customer.total_outstanding,
-        }),
-        { current: 0, bucket_1_30: 0, bucket_31_60: 0, bucket_61_90: 0, bucket_90_plus: 0, total_outstanding: 0 }
-      );
-
-      rows.push([
-        "GRAND TOTAL",
-        grandTotals.current.toFixed(2),
-        grandTotals.bucket_1_30.toFixed(2),
-        grandTotals.bucket_31_60.toFixed(2),
-        grandTotals.bucket_61_90.toFixed(2),
-        grandTotals.bucket_90_plus.toFixed(2),
-        grandTotals.total_outstanding.toFixed(2),
-      ]);
-
-      // Combine metadata and data
-      const allRows = [...metadataRows, headers, ...rows];
-
-      // CSV content with BOM for Excel compatibility
-      const BOM = "\uFEFF";
-      const csvContent = BOM + allRows.map((row) => row.join(",")).join("\n");
-
-      // Create download
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `receivables-ageing-${asOfDate}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      const result = await executeReceivablesAgeingCsvExport({
+        path: buildReceivablesAgeingExportPath({ asOfDate, outletId }),
+        fallbackFilename: `receivables-ageing-${asOfDate}.csv`,
+        request: apiStreamingRequest,
+        download: downloadStreamingResponse,
+      });
+      if (!result.ok) setExportError(result.error);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Network error during receivables ageing export.");
     } finally {
       setExporting(false);
     }
   };
 
   return (
-    <Button
-      variant="light"
-      leftSection={<IconFileTypeCsv size={16} />}
-      onClick={handleExport}
-      loading={exporting || isLoading}
-      disabled={!report || customers.length === 0}
-    >
-      Export CSV
-    </Button>
+    <Stack gap={4} align="flex-end">
+      <Button
+        variant="light"
+        leftSection={<IconFileTypeCsv size={16} />}
+        onClick={handleExport}
+        loading={exporting || isLoading}
+        disabled={!canExportReceivablesAgeing(report)}
+        title={`Export ${outletName} receivables ageing CSV`}
+      >
+        Export CSV
+      </Button>
+      {exportError ? <Text size="xs" c="red" role="alert">{exportError}</Text> : null}
+    </Stack>
   );
 }

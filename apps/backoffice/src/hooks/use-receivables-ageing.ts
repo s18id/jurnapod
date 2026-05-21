@@ -11,6 +11,74 @@ import {
   type ReceivablesAgeingResponse,
 } from "../types/reports/receivables-ageing";
 
+export function buildReceivablesAgeingReportPath(filters: ReceivablesAgeingFilters): string {
+  const params = new URLSearchParams();
+  params.set("as_of_date", filters.asOfDate);
+  if (filters.outletId) {
+    params.set("outlet_id", String(filters.outletId));
+  }
+  return `/reports/receivables-ageing?${params.toString()}`;
+}
+
+export function aggregateReceivablesAgeingCustomers(data: ReceivablesAgeingReport | null): AggregatedCustomer[] {
+  if (!data?.invoices) return [];
+
+  const customerMap = new Map<
+    string,
+    {
+      customerId: number | null;
+      name: string;
+      code: string;
+      current: number;
+      bucket_1_30: number;
+      bucket_31_60: number;
+      bucket_61_90: number;
+      bucket_90_plus: number;
+      total: number;
+    }
+  >();
+
+  for (const invoice of data.invoices) {
+    const customerKey = invoice.customer_id === null ? `invoice:${invoice.invoice_id}` : `customer:${invoice.customer_id}`;
+    const existing = customerMap.get(customerKey);
+    const amount = invoice.outstanding_amount;
+
+    if (existing) {
+      existing.current += invoice.age_bucket === "current" ? amount : 0;
+      existing.bucket_1_30 += invoice.age_bucket === "1_30_days" ? amount : 0;
+      existing.bucket_31_60 += invoice.age_bucket === "31_60_days" ? amount : 0;
+      existing.bucket_61_90 += invoice.age_bucket === "61_90_days" ? amount : 0;
+      existing.bucket_90_plus += invoice.age_bucket === "over_90_days" ? amount : 0;
+      existing.total += amount;
+    } else {
+      customerMap.set(customerKey, {
+        customerId: invoice.customer_id,
+        name: invoice.customer_display_name ?? (invoice.customer_id === null ? "Unassigned Customer" : `Customer #${invoice.customer_id}`),
+        code: invoice.customer_code ?? "",
+        current: invoice.age_bucket === "current" ? amount : 0,
+        bucket_1_30: invoice.age_bucket === "1_30_days" ? amount : 0,
+        bucket_31_60: invoice.age_bucket === "31_60_days" ? amount : 0,
+        bucket_61_90: invoice.age_bucket === "61_90_days" ? amount : 0,
+        bucket_90_plus: invoice.age_bucket === "over_90_days" ? amount : 0,
+        total: amount,
+      });
+    }
+  }
+
+  return Array.from(customerMap.entries()).map(([customerKey, values]) => ({
+    customer_key: customerKey,
+    customer_id: values.customerId,
+    customer_name: values.name,
+    customer_code: values.code,
+    current: values.current,
+    bucket_1_30: values.bucket_1_30,
+    bucket_31_60: values.bucket_31_60,
+    bucket_61_90: values.bucket_61_90,
+    bucket_90_plus: values.bucket_90_plus,
+    total_outstanding: values.total,
+  }));
+}
+
 // ============================================================================
 // Hook: useReceivablesAgeing
 // ============================================================================
@@ -46,17 +114,8 @@ export function useReceivablesAgeing({
     setError(null);
 
     try {
-      const params = new URLSearchParams();
-      params.set("as_of_date", filters.asOfDate);
-      if (filters.outletId) {
-        params.set("outlet_id", String(filters.outletId));
-      }
-      if (filters.customerId) {
-        params.set("customer_id", String(filters.customerId));
-      }
-
       const response = await apiRequest<ReceivablesAgeingResponse>(
-        `/reports/receivables-ageing?${params.toString()}`,
+        buildReceivablesAgeingReportPath(filters),
         {}
       );
 
@@ -71,7 +130,7 @@ export function useReceivablesAgeing({
     } finally {
       setIsLoading(false);
     }
-  }, [filters.asOfDate, filters.outletId, filters.customerId, enabled]);
+  }, [filters.asOfDate, filters.outletId, enabled]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -87,58 +146,7 @@ export function useReceivablesAgeing({
 
   // Aggregate invoices by customer
   const customers = useMemo<AggregatedCustomer[]>(() => {
-    if (!data?.invoices) return [];
-
-    const customerMap = new Map<
-      number,
-      {
-        name: string;
-        code: string;
-        current: number;
-        bucket_1_30: number;
-        bucket_31_60: number;
-        bucket_61_90: number;
-        bucket_90_plus: number;
-        total: number;
-      }
-    >();
-
-    for (const invoice of data.invoices) {
-      const existing = customerMap.get(invoice.customer_id);
-      const amount = invoice.outstanding_amount;
-
-      if (existing) {
-        existing.current += invoice.age_bucket === "current" ? amount : 0;
-        existing.bucket_1_30 += invoice.age_bucket === "1_30_days" ? amount : 0;
-        existing.bucket_31_60 += invoice.age_bucket === "31_60_days" ? amount : 0;
-        existing.bucket_61_90 += invoice.age_bucket === "61_90_days" ? amount : 0;
-        existing.bucket_90_plus += invoice.age_bucket === "over_90_days" ? amount : 0;
-        existing.total += amount;
-      } else {
-        customerMap.set(invoice.customer_id, {
-          name: invoice.customer_name ?? `Customer #${invoice.customer_id}`,
-          code: invoice.customer_code ?? "",
-          current: invoice.age_bucket === "current" ? amount : 0,
-          bucket_1_30: invoice.age_bucket === "1_30_days" ? amount : 0,
-          bucket_31_60: invoice.age_bucket === "31_60_days" ? amount : 0,
-          bucket_61_90: invoice.age_bucket === "61_90_days" ? amount : 0,
-          bucket_90_plus: invoice.age_bucket === "over_90_days" ? amount : 0,
-          total: amount,
-        });
-      }
-    }
-
-    return Array.from(customerMap.entries()).map(([customer_id, values]) => ({
-      customer_id,
-      customer_name: values.name,
-      customer_code: values.code,
-      current: values.current,
-      bucket_1_30: values.bucket_1_30,
-      bucket_31_60: values.bucket_31_60,
-      bucket_61_90: values.bucket_61_90,
-      bucket_90_plus: values.bucket_90_plus,
-      total_outstanding: values.total,
-    }));
+    return aggregateReceivablesAgeingCustomers(data);
   }, [data]);
 
   return {

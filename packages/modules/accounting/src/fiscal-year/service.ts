@@ -556,6 +556,13 @@ export class FiscalYearService {
 
       // If duplicate found, return existing result immediately
       if (existingRequest) {
+        const existingResultJson = existingRequest.result_json
+          ? JSON.parse(existingRequest.result_json) as Record<string, unknown>
+          : {};
+        if (existingRequest.reason && typeof existingResultJson.reason !== "string") {
+          existingResultJson.reason = existingRequest.reason;
+        }
+
         return {
           success: existingRequest.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED,
           fiscalYearId,
@@ -563,9 +570,8 @@ export class FiscalYearService {
           status: existingRequest.status as FiscalYearCloseStatus,
           previousStatus: existingRequest.fiscal_year_status_before,
           newStatus: existingRequest.fiscal_year_status_after,
-          resultJson: existingRequest.result_json
-            ? JSON.parse(existingRequest.result_json)
-            : undefined,
+          reason: existingRequest.reason ?? null,
+          resultJson: Object.keys(existingResultJson).length > 0 ? existingResultJson : undefined,
           failureCode: existingRequest.failure_code ?? undefined,
           failureMessage: existingRequest.failure_message ?? undefined,
         };
@@ -741,6 +747,7 @@ export class FiscalYearService {
     context: CloseFiscalYearContext
   ): Promise<CloseFiscalYearResult> {
     const { companyId, requestedByUserId, requestedAtEpochMs } = context;
+    const requestedReason = context.reason?.trim() ?? null;
 
     return await withTransactionRetry(this.db, async (trx) => {
       // Check if fiscal year exists and is not already closed
@@ -770,6 +777,13 @@ export class FiscalYearService {
 
       // If duplicate found, return existing result immediately
       if (existingRequest) {
+        const existingResultJson = existingRequest.result_json
+          ? JSON.parse(existingRequest.result_json) as Record<string, unknown>
+          : {};
+        if (existingRequest.reason && typeof existingResultJson.reason !== "string") {
+          existingResultJson.reason = existingRequest.reason;
+        }
+
         return {
           success: existingRequest.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED,
           fiscalYearId,
@@ -777,9 +791,8 @@ export class FiscalYearService {
           status: existingRequest.status as FiscalYearCloseStatus,
           previousStatus: existingRequest.fiscal_year_status_before,
           newStatus: existingRequest.fiscal_year_status_after,
-          resultJson: existingRequest.result_json
-            ? JSON.parse(existingRequest.result_json)
-            : undefined,
+          reason: existingRequest.reason ?? null,
+          resultJson: Object.keys(existingResultJson).length > 0 ? existingResultJson : undefined,
           failureCode: existingRequest.failure_code ?? undefined,
           failureMessage: existingRequest.failure_message ?? undefined,
         };
@@ -794,9 +807,11 @@ export class FiscalYearService {
         status: FISCAL_YEAR_CLOSE_STATUS.PENDING,
         previousStatus: fiscalYear.status,
         newStatus: fiscalYear.status, // No change - remains OPEN
+        reason: requestedReason,
         resultJson: {
           claimed: true,
           closeRequestDbId,
+          reason: requestedReason,
           message: "Fiscal year close initiated. Proceed to approve to post closing entries."
         }
       };
@@ -934,6 +949,7 @@ export class FiscalYearService {
     requestedByUserId: number
   ): Promise<CloseFiscalYearResult> {
     const { requestedAtEpochMs } = context;
+    const requestedReason = context.reason?.trim() ?? null;
 
     // Lock fiscal_year row FIRST to prevent deadlocks
     const lockedFiscalYear = await trx
@@ -1007,7 +1023,7 @@ export class FiscalYearService {
         result_json: JSON.stringify({
           closedAt: completedAt,
           closedByUserId: requestedByUserId,
-          reason: context.reason ?? null
+          reason: requestedReason
         }),
         completed_at_ts: completedAt,
         updated_at_ts: completedAt
@@ -1025,7 +1041,7 @@ export class FiscalYearService {
       resultJson: {
         closedAt: completedAt,
         closedByUserId: requestedByUserId,
-        reason: context.reason ?? null
+        reason: requestedReason
       }
     };
   }
@@ -1053,10 +1069,12 @@ export class FiscalYearService {
       result_json: string | null;
       failure_code: string | null;
       failure_message: string | null;
+      reason: string | null;
     };
   }> {
     const { requestedByUserId, requestedAtEpochMs } = context;
     const now = requestedAtEpochMs;
+    const requestedReason = context.reason?.trim() ?? null;
 
     try {
       const insertResult = await db
@@ -1065,6 +1083,7 @@ export class FiscalYearService {
           company_id: companyId,
           fiscal_year_id: fiscalYearId,
           close_request_id: closeRequestId,
+          reason: requestedReason,
           status: FISCAL_YEAR_CLOSE_STATUS.PENDING,
           fiscal_year_status_before: "UNKNOWN",
           fiscal_year_status_after: "CLOSED",
@@ -1095,6 +1114,7 @@ export class FiscalYearService {
             "result_json",
             "failure_code",
             "failure_message",
+            "reason",
           ])
           .executeTakeFirst();
 
@@ -1116,6 +1136,7 @@ export class FiscalYearService {
   ): Promise<CloseFiscalYearResult> {
     const { companyId, requestedByUserId, requestedAtEpochMs } = context;
     const now = requestedAtEpochMs;
+    const requestedReason = context.reason?.trim() ?? null;
 
     // Step 1: Atomically claim idempotency key by insert.
     let closeRequestDbId: number;
@@ -1126,6 +1147,7 @@ export class FiscalYearService {
           company_id: companyId,
           fiscal_year_id: fiscalYearId,
           close_request_id: closeRequestId,
+          reason: requestedReason,
           status: FISCAL_YEAR_CLOSE_STATUS.PENDING,
           fiscal_year_status_before: "UNKNOWN",
           fiscal_year_status_after: "CLOSED",
@@ -1155,13 +1177,21 @@ export class FiscalYearService {
             "fiscal_year_status_after",
             "result_json",
             "failure_code",
-            "failure_message"
+            "failure_message",
+            "reason"
           ])
           .executeTakeFirst();
 
         if (existingRequest) {
           // If already succeeded, return existing result
           if (existingRequest.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED) {
+            const existingResultJson = existingRequest.result_json
+              ? JSON.parse(existingRequest.result_json) as Record<string, unknown>
+              : {};
+            if (existingRequest.reason && typeof existingResultJson.reason !== "string") {
+              existingResultJson.reason = existingRequest.reason;
+            }
+
             return {
               success: true,
               fiscalYearId,
@@ -1169,9 +1199,8 @@ export class FiscalYearService {
               status: FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED as FiscalYearCloseStatus,
               previousStatus: existingRequest.fiscal_year_status_before,
               newStatus: existingRequest.fiscal_year_status_after,
-              resultJson: existingRequest.result_json
-                ? JSON.parse(existingRequest.result_json)
-                : undefined,
+              reason: existingRequest.reason ?? null,
+              resultJson: Object.keys(existingResultJson).length > 0 ? existingResultJson : undefined,
               failureCode: existingRequest.failure_code ?? undefined,
               failureMessage: existingRequest.failure_message ?? undefined
             };
@@ -1260,7 +1289,7 @@ export class FiscalYearService {
         result_json: JSON.stringify({
           closedAt: completedAt,
           closedByUserId: requestedByUserId,
-          reason: context.reason ?? null
+          reason: requestedReason
         }),
         completed_at_ts: completedAt,
         updated_at_ts: completedAt
@@ -1278,7 +1307,7 @@ export class FiscalYearService {
       resultJson: {
         closedAt: completedAt,
         closedByUserId: requestedByUserId,
-        reason: context.reason ?? null
+        reason: requestedReason
       }
     };
   }

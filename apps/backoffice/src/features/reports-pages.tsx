@@ -2,7 +2,6 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import {
-  Alert,
   Badge,
   Box,
   Button,
@@ -24,9 +23,22 @@ import { PageCard } from "../components/PageCard";
 import { StatTiles } from "../components/StatTiles";
 import { OfflinePage } from "../components/offline-page";
 import { useAccounts, useAccountTypes } from "../hooks/use-accounts";
-import { apiRequest, ApiError } from "../lib/api-client";
+import { apiRequest, apiStreamingRequest, ApiError } from "../lib/api-client";
 import { useOnlineStatus } from "../lib/connection";
 import type { SessionUser } from "../lib/session";
+import { downloadStreamingResponse } from "../hooks/use-export";
+import {
+  buildAPAgingExportPath,
+  buildAPAgingReportPath,
+  buildGeneralLedgerExportPath,
+  buildGeneralLedgerReportPath,
+  buildTrialBalanceExportPath,
+  buildTrialBalanceReportPath,
+  currentDateOnly,
+  currentYearStartDateOnly,
+  daysBeforeCurrentDateOnly,
+  executeReportCsvExport,
+} from "../lib/report-export-helpers";
 
 type ReportsProps = {
   user: SessionUser;
@@ -93,26 +105,6 @@ type PosPaymentsResponse = {
   success: true;
   data: {
     rows: PosPaymentRow[];
-  };
-};
-
-type JournalRow = {
-  id: number;
-  outlet_id: number | null;
-  outlet_name: string | null;
-  doc_type: string;
-  doc_id: number;
-  posted_at: string;
-  total_debit: number;
-  total_credit: number;
-  line_count: number;
-};
-
-type JournalResponse = {
-  success: true;
-  data: {
-    total: number;
-    journals: JournalRow[];
   };
 };
 
@@ -257,20 +249,47 @@ type ProfitLossResponse = {
   };
 };
 
+type APAgingBuckets = {
+  current: string;
+  due_1_30: string;
+  due_31_60: string;
+  due_61_90: string;
+  due_over_90: string;
+};
+
+type APAgingSupplier = {
+  supplier_id: number;
+  supplier_name: string;
+  currency: string;
+  total_open_amount: string;
+  base_open_amount: string;
+  exchange_rate_note: string;
+  buckets: APAgingBuckets;
+};
+
+type APAgingResponse = {
+  success: true;
+  data: {
+    as_of_date: string;
+    suppliers: APAgingSupplier[];
+    grand_totals: {
+      base_open_amount: string;
+      buckets: APAgingBuckets;
+      currency_totals: Array<{ currency: string; total_open_amount: string }>;
+    };
+  };
+};
+
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return currentDateOnly();
 }
 
 function startOfYearIso(): string {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), 0, 1);
-  return start.toISOString().slice(0, 10);
+  return currentYearStartDateOnly();
 }
 
 function beforeDaysIso(days: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return date.toISOString().slice(0, 10);
+  return daysBeforeCurrentDateOnly(days);
 }
 
 const monthNames = [
@@ -386,6 +405,44 @@ function renderStatusBadge(status: string) {
     <Badge color={color} variant="light" size="sm">
       {status}
     </Badge>
+  );
+}
+
+function CsvExportButton(props: {
+  path: string;
+  reportName: string;
+  fallbackFilename: string;
+  disabled?: boolean;
+}) {
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const handleExport = useCallback(async () => {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const result = await executeReportCsvExport({
+        path: props.path,
+        reportName: props.reportName,
+        fallbackFilename: props.fallbackFilename,
+        request: apiStreamingRequest,
+        download: downloadStreamingResponse,
+      });
+      if (!result.ok) setExportError(result.error);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : `${props.reportName} export failed due to a network error.`);
+    } finally {
+      setExporting(false);
+    }
+  }, [props.fallbackFilename, props.path, props.reportName]);
+
+  return (
+    <Stack gap={4} align="flex-start">
+      <Button variant="light" onClick={() => void handleExport()} loading={exporting} disabled={props.disabled}>
+        Export CSV
+      </Button>
+      {exportError ? <Text size="xs" c="red" role="alert">{exportError}</Text> : null}
+    </Stack>
   );
 }
 
@@ -675,6 +732,134 @@ export function DailySalesPage(props: ReportsProps) {
   );
 }
 
+export function TrialBalancePage(props: ReportsProps) {
+  const isOnline = useOnlineStatus();
+  const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
+  const [dateFrom, setDateFrom] = useState<string>(startOfYearIso());
+  const [dateTo, setDateTo] = useState<string>(todayIso());
+  const [fiscalYearId, setFiscalYearId] = useState<string | null>(null);
+  const [fiscalDefaultApplied, setFiscalDefaultApplied] = useState(false);
+  const [rows, setRows] = useState<TrialBalanceRow[]>([]);
+  const [totals, setTotals] = useState({ total_debit: 0, total_credit: 0, balance: 0 });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { data: fiscalYears, loading: fiscalYearsLoading, error: fiscalYearsError } = useFiscalYears(props.user.company_id);
+  const fiscalYearOptions = useMemo(() => buildFiscalYearOptions(fiscalYears), [fiscalYears]);
+
+  const columns = useMemo<ColumnDef<TrialBalanceRow>[]>(
+    () => [
+      { header: "Account", accessorKey: "account_code" },
+      { header: "Name", accessorKey: "account_name" },
+      {
+        header: "Debit",
+        accessorKey: "total_debit",
+        cell: ({ getValue }) => <Text size="sm" ta="right">{formatMoneyDisplay(Number(getValue()))}</Text>
+      },
+      {
+        header: "Credit",
+        accessorKey: "total_credit",
+        cell: ({ getValue }) => <Text size="sm" ta="right">{formatMoneyDisplay(Number(getValue()))}</Text>
+      },
+      {
+        header: "Balance",
+        accessorKey: "balance",
+        cell: ({ getValue }) => <Text size="sm" ta="right">{formatMoneyDisplay(Number(getValue()))}</Text>
+      }
+    ],
+    []
+  );
+
+  const loadRows = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await apiRequest<TrialBalanceResponse>(
+        buildTrialBalanceReportPath({ outletId, dateFrom, dateTo }),
+        {}
+      );
+      setRows(response.data.rows);
+      setTotals(response.data.totals);
+    } catch (fetchError) {
+      setError(fetchError instanceof ApiError ? fetchError.message : "Failed to load trial balance");
+    } finally {
+      setLoading(false);
+    }
+  }, [dateFrom, dateTo, outletId]);
+
+  useEffect(() => {
+    if (fiscalDefaultApplied) return;
+    const defaultYear = resolveDefaultOpenFiscalYear(fiscalYears);
+    if (!defaultYear) return;
+    const timeoutId = globalThis.setTimeout(() => {
+      setDateFrom(defaultYear.start_date);
+      setDateTo(defaultYear.end_date);
+      setFiscalYearId(String(defaultYear.id));
+      setFiscalDefaultApplied(true);
+    }, 0);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [fiscalDefaultApplied, fiscalYears]);
+
+  useEffect(() => {
+    if (outletId <= 0) return;
+    const timeoutId = globalThis.setTimeout(() => void loadRows(), 0);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [loadRows, outletId]);
+
+  if (!isOnline) {
+    return <OfflinePage title="Connect to View Reports" message="Reports require real-time data. Please connect to the internet." />;
+  }
+
+  const isBalanced = totals.total_debit === totals.total_credit;
+
+  return (
+    <PageCard title="Trial Balance" description="Debit and credit balances by account for a selected period.">
+      <Stack gap="sm">
+        <FilterBar>
+          <Select label="Outlet" data={buildOutletOptions(props.user.outlets)} value={String(outletId)} onChange={(value) => setOutletId(Number(value))} />
+          <Select
+            label="Fiscal year"
+            data={fiscalYearOptions}
+            value={fiscalYearId}
+            onChange={(value) => {
+              setFiscalYearId(value);
+              const selected = fiscalYears.find((year) => String(year.id) === value);
+              if (selected) {
+                setDateFrom(selected.start_date);
+                setDateTo(selected.end_date);
+              }
+            }}
+            clearable
+          />
+          <TextInput label="From" type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setFiscalYearId(null); }} />
+          <TextInput label="To" type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setFiscalYearId(null); }} />
+          <Button onClick={() => void loadRows()} loading={loading}>Refresh</Button>
+          <CsvExportButton
+            path={buildTrialBalanceExportPath({ outletId, dateFrom, dateTo })}
+            reportName="Trial balance"
+            fallbackFilename={`trial-balance-${dateTo}.csv`}
+            disabled={outletId <= 0}
+          />
+        </FilterBar>
+
+        {fiscalYearsLoading ? <Text size="sm">Loading fiscal years...</Text> : null}
+        {fiscalYearsError ? <Text c="red" size="sm">{fiscalYearsError}</Text> : null}
+        {error ? <Text c="red" size="sm">{error}</Text> : null}
+
+        <StatTiles
+          items={[
+            { label: "Total Debit", value: formatMoneyDisplay(totals.total_debit) },
+            { label: "Total Credit", value: formatMoneyDisplay(totals.total_credit) },
+            { label: "Balance", value: formatMoneyDisplay(totals.balance), helper: isBalanced ? "Balanced" : "Out of balance" },
+            { label: "Rows", value: rows.length }
+          ]}
+        />
+
+        <DataTable columns={columns} data={rows} minWidth={720} stickyHeader />
+      </Stack>
+    </PageCard>
+  );
+}
+
 export function GeneralLedgerPage(props: ReportsProps) {
   const isOnline = useOnlineStatus();
   const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
@@ -762,7 +947,7 @@ export function GeneralLedgerPage(props: ReportsProps) {
     setError(null);
     try {
       const response = await apiRequest<GeneralLedgerResponse>(
-        `/reports/general-ledger?outlet_id=${outletId}&account_id=${accountId}&date_from=${dateFrom}&date_to=${dateTo}&round=2&line_limit=${lineLimit}&line_offset=${lineOffset}`,
+        buildGeneralLedgerReportPath({ outletId, accountId, dateFrom, dateTo, lineLimit, lineOffset }),
         {}
       );
       setRows(response.data.rows);
@@ -894,6 +1079,12 @@ export function GeneralLedgerPage(props: ReportsProps) {
           <Button onClick={() => loadRows()} loading={loading}>
             Refresh
           </Button>
+          <CsvExportButton
+            path={buildGeneralLedgerExportPath({ outletId, accountId, dateFrom, dateTo, lineLimit, lineOffset })}
+            reportName="General ledger"
+            fallbackFilename={`general-ledger-${dateTo}.csv`}
+            disabled={!accountId || outletId <= 0}
+          />
         </FilterBar>
 
         {accountsLoading ? <Text size="sm">Loading accounts...</Text> : null}
@@ -968,6 +1159,123 @@ export function GeneralLedgerPage(props: ReportsProps) {
         ) : null}
 
         {row ? <DataTable columns={columns} data={row.lines} minWidth={900} stickyHeader /> : null}
+      </Stack>
+    </PageCard>
+  );
+}
+
+export function APAgingPage() {
+  const isOnline = useOnlineStatus();
+  const [asOfDate, setAsOfDate] = useState<string>(todayIso());
+  const [suppliers, setSuppliers] = useState<APAgingSupplier[]>([]);
+  const [grandTotals, setGrandTotals] = useState<APAgingResponse["data"]["grand_totals"] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const columns = useMemo<ColumnDef<APAgingSupplier>[]>(
+    () => [
+      { header: "Supplier", accessorKey: "supplier_name" },
+      { header: "Currency", accessorKey: "currency" },
+      {
+        header: "Total Open",
+        accessorKey: "total_open_amount",
+        cell: ({ getValue }) => <Text size="sm" ta="right">{formatMoneyDisplay(Number(getValue()))}</Text>
+      },
+      {
+        header: "Base Open",
+        accessorKey: "base_open_amount",
+        cell: ({ getValue }) => <Text size="sm" ta="right">{formatMoneyDisplay(Number(getValue()))}</Text>
+      },
+      {
+        header: "Current",
+        accessorFn: (row) => row.buckets.current,
+        cell: ({ getValue }) => <Text size="sm" ta="right">{formatMoneyDisplay(Number(getValue()))}</Text>
+      },
+      {
+        header: "1-30",
+        accessorFn: (row) => row.buckets.due_1_30,
+        cell: ({ getValue }) => <Text size="sm" ta="right">{formatMoneyDisplay(Number(getValue()))}</Text>
+      },
+      {
+        header: "31-60",
+        accessorFn: (row) => row.buckets.due_31_60,
+        cell: ({ getValue }) => <Text size="sm" ta="right">{formatMoneyDisplay(Number(getValue()))}</Text>
+      },
+      {
+        header: "61-90",
+        accessorFn: (row) => row.buckets.due_61_90,
+        cell: ({ getValue }) => <Text size="sm" ta="right">{formatMoneyDisplay(Number(getValue()))}</Text>
+      },
+      {
+        header: ">90",
+        accessorFn: (row) => row.buckets.due_over_90,
+        cell: ({ getValue }) => <Text size="sm" ta="right">{formatMoneyDisplay(Number(getValue()))}</Text>
+      },
+      { header: "FX Note", accessorKey: "exchange_rate_note" }
+    ],
+    []
+  );
+
+  const loadRows = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await apiRequest<APAgingResponse>(buildAPAgingReportPath({ asOfDate }), {});
+      setSuppliers(response.data.suppliers);
+      setGrandTotals(response.data.grand_totals);
+    } catch (fetchError) {
+      setError(fetchError instanceof ApiError ? fetchError.message : "Failed to load AP ageing report");
+    } finally {
+      setLoading(false);
+    }
+  }, [asOfDate]);
+
+  useEffect(() => {
+    const timeoutId = globalThis.setTimeout(() => void loadRows(), 0);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [loadRows]);
+
+  if (!isOnline) {
+    return <OfflinePage title="Connect to View Reports" message="Reports require real-time data. Please connect to the internet." />;
+  }
+
+  const buckets = grandTotals?.buckets;
+
+  return (
+    <PageCard title="AP Ageing" description="Open supplier balances by due-date bucket.">
+      <Stack gap="sm">
+        <FilterBar>
+          <TextInput label="As of" type="date" value={asOfDate} onChange={(event) => setAsOfDate(event.target.value)} />
+          <Button onClick={() => void loadRows()} loading={loading}>Refresh</Button>
+          <CsvExportButton
+            path={buildAPAgingExportPath({ asOfDate })}
+            reportName="AP ageing"
+            fallbackFilename={`ap-aging-${asOfDate}.csv`}
+          />
+        </FilterBar>
+
+        {error ? <Text c="red" size="sm">{error}</Text> : null}
+
+        <StatTiles
+          items={[
+            { label: "Base Open", value: formatMoneyDisplay(Number(grandTotals?.base_open_amount ?? 0)) },
+            { label: "Current", value: formatMoneyDisplay(Number(buckets?.current ?? 0)) },
+            { label: "1-30", value: formatMoneyDisplay(Number(buckets?.due_1_30 ?? 0)) },
+            { label: ">90", value: formatMoneyDisplay(Number(buckets?.due_over_90 ?? 0)) }
+          ]}
+        />
+
+        {grandTotals?.currency_totals.length ? (
+          <Group gap="xs" wrap="wrap">
+            {grandTotals.currency_totals.map((total) => (
+              <Badge key={total.currency} variant="light">
+                {total.currency}: {formatMoneyDisplay(Number(total.total_open_amount))}
+              </Badge>
+            ))}
+          </Group>
+        ) : null}
+
+        <DataTable columns={columns} data={suppliers} minWidth={1080} stickyHeader />
       </Stack>
     </PageCard>
   );
@@ -1115,265 +1423,6 @@ export function PosPaymentsPage(props: ReportsProps) {
         <DataTable columns={columns} data={rows} minWidth={640} stickyHeader />
       </Stack>
     </PageCard>
-  );
-}
-
-export function JournalsPage(props: ReportsProps) {
-  const isOnline = useOnlineStatus();
-  const [outletId, setOutletId] = useState<number>(props.user.outlets[0]?.id ?? 0);
-  const [dateFrom, setDateFrom] = useState<string>(beforeDaysIso(7));
-  const [dateTo, setDateTo] = useState<string>(todayIso());
-  const [fiscalYearId, setFiscalYearId] = useState<string | null>(null);
-  const [fiscalDefaultApplied, setFiscalDefaultApplied] = useState(false);
-  const [journals, setJournals] = useState<JournalRow[]>([]);
-  const [trialRows, setTrialRows] = useState<TrialBalanceRow[]>([]);
-  const [trialTotals, setTrialTotals] = useState<{ total_debit: number; total_credit: number; balance: number }>({
-    total_debit: 0,
-    total_credit: 0,
-    balance: 0
-  });
-  const isTrialBalanced = useMemo(() => trialTotals.total_debit === trialTotals.total_credit, [trialTotals]);
-  const [error, setError] = useState<string | null>(null);
-  const {
-    data: fiscalYears,
-    loading: fiscalYearsLoading,
-    error: fiscalYearsError
-  } = useFiscalYears(props.user.company_id);
-  const fiscalYearOptions = useMemo(() => buildFiscalYearOptions(fiscalYears), [fiscalYears]);
-
-  const journalColumns = useMemo<ColumnDef<JournalRow>[]>(
-    () => [
-      {
-        header: "Posted At",
-        accessorKey: "posted_at",
-        cell: ({ getValue }) => new Date(String(getValue())).toLocaleString()
-      },
-      {
-        header: "Doc",
-        accessorKey: "doc_id",
-        cell: ({ row }) => `${row.original.doc_type} #${row.original.doc_id}`
-      },
-      {
-        header: "Outlet",
-        accessorKey: "outlet_name",
-        cell: ({ row }) => row.original.outlet_name ?? "ALL"
-      },
-      {
-        header: "Lines",
-        accessorKey: "line_count",
-        cell: ({ getValue }) => (
-          <Text size="sm" ta="right">
-            {Number(getValue())}
-          </Text>
-        )
-      },
-      {
-        header: "Debit",
-        accessorKey: "total_debit",
-        cell: ({ getValue }) => (
-          <Text size="sm" ta="right">
-            {formatMoneyDisplay(Number(getValue()))}
-          </Text>
-        )
-      },
-      {
-        header: "Credit",
-        accessorKey: "total_credit",
-        cell: ({ getValue }) => (
-          <Text size="sm" ta="right">
-            {formatMoneyDisplay(Number(getValue()))}
-          </Text>
-        )
-      }
-    ],
-    []
-  );
-
-  const trialColumns = useMemo<ColumnDef<TrialBalanceRow>[]>(
-    () => [
-      { header: "Account", accessorKey: "account_code" },
-      { header: "Name", accessorKey: "account_name" },
-      {
-        header: "Debit",
-        accessorKey: "total_debit",
-        cell: ({ getValue }) => (
-          <Text size="sm" ta="right">
-            {formatMoneyDisplay(Number(getValue()))}
-          </Text>
-        )
-      },
-      {
-        header: "Credit",
-        accessorKey: "total_credit",
-        cell: ({ getValue }) => (
-          <Text size="sm" ta="right">
-            {formatMoneyDisplay(Number(getValue()))}
-          </Text>
-        )
-      },
-      {
-        header: "Balance",
-        accessorKey: "balance",
-        cell: ({ getValue }) => (
-          <Text size="sm" ta="right">
-            {formatMoneyDisplay(Number(getValue()))}
-          </Text>
-        )
-      }
-    ],
-    []
-  );
-
-  const loadRows = useCallback(async () => {
-    setError(null);
-    try {
-      const asOf = new Date().toISOString();
-      const [journalResponse, trialResponse] = await Promise.all([
-        apiRequest<JournalResponse>(
-          `/reports/journals?outlet_id=${outletId}&date_from=${dateFrom}&date_to=${dateTo}&as_of=${encodeURIComponent(asOf)}`,
-          {}
-        ),
-        apiRequest<TrialBalanceResponse>(
-          `/reports/trial-balance?outlet_id=${outletId}&date_from=${dateFrom}&date_to=${dateTo}&as_of=${encodeURIComponent(asOf)}`,
-          {}
-        )
-      ]);
-
-      setJournals(journalResponse.data.journals);
-      setTrialRows(trialResponse.data.rows);
-      setTrialTotals(trialResponse.data.totals);
-    } catch (fetchError) {
-      if (fetchError instanceof ApiError) {
-        setError(fetchError.message);
-      } else {
-        setError("Failed to load journal report");
-      }
-    }
-  }, [dateFrom, dateTo, outletId]);
-
-  useEffect(() => {
-    if (outletId <= 0) {
-      return;
-    }
-
-    const timeoutId = globalThis.setTimeout(() => {
-      void loadRows();
-    }, 0);
-
-    return () => {
-      globalThis.clearTimeout(timeoutId);
-    };
-  }, [loadRows, outletId]);
-
-  useEffect(() => {
-    if (fiscalDefaultApplied) {
-      return;
-    }
-    const defaultYear = resolveDefaultOpenFiscalYear(fiscalYears);
-    if (!defaultYear) {
-      return;
-    }
-
-    const timeoutId = globalThis.setTimeout(() => {
-      setDateFrom(defaultYear.start_date);
-      setDateTo(defaultYear.end_date);
-      setFiscalYearId(String(defaultYear.id));
-      setFiscalDefaultApplied(true);
-    }, 0);
-
-    return () => {
-      globalThis.clearTimeout(timeoutId);
-    };
-  }, [fiscalYears, fiscalDefaultApplied]);
-
-  if (!isOnline) {
-    return (
-      <OfflinePage
-        title="Connect to View Reports"
-        message="Reports require real-time data. Please connect to the internet."
-      />
-    );
-  }
-
-  return (
-    <Stack gap="md">
-      <PageCard title="Journal List" description="Posted journal batches for the selected period.">
-        <Stack gap="sm">
-          <FilterBar>
-            <Select
-              label="Outlet"
-              data={buildOutletOptions(props.user.outlets)}
-              value={String(outletId)}
-              onChange={(value) => setOutletId(Number(value))}
-            />
-            <Select
-              label="Fiscal year"
-              data={fiscalYearOptions}
-              value={fiscalYearId}
-              onChange={(value) => {
-                setFiscalYearId(value);
-                const selected = fiscalYears.find((year) => String(year.id) === value);
-                if (selected) {
-                  setDateFrom(selected.start_date);
-                  setDateTo(selected.end_date);
-                }
-              }}
-              placeholder="Select fiscal year"
-              clearable
-            />
-            <TextInput
-              label="From"
-              type="date"
-              value={dateFrom}
-              onChange={(event) => {
-                setDateFrom(event.target.value);
-                setFiscalYearId(null);
-              }}
-            />
-            <TextInput
-              label="To"
-              type="date"
-              value={dateTo}
-              onChange={(event) => {
-                setDateTo(event.target.value);
-                setFiscalYearId(null);
-              }}
-            />
-            <Button onClick={() => loadRows()}>Refresh</Button>
-          </FilterBar>
-          {fiscalYearsLoading ? <Text size="sm">Loading fiscal years...</Text> : null}
-          {fiscalYearsError ? (
-            <Text c="red" size="sm">
-              {fiscalYearsError}
-            </Text>
-          ) : null}
-          {error ? (
-            <Text c="red" size="sm">
-              {error}
-            </Text>
-          ) : null}
-          <DataTable columns={journalColumns} data={journals} minWidth={760} stickyHeader />
-        </Stack>
-      </PageCard>
-
-      <PageCard title="Trial Balance" description="Summary balances for the selected period.">
-        <Stack gap="sm">
-          <StatTiles
-            items={[
-              { label: "Debit", value: formatMoneyDisplay(trialTotals.total_debit) },
-              { label: "Credit", value: formatMoneyDisplay(trialTotals.total_credit) },
-              { label: "Balance", value: formatMoneyDisplay(trialTotals.balance) }
-            ]}
-          />
-          {!isTrialBalanced && (
-            <Alert color="red" title="Out of Balance">
-              Trial balance is out of balance. Total Debits ({formatMoneyDisplay(trialTotals.total_debit)}) do not equal Total Credits ({formatMoneyDisplay(trialTotals.total_credit)}). This indicates a posting error.
-            </Alert>
-          )}
-          <DataTable columns={trialColumns} data={trialRows} minWidth={640} stickyHeader />
-        </Stack>
-      </PageCard>
-    </Stack>
   );
 }
 

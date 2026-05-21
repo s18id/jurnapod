@@ -43,6 +43,7 @@
  *     GET|PATCH  /purchasing/exchange-rates/{id}
  *   Reports:
  *     GET        /purchasing/reports/ap-aging
+ *     GET        /purchasing/reports/ap-aging/export
  *     GET        /purchasing/reports/ap-aging/{supplierId}/detail
  *     GET|PUT    /purchasing/reports/ap-reconciliation/settings
  *     GET        /purchasing/reports/ap-reconciliation/summary
@@ -170,6 +171,15 @@ const AgingDetailRowSchema = zodOpenApi.object({
   base_balance: zodOpenApi.string().openapi({ description: "Remaining balance in base currency" }),
   bucket: zodOpenApi.string().openapi({ description: "Aging bucket name" }),
 });
+
+const CsvExportResponse = {
+  description: "CSV attachment",
+  content: {
+    "text/csv": {
+      schema: zodOpenApi.string().openapi({ description: "CSV file content" }),
+    },
+  },
+};
 
 // ── Param / query helpers ────────────────────────────────────────────────────
 
@@ -919,6 +929,28 @@ export function registerPurchasingOpenApiRoutes(app: { openapi: OpenAPIHonoType[
       },
       responses: {
         200: { content: { "application/json": { schema: zodOpenApi.object({ success: zodOpenApi.literal(true).openapi({ example: true }), data: zodOpenApi.object({ as_of_date: zodOpenApi.string().openapi({ description: "Report date (YYYY-MM-DD)" }), suppliers: zodOpenApi.array(AgingSupplierRowSchema).openapi({ description: "Supplier summaries with aging buckets" }), grand_totals: zodOpenApi.object({ base_open_amount: zodOpenApi.string().openapi({ description: "Grand total open in base currency" }), buckets: AgingBucketsSchema, currency_totals: zodOpenApi.array(AgingCurrencyTotalSchema).openapi({ description: "Totals per currency" }), }) }) }).openapi("APAgingSummaryResponse") } }, description: "OK" },
+        ...standardResponses(),
+      },
+    });
+    app.openapi(route, _noop);
+  }
+  {
+    // GET /purchasing/reports/ap-aging/export
+    const route = createRoute({
+      path: "/purchasing/reports/ap-aging/export",
+      method: "get",
+      tags: ["Purchasing"],
+      summary: "Export AP aging summary report as CSV",
+      description: "Exports AP aging using purchasing.reports ANALYZE permission.",
+      security: [{ BearerAuth: [] }],
+      request: {
+        query: zodOpenApi.object({
+          as_of_date: zodOpenApi.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().openapi({ description: "Report date (YYYY-MM-DD), defaults to today" }),
+          format: zodOpenApi.literal("csv").optional().openapi({ description: "Export format; only csv is supported" }),
+        }),
+      },
+      responses: {
+        200: CsvExportResponse,
         ...standardResponses(),
       },
     });

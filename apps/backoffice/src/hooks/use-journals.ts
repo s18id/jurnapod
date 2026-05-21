@@ -190,3 +190,17 @@ export async function postManualJournalEntry(
   );
   return response.data;
 }
+
+export async function voidManualJournalEntry(
+  journalId: number,
+  reason: string
+): Promise<JournalEntryResponse> {
+  const response = await apiRequest<JournalBatchSingleResponse>(
+    `/journals/${journalId}/void`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason })
+    }
+  );
+  return response.data;
+}

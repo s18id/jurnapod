@@ -41,28 +41,38 @@ export const APP_ROUTES: readonly AppRoute[] = [
   {
     path: "/profit-loss",
     label: "Profit & Loss",
-    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    permission: { module: "accounting", resource: "reports", permissionMask: PERMISSION_BITS.ANALYZE }
   },
   {
     path: "/receivables-ageing",
     label: "Receivables Ageing",
-    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    permission: { module: "accounting", resource: "reports", permissionMask: PERMISSION_BITS.ANALYZE }
+  },
+  {
+    path: "/trial-balance",
+    label: "Trial Balance",
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    permission: { module: "accounting", resource: "reports", permissionMask: PERMISSION_BITS.ANALYZE }
   },
   {
     path: "/general-ledger",
     label: "General Ledger",
-    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    permission: { module: "accounting", resource: "reports", permissionMask: PERMISSION_BITS.ANALYZE }
   },
   {
     path: "/journals",
-    label: "Journals & Trial Balance",
+    label: "Journals",
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     permission: { module: "accounting", resource: "journals", permissionMask: PERMISSION_BITS.READ }
   },
   {
     path: "/accounting-worksheet",
     label: "Accounting Worksheet",
-    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"]
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    permission: { module: "accounting", resource: "reports", permissionMask: PERMISSION_BITS.ANALYZE }
   },
 
   // === ACCOUNTING ===
@@ -275,6 +285,13 @@ export const APP_ROUTES: readonly AppRoute[] = [
     allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
     requiredModule: "purchasing",
     permission: { module: "purchasing", resource: "credits", permissionMask: PERMISSION_BITS.READ }
+  },
+  {
+    path: "/purchasing/ap-aging",
+    label: "AP Ageing",
+    allowedRoles: ["OWNER", "COMPANY_ADMIN", "ADMIN", "ACCOUNTANT"],
+    requiredModule: "purchasing",
+    permission: { module: "purchasing", resource: "reports", permissionMask: PERMISSION_BITS.ANALYZE }
   },
   {
     path: "/inventory-settings",

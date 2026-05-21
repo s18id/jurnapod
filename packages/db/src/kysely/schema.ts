@@ -600,6 +600,7 @@ export interface FiscalYearCloseRequests {
   fiscal_year_status_after: string;
   fiscal_year_status_before: string;
   id: Generated<number>;
+  reason: Generated<string | null>;
   requested_at_ts: number;
   requested_by_user_id: number;
   result_json: Generated<string | null>;
@@ -942,6 +943,18 @@ export interface JournalLines {
   line_date: Date;
   outlet_id: Generated<number | null>;
   updated_at: Generated<Date>;
+}
+
+export interface JournalReversals {
+  company_id: number;
+  created_at: Generated<Date>;
+  id: Generated<number>;
+  original_journal_batch_id: number;
+  reversal_journal_batch_id: number;
+  updated_at: Generated<Date>;
+  void_reason: string;
+  voided_at: Generated<Date>;
+  voided_by_user_id: Generated<number | null>;
 }
 
 export interface ModuleRoles {
@@ -2067,6 +2080,7 @@ export interface DB {
   journal_draft_lines: JournalDraftLines;
   journal_drafts: JournalDrafts;
   journal_lines: JournalLines;
+  journal_reversals: JournalReversals;
   module_roles: ModuleRoles;
   modules: Modules;
   numbering_templates: NumberingTemplates;

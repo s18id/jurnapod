@@ -329,6 +329,7 @@ export interface ApproveFiscalYearCloseResult {
   status: string;
   previousStatus: string;
   newStatus: string;
+  reason?: string | null;
   postedBatchIds: number[];
   netIncome: number;
   totalIncome: number;
@@ -374,6 +375,63 @@ function parseResultJson(value: unknown): Record<string, unknown> {
   return {};
 }
 
+export interface FiscalYearCloseRequestRecord {
+  success: boolean;
+  fiscalYearId: number;
+  closeRequestId: string;
+  status: FiscalYearCloseStatus;
+  previousStatus: string;
+  newStatus: string;
+  reason: string | null;
+  resultJson?: Record<string, unknown>;
+  failureCode?: string;
+  failureMessage?: string;
+}
+
+export async function getFiscalYearCloseRequest(
+  companyId: number,
+  fiscalYearId: number,
+  closeRequestId: string
+): Promise<FiscalYearCloseRequestRecord | null> {
+  const row = await getDb()
+    .selectFrom("fiscal_year_close_requests")
+    .where("company_id", "=", companyId)
+    .where("fiscal_year_id", "=", fiscalYearId)
+    .where("close_request_id", "=", closeRequestId)
+    .select([
+      "status",
+      "fiscal_year_status_before",
+      "fiscal_year_status_after",
+      "result_json",
+      "failure_code",
+      "failure_message",
+      "reason",
+    ])
+    .executeTakeFirst();
+
+  if (!row) {
+    return null;
+  }
+
+  const resultJson = parseResultJson(row.result_json);
+  const persistedReason = typeof resultJson.reason === "string"
+    ? resultJson.reason
+    : row.reason ?? null;
+
+  return {
+    success: row.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED,
+    fiscalYearId,
+    closeRequestId,
+    status: row.status as FiscalYearCloseStatus,
+    previousStatus: row.fiscal_year_status_before,
+    newStatus: row.fiscal_year_status_after,
+    reason: persistedReason,
+    resultJson: Object.keys(resultJson).length > 0 ? resultJson : undefined,
+    failureCode: row.failure_code ?? undefined,
+    failureMessage: row.failure_message ?? undefined,
+  };
+}
+
 /**
  * Approve and execute fiscal year close with journal posting.
  * 
@@ -403,7 +461,7 @@ export async function approveFiscalYearClose(
       .where("close_request_id", "=", closeRequestId)
       .where("company_id", "=", companyId)
       .forUpdate()
-      .select(["id", "status", "fiscal_year_status_before", "fiscal_year_status_after", "result_json", "failure_code", "failure_message"])
+      .select(["id", "status", "fiscal_year_status_before", "fiscal_year_status_after", "result_json", "failure_code", "failure_message", "reason"])
       .executeTakeFirst();
 
     if (!lockedRequest) {
@@ -417,6 +475,9 @@ export async function approveFiscalYearClose(
       const postedBatchIds = Array.isArray(postedBatchIdsRaw)
         ? postedBatchIdsRaw.filter((v): v is number => typeof v === "number")
         : [];
+      const persistedReason = typeof parsed.reason === "string"
+        ? parsed.reason
+        : lockedRequest.reason ?? null;
 
       return {
         success: true,
@@ -425,6 +486,7 @@ export async function approveFiscalYearClose(
         status: lockedRequest.status,
         previousStatus: lockedRequest.fiscal_year_status_before,
         newStatus: lockedRequest.fiscal_year_status_after,
+        reason: persistedReason,
         postedBatchIds,
         netIncome: typeof parsed.netIncome === "number" ? parsed.netIncome : 0,
         totalIncome: typeof parsed.totalIncome === "number" ? parsed.totalIncome : 0,
@@ -464,6 +526,8 @@ export async function approveFiscalYearClose(
         `Fiscal year ${fiscalYearId} is already closed`
       );
     }
+
+    const persistedReason = lockedRequest.reason ?? context.reason ?? null;
 
     // 2) Atomically claim execution ownership via guarded PENDING -> IN_PROGRESS transition.
     const startedAt = context.requestedAtEpochMs;
@@ -561,7 +625,7 @@ export async function approveFiscalYearClose(
           totalIncome: preview.totalIncome,
           totalExpenses: preview.totalExpenses,
           hasImbalance,
-          reason: `Fiscal year close approved. Posted ${postedBatchIds.length} closing entry batch(es).`
+          reason: persistedReason
         }),
         completed_at_ts: completedAt,
         updated_at_ts: completedAt
@@ -605,6 +669,7 @@ export async function approveFiscalYearClose(
       status: FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED as FiscalYearCloseStatus,
       previousStatus: "OPEN",
       newStatus: "CLOSED",
+      reason: persistedReason,
       postedBatchIds,
       netIncome: preview.netIncome,
       totalIncome: preview.totalIncome,

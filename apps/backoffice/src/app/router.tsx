@@ -33,6 +33,7 @@ import { VerifyEmailPage } from "../features/verify-email-page";
 import { OPERATIONS_LIST_REFETCH_MS, useOperationsList } from "../hooks/use-operations-list";
 import { canReadOperations } from "../lib/operations-permissions";
 import { NotificationProvider } from "@/features/notifications/notification-provider";
+import { getFinancialReportRoutePageExport } from "./router/routes";
 
 import { AppLayout } from "./layout";
 import {
@@ -83,7 +84,10 @@ const ItemDetailPage = lazyNamed(loadPagesModule, "ItemDetailPage");
 const PricesPage = lazyNamed(loadPagesModule, "PricesPage");
 const JournalsPage = lazyNamed(loadPagesModule, "JournalsPage");
 const GeneralLedgerPage = lazyNamed(loadPagesModule, "GeneralLedgerPage");
+const TrialBalancePage = lazyNamed(loadPagesModule, "TrialBalancePage");
 const ProfitLossPage = lazyNamed(loadPagesModule, "ProfitLossPage");
+const ReceivablesAgeingPage = lazyNamed(loadPagesModule, "ReceivablesAgeingPage");
+const APAgingPage = lazyNamed(loadPagesModule, "APAgingPage");
 const FixedAssetsPage = lazyNamed(loadPagesModule, "FixedAssetsPage");
 const PosPaymentsPage = lazyNamed(loadPagesModule, "PosPaymentsPage");
 const PosTransactionsPage = lazyNamed(loadPagesModule, "PosTransactionsPage");
@@ -306,11 +310,21 @@ function RouteScreen(props: { path: string; user: SessionUser }) {
   if (props.path === "/daily-sales") {
     return renderLazyPage(<DailySalesPage user={props.user} />);
   }
-  if (props.path === "/profit-loss") {
+  const financialReportPage = getFinancialReportRoutePageExport(props.path);
+  if (financialReportPage === "ProfitLossPage") {
     return renderLazyPage(<ProfitLossPage user={props.user} />);
   }
-  if (props.path === "/general-ledger") {
+  if (financialReportPage === "ReceivablesAgeingPage") {
+    return renderLazyPage(<ReceivablesAgeingPage user={props.user} />);
+  }
+  if (financialReportPage === "TrialBalancePage") {
+    return renderLazyPage(<TrialBalancePage user={props.user} />);
+  }
+  if (financialReportPage === "GeneralLedgerPage") {
     return renderLazyPage(<GeneralLedgerPage user={props.user} />);
+  }
+  if (financialReportPage === "APAgingPage") {
+    return renderLazyPage(<APAgingPage user={props.user} />);
   }
   if (props.path === "/chart-of-accounts") {
     return renderLazyPage(<AccountsPage user={props.user} />);

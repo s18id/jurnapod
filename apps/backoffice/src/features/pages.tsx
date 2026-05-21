@@ -19,11 +19,13 @@ import { PricesPage as PricesManagementPage } from "./prices-page";
 import { TransactionTemplatesPage as TransactionTemplatesManagementPage } from "./transaction-templates-page";
 import {
   AccountingWorksheetPage as AccountingWorksheetReportPage,
+  APAgingPage as APAgingReportPage,
   DailySalesPage as DailySalesReportPage,
   GeneralLedgerPage as GeneralLedgerReportPage,
   ProfitLossPage as ProfitLossReportPage,
   PosPaymentsPage as PosPaymentsReportPage,
-  PosTransactionsPage as PosTransactionsReportPage
+  PosTransactionsPage as PosTransactionsReportPage,
+  TrialBalancePage as TrialBalanceReportPage
 } from "./reports-pages";
 import { ReceivablesAgeingPage as ReceivablesAgeingManagementPage } from "./receivables-ageing-page";
 import { SalesInvoicesPage as SalesInvoicesManagementPage } from "./sales-invoices-page";
@@ -92,6 +94,8 @@ export const DailySalesPage = DailySalesReportPage;
 
 export const GeneralLedgerPage = GeneralLedgerReportPage;
 
+export const TrialBalancePage = TrialBalanceReportPage;
+
 export const JournalsPage = JournalEntriesPage;
 
 export const ProfitLossPage = ProfitLossReportPage;
@@ -99,6 +103,8 @@ export const ProfitLossPage = ProfitLossReportPage;
 export const ReceivablesAgeingPage = ReceivablesAgeingManagementPage;
 
 export const AccountingWorksheetPage = AccountingWorksheetReportPage;
+
+export const APAgingPage = APAgingReportPage;
 
 export const SalesInvoicesPage = SalesInvoicesManagementPage;
 

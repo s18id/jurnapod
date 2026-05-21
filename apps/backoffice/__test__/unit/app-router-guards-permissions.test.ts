@@ -114,11 +114,11 @@ describe("AppRoute permission metadata (AC1)", () => {
     });
   });
 
-  it("audit-logs route has platform.settings.READ permission", () => {
+  it("audit-logs route has platform.audit.READ permission", () => {
     const route = findRoute("/audit-logs");
     expect(route?.permission).toEqual({
       module: "platform",
-      resource: "settings",
+      resource: "audit",
       permissionMask: 1,
     });
   });

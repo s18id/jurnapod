@@ -11,12 +11,12 @@ import {
   Select,
   Stack,
   Text,
+  Textarea,
   TextInput,
   Title,
   Modal,
   Table,
   Loader,
-  Checkbox,
   ScrollArea
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
@@ -24,7 +24,9 @@ import { useEffect, useMemo, useState } from "react";
 import { IconCalendar, IconAlertCircle, IconCheck } from "@tabler/icons-react";
 
 import { OfflinePage } from "../components/offline-page";
+import { ReviewPanel } from "../components/ReviewPanel/ReviewPanel";
 import { apiRequest, ApiError } from "../lib/api-client";
+import { actionGates, resolveEffectivePermissions } from "../lib/auth/permissions";
 import { useOnlineStatus } from "../lib/connection";
 import type { SessionUser } from "../lib/session";
 
@@ -36,7 +38,7 @@ type FiscalYearsPageProps = {
 // Types
 // =============================================================================
 
-type FiscalYearRow = {
+export type FiscalYearRow = {
   id?: number;
   code: string;
   name: string;
@@ -71,7 +73,7 @@ type FiscalYearResponse = {
 };
 
 // Close preview response from GET /accounts/fiscal-years/:id/close-preview
-type ClosePreviewResponse = {
+export type ClosePreviewResponse = {
   success: true;
   data: {
     fiscalYearId: number;
@@ -102,13 +104,17 @@ type ClosePreviewResponse = {
 };
 
 // Close initiate response from POST /accounts/fiscal-years/:id/close
-type CloseInitiateResponse = {
+export type CloseInitiateResponse = {
   success: true;
+  warnings?: WarningPayload[];
   data: {
     success: boolean;
     fiscalYearId: number;
     closeRequestId: string;
     status: string;
+    previousStatus?: string;
+    newStatus?: string;
+    reason?: string | null;
     message: string;
     canApprove: boolean;
     netIncome: number;
@@ -119,8 +125,9 @@ type CloseInitiateResponse = {
 };
 
 // Close approve response from POST /accounts/fiscal-years/:id/close/approve
-type CloseApproveResponse = {
+export type CloseApproveResponse = {
   success: true;
+  warnings?: WarningPayload[];
   data: {
     success: boolean;
     fiscalYearId: number;
@@ -128,12 +135,21 @@ type CloseApproveResponse = {
     status: string;
     previousStatus: string;
     newStatus: string;
+    reason?: string | null;
     postedBatchIds: number[];
     netIncome: number;
     totalIncome: number;
     totalExpenses: number;
     hasImbalance: boolean;
+    snapshotWarning?: WarningPayload;
   };
+};
+
+type WarningPayload = {
+  code: string;
+  reason: string;
+  message: string;
+  blocking: false;
 };
 
 // Fiscal year status response from GET /accounts/fiscal-years/:id/status
@@ -180,6 +196,10 @@ const STATUS_FILTER_OPTIONS = [
 
 type StatusFilterValue = (typeof STATUS_FILTER_OPTIONS)[number]["value"];
 
+const CLOSE_REASON_MAX_LENGTH = 500;
+const CLOSE_REASON_REQUIRED_MESSAGE = "Close reason is required and must include at least one non-space character.";
+const CLOSE_REASON_MAX_LENGTH_MESSAGE = "Close reason must be 500 characters or fewer.";
+
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -220,7 +240,7 @@ function isDraftDirty(original: FiscalYearRow, draft: FiscalYearRow): boolean {
   );
 }
 
-function formatCurrency(amount: number): string {
+export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("id-ID", {
     style: "currency",
     currency: "IDR",
@@ -236,7 +256,7 @@ function formatTimestamp(timestamp: number): string {
   });
 }
 
-function getEffectiveStatus(row: FiscalYearRow): "OPEN" | "PENDING_CLOSE" | "CLOSED" {
+export function getEffectiveStatus(row: FiscalYearRow): "OPEN" | "PENDING_CLOSE" | "CLOSED" {
   if (row.status === "CLOSED") return "CLOSED";
   if (row.close_info?.close_request_status === "PENDING" ||
       row.close_info?.close_request_status === "IN_PROGRESS") {
@@ -271,30 +291,159 @@ function getStatusLabel(status: "OPEN" | "PENDING_CLOSE" | "CLOSED"): string {
   }
 }
 
-// =============================================================================
-// Helpers
-// =============================================================================
+export type FiscalYearPermissionGates = Record<"READ" | "CREATE" | "UPDATE" | "MANAGE", boolean>;
+
+export type FiscalCloseReasonValidation = {
+  value: string | null;
+  error: string | null;
+  characterCount: number;
+};
+
+export type FiscalCloseEvidenceItem = {
+  label: string;
+  value: string;
+};
+
+export type FiscalCloseInitiationEvidence = {
+  scope: FiscalCloseEvidenceItem[];
+  reason: string;
+  financialEffects: FiscalCloseEvidenceItem[];
+  closingEntryCount: number;
+  closingEntries: FiscalCloseEvidenceItem[];
+  generatedEntryExpectation: string;
+  warnings: string[];
+};
+
+export type FiscalCloseApprovalResultEvidence = {
+  closeRequestId: string;
+  statusTransition: string;
+  postedBatchIds: string[];
+  totals: FiscalCloseEvidenceItem[];
+  reasonLabel: string;
+  reason: string;
+  warnings: string[];
+};
 
 /**
- * Check if user has MANAGE permission on accounting.fiscal_years.
- * Uses resource-level ACL - requires explicit permission entry in module_roles.
- *
- * Per AGENTS.md role matrix:
- * - OWNER: CRUDAM (63) → includes MANAGE
- * - COMPANY_ADMIN: CRUDAM (63) → includes MANAGE
- * - ADMIN: CRUDA (31) → does NOT include MANAGE
- * - ACCOUNTANT: READ (1) → does NOT include MANAGE
- * - CASHIER: 0 → does NOT include MANAGE
- *
- * Note: Frontend role-check is a convenience shortcut.
- * Server enforces the real ACL via requireAccess() on all endpoints.
+ * Resolve fiscal-year action gates from canonical resource-level permissions.
+ * Backend authorization remains authoritative; this helper only controls UX affordances.
  */
-function hasManagePermission(user: SessionUser): boolean {
-  const MANAGER_ROLES = ["OWNER", "COMPANY_ADMIN"];
-  return (
-    user.roles.some((role) => MANAGER_ROLES.includes(role)) ||
-    user.global_roles.some((role) => MANAGER_ROLES.includes(role))
+export function resolveFiscalYearPermissionGates(user: SessionUser): FiscalYearPermissionGates {
+  const gates = actionGates(
+    resolveEffectivePermissions(user) ?? [],
+    "accounting",
+    "fiscal_years",
+    ["READ", "CREATE", "UPDATE", "MANAGE"]
   );
+
+  return {
+    READ: gates.READ,
+    CREATE: gates.CREATE,
+    UPDATE: gates.UPDATE,
+    MANAGE: gates.MANAGE
+  };
+}
+
+export function validateFiscalCloseReason(reason: string): FiscalCloseReasonValidation {
+  const trimmed = reason.trim();
+  if (trimmed.length === 0) {
+    return { value: null, error: CLOSE_REASON_REQUIRED_MESSAGE, characterCount: trimmed.length };
+  }
+  if (trimmed.length > CLOSE_REASON_MAX_LENGTH) {
+    return { value: null, error: CLOSE_REASON_MAX_LENGTH_MESSAGE, characterCount: trimmed.length };
+  }
+  return { value: trimmed, error: null, characterCount: trimmed.length };
+}
+
+export function buildFiscalCloseInitiationEvidence(params: {
+  fiscalYear: FiscalYearRow;
+  preview: ClosePreviewResponse["data"];
+  reason: string;
+}): FiscalCloseInitiationEvidence {
+  const validatedReason = validateFiscalCloseReason(params.reason);
+  const reason = validatedReason.value ?? params.reason.trim();
+
+  return {
+    scope: [
+      { label: "Fiscal year", value: `${params.preview.fiscalYearCode} — ${params.preview.fiscalYearName}` },
+      { label: "Period", value: `${params.preview.startDate} → ${params.preview.endDate}` },
+      { label: "Current status", value: getEffectiveStatus(params.fiscalYear) }
+    ],
+    reason,
+    financialEffects: [
+      { label: "Total revenue", value: formatCurrency(params.preview.totalIncome) },
+      { label: "Total expenses", value: formatCurrency(params.preview.totalExpenses) },
+      { label: "Net income", value: formatCurrency(params.preview.netIncome) },
+      { label: "Retained earnings account", value: params.preview.retainedEarningsAccountCode }
+    ],
+    closingEntryCount: params.preview.closingEntries.length,
+    closingEntries: params.preview.closingEntries.map((entry) => ({
+      label: `${entry.accountCode} — ${entry.accountName}`,
+      value: `${entry.description}; debit ${formatCurrency(entry.debit)}; credit ${formatCurrency(entry.credit)}`
+    })),
+    generatedEntryExpectation: "Initiation creates a close request only. Approval posts backend-assigned journal batch IDs; the UI displays returned IDs as text evidence.",
+    warnings: params.preview.blockers ?? []
+  };
+}
+
+export function resolveFiscalCloseRequestId(
+  fiscalYear: FiscalYearRow | null,
+  initiateResult: CloseInitiateResponse["data"] | null
+): string | null {
+  return initiateResult?.closeRequestId ?? fiscalYear?.close_info?.close_request_id ?? null;
+}
+
+export function buildFiscalCloseApprovalResultEvidence(params: {
+  result: CloseApproveResponse["data"];
+  submittedReason: string | null;
+  warnings?: WarningPayload[];
+}): FiscalCloseApprovalResultEvidence {
+  const backendReason = typeof params.result.reason === "string" && params.result.reason.trim().length > 0
+    ? params.result.reason.trim()
+    : null;
+  const submittedReason = params.submittedReason?.trim() || null;
+  const warnings = [
+    ...(params.warnings ?? []).map((warning) => `${warning.code}: ${warning.message}`),
+    ...(params.result.snapshotWarning ? [`${params.result.snapshotWarning.code}: ${params.result.snapshotWarning.message}`] : [])
+  ];
+
+  return {
+    closeRequestId: params.result.closeRequestId,
+    statusTransition: `${params.result.previousStatus} → ${params.result.newStatus}`,
+    postedBatchIds: params.result.postedBatchIds.map((id) => String(id)),
+    totals: [
+      { label: "Total revenue", value: formatCurrency(params.result.totalIncome) },
+      { label: "Total expenses", value: formatCurrency(params.result.totalExpenses) },
+      { label: "Net income", value: formatCurrency(params.result.netIncome) }
+    ],
+    reasonLabel: backendReason ? "Backend reason" : submittedReason ? "Submitted reason" : "Reason",
+    reason: backendReason ?? submittedReason ?? "Not returned by backend",
+    warnings
+  };
+}
+
+export function formatFiscalCloseApiError(error: unknown): string {
+  if (error instanceof ApiError) {
+    switch (error.code) {
+      case "INVALID_REQUEST":
+        return "INVALID_REQUEST: Fiscal year close reason is required and must be 500 characters or fewer.";
+      case "FISCAL_YEAR_ALREADY_CLOSED":
+      case "FISCAL_YEAR_CLOSED":
+        return `${error.code}: This fiscal year is already closed. Refresh fiscal years before retrying.`;
+      case "CLOSE_CONFLICT":
+        return "CLOSE_CONFLICT: A fiscal close request already exists or changed on the server. Refresh fiscal years before retrying.";
+      case "CLOSE_PRECONDITION_FAILED":
+        return "CLOSE_PRECONDITION_FAILED: Fiscal year close is blocked by backend preconditions.";
+      case "RETAINED_EARNINGS_NOT_FOUND":
+        return "RETAINED_EARNINGS_NOT_FOUND: Configure the retained earnings account before closing this fiscal year.";
+      case "ENTRIES_NOT_BALANCED":
+        return "ENTRIES_NOT_BALANCED: Backend rejected the closing entries because debits and credits do not balance.";
+      default:
+        return `${error.code}: ${error.message}`;
+    }
+  }
+
+  return "Failed to complete fiscal close workflow";
 }
 
 // =============================================================================
@@ -320,12 +469,15 @@ export function FiscalYearsPage({ user }: FiscalYearsPageProps) {
   // Close workflow modals
   const [previewModalOpen, { open: openPreviewModal, close: closePreviewModal }] = useDisclosure(false);
   const [approveModalOpen, { open: openApproveModal, close: closeApproveModal }] = useDisclosure(false);
-  const [closeConfirmChecked, setCloseConfirmChecked] = useState(false);
 
   // Close workflow state
   const [selectedFiscalYear, setSelectedFiscalYear] = useState<FiscalYearRow | null>(null);
   const [closePreview, setClosePreview] = useState<ClosePreviewResponse["data"] | null>(null);
   const [closeInitiateResult, setCloseInitiateResult] = useState<CloseInitiateResponse["data"] | null>(null);
+  const [closeApproveResult, setCloseApproveResult] = useState<CloseApproveResponse["data"] | null>(null);
+  const [closeApproveWarnings, setCloseApproveWarnings] = useState<WarningPayload[]>([]);
+  const [closeReason, setCloseReason] = useState("");
+  const [closeSubmittedReason, setCloseSubmittedReason] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [loadingInitiate, setLoadingInitiate] = useState(false);
   const [loadingApprove, setLoadingApprove] = useState(false);
@@ -341,7 +493,39 @@ export function FiscalYearsPage({ user }: FiscalYearsPageProps) {
   const shouldDiscardCurrentEdit =
     currentEditingRow?.isNew === true || isCurrentDraftDirty;
 
-  const canManage = hasManagePermission(user);
+  const fiscalYearPermissions = useMemo(() => resolveFiscalYearPermissionGates(user), [user]);
+  const canManage = fiscalYearPermissions.MANAGE;
+  const closeReasonValidation = validateFiscalCloseReason(closeReason);
+  const closeRequestId = resolveFiscalCloseRequestId(selectedFiscalYear, closeInitiateResult);
+  const closeInitiationEvidence = selectedFiscalYear && closePreview
+    ? buildFiscalCloseInitiationEvidence({ fiscalYear: selectedFiscalYear, preview: closePreview, reason: closeReason })
+    : null;
+  const closeApprovalEvidence = selectedFiscalYear
+    ? {
+        scope: [
+          { label: "Fiscal year", value: `${selectedFiscalYear.code} — ${selectedFiscalYear.name}` },
+          { label: "Period", value: `${selectedFiscalYear.start_date} → ${selectedFiscalYear.end_date}` },
+          { label: "Current status", value: getEffectiveStatus(selectedFiscalYear) },
+          { label: "Close request ID", value: closeRequestId ?? "Missing" }
+        ],
+        totals: closeInitiateResult
+          ? [
+              { label: "Total revenue", value: formatCurrency(closeInitiateResult.totalIncome) },
+              { label: "Total expenses", value: formatCurrency(closeInitiateResult.totalExpenses) },
+              { label: "Net income", value: formatCurrency(closeInitiateResult.netIncome) },
+              { label: "Closing entries", value: String(closeInitiateResult.closingEntriesCount) }
+            ]
+          : [],
+        reason: closeSubmittedReason ?? closeInitiateResult?.reason ?? null
+      }
+    : null;
+  const closeApprovalResultEvidence = closeApproveResult
+    ? buildFiscalCloseApprovalResultEvidence({
+        result: closeApproveResult,
+        submittedReason: closeSubmittedReason,
+        warnings: closeApproveWarnings
+      })
+    : null;
 
   // Fetch close request status for all fiscal years
   async function fetchCloseRequestStatuses(fiscalYearsList: FiscalYearRow[]) {
@@ -596,6 +780,10 @@ export function FiscalYearsPage({ user }: FiscalYearsPageProps) {
     setSelectedFiscalYear(fiscalYear);
     setClosePreview(null);
     setCloseInitiateResult(null);
+    setCloseApproveResult(null);
+    setCloseApproveWarnings([]);
+    setCloseReason("");
+    setCloseSubmittedReason(null);
     setCloseError(null);
     setCloseSuccessMsg(null);
     setLoadingPreview(true);
@@ -608,11 +796,7 @@ export function FiscalYearsPage({ user }: FiscalYearsPageProps) {
       );
       setClosePreview(response.data);
     } catch (err) {
-      if (err instanceof ApiError) {
-        setCloseError(err.message);
-      } else {
-        setCloseError("Failed to load close preview");
-      }
+      setCloseError(formatFiscalCloseApiError(err));
     } finally {
       setLoadingPreview(false);
     }
@@ -620,28 +804,46 @@ export function FiscalYearsPage({ user }: FiscalYearsPageProps) {
 
   async function handleInitiateClose() {
     if (!selectedFiscalYear?.id) return;
+    const validatedReason = validateFiscalCloseReason(closeReason);
+    if (validatedReason.error || !validatedReason.value) {
+      setCloseError(validatedReason.error ?? CLOSE_REASON_REQUIRED_MESSAGE);
+      return;
+    }
 
     setLoadingInitiate(true);
     setCloseError(null);
+    setCloseSubmittedReason(validatedReason.value);
 
     try {
       const response = await apiRequest<CloseInitiateResponse>(
         `/accounts/fiscal-years/${selectedFiscalYear.id}/close`,
         {
           method: "POST",
-          body: JSON.stringify({})
-        },
-        {}
+          body: JSON.stringify({ reason: validatedReason.value })
+        }
       );
       setCloseInitiateResult(response.data);
+      setCloseSubmittedReason(response.data.reason ?? validatedReason.value);
 
-      // Close preview modal immediately on success
-      closePreviewModal();
+      const initiatedFiscalYear: FiscalYearRow = {
+        ...selectedFiscalYear,
+        close_info: {
+          ...selectedFiscalYear.close_info,
+          close_request_id: response.data.closeRequestId,
+          close_request_status: response.data.status as NonNullable<FiscalYearRow["close_info"]>["close_request_status"],
+          net_income: response.data.netIncome,
+          total_income: response.data.totalIncome,
+          total_expenses: response.data.totalExpenses,
+          closing_entries_count: response.data.closingEntriesCount
+        }
+      };
+      setSelectedFiscalYear(initiatedFiscalYear);
+      setFiscalYears((prev) => prev.map((fy) => fy.id === initiatedFiscalYear.id ? initiatedFiscalYear : fy));
 
       if (response.data.success) {
         setCloseSuccessMsg("Fiscal year has already been closed previously.");
       } else {
-        setCloseSuccessMsg("Close initiated. Please proceed to approve to finalize the close.");
+        setCloseSuccessMsg(`Close initiated. Close request ID ${response.data.closeRequestId} is ready for approval.`);
       }
 
       // Refresh the fiscal years list to update close_info
@@ -653,11 +855,7 @@ export function FiscalYearsPage({ user }: FiscalYearsPageProps) {
       await fetchCloseRequestStatuses(fyResponse.data);
 
     } catch (err) {
-      if (err instanceof ApiError) {
-        setCloseError(err.message);
-      } else {
-        setCloseError("Failed to initiate close");
-      }
+      setCloseError(formatFiscalCloseApiError(err));
     } finally {
       setLoadingInitiate(false);
     }
@@ -667,17 +865,26 @@ export function FiscalYearsPage({ user }: FiscalYearsPageProps) {
     if (!fiscalYear.id || !fiscalYear.close_info?.close_request_id) return;
 
     setSelectedFiscalYear(fiscalYear);
-    setCloseConfirmChecked(false);
+    setCloseInitiateResult((current) => current?.fiscalYearId === fiscalYear.id ? current : null);
+    setCloseApproveResult(null);
+    setCloseApproveWarnings([]);
+    setCloseSubmittedReason((current) => current);
     setCloseError(null);
     setCloseSuccessMsg(null);
     openApproveModal();
   }
 
-  async function handleConfirmApproveClose() {
-    if (!selectedFiscalYear?.id || !selectedFiscalYear.close_info?.close_request_id) return;
+  function handleProceedToApproveFromInitiate() {
+    if (!selectedFiscalYear?.id || !closeInitiateResult?.closeRequestId) return;
+    closePreviewModal();
+    openApproveModal();
+  }
 
-    if (!closeConfirmChecked) {
-      setCloseError("Please confirm that you understand this action will finalize the fiscal year.");
+  async function handleConfirmApproveClose() {
+    if (!selectedFiscalYear?.id) return;
+    const resolvedCloseRequestId = resolveFiscalCloseRequestId(selectedFiscalYear, closeInitiateResult);
+    if (!resolvedCloseRequestId) {
+      setCloseError("CLOSE_REQUEST_ID_MISSING: Refresh fiscal years before approving this close.");
       return;
     }
 
@@ -690,13 +897,16 @@ export function FiscalYearsPage({ user }: FiscalYearsPageProps) {
         {
           method: "POST",
           body: JSON.stringify({
-            close_request_id: selectedFiscalYear.close_info.close_request_id
+            close_request_id: resolvedCloseRequestId
           })
         }
       );
 
+      setCloseApproveResult(response.data);
+      setCloseApproveWarnings(response.warnings ?? []);
+      setCloseSubmittedReason(response.data.reason ?? closeSubmittedReason);
       setCloseSuccessMsg(
-        `Fiscal year has been closed successfully. ${response.data.postedBatchIds.length} journal batch(es) posted.`
+        `Fiscal year has been closed successfully. Posted journal batch IDs: ${response.data.postedBatchIds.length > 0 ? response.data.postedBatchIds.join(", ") : "none returned"}.`
       );
       closeApproveModal();
 
@@ -709,11 +919,7 @@ export function FiscalYearsPage({ user }: FiscalYearsPageProps) {
       await fetchCloseRequestStatuses(fyResponse.data);
 
     } catch (err) {
-      if (err instanceof ApiError) {
-        setCloseError(err.message);
-      } else {
-        setCloseError("Failed to approve close");
-      }
+      setCloseError(formatFiscalCloseApiError(err));
     } finally {
       setLoadingApprove(false);
     }
@@ -724,13 +930,13 @@ export function FiscalYearsPage({ user }: FiscalYearsPageProps) {
     setSelectedFiscalYear(null);
     setClosePreview(null);
     setCloseInitiateResult(null);
+    setCloseReason("");
     setCloseError(null);
   }
 
   function handleApproveModalClose() {
     closeApproveModal();
     setSelectedFiscalYear(null);
-    setCloseConfirmChecked(false);
     setCloseError(null);
   }
 
@@ -795,6 +1001,59 @@ export function FiscalYearsPage({ user }: FiscalYearsPageProps) {
           <Alert color="green" title="Saved">
             {saveSuccess}
           </Alert>
+        ) : null}
+
+        {closeSuccessMsg ? (
+          <Alert color="green" title="Fiscal close workflow">
+            {closeSuccessMsg}
+          </Alert>
+        ) : null}
+
+        {closeApprovalResultEvidence ? (
+          <Card withBorder>
+            <Stack gap="xs">
+              <Text fw={600}>Fiscal Close Result Evidence</Text>
+              <Group gap="xl" wrap="wrap">
+                <div>
+                  <Text size="xs" c="dimmed">Close request ID</Text>
+                  <Text size="sm">{closeApprovalResultEvidence.closeRequestId}</Text>
+                </div>
+                <div>
+                  <Text size="xs" c="dimmed">Status transition</Text>
+                  <Text size="sm">{closeApprovalResultEvidence.statusTransition}</Text>
+                </div>
+                <div>
+                  <Text size="xs" c="dimmed">Posted journal batch IDs</Text>
+                  <Text size="sm">
+                    {closeApprovalResultEvidence.postedBatchIds.length > 0
+                      ? closeApprovalResultEvidence.postedBatchIds.join(", ")
+                      : "None returned"}
+                  </Text>
+                </div>
+              </Group>
+              <Group gap="xl" wrap="wrap">
+                {closeApprovalResultEvidence.totals.map((item) => (
+                  <div key={item.label}>
+                    <Text size="xs" c="dimmed">{item.label}</Text>
+                    <Text size="sm">{item.value}</Text>
+                  </div>
+                ))}
+              </Group>
+              <div>
+                <Text size="xs" c="dimmed">{closeApprovalResultEvidence.reasonLabel}</Text>
+                <Text size="sm">{closeApprovalResultEvidence.reason}</Text>
+              </div>
+              {closeApprovalResultEvidence.warnings.length > 0 ? (
+                <Alert color="yellow" title="Close warnings">
+                  <Stack gap={4}>
+                    {closeApprovalResultEvidence.warnings.map((warning) => (
+                      <Text key={warning} size="sm">{warning}</Text>
+                    ))}
+                  </Stack>
+                </Alert>
+              ) : null}
+            </Stack>
+          </Card>
         ) : null}
 
         {filteredYears.map((row) => {
@@ -997,163 +1256,151 @@ export function FiscalYearsPage({ user }: FiscalYearsPageProps) {
             </Group>
           )}
 
-          {closePreview && !closeInitiateResult && (
-            <>
-              {/* Fiscal Year Summary */}
-              <Card withBorder>
-                <Stack gap="xs">
-                  <Text fw={600}>Fiscal Year Summary</Text>
-                  <Group gap="xl">
-                    <div>
-                      <Text size="xs" c="dimmed">Code</Text>
-                      <Text size="sm">{closePreview.fiscalYearCode}</Text>
-                    </div>
-                    <div>
-                      <Text size="xs" c="dimmed">Period</Text>
-                      <Text size="sm">{closePreview.startDate} → {closePreview.endDate}</Text>
-                    </div>
-                  </Group>
-                </Stack>
-              </Card>
-
-              {/* Financial Summary */}
-              <Card withBorder>
-                <Stack gap="xs">
-                  <Text fw={600}>Financial Summary</Text>
-                  <Group gap="xl">
-                    <div>
-                      <Text size="xs" c="dimmed">Total Revenue</Text>
-                      <Text size="sm" c="green">{formatCurrency(closePreview.totalIncome)}</Text>
-                    </div>
-                    <div>
-                      <Text size="xs" c="dimmed">Total Expenses</Text>
-                      <Text size="sm" c="red">{formatCurrency(closePreview.totalExpenses)}</Text>
-                    </div>
-                    <div>
-                      <Text size="xs" c="dimmed">Net Income</Text>
-                      <Text size="sm" fw={600} c={closePreview.netIncome >= 0 ? "green" : "red"}>
-                        {formatCurrency(closePreview.netIncome)}
+          {closePreview && closeInitiationEvidence && !closeInitiateResult && (
+            <ReviewPanel
+              title="Review fiscal close initiation"
+              description="Complete each evidence section, then use final confirmation to create the backend close request. Approval is a separate finalizing step."
+              scopeBadges={closeInitiationEvidence.scope.map((item) => ({ label: item.label, value: item.value }))}
+              summaryItems={closeInitiationEvidence.financialEffects.map((item) => ({ label: item.label, value: item.value }))}
+              saveLabel="Initiate close request"
+              submitting={loadingInitiate}
+              saveDisabled={closePreview.can_close === false || Boolean(closeReasonValidation.error)}
+              onDiscardDraft={handlePreviewModalClose}
+              onSubmit={handleInitiateClose}
+              sections={[
+                {
+                  id: "close-scope",
+                  title: "Scope",
+                  description: "Fiscal year and status that will be submitted to the close workflow.",
+                  content: (
+                    <Stack gap="xs">
+                      {closeInitiationEvidence.scope.map((item) => (
+                        <Group key={item.label} justify="space-between">
+                          <Text fw={600}>{item.label}</Text>
+                          <Text>{item.value}</Text>
+                        </Group>
+                      ))}
+                    </Stack>
+                  )
+                },
+                {
+                  id: "close-reason",
+                  title: "Reason",
+                  description: "Operator accountability reason sent to the backend close request.",
+                  errors: closeReasonValidation.error ? [closeReasonValidation.error] : [],
+                  content: (
+                    <Stack gap="xs">
+                      <Textarea
+                        label="Close reason"
+                        value={closeReason}
+                        onChange={(event) => setCloseReason(event.currentTarget.value)}
+                        maxLength={CLOSE_REASON_MAX_LENGTH}
+                        minRows={3}
+                        autosize
+                        required
+                        error={closeReasonValidation.error}
+                      />
+                      <Text size="xs" c="dimmed">
+                        {closeReasonValidation.characterCount}/{CLOSE_REASON_MAX_LENGTH} characters after trimming
                       </Text>
-                    </div>
-                  </Group>
-                </Stack>
-              </Card>
-
-              {/* Blockers Alert - shown when can_close is false */}
-              {closePreview.blockers && closePreview.blockers.length > 0 && (
-                <Alert color="red" title="Cannot Close Fiscal Year" icon={<IconAlertCircle size={16} />}>
-                  <Text size="sm" mb="xs">
-                    The following issues prevent this fiscal year from being closed:
-                  </Text>
-                  <Stack gap="xs">
-                    {closePreview.blockers.map((blocker, idx) => (
-                      <Text key={idx} size="sm">
-                        • {blocker}
-                      </Text>
-                    ))}
-                  </Stack>
-                </Alert>
-              )}
-
-              {/* Closing Entries Preview */}
-              <Card withBorder>
-                <Stack gap="xs">
-                  <Text fw={600}>
-                    Closing Entries to be Created ({closePreview.closingEntries.length} entries)
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    Entry Date: {closePreview.entryDate} | Description: {closePreview.description}
-                  </Text>
-
-                  <ScrollArea>
-                    <Table striped highlightOnHover withTableBorder withColumnBorders>
-                      <Table.Thead>
-                        <Table.Tr>
-                          <Table.Th>Account</Table.Th>
-                          <Table.Th>Description</Table.Th>
-                          <Table.Th style={{ textAlign: "right" }}>Debit</Table.Th>
-                          <Table.Th style={{ textAlign: "right" }}>Credit</Table.Th>
-                        </Table.Tr>
-                      </Table.Thead>
-                      <Table.Tbody>
-                        {closePreview.closingEntries.map((entry, idx) => (
-                          <Table.Tr key={idx}>
-                            <Table.Td>
-                              <Text size="sm">{entry.accountCode} - {entry.accountName}</Text>
-                            </Table.Td>
-                            <Table.Td>
-                              <Text size="sm">{entry.description}</Text>
-                            </Table.Td>
-                            <Table.Td style={{ textAlign: "right" }}>
-                              <Text size="sm" c="red">
-                                {entry.debit > 0 ? formatCurrency(entry.debit) : "—"}
-                              </Text>
-                            </Table.Td>
-                            <Table.Td style={{ textAlign: "right" }}>
-                              <Text size="sm" c="green">
-                                {entry.credit > 0 ? formatCurrency(entry.credit) : "—"}
-                              </Text>
-                            </Table.Td>
-                          </Table.Tr>
+                    </Stack>
+                  )
+                },
+                {
+                  id: "close-effects",
+                  title: "Financial effects",
+                  description: "Backend close-preview totals and closing entry details.",
+                  content: (
+                    <Stack gap="md">
+                      <Group gap="xl" wrap="wrap">
+                        {closeInitiationEvidence.financialEffects.map((item) => (
+                          <div key={item.label}>
+                            <Text size="xs" c="dimmed">{item.label}</Text>
+                            <Text size="sm">{item.value}</Text>
+                          </div>
                         ))}
-                        {/* Retained Earnings entry */}
-                        <Table.Tr bg="gray.1">
-                          <Table.Td>
-                            <Text size="sm" fw={600}>
-                              {closePreview.retainedEarningsAccountCode} - Retained Earnings
-                            </Text>
-                          </Table.Td>
-                          <Table.Td>
-                            <Text size="sm" fw={600}>Close {closePreview.fiscalYearCode}</Text>
-                          </Table.Td>
-                          <Table.Td style={{ textAlign: "right" }}>
-                            <Text size="sm" fw={600} c={closePreview.netIncome < 0 ? "red" : "gray"}>
-                              {closePreview.netIncome < 0 ? formatCurrency(Math.abs(closePreview.netIncome)) : "—"}
-                            </Text>
-                          </Table.Td>
-                          <Table.Td style={{ textAlign: "right" }}>
-                            <Text size="sm" fw={600} c={closePreview.netIncome >= 0 ? "green" : "gray"}>
-                              {closePreview.netIncome >= 0 ? formatCurrency(closePreview.netIncome) : "—"}
-                            </Text>
-                          </Table.Td>
-                        </Table.Tr>
-                      </Table.Tbody>
-                    </Table>
-                  </ScrollArea>
-                </Stack>
-              </Card>
-
-              {/* Actions */}
-              <Group justify="flex-end">
-                <Button variant="default" onClick={handlePreviewModalClose}>
-                  Cancel
-                </Button>
-                <Button
-                  color="orange"
-                  onClick={handleInitiateClose}
-                  loading={loadingInitiate}
-                  disabled={closePreview.can_close === false}
-                  leftSection={<IconCalendar size={16} />}
-                >
-                  Initiate Close
-                </Button>
-              </Group>
-            </>
+                      </Group>
+                      <Text fw={600}>Closing entries ({closeInitiationEvidence.closingEntryCount})</Text>
+                      <ScrollArea>
+                        <Table striped highlightOnHover withTableBorder withColumnBorders>
+                          <Table.Thead>
+                            <Table.Tr>
+                              <Table.Th>Account</Table.Th>
+                              <Table.Th>Evidence</Table.Th>
+                            </Table.Tr>
+                          </Table.Thead>
+                          <Table.Tbody>
+                            {closeInitiationEvidence.closingEntries.map((entry) => (
+                              <Table.Tr key={entry.label}>
+                                <Table.Td><Text size="sm">{entry.label}</Text></Table.Td>
+                                <Table.Td><Text size="sm">{entry.value}</Text></Table.Td>
+                              </Table.Tr>
+                            ))}
+                          </Table.Tbody>
+                        </Table>
+                      </ScrollArea>
+                    </Stack>
+                  )
+                },
+                {
+                  id: "close-generated-entry-expectation",
+                  title: "Generated-entry expectation",
+                  description: "What this step creates now and what approval creates later.",
+                  errors: closeInitiationEvidence.warnings.length > 0 ? closeInitiationEvidence.warnings : [],
+                  content: (
+                    <Stack gap="xs">
+                      <Text>{closeInitiationEvidence.generatedEntryExpectation}</Text>
+                      <Text size="sm" c="dimmed">
+                        Entry date: {closePreview.entryDate} | Description: {closePreview.description}
+                      </Text>
+                      {closeInitiationEvidence.warnings.length > 0 ? (
+                        <Alert color="red" title="Cannot Close Fiscal Year" icon={<IconAlertCircle size={16} />}>
+                          <Stack gap="xs">
+                            {closeInitiationEvidence.warnings.map((warning) => (
+                              <Text key={warning} size="sm">{warning}</Text>
+                            ))}
+                          </Stack>
+                        </Alert>
+                      ) : null}
+                    </Stack>
+                  )
+                }
+              ]}
+            />
           )}
 
           {closeInitiateResult && (
             <Alert color={closeInitiateResult.success ? "green" : "blue"} title={closeInitiateResult.success ? "Already Closed" : "Close Initiated"}>
               <Text>{closeInitiateResult.message}</Text>
-              {!closeInitiateResult.success && (
-                <Stack gap="xs" mt="sm">
+              <Stack gap="xs" mt="sm">
+                <Text size="sm">
+                  <strong>Close request ID:</strong> {closeInitiateResult.closeRequestId}
+                </Text>
+                <Text size="sm">
+                  <strong>Status:</strong> {closeInitiateResult.status}
+                </Text>
+                {closeInitiateResult.reason ? (
                   <Text size="sm">
-                    <strong>Net Income:</strong> {formatCurrency(closeInitiateResult.netIncome)}
+                    <strong>Reason:</strong> {closeInitiateResult.reason}
                   </Text>
+                ) : closeSubmittedReason ? (
                   <Text size="sm">
-                    <strong>Closing Entries:</strong> {closeInitiateResult.closingEntriesCount}
+                    <strong>Submitted reason:</strong> {closeSubmittedReason}
                   </Text>
-                </Stack>
-              )}
+                ) : null}
+                <Text size="sm">
+                  <strong>Total Revenue:</strong> {formatCurrency(closeInitiateResult.totalIncome)}
+                </Text>
+                <Text size="sm">
+                  <strong>Total Expenses:</strong> {formatCurrency(closeInitiateResult.totalExpenses)}
+                </Text>
+                <Text size="sm">
+                  <strong>Net Income:</strong> {formatCurrency(closeInitiateResult.netIncome)}
+                </Text>
+                <Text size="sm">
+                  <strong>Closing Entries:</strong> {closeInitiateResult.closingEntriesCount}
+                </Text>
+              </Stack>
               <Group justify="flex-end" mt="md">
                 <Button variant="default" onClick={handlePreviewModalClose}>
                   Close
@@ -1161,12 +1408,7 @@ export function FiscalYearsPage({ user }: FiscalYearsPageProps) {
                 {!closeInitiateResult.success && canManage && (
                   <Button
                     color="green"
-                    onClick={() => {
-                      handlePreviewModalClose();
-                      // Find the fiscal year and open approve modal
-                      const fy = fiscalYears.find(f => f.id === selectedFiscalYear?.id);
-                      if (fy) handleApproveCloseClick(fy);
-                    }}
+                    onClick={handleProceedToApproveFromInitiate}
                     leftSection={<IconCheck size={16} />}
                   >
                     Proceed to Approve
@@ -1185,67 +1427,85 @@ export function FiscalYearsPage({ user }: FiscalYearsPageProps) {
         opened={approveModalOpen}
         onClose={handleApproveModalClose}
         title={`Approve Close: ${selectedFiscalYear?.name ?? ""}`}
-        size="md"
+        size="xl"
         centered
       >
         <Stack gap="md">
-          <Alert color="red" title="Warning: Irreversible Action" icon={<IconAlertCircle size={16} />}>
-            <Text size="sm">
-              Approving the fiscal year close will:
-            </Text>
-            <ul style={{ margin: "8px 0", paddingLeft: "20px" }}>
-              <li><Text size="sm">Post all closing entries to the General Ledger</Text></li>
-              <li><Text size="sm">Transfer net income/loss to retained earnings</Text></li>
-              <li><Text size="sm"><strong>This action cannot be undone</strong></Text></li>
-            </ul>
-          </Alert>
-
-          {closeInitiateResult && (
-            <Card withBorder>
-              <Stack gap="xs">
-                <Text fw={600}>Close Summary</Text>
-                <Group gap="xl">
-                  <div>
-                    <Text size="xs" c="dimmed">Net Income</Text>
-                    <Text size="sm" fw={600} c={closeInitiateResult.netIncome >= 0 ? "green" : "red"}>
-                      {formatCurrency(closeInitiateResult.netIncome)}
-                    </Text>
-                  </div>
-                  <div>
-                    <Text size="xs" c="dimmed">Closing Entries</Text>
-                    <Text size="sm">{closeInitiateResult.closingEntriesCount}</Text>
-                  </div>
-                </Group>
-              </Stack>
-            </Card>
-          )}
-
           {closeError && (
             <Alert color="red" title="Error">
               {closeError}
             </Alert>
           )}
 
-          <Checkbox
-            label="I understand that this action will finalize the fiscal year and cannot be undone"
-            checked={closeConfirmChecked}
-            onChange={(event) => setCloseConfirmChecked(event.currentTarget.checked)}
-          />
-
-          <Group justify="flex-end">
-            <Button variant="default" onClick={handleApproveModalClose} disabled={loadingApprove}>
-              Cancel
-            </Button>
-            <Button
-              color="green"
-              onClick={handleConfirmApproveClose}
-              loading={loadingApprove}
-              disabled={!closeConfirmChecked}
-              leftSection={<IconCheck size={16} />}
-            >
-              Approve & Close
-            </Button>
-          </Group>
+          {closeApprovalEvidence ? (
+            <ReviewPanel
+              title="Review fiscal close approval"
+              description="Approval finalizes the fiscal year and posts backend-assigned journal batch IDs. Complete all sections and final confirmation before approving."
+              scopeBadges={closeApprovalEvidence.scope.map((item) => ({ label: item.label, value: item.value }))}
+              summaryItems={closeApprovalEvidence.totals.map((item) => ({ label: item.label, value: item.value }))}
+              saveLabel="Approve and close fiscal year"
+              submitting={loadingApprove}
+              saveDisabled={!closeRequestId}
+              onDiscardDraft={handleApproveModalClose}
+              onSubmit={handleConfirmApproveClose}
+              sections={[
+                {
+                  id: "approve-scope",
+                  title: "Approval scope",
+                  description: "Close request that will be approved.",
+                  errors: closeRequestId ? [] : ["Close request ID is required before approval."],
+                  content: (
+                    <Stack gap="xs">
+                      {closeApprovalEvidence.scope.map((item) => (
+                        <Group key={item.label} justify="space-between">
+                          <Text fw={600}>{item.label}</Text>
+                          <Text>{item.value}</Text>
+                        </Group>
+                      ))}
+                    </Stack>
+                  )
+                },
+                {
+                  id: "approve-financial-effects",
+                  title: "Finalize financial effects",
+                  description: "Evidence known before approval. Backend remains source of truth for posted journal batch IDs.",
+                  content: (
+                    <Stack gap="xs">
+                      <Alert color="red" title="Warning: Irreversible Action" icon={<IconAlertCircle size={16} />}>
+                        <Text size="sm">Approving the fiscal year close will post closing entries to the General Ledger and finalize the fiscal year.</Text>
+                      </Alert>
+                      {closeApprovalEvidence.totals.length > 0 ? closeApprovalEvidence.totals.map((item) => (
+                        <Group key={item.label} justify="space-between">
+                          <Text fw={600}>{item.label}</Text>
+                          <Text>{item.value}</Text>
+                        </Group>
+                      )) : (
+                        <Text size="sm" c="dimmed">Totals are not present in the pending close list response. Approval response will display backend totals.</Text>
+                      )}
+                    </Stack>
+                  )
+                },
+                {
+                  id: "approve-accountability",
+                  title: "Accountability and result expectation",
+                  description: "Reason evidence and backend-generated result fields expected after approval.",
+                  content: (
+                    <Stack gap="xs">
+                      <Text size="sm">
+                        <strong>Reason evidence:</strong> {closeApprovalEvidence.reason ?? "Reason is not available in the current list response."}
+                      </Text>
+                      <Text size="sm">
+                        Approval sends <strong>{`{ close_request_id: "${closeRequestId ?? ""}" }`}</strong> to the backend.
+                      </Text>
+                      <Text size="sm">
+                        Approval result will display status transition, totals, warnings if returned, and posted journal batch IDs as text only.
+                      </Text>
+                    </Stack>
+                  )
+                }
+              ]}
+            />
+          ) : null}
         </Stack>
       </Modal>
     </Container>

@@ -14,6 +14,7 @@ import {
   createManualJournalEntry,
   postManualJournalEntry,
   updateManualJournalEntry,
+  voidManualJournalEntry,
   useJournalBatches,
 } from "@/hooks/use-journals";
 import { useOnlineStatus } from "@/lib/connection";
@@ -46,9 +47,19 @@ type JournalFormState = {
 type JournalListFilters = {
   start_date: string;
   end_date: string;
-  status: "ALL" | "DRAFT" | "POSTED";
+  status: JournalStatusFilter;
   reference: string;
 };
+
+export type JournalStatusFilter = "ALL" | JournalEntryResponse["status"];
+
+export const JOURNAL_STATUS_FILTER_OPTIONS: readonly { value: JournalStatusFilter; label: string }[] = [
+  { value: "ALL", label: "All" },
+  { value: "DRAFT", label: "Draft" },
+  { value: "POSTED", label: "Posted" },
+  { value: "VOIDED", label: "Voided" },
+  { value: "REVERSAL", label: "Reversal" },
+];
 
 const inputStyle = {
   border: "1px solid #cabfae",
@@ -99,11 +110,15 @@ export function formatJournalApiError(error: unknown): string {
     INVALID_REQUEST: "INVALID_REQUEST: Review required journal fields and balanced line amounts.",
     NOT_FOUND: "NOT_FOUND: Journal was not found or is outside your company.",
     JOURNAL_ALREADY_POSTED: "JOURNAL_ALREADY_POSTED: Posted journals are immutable and cannot be edited again.",
+    JOURNAL_ALREADY_VOIDED: "JOURNAL_ALREADY_VOIDED: This journal was already voided. Refresh the list before retrying.",
+    JOURNAL_VOID_NOT_ALLOWED: "JOURNAL_VOID_NOT_ALLOWED: Only posted manual journals can be voided from this screen.",
+    JOURNAL_CANNOT_VOID_DRAFT: "JOURNAL_CANNOT_VOID_DRAFT: Draft journals cannot be voided. Delete or edit the draft workflow instead.",
     FISCAL_YEAR_CLOSED: "FISCAL_YEAR_CLOSED: The selected fiscal year is closed.",
     JOURNAL_OUTSIDE_FISCAL_YEAR: "JOURNAL_OUTSIDE_FISCAL_YEAR: Journal date is outside an open fiscal year.",
     INVALID_ACCOUNT: "INVALID_ACCOUNT: One or more accounts are invalid for this company.",
     INVALID_OUTLET: "INVALID_OUTLET: Selected outlet is invalid for this company.",
     FORBIDDEN: "FORBIDDEN: You do not have permission for this journal action.",
+    SERVICE_VERSION_MISMATCH: "SERVICE_VERSION_MISMATCH: The journal changed on the server. Refresh the list before retrying.",
   };
   return messages[error.code] ?? `${error.code}: ${error.message}`;
 }
@@ -132,6 +147,32 @@ export function buildJournalPostDiffChanges(entry: JournalEntryResponse): DiffCh
       moneyFields: ["total_debits", "total_credits"],
     },
   );
+}
+
+export function buildJournalVoidDiffChanges(entry: JournalEntryResponse, reason: string): DiffChange[] {
+  return diffValues(
+    {
+      status: entry.status,
+      void_reason: entry.void_reason ?? null,
+      reversal_journal_id: entry.reversal_journal_id ?? null,
+    },
+    {
+      status: "VOIDED",
+      void_reason: reason.trim(),
+      reversal_journal_id: "Assigned by backend on confirmation",
+    },
+    {
+      labels: {
+        status: "Journal status",
+        void_reason: "Void reason",
+        reversal_journal_id: "Reversal journal ID",
+      },
+    },
+  );
+}
+
+export function isVoidEligibleJournal(entry: JournalEntryResponse): boolean {
+  return entry.status === "POSTED" && entry.doc_type === "MANUAL";
 }
 
 function currentJournalDate(companyTimezone?: string | null): string {
@@ -209,6 +250,39 @@ export function journalReviewBlockReason(entry: JournalEntryResponse | null, for
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—";
   return value.replace("T", " ").replace(/\.\d+Z?$/, " UTC").replace(/Z$/, " UTC");
+}
+
+export function journalCorrectionSummary(entry: JournalEntryResponse): string {
+  const parts: string[] = [];
+  if (entry.status === "VOIDED") {
+    if (entry.void_reason) parts.push(`Void reason: ${entry.void_reason}`);
+    if (entry.voided_at) parts.push(`Voided at: ${formatDateTime(entry.voided_at)}`);
+    if (entry.voided_by_user_id) parts.push(`Voided by user ID: ${entry.voided_by_user_id}`);
+    if (entry.reversal_journal_id) parts.push(`Reversal journal ID: ${entry.reversal_journal_id}`);
+  }
+  if (entry.status === "REVERSAL" && entry.original_journal_id) {
+    parts.push(`Original journal ID: ${entry.original_journal_id}`);
+  }
+  return parts.length > 0 ? parts.join("; ") : "—";
+}
+
+export function journalVoidResultMessages(entry: JournalEntryResponse): { success: string | null; error: string | null } {
+  if (entry.status === "VOIDED" && !entry.reversal_journal_id) {
+    return {
+      success: null,
+      error: "VOID_EVIDENCE_INCOMPLETE: Backend void response did not include reversal_journal_id. Refresh the list and contact support before relying on this correction evidence.",
+    };
+  }
+  if (entry.reversal_journal_id) {
+    return {
+      success: `Journal voided. Reversal journal ID ${entry.reversal_journal_id} was assigned by backend.`,
+      error: null,
+    };
+  }
+  return {
+    success: "Journal void completed with backend response. Refresh the list to verify correction evidence.",
+    error: null,
+  };
 }
 
 function accountLabel(accounts: AccountResponse[], accountId: number): string {
@@ -291,7 +365,7 @@ export function JournalsPage({ user }: JournalsPageProps) {
   const isOnline = useOnlineStatus();
   const permissions = useMemo(() => {
     const effective = resolveEffectivePermissions(user) ?? [];
-    return actionGates(effective, "accounting", "journals", ["READ", "CREATE", "UPDATE"]);
+    return actionGates(effective, "accounting", "journals", ["READ", "CREATE", "UPDATE", "DELETE"]);
   }, [user]);
   const accountFilters = useMemo(() => ({ is_active: true }), []);
   const { data: accounts, loading: accountsLoading, error: accountsError } = useAccounts(user.company_id, accountFilters);
@@ -312,8 +386,12 @@ export function JournalsPage({ user }: JournalsPageProps) {
   const [lineSequence, setLineSequence] = useState(3);
   const [selectedEntry, setSelectedEntry] = useState<JournalEntryResponse | null>(null);
   const [reviewEntry, setReviewEntry] = useState<JournalEntryResponse | null>(null);
+  const [voidReviewEntry, setVoidReviewEntry] = useState<JournalEntryResponse | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+  const [voidReasonError, setVoidReasonError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [postSubmitting, setPostSubmitting] = useState(false);
+  const [voidSubmitting, setVoidSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -336,6 +414,7 @@ export function JournalsPage({ user }: JournalsPageProps) {
   const canSave = isEditing ? permissions.UPDATE : permissions.CREATE;
   const editableSelectedEntry = selectedEntry?.status === "DRAFT" ? selectedEntry : null;
   const reviewBlockReason = journalReviewBlockReason(editableSelectedEntry, form);
+  const trimmedVoidReason = voidReason.trim();
 
   function updateLine(id: string, patch: Partial<JournalFormLine>) {
     setForm((current) => ({
@@ -348,6 +427,9 @@ export function JournalsPage({ user }: JournalsPageProps) {
     setForm(emptyForm(user.company_timezone));
     setSelectedEntry(null);
     setReviewEntry(null);
+    setVoidReviewEntry(null);
+    setVoidReason("");
+    setVoidReasonError(null);
     setSubmitError(null);
     setSuccessMessage(null);
   }
@@ -393,6 +475,7 @@ export function JournalsPage({ user }: JournalsPageProps) {
       const posted = await postManualJournalEntry(reviewEntry.id);
       setSelectedEntry(posted);
       setReviewEntry(null);
+      setVoidReviewEntry(null);
       setForm(emptyForm(user.company_timezone));
       setSuccessMessage("Journal posted. Posted journals are now immutable in the UI.");
       await refetch();
@@ -400,6 +483,54 @@ export function JournalsPage({ user }: JournalsPageProps) {
       setSubmitError(formatJournalApiError(requestError));
     } finally {
       setPostSubmitting(false);
+    }
+  }
+
+  function startVoidReview(entry: JournalEntryResponse) {
+    setSubmitError(null);
+    setSuccessMessage(null);
+    setVoidReasonError(null);
+    if (!permissions.DELETE) {
+      setSubmitError("accounting.journals.DELETE is required to void posted manual journals.");
+      return;
+    }
+    if (!isVoidEligibleJournal(entry)) {
+      setSubmitError("Only posted manual journals can be voided from this screen.");
+      return;
+    }
+    setSelectedEntry(entry);
+    setReviewEntry(null);
+    setVoidReviewEntry(entry);
+    setVoidReason("");
+    setForm(emptyForm(user.company_timezone));
+  }
+
+  async function handleVoid() {
+    if (!voidReviewEntry) return;
+    setSubmitError(null);
+    setVoidReasonError(null);
+    if (!trimmedVoidReason) {
+      const message = "Void reason is required before submitting void review.";
+      setVoidReasonError(message);
+      setSubmitError(message);
+      return;
+    }
+    setVoidSubmitting(true);
+    try {
+      const voided = await voidManualJournalEntry(voidReviewEntry.id, trimmedVoidReason);
+      setSelectedEntry(voided);
+      setVoidReviewEntry(null);
+      setVoidReason("");
+      setVoidReasonError(null);
+      setForm(emptyForm(user.company_timezone));
+      const messages = journalVoidResultMessages(voided);
+      setSuccessMessage(messages.success);
+      setSubmitError(messages.error);
+      await refetch();
+    } catch (requestError) {
+      setSubmitError(formatJournalApiError(requestError));
+    } finally {
+      setVoidSubmitting(false);
     }
   }
 
@@ -436,9 +567,61 @@ export function JournalsPage({ user }: JournalsPageProps) {
     },
   ] : [];
 
+  const voidReviewSections: ReviewPanelSection[] = voidReviewEntry ? [
+    {
+      id: "void-before-evidence",
+      title: "Before void evidence",
+      description: "Backend fields for the posted manual journal that will be voided.",
+      content: (
+        <Stack gap="sm">
+          <Group gap="lg" wrap="wrap">
+            <DetailField label="Affected journal ID" value={voidReviewEntry.id} />
+            <DetailField label="Status before" value={voidReviewEntry.status} />
+            <DetailField label="Doc type" value={voidReviewEntry.doc_type} />
+            <DetailField label="Reference" value={voidReviewEntry.reference ?? "—"} />
+            <DetailField label="Entry date" value={entryDate(voidReviewEntry)} />
+            <DetailField label="Total debits" value={formatMoney(voidReviewEntry.total_debits)} />
+            <DetailField label="Total credits" value={formatMoney(voidReviewEntry.total_credits)} />
+          </Group>
+          <JournalLinesTable entry={voidReviewEntry} accounts={accounts} />
+        </Stack>
+      ),
+      errors: !isVoidEligibleJournal(voidReviewEntry) ? ["Only posted manual journals can be voided."] : undefined,
+    },
+    {
+      id: "void-after-evidence",
+      title: "After void evidence",
+      description: "Expected backend-owned correction state after POST /journals/:id/void.",
+      content: (
+        <Stack gap="xs">
+          <Text>Status after: VOIDED</Text>
+          <Text>Affected journal ID: {voidReviewEntry.id}</Text>
+          <Text>Expected reversal behavior: backend creates/assigns reversal_journal_id and returns the original journal as VOIDED.</Text>
+          <Text>Original/reversal link semantics: VOIDED originals display reversal_journal_id; REVERSAL journals display original_journal_id as backend-provided text IDs only.</Text>
+          <label>
+            Void reason *
+            <textarea
+              aria-label="Void reason"
+              style={{ ...inputStyle, minHeight: 84 }}
+              value={voidReason}
+              onChange={(event) => {
+                setVoidReason(event.currentTarget.value);
+                if (event.currentTarget.value.trim()) setVoidReasonError(null);
+              }}
+              placeholder="Explain the auditable correction reason"
+            />
+          </label>
+          {voidReasonError ? <Alert color="red">{voidReasonError}</Alert> : null}
+          <Text>Trimmed reason that will be submitted: {trimmedVoidReason || "—"}</Text>
+        </Stack>
+      ),
+      errors: !trimmedVoidReason ? ["Void reason is required before submitting void review."] : undefined,
+    },
+  ] : [];
+
   return (
     <Stack gap="md">
-      <PageCard title="Journal Entries" description="Create balanced draft journals, review posting evidence, and inspect posted immutable journals. Posted rows open as read-only immutable detail with status and posted_at visible.">
+      <PageCard title="Journal Entries" description="Create balanced draft journals, review posting/void evidence, and inspect immutable journals. Posted, voided, and reversal rows open as read-only detail with backend status and correction metadata visible.">
         <Stack gap="sm">
           {!isOnline ? <Alert color="yellow">Journal create, edit, and post actions require online backend validation.</Alert> : null}
           {error ? <Alert color="red">{error}</Alert> : null}
@@ -448,7 +631,7 @@ export function JournalsPage({ user }: JournalsPageProps) {
           <Group align="flex-end" wrap="wrap">
             <label>From<input type="date" style={inputStyle} value={filters.start_date} onChange={(event) => setFilters((current) => ({ ...current, start_date: event.currentTarget.value }))} /></label>
             <label>To<input type="date" style={inputStyle} value={filters.end_date} onChange={(event) => setFilters((current) => ({ ...current, end_date: event.currentTarget.value }))} /></label>
-            <label>Status<select style={inputStyle} value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.currentTarget.value as JournalListFilters["status"] }))}><option value="ALL">All</option><option value="DRAFT">Draft</option><option value="POSTED">Posted</option></select></label>
+            <label>Status<select style={inputStyle} value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.currentTarget.value as JournalListFilters["status"] }))}>{JOURNAL_STATUS_FILTER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
             <label>Reference<input style={inputStyle} value={filters.reference} onChange={(event) => setFilters((current) => ({ ...current, reference: event.currentTarget.value }))} placeholder="Reference or ID" /></label>
             <Button onClick={() => void refetch()} loading={loading}>Refresh</Button>
           </Group>
@@ -462,12 +645,13 @@ export function JournalsPage({ user }: JournalsPageProps) {
                 <th style={{ ...cellStyle, textAlign: "right" }}>Total Credits</th>
                 <th style={{ ...cellStyle, textAlign: "left" }}>Outlet</th>
                 <th style={{ ...cellStyle, textAlign: "right" }}>Lines</th>
+                <th style={{ ...cellStyle, textAlign: "left" }}>Correction</th>
                 <th style={{ ...cellStyle, textAlign: "left" }}>Action</th>
               </tr>
             </thead>
             <tbody>
               {filteredJournals.length === 0 ? (
-                <tr><td style={cellStyle} colSpan={8}>{loading ? "Loading journals..." : "No journal entries found."}</td></tr>
+                <tr><td style={cellStyle} colSpan={9}>{loading ? "Loading journals..." : "No journal entries found."}</td></tr>
               ) : filteredJournals.map((entry) => (
                 <tr key={`${entry.status}-${entry.id}`}>
                   <td style={cellStyle}>{entry.status}</td>
@@ -477,12 +661,20 @@ export function JournalsPage({ user }: JournalsPageProps) {
                   <td style={{ ...cellStyle, textAlign: "right" }}>{formatMoney(entry.total_credits)}</td>
                   <td style={cellStyle}>{entry.outlet_id ?? "Company"}</td>
                   <td style={{ ...cellStyle, textAlign: "right" }}>{entry.lines.length}</td>
+                  <td style={cellStyle}>{journalCorrectionSummary(entry)}</td>
                   <td style={cellStyle}>
-                    <Button size="xs" variant="light" onClick={() => {
-                      setSelectedEntry(entry);
-                      setReviewEntry(null);
-                      setForm(formForEntrySelection(entry, user.company_timezone));
-                    }}>{entry.status === "DRAFT" ? "Edit draft" : "View posted"}</Button>
+                    <Group gap="xs">
+                      <Button size="xs" variant="light" onClick={() => {
+                        setSelectedEntry(entry);
+                        setReviewEntry(null);
+                        setVoidReviewEntry(null);
+                        setVoidReason("");
+                        setVoidReasonError(null);
+                        setForm(formForEntrySelection(entry, user.company_timezone));
+                      }}>{entry.status === "DRAFT" ? "Edit draft" : "View detail"}</Button>
+                      {isVoidEligibleJournal(entry) && permissions.DELETE ? <Button size="xs" color="red" variant="light" onClick={() => startVoidReview(entry)}>Review void</Button> : null}
+                      {isVoidEligibleJournal(entry) && !permissions.DELETE ? <Text size="xs" c="dimmed">Void requires accounting.journals.DELETE.</Text> : null}
+                    </Group>
                   </td>
                 </tr>
               ))}
@@ -545,6 +737,9 @@ export function JournalsPage({ user }: JournalsPageProps) {
                 <Button color="green" disabled={!editableSelectedEntry || !permissions.UPDATE || formErrors.length > 0 || Boolean(reviewBlockReason)} onClick={() => {
                   if (!editableSelectedEntry || reviewBlockReason) return;
                   setReviewEntry(editableSelectedEntry);
+                  setVoidReviewEntry(null);
+                  setVoidReason("");
+                  setVoidReasonError(null);
                 }}>Review and post draft</Button>
               </Group>
             </Group>
@@ -553,16 +748,24 @@ export function JournalsPage({ user }: JournalsPageProps) {
       </PageCard>
 
       {selectedEntry ? (
-        <PageCard title="Journal Detail" description={selectedEntry.status === "POSTED" ? "Posted journal detail is read-only and immutable." : "Draft journal detail can be edited until posted."}>
+        <PageCard title="Journal Detail" description={selectedEntry.status === "DRAFT" ? "Draft journal detail can be edited until posted." : "Finalized journal detail is read-only. Void and reversal records are auditable correction flow evidence, not mutation controls."}>
           <Stack gap="sm">
-            {selectedEntry.status === "POSTED" ? <Alert color="blue">Posted journal is immutable in the UI. Status {selectedEntry.status}; posted at {formatDateTime(selectedEntry.posted_at)}.</Alert> : null}
+            {selectedEntry.status !== "DRAFT" ? <Alert color="blue">Finalized journal is immutable in the UI. Status {selectedEntry.status}; posted at {formatDateTime(selectedEntry.posted_at)}.</Alert> : null}
+            {isVoidEligibleJournal(selectedEntry) && !permissions.DELETE ? <Alert color="yellow">Read-only access: accounting.journals.DELETE is required to void posted manual journals.</Alert> : null}
             <Group gap="lg" wrap="wrap">
               <DetailField label="Status" value={selectedEntry.status} />
+              <DetailField label="Doc type" value={selectedEntry.doc_type} />
               <DetailField label="Reference" value={selectedEntry.reference ?? "—"} />
               <DetailField label="Entry date" value={entryDate(selectedEntry)} />
               <DetailField label="Posted at" value={formatDateTime(selectedEntry.posted_at)} />
               <DetailField label="Outlet" value={selectedEntry.outlet_id ?? "Company"} />
+              {selectedEntry.status === "VOIDED" ? <DetailField label="Void reason" value={selectedEntry.void_reason ?? "—"} /> : null}
+              {selectedEntry.status === "VOIDED" ? <DetailField label="Voided at" value={formatDateTime(selectedEntry.voided_at)} /> : null}
+              {selectedEntry.status === "VOIDED" && selectedEntry.voided_by_user_id ? <DetailField label="Voided by user ID" value={selectedEntry.voided_by_user_id} /> : null}
+              {selectedEntry.status === "VOIDED" ? <DetailField label="Reversal journal ID" value={selectedEntry.reversal_journal_id ?? "—"} /> : null}
+              {selectedEntry.status === "REVERSAL" ? <DetailField label="Original journal ID" value={selectedEntry.original_journal_id ?? "—"} /> : null}
             </Group>
+            {isVoidEligibleJournal(selectedEntry) && permissions.DELETE ? <Button color="red" variant="light" onClick={() => startVoidReview(selectedEntry)}>Review void correction</Button> : null}
             <JournalLinesTable entry={selectedEntry} accounts={accounts} />
           </Stack>
         </PageCard>
@@ -587,6 +790,34 @@ export function JournalsPage({ user }: JournalsPageProps) {
             submitting={postSubmitting}
             onDiscardDraft={() => setReviewEntry(null)}
             onSubmit={() => void handlePost()}
+          />
+        </PageCard>
+      ) : null}
+
+      {voidReviewEntry ? (
+        <PageCard title="Void Review">
+          <ReviewPanel
+            title="Void posted manual journal"
+            description="Review before/after void evidence before calling the backend void endpoint. Backend fields only are displayed; no audit or journal links are fabricated. Void creates an auditable correction flow, not mutation controls."
+            sections={voidReviewSections}
+            summaryItems={[
+              { label: "Affected journal ID", value: voidReviewEntry.id },
+              { label: "Reference", value: voidReviewEntry.reference ?? "—" },
+              { label: "Total debits", value: formatMoney(voidReviewEntry.total_debits) },
+              { label: "Total credits", value: formatMoney(voidReviewEntry.total_credits) },
+              { label: "Void reason", value: trimmedVoidReason || "—" },
+            ]}
+            scopeBadges={[{ label: "Resource", value: "accounting.journals" }, { label: "Action", value: "DELETE/void" }]}
+            diffChanges={buildJournalVoidDiffChanges(voidReviewEntry, trimmedVoidReason)}
+            saveLabel="Confirm and void journal"
+            saveDisabled={!permissions.DELETE || voidSubmitting || !trimmedVoidReason}
+            submitting={voidSubmitting}
+            onDiscardDraft={() => {
+              setVoidReviewEntry(null);
+              setVoidReason("");
+              setVoidReasonError(null);
+            }}
+            onSubmit={() => void handleVoid()}
           />
         </PageCard>
       ) : null}

@@ -119,7 +119,7 @@ export function AgeingTable({ customers, sortConfig, onSort }: AgeingTableProps)
         </Table.Thead>
         <Table.Tbody>
           {sortedCustomers.map((customer) => (
-            <Table.Tr key={customer.customer_id}>
+            <Table.Tr key={customer.customer_key}>
               <Table.Td>
                 <Text size="sm" fw={500}>
                   {customer.customer_name}

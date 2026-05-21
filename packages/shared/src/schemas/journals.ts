@@ -19,7 +19,20 @@ export const JournalLineResponseSchema = JournalLineSchema.extend({
   updated_at: z.string()
 });
 
-export const JournalStatusSchema = z.enum(["DRAFT", "POSTED"]);
+export const JournalStatusSchema = z.enum(["DRAFT", "POSTED", "VOIDED", "REVERSAL"]);
+export const PostedJournalStatusSchema = z.enum(["POSTED", "VOIDED", "REVERSAL"]);
+
+export const JournalVoidFieldsSchema = z.object({
+  void_reason: z.string().nullable().optional(),
+  voided_at: z.string().nullable().optional(),
+  voided_by_user_id: z.number().int().positive().nullable().optional(),
+  original_journal_id: z.number().int().positive().nullable().optional(),
+  reversal_journal_id: z.number().int().positive().nullable().optional(),
+});
+
+export const JournalVoidRequestSchema = z.object({
+  reason: z.string().trim().min(1, "Void reason is required").max(500),
+});
 
 export const JournalEntryLineResponseSchema = JournalLineSchema.extend({
   id: z.number().int().positive(),
@@ -50,7 +63,7 @@ export const JournalBatchResponseSchema = z.object({
   id: z.number().int().positive(),
   company_id: z.number().int().positive(),
   outlet_id: z.number().int().positive().nullable(),
-  status: JournalStatusSchema.default("POSTED"),
+  status: PostedJournalStatusSchema.default("POSTED"),
   reference: z.string().nullable().optional(),
   total_debits: z.number().nonnegative().optional(),
   total_credits: z.number().nonnegative().optional(),
@@ -61,7 +74,7 @@ export const JournalBatchResponseSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
   lines: z.array(JournalLineResponseSchema)
-});
+}).merge(JournalVoidFieldsSchema);
 
 /**
  * Manual Journal Entry Create Request
@@ -126,12 +139,12 @@ export const JournalDraftResponseSchema = z.object({
   total_debits: z.number().nonnegative(),
   total_credits: z.number().nonnegative(),
   lines: z.array(JournalEntryLineResponseSchema),
-});
+}).merge(JournalVoidFieldsSchema);
 
 export const JournalEntryResponseSchema = z.union([
   JournalDraftResponseSchema,
   JournalBatchResponseSchema.extend({
-    status: z.literal("POSTED"),
+    status: PostedJournalStatusSchema,
     reference: z.string().nullable().optional(),
     total_debits: z.number().nonnegative(),
     total_credits: z.number().nonnegative(),
@@ -170,9 +183,11 @@ export const TransactionTypeSchema = z.enum([
  */
 export type JournalLineResponse = z.infer<typeof JournalLineResponseSchema>;
 export type JournalStatus = z.infer<typeof JournalStatusSchema>;
+export type PostedJournalStatus = z.infer<typeof PostedJournalStatusSchema>;
 export type JournalEntryLineResponse = z.infer<typeof JournalEntryLineResponseSchema>;
 export type JournalBatch = z.infer<typeof JournalBatchSchema>;
 export type JournalBatchResponse = z.infer<typeof JournalBatchResponseSchema>;
+export type JournalVoidRequest = z.infer<typeof JournalVoidRequestSchema>;
 export type ManualJournalEntryCreateRequest = z.infer<typeof ManualJournalEntryCreateRequestSchema>;
 export type ManualJournalEntryUpdateRequest = z.infer<typeof ManualJournalEntryUpdateRequestSchema>;
 export type JournalDraftResponse = z.infer<typeof JournalDraftResponseSchema>;

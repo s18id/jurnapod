@@ -115,6 +115,18 @@ export async function insertJournalLines(
  */
 export interface JournalsDbClient extends KyselySchema {}
 
+export type ResolvedVoidTargetJournal = {
+  id: number;
+  company_id: number;
+  outlet_id: number | null;
+  doc_type: string;
+  doc_id: number;
+  client_ref: string | null;
+  posted_at: Date | string;
+  created_at: Date | string;
+  updated_at: Date | string;
+};
+
 /**
  * Custom error classes
  */
@@ -155,6 +167,38 @@ export class JournalAlreadyPostedError extends Error {
   constructor(journalId: number) {
     super(`Journal ${journalId} is already posted and cannot be edited`);
     this.name = "JournalAlreadyPostedError";
+  }
+}
+
+export class JournalAlreadyVoidedError extends Error {
+  code = "JOURNAL_ALREADY_VOIDED";
+  constructor(batchId: number, readonly reversalJournalId?: number) {
+    super(`Journal ${batchId} is already voided`);
+    this.name = "JournalAlreadyVoidedError";
+  }
+}
+
+export class JournalCannotVoidDraftError extends Error {
+  code = "JOURNAL_CANNOT_VOID_DRAFT";
+  constructor(journalId: number) {
+    super(`Journal draft ${journalId} cannot be voided before posting`);
+    this.name = "JournalCannotVoidDraftError";
+  }
+}
+
+export class JournalVoidNotAllowedError extends Error {
+  code = "JOURNAL_VOID_NOT_ALLOWED";
+  constructor(message: string) {
+    super(message);
+    this.name = "JournalVoidNotAllowedError";
+  }
+}
+
+export class InvalidJournalVoidReasonError extends Error {
+  code = "INVALID_VOID_REASON";
+  constructor() {
+    super("Void reason is required");
+    this.name = "InvalidJournalVoidReasonError";
   }
 }
 
@@ -416,6 +460,91 @@ export class JournalsService {
     return this.getPostedJournalEntry(postedBatchId, companyId);
   }
 
+  async voidPostedManualJournal(
+    journalId: number,
+    companyId: number,
+    reason: string,
+    userId?: number,
+  ): Promise<JournalEntryResponse> {
+    const trimmedReason = reason.trim();
+    if (trimmedReason.length === 0) {
+      throw new InvalidJournalVoidReasonError();
+    }
+
+    const originalBatchId = await withTransactionRetry(this.db, async (innerTrx) => {
+      const trx = innerTrx as unknown as KyselySchema;
+      const original = await this.resolveVoidTargetPostedBatchForUpdate(trx, journalId, companyId);
+      const targetBatchId = Number(original.id);
+      if (String(original.doc_type) !== "MANUAL") {
+        throw new JournalVoidNotAllowedError("Only posted manual journals can be voided");
+      }
+
+      const existingLink = await this.findReversalLinkForUpdate(trx, targetBatchId, companyId);
+      if (existingLink?.original_journal_batch_id === targetBatchId) {
+        throw new JournalAlreadyVoidedError(targetBatchId, Number(existingLink.reversal_journal_batch_id));
+      }
+      if (existingLink?.reversal_journal_batch_id === targetBatchId) {
+        throw new JournalVoidNotAllowedError("Reversal journals cannot be voided");
+      }
+
+      const originalLines = await this.getRawJournalLinesForReversal(trx, targetBatchId, companyId);
+      const reversalEntryDate = fromUtcIso.dateOnly(toUtcIso.dateLike(original.posted_at) as string);
+      await this.ensureEntryDateInOpenFiscalYear(companyId, reversalEntryDate, trx);
+
+      const reversal = await this.createManualReversalEntryFromStoredLines(
+        trx,
+        companyId,
+        original.outlet_id === null ? null : Number(original.outlet_id),
+        reversalEntryDate,
+        targetBatchId,
+        originalLines,
+        userId,
+      );
+
+      try {
+        await sql`
+          INSERT INTO journal_reversals (
+            company_id,
+            original_journal_batch_id,
+            reversal_journal_batch_id,
+            void_reason,
+            voided_at,
+            voided_by_user_id,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            ${companyId},
+            ${targetBatchId},
+            ${reversal.id},
+            ${trimmedReason},
+            NOW(),
+            ${userId ?? null},
+            NOW(),
+            NOW()
+          )
+        `.execute(trx);
+      } catch (error) {
+        if (isMysqlDuplicateError(error)) {
+          const duplicateLink = await this.findReversalLinkForUpdate(trx, targetBatchId, companyId);
+          throw new JournalAlreadyVoidedError(targetBatchId, duplicateLink?.reversal_journal_batch_id);
+        }
+        throw error;
+      }
+
+      return targetBatchId;
+    });
+
+    return this.getPostedJournalEntry(originalBatchId, companyId);
+  }
+
+  async resolveVoidTargetJournal(
+    journalId: number,
+    companyId: number,
+  ): Promise<ResolvedVoidTargetJournal> {
+    return this.resolveVoidTargetPostedBatch(this.db, journalId, companyId);
+  }
+
   /**
    * Create a manual journal entry
    * 
@@ -534,7 +663,7 @@ export class JournalsService {
         "journal_entry",
         newBatchId,
         {
-          doc_type: "MANUAL",
+          doc_type: docType,
           entry_date: data.entry_date,
           description: data.description,
           total_debit: totalDebit,
@@ -545,6 +674,56 @@ export class JournalsService {
     }
 
     return newBatchId;
+  }
+
+  private async createManualReversalEntryFromStoredLines(
+    trx: KyselySchema,
+    companyId: number,
+    outletId: number | null,
+    entryDate: string,
+    originalBatchId: number,
+    originalLines: RawJournalLineForReversal[],
+    userId?: number,
+  ): Promise<JournalBatchResponse> {
+    if (originalLines.length === 0) {
+      throw new JournalVoidNotAllowedError("Cannot void a journal with no lines");
+    }
+
+    const reversalBatchId = await insertJournalBatch(trx, {
+      companyId,
+      outletId,
+      docType: "MANUAL_REVERSAL",
+      docId: originalBatchId,
+      postedAt: entryDate,
+      clientRef: null,
+    });
+
+    await insertJournalLines(trx, reversalBatchId, originalLines.map((line) => ({
+      companyId,
+      outletId: line.outlet_id === null ? null : Number(line.outlet_id),
+      accountId: Number(line.account_id),
+      lineDate: entryDate,
+      debit: String(line.credit),
+      credit: String(line.debit),
+      description: buildReversalLineDescription(originalBatchId, String(line.description)),
+    })));
+
+    if (this.auditService && userId) {
+      await this.auditService.logCreate(
+        { company_id: companyId, user_id: userId },
+        "journal_entry",
+        reversalBatchId,
+        {
+          doc_type: "MANUAL_REVERSAL",
+          entry_date: entryDate,
+          description: `Reversal of journal ${originalBatchId}`,
+          original_journal_batch_id: originalBatchId,
+          line_count: originalLines.length,
+        },
+      );
+    }
+
+    return this.getJournalBatch(reversalBatchId, companyId, trx);
   }
 
   private async findManualEntryIdByClientRef(
@@ -626,6 +805,12 @@ export class JournalsService {
     const result = await db
       .selectFrom('journal_batches as jb')
       .leftJoin('journal_lines as jl', 'jb.id', 'jl.journal_batch_id')
+      .leftJoin('journal_reversals as jr_original', (join) => join
+        .onRef('jr_original.original_journal_batch_id', '=', 'jb.id')
+        .onRef('jr_original.company_id', '=', 'jb.company_id'))
+      .leftJoin('journal_reversals as jr_reversal', (join) => join
+        .onRef('jr_reversal.reversal_journal_batch_id', '=', 'jb.id')
+        .onRef('jr_reversal.company_id', '=', 'jb.company_id'))
       .where('jb.id', '=', batchId)
       .where('jb.company_id', '=', companyId)
       .select([
@@ -648,7 +833,15 @@ export class JournalsService {
         'jl.credit',
         'jl.description as jl_description',
         'jl.created_at as jl_created_at',
-        'jl.updated_at as jl_updated_at'
+        'jl.updated_at as jl_updated_at',
+        'jr_original.void_reason as original_void_reason',
+        'jr_original.voided_at as original_voided_at',
+        'jr_original.voided_by_user_id as original_voided_by_user_id',
+        'jr_original.reversal_journal_batch_id as original_reversal_journal_batch_id',
+        'jr_reversal.void_reason as reversal_void_reason',
+        'jr_reversal.voided_at as reversal_voided_at',
+        'jr_reversal.voided_by_user_id as reversal_voided_by_user_id',
+        'jr_reversal.original_journal_batch_id as reversal_original_journal_batch_id'
       ])
       .orderBy('jl.id', 'asc')
       .execute();
@@ -700,7 +893,7 @@ export class JournalsService {
       id: batch.id,
       company_id: batch.company_id,
       outlet_id: batch.outlet_id,
-      status: "POSTED",
+      status: derivePostedStatus(firstRow),
       reference,
       doc_type: batch.doc_type,
       doc_id: batch.doc_id,
@@ -708,6 +901,7 @@ export class JournalsService {
       posted_at: toUtcIso.dateLike(batch.posted_at) as string,
       created_at: toUtcIso.dateLike(batch.created_at) as string,
       updated_at: toUtcIso.dateLike(batch.updated_at) as string,
+      ...toJournalVoidFields(firstRow),
       lines
     });
   }
@@ -820,6 +1014,7 @@ export class JournalsService {
         docType: String(batch.doc_type),
       })),
     );
+    const reversalLinkByBatchId = await this.getReversalLinksForBatchIds(filters.company_id, batchIds.map(Number));
 
     // Step 4: Transform to response format
     return batchesResult.map((batch: typeof batchesResult[0]) => {
@@ -828,12 +1023,13 @@ export class JournalsService {
       const reference = String(batch.doc_type) === "MANUAL" && draftReferenceById.has(batchId)
         ? draftReferenceById.get(batchId) ?? null
         : batch.client_ref ?? null;
-      
+      const reversalLink = reversalLinkByBatchId.get(batchId);
+
       return this.withPostedSummary({
         id: batch.id,
         company_id: batch.company_id,
         outlet_id: batch.outlet_id,
-        status: "POSTED",
+        status: derivePostedStatusFromReversalLink(batchId, reversalLink),
         reference,
         doc_type: batch.doc_type,
         doc_id: batch.doc_id,
@@ -841,6 +1037,7 @@ export class JournalsService {
         posted_at: toUtcIso.dateLike(batch.posted_at) as string,
         created_at: toUtcIso.dateLike(batch.created_at) as string,
         updated_at: toUtcIso.dateLike(batch.updated_at) as string,
+        ...toJournalVoidFieldsFromReversalLink(batchId, reversalLink),
         lines: batchLines.map(line => ({
           id: line.id,
           journal_batch_id: line.journal_batch_id,
@@ -895,7 +1092,7 @@ export class JournalsService {
   ): JournalEntryResponse {
     return {
       ...batch,
-      status: "POSTED",
+      status: batch.status,
       reference: referenceOverride !== undefined ? referenceOverride : batch.reference ?? null,
       total_debits: batch.total_debits ?? 0,
       total_credits: batch.total_credits ?? 0,
@@ -987,6 +1184,151 @@ export class JournalsService {
       total_credits: totals.totalCredits,
       lines,
     };
+  }
+
+  private async resolveVoidTargetPostedBatch(
+    db: KyselySchema,
+    journalId: number,
+    companyId: number,
+  ): Promise<PostedBatchHeaderRow> {
+    const batch = await this.findPostedBatch(db, journalId, companyId);
+    if (batch) {
+      return batch;
+    }
+
+    const draft = await this.findDraft(journalId, companyId, db);
+    if (!draft) {
+      throw new JournalNotFoundError(journalId);
+    }
+    if (draft.status === "DRAFT") {
+      throw new JournalCannotVoidDraftError(journalId);
+    }
+    if (!draft.posted_batch_id) {
+      throw new JournalNotFoundError(journalId);
+    }
+
+    const postedDraftBatch = await this.findPostedBatch(db, Number(draft.posted_batch_id), companyId);
+    if (!postedDraftBatch) {
+      throw new JournalNotFoundError(journalId);
+    }
+    return postedDraftBatch;
+  }
+
+  private async resolveVoidTargetPostedBatchForUpdate(
+    db: KyselySchema,
+    journalId: number,
+    companyId: number,
+  ): Promise<PostedBatchHeaderRow> {
+    const batch = await this.findPostedBatchForUpdate(db, journalId, companyId);
+    if (batch) {
+      return batch;
+    }
+
+    const draft = await this.findDraftForUpdate(db, journalId, companyId);
+    if (!draft) {
+      throw new JournalNotFoundError(journalId);
+    }
+    if (draft.status === "DRAFT") {
+      throw new JournalCannotVoidDraftError(journalId);
+    }
+    if (!draft.posted_batch_id) {
+      throw new JournalNotFoundError(journalId);
+    }
+
+    const postedDraftBatch = await this.findPostedBatchForUpdate(db, Number(draft.posted_batch_id), companyId);
+    if (!postedDraftBatch) {
+      throw new JournalNotFoundError(journalId);
+    }
+    return postedDraftBatch;
+  }
+
+  private async findPostedBatch(
+    db: KyselySchema,
+    batchId: number,
+    companyId: number,
+  ): Promise<PostedBatchHeaderRow | null> {
+    const result = await sql<PostedBatchHeaderRow>`
+      SELECT id, company_id, outlet_id, doc_type, doc_id, client_ref, posted_at, created_at, updated_at
+      FROM journal_batches
+      WHERE id = ${batchId}
+        AND company_id = ${companyId}
+      LIMIT 1
+    `.execute(db);
+    return result.rows[0] ?? null;
+  }
+
+  private async findPostedBatchForUpdate(
+    db: KyselySchema,
+    batchId: number,
+    companyId: number,
+  ): Promise<PostedBatchHeaderRow | null> {
+    const result = await sql<PostedBatchHeaderRow>`
+      SELECT id, company_id, outlet_id, doc_type, doc_id, client_ref, posted_at, created_at, updated_at
+      FROM journal_batches
+      WHERE id = ${batchId}
+        AND company_id = ${companyId}
+      LIMIT 1
+      FOR UPDATE
+    `.execute(db);
+    return result.rows[0] ?? null;
+  }
+
+  private async findReversalLinkForUpdate(
+    db: KyselySchema,
+    batchId: number,
+    companyId: number,
+  ): Promise<JournalReversalRow | null> {
+    const result = await sql<JournalReversalRow>`
+      SELECT id, company_id, original_journal_batch_id, reversal_journal_batch_id,
+             void_reason, voided_at, voided_by_user_id, created_at, updated_at
+      FROM journal_reversals
+      WHERE company_id = ${companyId}
+        AND (original_journal_batch_id = ${batchId} OR reversal_journal_batch_id = ${batchId})
+      LIMIT 1
+      FOR UPDATE
+    `.execute(db);
+    return result.rows[0] ?? null;
+  }
+
+  private async getRawJournalLinesForReversal(
+    db: KyselySchema,
+    batchId: number,
+    companyId: number,
+  ): Promise<RawJournalLineForReversal[]> {
+    const result = await sql<RawJournalLineForReversal>`
+      SELECT account_id, outlet_id, description, debit, credit
+      FROM journal_lines
+      WHERE company_id = ${companyId}
+        AND journal_batch_id = ${batchId}
+      ORDER BY id ASC
+    `.execute(db);
+    return result.rows;
+  }
+
+  private async getReversalLinksForBatchIds(
+    companyId: number,
+    batchIds: number[],
+  ): Promise<Map<number, JournalReversalRow>> {
+    if (batchIds.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.db
+      .selectFrom("journal_reversals")
+      .selectAll()
+      .where("company_id", "=", companyId)
+      .where((eb) => eb.or([
+        eb("original_journal_batch_id", "in", batchIds),
+        eb("reversal_journal_batch_id", "in", batchIds),
+      ]))
+      .execute() as JournalReversalRow[];
+
+    const links = new Map<number, JournalReversalRow>();
+    for (const row of rows) {
+      links.set(Number(row.original_journal_batch_id), row);
+      links.set(Number(row.reversal_journal_batch_id), row);
+    }
+    return links;
   }
 
   private async resolvePostedJournalReference(
@@ -1138,7 +1480,11 @@ export class JournalsService {
     }
   }
 
-  private async findDraft(draftId: number, companyId: number): Promise<JournalDraftHeaderRow | null> {
+  private async findDraft(
+    draftId: number,
+    companyId: number,
+    db: KyselySchema = this.db,
+  ): Promise<JournalDraftHeaderRow | null> {
     const result = await sql<JournalDraftHeaderRow>`
       SELECT id, company_id, outlet_id, entry_date, reference, description, client_ref,
              status, posted_batch_id, posted_at, created_at, updated_at
@@ -1146,7 +1492,7 @@ export class JournalsService {
       WHERE id = ${draftId}
         AND company_id = ${companyId}
       LIMIT 1
-    `.execute(this.db);
+    `.execute(db);
     return result.rows[0] ?? null;
   }
 
@@ -1197,7 +1543,7 @@ export class JournalsService {
     const totals = calculateLineTotals(batch.lines);
     return {
       ...batch,
-      status: "POSTED",
+      status: batch.status ?? "POSTED",
       reference: batch.reference ?? null,
       total_debits: totals.totalDebits,
       total_credits: totals.totalCredits,
@@ -1371,6 +1717,145 @@ type JournalDraftFlatRow = JournalDraftHeaderRow & {
   line_created_at: Date | string | null;
   line_updated_at: Date | string | null;
 };
+
+type PostedBatchHeaderRow = {
+  id: number;
+  company_id: number;
+  outlet_id: number | null;
+  doc_type: string;
+  doc_id: number;
+  client_ref: string | null;
+  posted_at: Date | string;
+  created_at: Date | string;
+  updated_at: Date | string;
+};
+
+type RawJournalLineForReversal = {
+  account_id: number;
+  outlet_id: number | null;
+  description: string;
+  debit: string;
+  credit: string;
+};
+
+type JournalReversalRow = {
+  id: number;
+  company_id: number;
+  original_journal_batch_id: number;
+  reversal_journal_batch_id: number;
+  void_reason: string;
+  voided_at: Date | string;
+  voided_by_user_id: number | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+};
+
+type JournalReversalJoinedRow = {
+  original_void_reason?: string | null;
+  original_voided_at?: Date | string | null;
+  original_voided_by_user_id?: number | null;
+  original_reversal_journal_batch_id?: number | null;
+  reversal_void_reason?: string | null;
+  reversal_voided_at?: Date | string | null;
+  reversal_voided_by_user_id?: number | null;
+  reversal_original_journal_batch_id?: number | null;
+};
+
+function derivePostedStatus(row: JournalReversalJoinedRow): "POSTED" | "VOIDED" | "REVERSAL" {
+  if (row.original_reversal_journal_batch_id !== null && row.original_reversal_journal_batch_id !== undefined) {
+    return "VOIDED";
+  }
+  if (row.reversal_original_journal_batch_id !== null && row.reversal_original_journal_batch_id !== undefined) {
+    return "REVERSAL";
+  }
+  return "POSTED";
+}
+
+function derivePostedStatusFromReversalLink(
+  batchId: number,
+  link?: JournalReversalRow,
+): "POSTED" | "VOIDED" | "REVERSAL" {
+  if (!link) return "POSTED";
+  if (Number(link.original_journal_batch_id) === batchId) return "VOIDED";
+  if (Number(link.reversal_journal_batch_id) === batchId) return "REVERSAL";
+  return "POSTED";
+}
+
+function toJournalVoidFields(row: JournalReversalJoinedRow): {
+  void_reason: string | null;
+  voided_at: string | null;
+  voided_by_user_id: number | null;
+  original_journal_id: number | null;
+  reversal_journal_id: number | null;
+} {
+  if (row.original_reversal_journal_batch_id !== null && row.original_reversal_journal_batch_id !== undefined) {
+    return {
+      void_reason: row.original_void_reason ?? null,
+      voided_at: row.original_voided_at ? toUtcIso.dateLike(row.original_voided_at) as string : null,
+      voided_by_user_id: row.original_voided_by_user_id ?? null,
+      original_journal_id: null,
+      reversal_journal_id: Number(row.original_reversal_journal_batch_id),
+    };
+  }
+  if (row.reversal_original_journal_batch_id !== null && row.reversal_original_journal_batch_id !== undefined) {
+    return {
+      void_reason: row.reversal_void_reason ?? null,
+      voided_at: row.reversal_voided_at ? toUtcIso.dateLike(row.reversal_voided_at) as string : null,
+      voided_by_user_id: row.reversal_voided_by_user_id ?? null,
+      original_journal_id: Number(row.reversal_original_journal_batch_id),
+      reversal_journal_id: null,
+    };
+  }
+  return emptyJournalVoidFields();
+}
+
+function toJournalVoidFieldsFromReversalLink(
+  batchId: number,
+  link?: JournalReversalRow,
+): ReturnType<typeof toJournalVoidFields> {
+  if (!link) return emptyJournalVoidFields();
+  if (Number(link.original_journal_batch_id) === batchId) {
+    return {
+      void_reason: link.void_reason,
+      voided_at: toUtcIso.dateLike(link.voided_at) as string,
+      voided_by_user_id: link.voided_by_user_id ?? null,
+      original_journal_id: null,
+      reversal_journal_id: Number(link.reversal_journal_batch_id),
+    };
+  }
+  if (Number(link.reversal_journal_batch_id) === batchId) {
+    return {
+      void_reason: link.void_reason,
+      voided_at: toUtcIso.dateLike(link.voided_at) as string,
+      voided_by_user_id: link.voided_by_user_id ?? null,
+      original_journal_id: Number(link.original_journal_batch_id),
+      reversal_journal_id: null,
+    };
+  }
+  return emptyJournalVoidFields();
+}
+
+function emptyJournalVoidFields(): {
+  void_reason: null;
+  voided_at: null;
+  voided_by_user_id: null;
+  original_journal_id: null;
+  reversal_journal_id: null;
+} {
+  return {
+    void_reason: null,
+    voided_at: null,
+    voided_by_user_id: null,
+    original_journal_id: null,
+    reversal_journal_id: null,
+  };
+}
+
+function buildReversalLineDescription(originalBatchId: number, originalDescription: string): string {
+  const prefix = `Reversal of ${originalBatchId}: `;
+  const maxOriginalLength = 255 - prefix.length;
+  return `${prefix}${originalDescription.slice(0, Math.max(0, maxOriginalLength))}`;
+}
 
 const mysqlDuplicateErrorCode = 1062;
 

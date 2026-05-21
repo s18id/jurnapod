@@ -5,6 +5,7 @@
  * Purchasing AP Aging Routes
  *
  * - GET /purchasing/reports/ap-aging
+ * - GET /purchasing/reports/ap-aging/export
  * - GET /purchasing/reports/ap-aging/:supplierId/detail
  *
  * Required ACL: purchasing.reports ANALYZE permission
@@ -16,6 +17,7 @@ import { authenticateRequest, requireAccess, type AuthContext } from "@/lib/auth
 import { errorResponse, successResponse } from "@jurnapod/shared";
 import { getAPAgingSummary, getAPAgingSupplierDetail } from "@/lib/purchasing/ap-aging-report";
 import { nowUTC, fromUtcIso } from "@/lib/date-helpers";
+import { apAgingToCsv, buildReportCsvFilename } from "@/lib/reports/csv-export";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -28,6 +30,20 @@ const apAgingRoutes = new Hono();
 const querySchema = z.object({
   as_of_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
+
+const exportQuerySchema = querySchema.extend({
+  format: z.literal("csv").optional(),
+});
+
+function csvResponse(csv: string, filename: string): Response {
+  return new Response(csv, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+    },
+  });
+}
 
 apAgingRoutes.use("/*", async (c, next) => {
   const authResult = await authenticateRequest(c.req.raw);
@@ -67,6 +83,42 @@ apAgingRoutes.get("/", async (c) => {
     }
     console.error("GET /purchasing/reports/ap-aging failed", error);
     return errorResponse("INTERNAL_SERVER_ERROR", "Failed to fetch AP aging report", 500);
+  }
+});
+
+apAgingRoutes.get("/export", async (c) => {
+  try {
+    const auth = c.get("auth");
+
+    const accessResult = await requireAccess({
+      module: "purchasing",
+      resource: "reports",
+      permission: "analyze",
+    })(c.req.raw, auth);
+
+    if (accessResult !== null) {
+      return accessResult;
+    }
+
+    const url = new URL(c.req.raw.url);
+    const parsed = exportQuerySchema.parse({
+      as_of_date: url.searchParams.get("as_of_date") ?? undefined,
+      format: url.searchParams.get("format") ?? undefined,
+    });
+
+    const asOfDate = parsed.as_of_date ?? fromUtcIso.dateOnly(nowUTC());
+    const result = await getAPAgingSummary(auth.companyId, asOfDate);
+
+    return csvResponse(
+      apAgingToCsv(result),
+      buildReportCsvFilename("ap-aging", asOfDate)
+    );
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResponse("INVALID_REQUEST", "Invalid query parameters", 400);
+    }
+    console.error("GET /purchasing/reports/ap-aging/export failed", error);
+    return errorResponse("INTERNAL_SERVER_ERROR", "Failed to export AP aging report", 500);
   }
 });
 

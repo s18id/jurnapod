@@ -18,6 +18,8 @@ import {
   validateJournalDraftReferences,
   updateJournalDraft,
   postJournalDraft,
+  voidPostedManualJournal,
+  resolveVoidTargetJournal,
   listJournalEntries,
   getJournalEntry,
   JournalNotBalancedError,
@@ -25,16 +27,22 @@ import {
   InvalidJournalLineError,
   JournalDraftNotFoundError,
   JournalAlreadyPostedError,
+  JournalAlreadyVoidedError,
+  JournalCannotVoidDraftError,
+  JournalVoidNotAllowedError,
+  InvalidJournalVoidReasonError,
   JournalDuplicateClientRefError,
   InvalidJournalOutletError,
   InvalidJournalAccountError,
   FiscalYearClosedError,
-  JournalOutsideFiscalYearError
+  JournalOutsideFiscalYearError,
+  JournalsServiceVersionMismatchError
 } from "./journals";
 import type { AuthContext } from "./auth-guard";
 import {
   ManualJournalEntryCreateRequestSchema,
   ManualJournalEntryUpdateRequestSchema,
+  JournalVoidRequestSchema,
   DateOnlySchema,
   normalizeJournalDocType,
   type ManualJournalEntryUpdateRequest
@@ -55,7 +63,7 @@ export type ListJournalsInput = z.infer<typeof listQuerySchema>;
 async function requireJournalAccess(
   auth: AuthContext,
   rawRequest: Request,
-  permission: "create" | "read" | "update",
+  permission: "create" | "read" | "update" | "delete",
   outletId?: number | null
 ): Promise<Response | null> {
   return requireAccess({
@@ -68,7 +76,7 @@ async function requireJournalAccess(
 
 async function requireJournalPermission(
   auth: AuthContext,
-  permission: "create" | "read" | "update",
+  permission: "create" | "read" | "update" | "delete",
   outletId?: number | null
 ): Promise<Response | null> {
   const access = await checkUserAccess({
@@ -95,7 +103,7 @@ async function requireJournalPermission(
 
 async function userHasCompanyWideJournalPermission(
   auth: AuthContext,
-  permission: "create" | "read" | "update"
+  permission: "create" | "read" | "update" | "delete"
 ): Promise<boolean> {
   const access = await checkUserAccess({
     userId: auth.userId,
@@ -136,6 +144,22 @@ function mapJournalError(error: unknown, action: string): Response {
     return errorResponse("JOURNAL_ALREADY_POSTED", error.message, 409);
   }
 
+  if (error instanceof JournalAlreadyVoidedError) {
+    return errorResponse("JOURNAL_ALREADY_VOIDED", error.message, 409);
+  }
+
+  if (error instanceof JournalCannotVoidDraftError) {
+    return errorResponse("JOURNAL_CANNOT_VOID_DRAFT", error.message, 409);
+  }
+
+  if (error instanceof JournalVoidNotAllowedError) {
+    return errorResponse("JOURNAL_VOID_NOT_ALLOWED", error.message, 409);
+  }
+
+  if (error instanceof InvalidJournalVoidReasonError) {
+    return errorResponse("INVALID_REQUEST", error.message, 400);
+  }
+
   if (error instanceof JournalDuplicateClientRefError) {
     return errorResponse("DUPLICATE_CLIENT_REF", error.message, 409);
   }
@@ -146,6 +170,10 @@ function mapJournalError(error: unknown, action: string): Response {
 
   if (error instanceof JournalOutsideFiscalYearError) {
     return errorResponse("JOURNAL_OUTSIDE_FISCAL_YEAR", "Entry date is outside any open fiscal year", 400);
+  }
+
+  if (error instanceof JournalsServiceVersionMismatchError) {
+    return errorResponse("SERVICE_VERSION_MISMATCH", error.message, 500);
   }
 
   if (error instanceof Error && error.name === "FiscalYearClosedError") {
@@ -317,6 +345,26 @@ export async function handlePostJournal(
     return successResponse(await postJournalDraft(journalId, auth.companyId, auth.userId));
   } catch (error) {
     return mapJournalError(error, "post journal draft");
+  }
+}
+
+export async function handleVoidJournal(
+  auth: AuthContext,
+  rawRequest: Request,
+  journalId: number,
+  input: unknown
+): Promise<Response> {
+  void rawRequest;
+  try {
+    const parsed = JournalVoidRequestSchema.parse(input);
+    const voidTarget = await resolveVoidTargetJournal(journalId, auth.companyId);
+    const accessResult = await requireJournalPermission(auth, "delete", voidTarget.outlet_id);
+    if (accessResult !== null) {
+      return accessResult;
+    }
+    return successResponse(await voidPostedManualJournal(journalId, auth.companyId, parsed.reason, auth.userId));
+  } catch (error) {
+    return mapJournalError(error, "void journal");
   }
 }
 

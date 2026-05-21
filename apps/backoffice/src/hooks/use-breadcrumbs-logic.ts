@@ -41,8 +41,9 @@ export const BREADCRUMB_ROUTES: BreadcrumbRoute[] = [
   // === Root/Base Routes (no parent) ===
   { path: "/daily-sales", label: "Daily Sales" },
   { path: "/profit-loss", label: "Profit & Loss" },
+  { path: "/trial-balance", label: "Trial Balance" },
   { path: "/general-ledger", label: "General Ledger" },
-  { path: "/journals", label: "Journals & Trial Balance" },
+  { path: "/journals", label: "Journals" },
   { path: "/accounting-worksheet", label: "Accounting Worksheet" },
   { path: "/account-types", label: "Account Types" },
   { path: "/chart-of-accounts", label: "Chart of Accounts" },
@@ -69,6 +70,7 @@ export const BREADCRUMB_ROUTES: BreadcrumbRoute[] = [
   { path: "/items-prices", label: "Items & Prices" },
   { path: "/supplies", label: "Supplies" },
   { path: "/fixed-assets", label: "Fixed Assets" },
+  { path: "/purchasing/ap-aging", label: "AP Ageing" },
   { path: "/inventory-settings", label: "Inventory Settings" },
   { path: "/audit-logs", label: "Audit Logs" },
   { path: "/companies", label: "Companies" },

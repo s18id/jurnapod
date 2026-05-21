@@ -774,7 +774,7 @@ development_status:
   epic-69: in-progress
   69-1-reviewpanel-staged-forms: done
   69-2-purchasing-domain-screens: done
-  69-3-accounting-domain-screens: in-progress
+  69-3-accounting-domain-screens: done
   69-4-financial-review-ux: backlog
   69-5-ap-exception-worklist: backlog
   69-2-e-reviewpanel-domain-interaction-hardening: done
@@ -785,7 +785,7 @@ development_status:
   69-3-a-accounting-contract-fixture-readiness: done
   69-3-b-chart-of-accounts-screens: done
   69-3-c-journal-entry-create-post-flow: done
-  69-3-d-journal-void-reversal-evidence-flow: backlog
-  69-3-e-fiscal-period-close-ux: backlog
-  69-3-f-financial-reports-csv-export: backlog
+  69-3-d-journal-void-reversal-evidence-flow: done
+  69-3-e-fiscal-period-close-ux: done
+  69-3-f-financial-reports-csv-export: done
 

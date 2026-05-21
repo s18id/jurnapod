@@ -39,13 +39,13 @@ export interface ReceivablesAgeingCustomer extends ReceivablesAgeingBucket {
   total_outstanding: number;
 }
 
-// Legacy API invoice row type
 export interface ReceivablesAgeingInvoice {
   invoice_id: number;
   invoice_no: string;
-  customer_id: number;
-  customer_name: string | null;
+  customer_id: number | null;
   customer_code: string | null;
+  customer_type: number | null;
+  customer_display_name: string | null;
   outlet_id: number;
   outlet_name: string | null;
   invoice_date: string;
@@ -53,6 +53,7 @@ export interface ReceivablesAgeingInvoice {
   outstanding_amount: number;
   days_overdue: number;
   age_bucket: "current" | "1_30_days" | "31_60_days" | "61_90_days" | "over_90_days";
+  overdue: boolean;
 }
 
 // ============================================================================
@@ -85,8 +86,6 @@ export interface ReceivablesAgeingReport {
   };
   buckets: ReceivablesAgeingBuckets;
   total_outstanding: number;
-  overdue_total: number;
-  overdue_percentage: number;
   invoices: ReceivablesAgeingInvoice[];
 }
 
@@ -100,7 +99,8 @@ export interface ReceivablesAgeingResponse {
 // ============================================================================
 
 export interface AggregatedCustomer {
-  customer_id: number;
+  customer_key: string;
+  customer_id: number | null;
   customer_name: string;
   customer_code: string;
   current: number;
@@ -118,13 +118,11 @@ export interface AggregatedCustomer {
 export interface ReceivablesAgeingFilters {
   asOfDate: string;
   outletId: number | null;
-  customerId: number | null;
 }
 
 export const DEFAULT_FILTERS: ReceivablesAgeingFilters = {
   asOfDate: fromUtcIso.dateOnly(nowUTC()),
   outletId: null,
-  customerId: null,
 };
 
 // ============================================================================

@@ -40,10 +40,10 @@ Story 69-3 has been split into the following child stories. **Do not implement t
 |-----------|-------|-------|--------------|---------------|
 | `69-3-a` | Accounting Contract + Fixture Readiness | Verify endpoint contracts, auth/error envelopes, ACL resources, fixture ownership, test policy, PID/log commands, and readiness gates | 69-1 done; Epic 65 done; Epic 66 done; Epic 32 done; backoffice unfreeze approval | `done` |
 | `69-3-b` | Chart of Accounts Screens | Accounts tree/flat list, create/edit forms, account detail/history, permissions | 69-3-a; 69-1 ReviewPanel | `done` |
-| `69-3-c` | Journal Entry Create/Post Flow | Journal list, balanced draft create/edit, real-time balance indicator, post ReviewPanel, posted read-only state | 69-3-a; 69-3-b where account selectors depend on accounts UX; 69-1 ReviewPanel | `backlog — NO-GO as written; see story-69-3-c.readiness-coordination.md` |
-| `69-3-d` | Journal Void/Reversal Evidence Flow | Void reason, reversal cross-link, before/after evidence, conflict handling, immutable posted records | 69-3-a; 69-3-c; 69-1 ReviewPanel | `backlog — blocked by 69-3-c` |
-| `69-3-e` | Fiscal Period Close UX | Fiscal period list, close workflow, elevated permission handling, reason/evidence, Epic 32 close semantics | 69-3-a; 69-3-c; 69-1 ReviewPanel; Epic 32 close backend | `backlog — blocked by unfreeze and contract verification` |
-| `69-3-f` | Financial Reports + CSV Export | Trial balance, general ledger, AP aging, AR aging, filters, pagination, CSV export | 69-3-a; accounting report backend verified; `apiStreamingRequest()` available | `backlog — NO-GO as written; see story-69-3-f.readiness-coordination.md` |
+| `69-3-c` | Journal Entry Create/Post Flow | Journal list, balanced draft create/edit, real-time balance indicator, post ReviewPanel, posted read-only state | 69-3-a; 69-3-b where account selectors depend on accounts UX; 69-1 ReviewPanel | `done` |
+| `69-3-d` | Journal Void/Reversal Evidence Flow | Void reason, reversal cross-link, before/after evidence, conflict handling, immutable posted records | 69-3-a; 69-3-c; 69-1 ReviewPanel | `done` |
+| `69-3-e` | Fiscal Period Close UX | Fiscal period list, close workflow, elevated permission handling, reason/evidence, Epic 32 close semantics | 69-3-a; 69-3-c; 69-1 ReviewPanel; Epic 32 close backend | `done` |
+| `69-3-f` | Financial Reports + CSV Export | Trial balance, general ledger, AP aging, AR aging, filters, pagination, CSV export | 69-3-a; accounting report backend verified; `apiStreamingRequest()` available | `done` |
 
 ## Original Content Archive
 
@@ -72,4 +72,4 @@ The original acceptance criteria, tasks, files, and risk assessment from Story 6
 - **Definition of Done (MANDATORY per child story):** All acceptance criteria implemented with evidence, unit tests in `__test__/unit/`, integration tests in `__test__/integration/`, PID/log validation evidence captured, `npm run typecheck -w @jurnapod/backoffice` passes, `npm run build -w @jurnapod/backoffice` passes, code review completed with no blockers, AI review conducted (`bmad-review` agent), story completion report created with all AC evidence and second-pass reviewer sign-off.
 - **Backoffice Freeze:** Every child story MUST record explicit unfreeze authorization before implementation.
 
-_Last Updated: 2026-05-19 — Split by bmad-sm_
+_Last Updated: 2026-05-21 — 69-3-f signed off and marked done; all 69-3 split children complete_

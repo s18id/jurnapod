@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Ahmad Faruk (Signal18 ID). All rights reserved.
 // Ownership: Ahmad Faruk (Signal18 ID)
 
-import { Stack, Text, Group, Title, Box } from "@mantine/core";
+import { Stack, Text, Title, Box } from "@mantine/core";
 import { useState, useCallback } from "react";
 
 import { PageCard } from "../components/PageCard";
@@ -66,8 +66,8 @@ export function ReceivablesAgeingPage({ user }: ReceivablesAgeingPageProps) {
       actions={
         <AgeingExportButton
           report={data}
-          customers={customers}
           asOfDate={filters.asOfDate}
+          outletId={filters.outletId}
           isLoading={isLoading}
         />
       }
@@ -111,15 +111,6 @@ export function ReceivablesAgeingPage({ user }: ReceivablesAgeingPageProps) {
             onSort={handleSort}
           />
         </Box>
-
-        {/* Report Metadata */}
-        {data && (
-          <Group justify="flex-end">
-            <Text size="xs" c="dimmed">
-              Generated at: {new Date().toLocaleString()}
-            </Text>
-          </Group>
-        )}
       </Stack>
     </PageCard>
   );

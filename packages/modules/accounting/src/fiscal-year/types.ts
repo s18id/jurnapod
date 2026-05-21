@@ -28,6 +28,7 @@ export interface CloseFiscalYearResult {
   status: FiscalYearCloseStatus;
   previousStatus: string;
   newStatus: string;
+  reason?: string | null;
   resultJson?: Record<string, unknown>;
   failureCode?: string;
   failureMessage?: string;

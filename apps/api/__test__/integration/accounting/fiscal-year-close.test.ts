@@ -40,6 +40,7 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
   let baseUrl: string;
   let companyId: number;
   let ownerToken: string;
+  let updateOnlyToken: string;
 
   const postJson = async (path: string, token: string, body?: unknown) => {
     return fetch(`${baseUrl}${path}`, {
@@ -108,6 +109,17 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
 
     ownerToken = await loginForTest(baseUrl, company.code, ownerUser.email, "TestPassword123!");
 
+    const updateOnlyRole = await createTestRole(baseUrl, seedToken, "FY Close Update Only");
+    const updateOnlyUser = await createTestUser(companyId, {
+      email: `fy-close-update-only-${runId}@example.com`,
+      name: "FY Close Update Only",
+      password: "TestPassword123!",
+    });
+    await assignUserGlobalRole(updateOnlyUser.id, updateOnlyRole.id);
+    await setModulePermission(companyId, updateOnlyRole.id, "accounting", "fiscal_years", 4);
+
+    updateOnlyToken = await loginForTest(baseUrl, company.code, updateOnlyUser.email, "TestPassword123!");
+
     // Canonical fiscal-close fixture setup: retained-earnings-like account
     // and non-zero P&L balance so close-preview generates closing entries.
     await createTestFiscalCloseBalanceFixture(companyId, {
@@ -120,6 +132,119 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
     resetFixtureRegistry();
     await closeTestDb();
     await releaseReadLock();
+  });
+
+  /**
+   * Story 69-3-e: close initiation requires an accountable reason.
+   */
+  it("rejects missing or empty close reason with INVALID_REQUEST", async () => {
+    const fiscalYear = await createTestFiscalYear(companyId, {
+      year: 2038,
+      startDate: "2038-01-01",
+      endDate: "2038-12-31",
+      status: "OPEN",
+    });
+
+    const missingReasonRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
+      ownerToken,
+      { close_request_id: `missing-reason-${randomUUID()}` }
+    );
+    expect(missingReasonRes.status).toBe(400);
+    const missingReasonBody = await missingReasonRes.json();
+    expect(missingReasonBody.success).toBe(false);
+    expect(missingReasonBody.error.code).toBe("INVALID_REQUEST");
+
+    const emptyReasonRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
+      ownerToken,
+      { close_request_id: `empty-reason-${randomUUID()}`, reason: "   " }
+    );
+    expect(emptyReasonRes.status).toBe(400);
+    const emptyReasonBody = await emptyReasonRes.json();
+    expect(emptyReasonBody.success).toBe(false);
+    expect(emptyReasonBody.error.code).toBe("INVALID_REQUEST");
+  });
+
+  it("rejects oversized close_request_id on initiate and approve with INVALID_REQUEST", async () => {
+    const fiscalYear = await createTestFiscalYear(companyId, {
+      year: 2062,
+      startDate: "2062-01-01",
+      endDate: "2062-12-31",
+      status: "OPEN",
+    });
+    const oversizedCloseRequestId = "x".repeat(65);
+
+    const initiateRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
+      ownerToken,
+      { close_request_id: oversizedCloseRequestId, reason: "Oversized request id" }
+    );
+    expect(initiateRes.status).toBe(400);
+    const initiateBody = await initiateRes.json();
+    expect(initiateBody.success).toBe(false);
+    expect(initiateBody.error.code).toBe("INVALID_REQUEST");
+
+    const approveRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close/approve`,
+      ownerToken,
+      { close_request_id: oversizedCloseRequestId }
+    );
+    expect(approveRes.status).toBe(400);
+    const approveBody = await approveRes.json();
+    expect(approveBody.success).toBe(false);
+    expect(approveBody.error.code).toBe("INVALID_REQUEST");
+  });
+
+  /**
+   * Story 69-3-e: fiscal close requires elevated MANAGE permission, not UPDATE.
+   */
+  it("requires MANAGE permission for close initiation and approval", async () => {
+    await createTestFiscalCloseBalanceFixture(companyId, {
+      asOfDate: "2039-12-31",
+      plBalance: "90.0000",
+    });
+
+    const fiscalYear = await createTestFiscalYear(companyId, {
+      year: 2039,
+      startDate: "2039-01-01",
+      endDate: "2039-12-31",
+      status: "OPEN",
+    });
+
+    const closeRequestId = `manage-required-${randomUUID()}`;
+
+    const updateOnlyCloseRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
+      updateOnlyToken,
+      { close_request_id: closeRequestId, reason: "UPDATE-only must not initiate fiscal close" }
+    );
+    expect(updateOnlyCloseRes.status).toBe(403);
+
+    const manageCloseRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
+      ownerToken,
+      { close_request_id: closeRequestId, reason: "MANAGE user initiates fiscal close" }
+    );
+    expect(manageCloseRes.status).toBe(200);
+
+    const updateOnlyApproveRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close/approve`,
+      updateOnlyToken,
+      { close_request_id: closeRequestId }
+    );
+    expect(updateOnlyApproveRes.status).toBe(403);
+
+    await ensureAPReconciliationSettings();
+
+    const manageApproveRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close/approve`,
+      ownerToken,
+      { close_request_id: closeRequestId }
+    );
+    expect(manageApproveRes.status).toBe(200);
+    const manageApproveBody = await manageApproveRes.json();
+    expect(manageApproveBody.success).toBe(true);
   });
 
   /**
@@ -172,6 +297,7 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
     });
 
     const closeRequestId = `approve-test-${randomUUID()}`;
+    const closeReason = "AC-2 test: full close flow";
 
     await ensureAPReconciliationSettings();
 
@@ -179,9 +305,11 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
     const initiateRes = await postJson(
       `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
       ownerToken,
-      { close_request_id: closeRequestId, reason: "AC-2 test: full close flow" }
+      { close_request_id: closeRequestId, reason: `  ${closeReason}  ` }
     );
     expect(initiateRes.status).toBe(200);
+    const initiateBody = await initiateRes.json();
+    expect(initiateBody.data.reason).toBe(closeReason);
 
     // Verify still OPEN after initiate
     const statusAfterInit = await getJson(`/api/accounts/fiscal-years/${fiscalYear.id}/status`, ownerToken);
@@ -197,6 +325,19 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
     expect(approveRes.status).toBe(200);
     const approveBody = await approveRes.json();
     expect(approveBody.success).toBe(true);
+    expect(approveBody.data.reason).toBe(closeReason);
+
+    const db = getTestDb();
+    const reasonRows = await sql<{ reason: string | null; result_json: unknown }>`
+      SELECT reason, result_json
+      FROM fiscal_year_close_requests
+      WHERE company_id = ${companyId}
+        AND fiscal_year_id = ${fiscalYear.id}
+        AND close_request_id = ${closeRequestId}
+    `.execute(db);
+    expect(reasonRows.rows).toHaveLength(1);
+    expect(reasonRows.rows[0]?.reason).toBe(closeReason);
+    expect(parseResultJson(reasonRows.rows[0]?.result_json).reason).toBe(closeReason);
 
     // Verify fiscal year is now CLOSED
     const statusAfterApprove = await getJson(`/api/accounts/fiscal-years/${fiscalYear.id}/status`, ownerToken);
@@ -275,6 +416,77 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
     expect(persistedBatches.rows).toHaveLength(approve1BatchIds.length);
   });
 
+  it("initiate replay after approval returns original succeeded close result", async () => {
+    await createTestFiscalCloseBalanceFixture(companyId, {
+      asOfDate: "2047-12-31",
+      plBalance: "160.0000",
+    });
+
+    const fiscalYear = await createTestFiscalYear(companyId, {
+      year: 2047,
+      startDate: "2047-01-01",
+      endDate: "2047-12-31",
+      status: "OPEN",
+    });
+
+    const closeRequestId = `post-approval-replay-${randomUUID()}`;
+    const originalReason = "Post-approval replay must preserve original reason";
+
+    await ensureAPReconciliationSettings();
+
+    const initiateRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
+      ownerToken,
+      { close_request_id: closeRequestId, reason: originalReason }
+    );
+    expect(initiateRes.status).toBe(200);
+
+    const approveRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close/approve`,
+      ownerToken,
+      { close_request_id: closeRequestId }
+    );
+    expect(approveRes.status).toBe(200);
+    const approveBody = await approveRes.json();
+    expect(approveBody.success).toBe(true);
+
+    const replayRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
+      ownerToken,
+      { close_request_id: closeRequestId, reason: "Retry reason must not overwrite" }
+    );
+    expect(replayRes.status).toBe(200);
+    const replayBody = await replayRes.json();
+    expect(replayBody.success).toBe(true);
+    expect(replayBody.data.status).toBe("SUCCEEDED");
+    expect(replayBody.data.closeRequestId).toBe(closeRequestId);
+    expect(replayBody.data.reason).toBe(originalReason);
+    expect(replayBody.data.resultJson.reason).toBe(originalReason);
+    expect(replayBody.data.resultJson.postedBatchIds).toEqual(approveBody.data.postedBatchIds);
+
+    const newRequestRes = await postJson(
+      `/api/accounts/fiscal-years/${fiscalYear.id}/close`,
+      ownerToken,
+      { close_request_id: `post-approval-new-${randomUUID()}`, reason: "New close request after closed" }
+    );
+    expect(newRequestRes.status).toBe(409);
+    const newRequestBody = await newRequestRes.json();
+    expect(newRequestBody.success).toBe(false);
+    expect(newRequestBody.error.code).toBe("FISCAL_YEAR_ALREADY_CLOSED");
+
+    const db = getTestDb();
+    const reasonRows = await sql<{ reason: string | null; result_json: unknown }>`
+      SELECT reason, result_json
+      FROM fiscal_year_close_requests
+      WHERE company_id = ${companyId}
+        AND fiscal_year_id = ${fiscalYear.id}
+        AND close_request_id = ${closeRequestId}
+    `.execute(db);
+    expect(reasonRows.rows).toHaveLength(1);
+    expect(reasonRows.rows[0]?.reason).toBe(originalReason);
+    expect(parseResultJson(reasonRows.rows[0]?.result_json).reason).toBe(originalReason);
+  });
+
   /**
    * AC-4: Cannot approve without initiate (enforce two-step contract)
    */
@@ -338,6 +550,18 @@ describe("accounting.fiscal-year-close", { timeout: 120000 }, () => {
 
     // Should return same closeRequestId (idempotent)
     expect(init2Body.data.closeRequestId).toBe(closeRequestId);
+    expect(init2Body.data.reason).toBe("First initiate");
+
+    const db = getTestDb();
+    const reasonRows = await sql<{ reason: string | null }>`
+      SELECT reason
+      FROM fiscal_year_close_requests
+      WHERE company_id = ${companyId}
+        AND fiscal_year_id = ${fiscalYear.id}
+        AND close_request_id = ${closeRequestId}
+    `.execute(db);
+    expect(reasonRows.rows).toHaveLength(1);
+    expect(reasonRows.rows[0]?.reason).toBe("First initiate");
   });
 
   /**

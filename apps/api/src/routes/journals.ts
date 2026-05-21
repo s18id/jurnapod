@@ -14,6 +14,7 @@
  * GET  /journals/:id - Get journal draft or posted journal
  * PATCH /journals/:id - Update journal draft
  * POST /journals/:id/post - Post journal draft
+ * POST /journals/:id/void - Void posted manual journal with reversal
  */
 
 import { Hono } from "hono";
@@ -26,6 +27,7 @@ import {
   handleCreateJournal,
   handleUpdateJournal,
   handlePostJournal,
+  handleVoidJournal,
   handleGetJournal,
   listQuerySchema
 } from "@/lib/journal-handlers";
@@ -113,6 +115,18 @@ journalRoutes.post("/:id/post", async (c) => {
   return handlePostJournal(auth, c.req.raw, journalId);
 });
 
+journalRoutes.post("/:id/void", async (c) => {
+  const auth = c.get("auth") as AuthContext;
+  const idParam = c.req.param("id");
+  const journalId = parseJournalIdParam(idParam);
+  if (journalId instanceof Response) {
+    return journalId;
+  }
+  const body = await c.req.json();
+
+  return handleVoidJournal(auth, c.req.raw, journalId, body);
+});
+
 journalRoutes.patch("/:id", async (c) => {
   const auth = c.get("auth") as AuthContext;
   const idParam = c.req.param("id");
@@ -173,7 +187,7 @@ const JournalBatchResponseSchema = zodOpenApi.object({
   id: zodOpenApi.number().int().positive().openapi({ description: "Batch ID" }),
   company_id: zodOpenApi.number().int().positive().openapi({ description: "Company ID" }),
   outlet_id: zodOpenApi.number().int().positive().nullable().openapi({ description: "Outlet ID" }),
-  status: zodOpenApi.enum(["POSTED"]).openapi({ description: "Journal status" }),
+  status: zodOpenApi.enum(["POSTED", "VOIDED", "REVERSAL"]).openapi({ description: "Journal status" }),
   reference: zodOpenApi.string().nullable().optional().openapi({ description: "Journal reference" }),
   total_debits: zodOpenApi.number().nonnegative().openapi({ description: "Total debit amount" }),
   total_credits: zodOpenApi.number().nonnegative().openapi({ description: "Total credit amount" }),
@@ -183,6 +197,11 @@ const JournalBatchResponseSchema = zodOpenApi.object({
   posted_at: zodOpenApi.string().openapi({ description: "Posted timestamp" }),
   created_at: zodOpenApi.string().openapi({ description: "Created timestamp" }),
   updated_at: zodOpenApi.string().openapi({ description: "Updated timestamp" }),
+  void_reason: zodOpenApi.string().nullable().optional().openapi({ description: "Void/reversal reason" }),
+  voided_at: zodOpenApi.string().nullable().optional().openapi({ description: "Void timestamp" }),
+  voided_by_user_id: zodOpenApi.number().int().positive().nullable().optional().openapi({ description: "User that voided the original journal" }),
+  original_journal_id: zodOpenApi.number().int().positive().nullable().optional().openapi({ description: "Original journal ID for reversal entries" }),
+  reversal_journal_id: zodOpenApi.number().int().positive().nullable().optional().openapi({ description: "Reversal journal ID for voided originals" }),
   lines: zodOpenApi.array(JournalEntryLineResponseSchema).openapi({ description: "Journal lines" }),
 }).openapi("JournalBatchResponse");
 
@@ -202,6 +221,11 @@ const JournalDraftResponseSchema = zodOpenApi.object({
   updated_at: zodOpenApi.string().openapi({ description: "Updated timestamp" }),
   total_debits: zodOpenApi.number().nonnegative().openapi({ description: "Total debit amount" }),
   total_credits: zodOpenApi.number().nonnegative().openapi({ description: "Total credit amount" }),
+  void_reason: zodOpenApi.string().nullable().optional().openapi({ description: "Void reason; null for drafts" }),
+  voided_at: zodOpenApi.string().nullable().optional().openapi({ description: "Void timestamp; null for drafts" }),
+  voided_by_user_id: zodOpenApi.number().int().positive().nullable().optional().openapi({ description: "Void actor; null for drafts" }),
+  original_journal_id: zodOpenApi.number().int().positive().nullable().optional().openapi({ description: "Original journal ID; null for drafts" }),
+  reversal_journal_id: zodOpenApi.number().int().positive().nullable().optional().openapi({ description: "Reversal journal ID; null for drafts" }),
   lines: zodOpenApi.array(JournalEntryLineResponseSchema).openapi({ description: "Journal lines" }),
 }).openapi("JournalDraftResponse");
 
@@ -240,6 +264,10 @@ const ManualJournalEntryRequestSchema = zodOpenApi.object({
   description: zodOpenApi.string().max(500).openapi({ description: "Entry description" }),
   lines: zodOpenApi.array(JournalLineSchema).min(2).openapi({ description: "Journal lines (must balance)" }),
 }).openapi("ManualJournalEntryRequest");
+
+const JournalVoidRequestSchema = zodOpenApi.object({
+  reason: zodOpenApi.string().trim().min(1).max(500).openapi({ description: "Required reason for voiding the posted journal" }),
+}).openapi("JournalVoidRequest");
 
 /**
  * Journal error response schema
@@ -428,6 +456,38 @@ export function registerJournalRoutes(app: { openapi: OpenAPIHonoType["openapi"]
       return journalId;
     }
     return handlePostJournal(auth, c.req.raw, journalId);
+  }) as any);
+
+  // POST /journals/:id/void - Void posted manual journal with reversal
+  const voidJournalRoute = createRoute({
+    path: "/journals/{id}/void",
+    method: "post",
+    tags: ["Journals"],
+    summary: "Void posted manual journal",
+    description: "Void a posted manual journal by creating an immutable balanced reversal journal.",
+    security: [{ BearerAuth: [] }],
+    request: {
+      params: zodOpenApi.object({ id: zodOpenApi.string().openapi({ description: "Posted journal ID or posted draft ID" }) }),
+      body: { content: { "application/json": { schema: JournalVoidRequestSchema } } },
+    },
+    responses: {
+      200: { content: { "application/json": { schema: JournalEntrySuccessResponseSchema } }, description: "Journal voided and reversal linked successfully" },
+      400: { content: { "application/json": { schema: JournalErrorResponseSchema } }, description: "Invalid request or fiscal year restriction" },
+      401: { content: { "application/json": { schema: JournalErrorResponseSchema } }, description: "Unauthorized" },
+      403: { content: { "application/json": { schema: JournalErrorResponseSchema } }, description: "Forbidden" },
+      404: { content: { "application/json": { schema: JournalErrorResponseSchema } }, description: "Journal not found" },
+      409: { content: { "application/json": { schema: JournalErrorResponseSchema } }, description: "Journal already voided or invalid state" },
+    },
+  });
+
+  app.openapi(voidJournalRoute, (async (c: any) => {
+    const auth = c.get("auth") as AuthContext;
+    const journalId = parseJournalIdParam(c.req.param("id"));
+    if (journalId instanceof Response) {
+      return journalId;
+    }
+    const body = await c.req.json();
+    return handleVoidJournal(auth, c.req.raw, journalId, body);
   }) as any);
 
   // GET /journals/:id - Get single journal entry

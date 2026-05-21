@@ -2,11 +2,10 @@
 // Ownership: Ahmad Faruk (Signal18 ID)
 
 import { Button, Group, Select, TextInput } from "@mantine/core";
-import { useEffect, useState, useCallback } from "react";
+import { useCallback } from "react";
 import type { SessionUser } from "../../../lib/session";
-import { apiRequest } from "../../../lib/api-client";
 
-import type { ReceivablesAgeingFilters } from "../../../types/reports/receivables-ageing";
+import { DEFAULT_FILTERS, type ReceivablesAgeingFilters } from "../../../types/reports/receivables-ageing";
 
 interface AgeingFiltersProps {
   filters: ReceivablesAgeingFilters;
@@ -15,57 +14,32 @@ interface AgeingFiltersProps {
   isLoading?: boolean;
 }
 
-interface CustomerOption {
-  value: string;
-  label: string;
+export function buildNextReceivablesAgeingFilters(
+  filters: ReceivablesAgeingFilters,
+  patch: Partial<ReceivablesAgeingFilters>
+): ReceivablesAgeingFilters {
+  return { ...filters, ...patch };
 }
 
 export function AgeingFilters({ filters, onFiltersChange, user, isLoading }: AgeingFiltersProps) {
-  const [customers, setCustomers] = useState<CustomerOption[]>([]);
-
   const asOfDate = filters.asOfDate;
   const outletId = filters.outletId !== null ? String(filters.outletId) : "";
-  const customerId = filters.customerId !== null ? String(filters.customerId) : "";
 
-  // Fetch customers for dropdown
-  useEffect(() => {
-    if (!user.company_id) return;
+  const handleAsOfDateChange = useCallback((value: string) => {
+    onFiltersChange(buildNextReceivablesAgeingFilters(filters, { asOfDate: value }));
+  }, [filters, onFiltersChange]);
 
-    apiRequest<{ data: Array<{ id: number; name: string }> }>(
-      `/customers?company_id=${user.company_id}`,
-      {}
-    )
-      .then((response) => {
-        const customerOptions = response.data.map((c) => ({
-          value: String(c.id),
-          label: c.name,
-        }));
-        setCustomers(customerOptions);
-      })
-      .catch(() => {
-        // Silently fail - customers are optional
-        setCustomers([]);
-      });
-  }, [user.company_id]);
+  const handleOutletChange = useCallback((value: string | null) => {
+    onFiltersChange(buildNextReceivablesAgeingFilters(filters, { outletId: value ? Number(value) : null }));
+  }, [filters, onFiltersChange]);
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
-    const formData = new FormData(e.currentTarget as HTMLFormElement);
-    const customerValue = formData.get("customerId") as string;
-    onFiltersChange({
-      asOfDate: formData.get("asOfDate") as string,
-      outletId: formData.get("outletId") ? Number(formData.get("outletId")) : null,
-      customerId: customerValue ? Number(customerValue) : null,
-    });
-  }, [onFiltersChange]);
+    onFiltersChange(filters);
+  }, [filters, onFiltersChange]);
 
   const handleReset = useCallback(() => {
-    const defaultFilters: ReceivablesAgeingFilters = {
-      asOfDate: new Date().toISOString().slice(0, 10),
-      outletId: null,
-      customerId: null,
-    };
-    onFiltersChange(defaultFilters);
+    onFiltersChange(DEFAULT_FILTERS);
   }, [onFiltersChange]);
 
   const outletOptions = [
@@ -84,7 +58,8 @@ export function AgeingFilters({ filters, onFiltersChange, user, isLoading }: Age
           type="date"
           name="asOfDate"
           style={{ minWidth: 160 }}
-          defaultValue={asOfDate}
+          value={asOfDate}
+          onChange={(event) => handleAsOfDateChange(event.currentTarget.value)}
         />
         <Select
           label="Outlet"
@@ -93,17 +68,8 @@ export function AgeingFilters({ filters, onFiltersChange, user, isLoading }: Age
           clearable
           placeholder="All Outlets"
           style={{ minWidth: 180 }}
-          defaultValue={outletId}
-        />
-        <Select
-          label="Customer"
-          name="customerId"
-          data={[{ value: "", label: "All Customers" }, ...customers]}
-          clearable
-          placeholder="All Customers"
-          searchable
-          style={{ minWidth: 200 }}
-          defaultValue={customerId}
+          value={outletId}
+          onChange={handleOutletChange}
         />
         <Button type="submit" loading={isLoading}>
           Apply Filters

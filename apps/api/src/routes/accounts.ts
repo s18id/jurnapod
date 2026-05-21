@@ -16,6 +16,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { z as zodOpenApi, createRoute } from "@hono/zod-openapi";
 import type { OpenAPIHono as OpenAPIHonoType } from "@hono/zod-openapi";
+import { randomUUID } from "node:crypto";
+import { Temporal } from "@js-temporal/polyfill";
 import {
   AccountCreateRequestSchema,
   AccountResponseSchema,
@@ -68,6 +70,7 @@ import {
   FiscalYearOpenConflictError,
   getFiscalYearClosePreview,
   getFiscalYearStatus,
+  getFiscalYearCloseRequest,
   FiscalYearAlreadyClosedError,
   FiscalYearClosePreconditionError,
   RetainedEarningsAccountNotFoundError,
@@ -115,6 +118,19 @@ const accountListQuerySchema = z.object({
     })
     .default("false")
 });
+
+const fiscalYearCloseInitiateRequestSchema = z.object({
+  close_request_id: z.string().trim().min(1).max(64).optional(),
+  reason: z.string().trim().min(1).max(500),
+});
+
+const fiscalYearCloseApproveRequestSchema = z.object({
+  close_request_id: z.string().trim().min(1).max(64),
+});
+
+function currentEpochMs(): number {
+  return Temporal.Now.instant().epochMilliseconds;
+}
 
 // =============================================================================
 // Account Routes
@@ -1145,7 +1161,7 @@ accountRoutes.post("/fiscal-years/:id/close", async (c) => {
     const accessResult = await requireAccess({
       module: "accounting",
       resource: "fiscal_years",
-      permission: "update"
+      permission: "manage"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -1154,11 +1170,18 @@ accountRoutes.post("/fiscal-years/:id/close", async (c) => {
 
     const fiscalYearId = NumericIdSchema.parse(c.req.param("id"));
 
-    // Parse optional request body
+    // Parse request body. A non-empty reason is required for audit accountability.
     const payload = await c.req.json().catch(() => ({}));
-    const closeRequestId = (payload as { close_request_id?: string }).close_request_id 
-      ?? `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-    const reason = (payload as { reason?: string }).reason;
+    const parsedPayload = fiscalYearCloseInitiateRequestSchema.safeParse(payload);
+    if (!parsedPayload.success) {
+      return errorResponse(
+        "INVALID_REQUEST",
+        "Fiscal year close reason is required and must be at most 500 characters; close_request_id must be at most 64 characters",
+        400
+      );
+    }
+    const closeRequestId = parsedPayload.data.close_request_id ?? randomUUID();
+    const reason = parsedPayload.data.reason;
 
     // Get the fiscal year first to check status
     const fiscalYear = await getFiscalYearById(auth.companyId, fiscalYearId);
@@ -1167,6 +1190,31 @@ accountRoutes.post("/fiscal-years/:id/close", async (c) => {
     }
 
     if (fiscalYear.status === "CLOSED") {
+      const existingCloseRequest = await getFiscalYearCloseRequest(
+        auth.companyId,
+        fiscalYearId,
+        closeRequestId
+      );
+
+      if (existingCloseRequest?.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED) {
+        const resultJsonReason = existingCloseRequest.resultJson?.reason;
+        const closeReason = typeof resultJsonReason === "string"
+          ? resultJsonReason
+          : existingCloseRequest.reason ?? reason;
+
+        return successResponse({
+          success: true,
+          fiscalYearId: existingCloseRequest.fiscalYearId,
+          closeRequestId: existingCloseRequest.closeRequestId,
+          status: existingCloseRequest.status,
+          message: "Fiscal year was already closed",
+          previousStatus: existingCloseRequest.previousStatus,
+          newStatus: existingCloseRequest.newStatus,
+          reason: closeReason,
+          resultJson: existingCloseRequest.resultJson
+        });
+      }
+
       return errorResponse("FISCAL_YEAR_ALREADY_CLOSED", `Fiscal year ${fiscalYearId} is already closed`, 409);
     }
 
@@ -1181,10 +1229,15 @@ accountRoutes.post("/fiscal-years/:id/close", async (c) => {
       {
         companyId: auth.companyId,
         requestedByUserId: auth.userId ?? 0,
-        requestedAtEpochMs: Date.now(),
-        reason: reason ?? "Fiscal year close initiated"
+        requestedAtEpochMs: currentEpochMs(),
+        reason
       }
     );
+
+    const resultJsonReason = closeResult.resultJson?.reason;
+    const closeReason = typeof resultJsonReason === "string"
+      ? resultJsonReason
+      : closeResult.reason ?? reason;
 
     // If the close request already existed and succeeded, return info about that
     if (closeResult.status === FISCAL_YEAR_CLOSE_STATUS.SUCCEEDED) {
@@ -1195,7 +1248,9 @@ accountRoutes.post("/fiscal-years/:id/close", async (c) => {
         status: closeResult.status,
         message: "Fiscal year was already closed",
         previousStatus: closeResult.previousStatus,
-        newStatus: closeResult.newStatus
+        newStatus: closeResult.newStatus,
+        reason: closeReason,
+        resultJson: closeResult.resultJson
       });
     }
 
@@ -1205,6 +1260,8 @@ accountRoutes.post("/fiscal-years/:id/close", async (c) => {
       fiscalYearId: closeResult.fiscalYearId,
       closeRequestId: closeResult.closeRequestId,
       status: closeResult.status,
+      reason: closeReason,
+      resultJson: closeResult.resultJson,
       message: "Fiscal year close initiated. Proceed to approve to post closing entries.",
       canApprove: true,
       netIncome: preview.netIncome,
@@ -1248,7 +1305,7 @@ accountRoutes.post("/fiscal-years/:id/close/approve", async (c) => {
     const accessResult = await requireAccess({
       module: "accounting",
       resource: "fiscal_years",
-      permission: "update"
+      permission: "manage"
     })(c.req.raw, auth);
 
     if (accessResult !== null) {
@@ -1259,9 +1316,15 @@ accountRoutes.post("/fiscal-years/:id/close/approve", async (c) => {
 
     // close_request_id is required to preserve idempotency between initiate and approve steps
     const payload = await c.req.json().catch(() => ({}));
-    const approvePayload = z.object({
-      close_request_id: z.string().min(1)
-    }).parse(payload);
+    const parsedApprovePayload = fiscalYearCloseApproveRequestSchema.safeParse(payload);
+    if (!parsedApprovePayload.success) {
+      return errorResponse(
+        "INVALID_REQUEST",
+        "close_request_id is required and must be at most 64 characters",
+        400
+      );
+    }
+    const approvePayload = parsedApprovePayload.data;
     const closeRequestId = approvePayload.close_request_id;
 
     // Delegate to library function - handles all DB orchestration internally
@@ -1272,8 +1335,7 @@ accountRoutes.post("/fiscal-years/:id/close/approve", async (c) => {
       {
         companyId: auth.companyId,
         requestedByUserId: auth.userId ?? 0,
-        requestedAtEpochMs: Date.now(),
-        reason: "Fiscal year close approved"
+        requestedAtEpochMs: currentEpochMs()
       }
     );
 

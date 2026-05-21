@@ -15,16 +15,20 @@ vi.mock("@/hooks/use-journals", () => ({
   createManualJournalEntry: vi.fn(),
   updateManualJournalEntry: vi.fn(),
   postManualJournalEntry: vi.fn(),
+  voidManualJournalEntry: vi.fn(),
 }));
 
 import { APP_ROUTES } from "@/app/routes";
 import {
+  buildJournalVoidDiffChanges,
   buildJournalPostDiffChanges,
   calculateJournalTotals,
   entryDate,
   formatJournalApiError,
   formForEntrySelection,
+  isVoidEligibleJournal,
   isJournalDraftDirty,
+  journalVoidResultMessages,
   journalReviewBlockReason,
   JournalsPage,
 } from "@/features/journals-page";
@@ -114,6 +118,27 @@ const postedJournal: JournalEntryResponse = {
   ],
 };
 
+const voidedJournal: JournalEntryResponse = {
+  ...postedJournal,
+  id: 89,
+  status: "VOIDED",
+  reference: "MAN-89",
+  void_reason: "Duplicate accrual reversal",
+  voided_at: "2026-05-20T03:00:00.000Z",
+  voided_by_user_id: 7,
+  reversal_journal_id: 90,
+  lines: postedJournal.lines.map((line) => ({ ...line, journal_id: 89, journal_batch_id: 89 })),
+};
+
+const reversalJournal: JournalEntryResponse = {
+  ...postedJournal,
+  id: 90,
+  status: "REVERSAL",
+  reference: "REV-90",
+  original_journal_id: 89,
+  lines: postedJournal.lines.map((line) => ({ ...line, journal_id: 90, journal_batch_id: 90 })),
+};
+
 function makeUser(mask: number): SessionUser {
   return {
     id: 7,
@@ -135,7 +160,7 @@ function renderWithProviders(element: ReactElement): string {
 describe("Journal create/post backoffice screen", () => {
   beforeEach(() => {
     mockedUseAccounts.mockReturnValue({ data: accounts, loading: false, error: null, refetch: vi.fn() });
-    mockedUseJournalBatches.mockReturnValue({ data: [draftJournal, postedJournal], loading: false, error: null, refetch: vi.fn() });
+    mockedUseJournalBatches.mockReturnValue({ data: [draftJournal, postedJournal, voidedJournal, reversalJournal], loading: false, error: null, refetch: vi.fn() });
   });
 
   it("declares route metadata for accounting.journals READ", () => {
@@ -153,7 +178,7 @@ describe("Journal create/post backoffice screen", () => {
     expect(calculateJournalTotals([{ debit: 100, credit: 0 }, { debit: 0, credit: 99 }]).isBalanced).toBe(false);
   });
 
-  it("renders verified list fields, filters, form totals, and immutable posted wording", () => {
+  it("renders verified list fields, filters, void statuses, correction metadata, and immutable wording", () => {
     const html = renderWithProviders(createElement(JournalsPage, { user: makeUser(PERMISSION_BITS.READ | PERMISSION_BITS.CREATE | PERMISSION_BITS.UPDATE) }));
 
     expect(html).toContain("Journal Entries");
@@ -165,13 +190,47 @@ describe("Journal create/post backoffice screen", () => {
     expect(html).toContain("MAN-88");
     expect(html).toContain("DRAFT");
     expect(html).toContain("POSTED");
+    expect(html).toContain("VOIDED");
+    expect(html).toContain("REVERSAL");
+    expect(html).toContain("Voided");
+    expect(html).toContain("Reversal");
+    expect(html).toContain("Void reason: Duplicate accrual reversal");
+    expect(html).toContain("Reversal journal ID: 90");
+    expect(html).toContain("Original journal ID: 89");
     expect(html).toContain("2026-05-19");
     expect(html).not.toContain("2026-05-20 02:00:00 UTC");
     expect(html).toContain("Create Draft Journal");
     expect(html).toContain("Totals");
     expect(html).toContain("Review and post draft");
-    expect(html).toContain("read-only immutable detail");
+    expect(html).toContain("read-only detail");
     expect(html).not.toContain("href=&quot;#/audit");
+  });
+
+  it("gates void action with accounting.journals DELETE while keeping backend authoritative", () => {
+    const noDeleteHtml = renderWithProviders(createElement(JournalsPage, { user: makeUser(PERMISSION_BITS.READ | PERMISSION_BITS.CREATE | PERMISSION_BITS.UPDATE) }));
+    expect(noDeleteHtml).toContain("Void requires accounting.journals.DELETE.");
+    expect(noDeleteHtml).not.toContain("Review void");
+
+    const deleteHtml = renderWithProviders(createElement(JournalsPage, { user: makeUser(PERMISSION_BITS.READ | PERMISSION_BITS.CREATE | PERMISSION_BITS.UPDATE | PERMISSION_BITS.DELETE) }));
+    expect(deleteHtml).toContain("Review void");
+    expect(deleteHtml).not.toContain("Void requires accounting.journals.DELETE.");
+    expect(isVoidEligibleJournal(postedJournal)).toBe(true);
+    expect(isVoidEligibleJournal(draftJournal)).toBe(false);
+    expect(isVoidEligibleJournal(voidedJournal)).toBe(false);
+    expect(isVoidEligibleJournal(reversalJournal)).toBe(false);
+  });
+
+  it("flags incomplete backend void evidence when reversal_journal_id is missing", () => {
+    expect(journalVoidResultMessages(voidedJournal)).toEqual({
+      success: "Journal voided. Reversal journal ID 90 was assigned by backend.",
+      error: null,
+    });
+
+    const incompleteVoidedJournal = { ...voidedJournal, reversal_journal_id: null };
+    expect(journalVoidResultMessages(incompleteVoidedJournal)).toEqual({
+      success: null,
+      error: "VOID_EVIDENCE_INCOMPLETE: Backend void response did not include reversal_journal_id. Refresh the list and contact support before relying on this correction evidence.",
+    });
   });
 
   it("gates create/update actions for read-only journal users", () => {
@@ -182,12 +241,23 @@ describe("Journal create/post backoffice screen", () => {
 
   it("surfaces deterministic API errors and post ReviewPanel before/after diff evidence", () => {
     expect(formatJournalApiError(new ApiError(409, "JOURNAL_ALREADY_POSTED", "already posted"))).toBe("JOURNAL_ALREADY_POSTED: Posted journals are immutable and cannot be edited again.");
+    expect(formatJournalApiError(new ApiError(409, "JOURNAL_ALREADY_VOIDED", "already voided"))).toBe("JOURNAL_ALREADY_VOIDED: This journal was already voided. Refresh the list before retrying.");
+    expect(formatJournalApiError(new ApiError(422, "JOURNAL_VOID_NOT_ALLOWED", "not allowed"))).toBe("JOURNAL_VOID_NOT_ALLOWED: Only posted manual journals can be voided from this screen.");
+    expect(formatJournalApiError(new ApiError(422, "JOURNAL_CANNOT_VOID_DRAFT", "draft"))).toBe("JOURNAL_CANNOT_VOID_DRAFT: Draft journals cannot be voided. Delete or edit the draft workflow instead.");
+    expect(formatJournalApiError(new ApiError(409, "SERVICE_VERSION_MISMATCH", "mismatch"))).toBe("SERVICE_VERSION_MISMATCH: The journal changed on the server. Refresh the list before retrying.");
     expect(formatJournalApiError(new ApiError(422, "FISCAL_YEAR_CLOSED", "closed"))).toBe("FISCAL_YEAR_CLOSED: The selected fiscal year is closed.");
 
     const diff = buildJournalPostDiffChanges(draftJournal);
     expect(diff).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: "status", oldFormatted: "DRAFT", newFormatted: "POSTED" }),
       expect.objectContaining({ path: "posted_at", newFormatted: "Assigned by backend on confirmation" }),
+    ]));
+
+    const voidDiff = buildJournalVoidDiffChanges(postedJournal, " Duplicate entry ");
+    expect(voidDiff).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: "status", oldFormatted: "POSTED", newFormatted: "VOIDED" }),
+      expect.objectContaining({ path: "void_reason", oldFormatted: "—", newFormatted: "Duplicate entry" }),
+      expect.objectContaining({ path: "reversal_journal_id", oldFormatted: "—", newFormatted: "Assigned by backend on confirmation" }),
     ]));
   });
 

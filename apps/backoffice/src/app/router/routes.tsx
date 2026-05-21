@@ -39,6 +39,7 @@ export const ROUTE_PATHS = {
   DAILY_SALES: "/daily-sales",
   PROFIT_LOSS: "/profit-loss",
   RECEIVABLES_AGEING: "/receivables-ageing",
+  TRIAL_BALANCE: "/trial-balance",
   GENERAL_LEDGER: "/general-ledger",
   JOURNALS: "/journals",
   ACCOUNTING_WORKSHEET: "/accounting-worksheet",
@@ -85,6 +86,7 @@ export const ROUTE_PATHS = {
   PURCHASING_INVOICES: "/purchasing/invoices",
   PURCHASING_PAYMENTS: "/purchasing/payments",
   PURCHASING_CREDITS: "/purchasing/credits",
+  PURCHASING_AP_AGING: "/purchasing/ap-aging",
 
   // Settings
   AUDIT_LOGS: "/audit-logs",
@@ -118,6 +120,25 @@ export const HASH_TO_V6_ROUTE: Record<string, string> = {
   "#/feature-settings": "/outlet-settings",
   "#/403": "/items",
 };
+
+export type FinancialReportRoutePageExport =
+  | "ProfitLossPage"
+  | "ReceivablesAgeingPage"
+  | "TrialBalancePage"
+  | "GeneralLedgerPage"
+  | "APAgingPage";
+
+export const FINANCIAL_REPORT_ROUTE_PAGE_EXPORTS: Record<string, FinancialReportRoutePageExport> = {
+  [ROUTE_PATHS.PROFIT_LOSS]: "ProfitLossPage",
+  [ROUTE_PATHS.RECEIVABLES_AGEING]: "ReceivablesAgeingPage",
+  [ROUTE_PATHS.TRIAL_BALANCE]: "TrialBalancePage",
+  [ROUTE_PATHS.GENERAL_LEDGER]: "GeneralLedgerPage",
+  [ROUTE_PATHS.PURCHASING_AP_AGING]: "APAgingPage",
+};
+
+export function getFinancialReportRoutePageExport(path: string): FinancialReportRoutePageExport | null {
+  return FINANCIAL_REPORT_ROUTE_PAGE_EXPORTS[path] ?? null;
+}
 
 /**
  * Check if a legacy hash path has a v6 redirect target.

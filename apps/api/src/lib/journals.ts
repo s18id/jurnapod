@@ -14,7 +14,25 @@ import type {
   JournalEntryResponse,
   JournalListQuery
 } from "@jurnapod/shared";
+import type { ResolvedVoidTargetJournal } from "@jurnapod/modules-accounting";
 import { getJournalsService } from "./accounting-services";
+
+export class JournalsServiceVersionMismatchError extends Error {
+  constructor() {
+    super("Journals service is stale; rebuild @jurnapod/modules-accounting and restart the API process");
+    this.name = "JournalsServiceVersionMismatchError";
+  }
+}
+
+function assertVoidResolverAvailable(
+  service: ReturnType<typeof getJournalsService>
+): asserts service is ReturnType<typeof getJournalsService> & {
+  resolveVoidTargetJournal: (journalId: number, companyId: number) => Promise<ResolvedVoidTargetJournal>;
+} {
+  if (typeof service.resolveVoidTargetJournal !== "function") {
+    throw new JournalsServiceVersionMismatchError();
+  }
+}
 
 /**
  * Export service methods - thin wrappers around accounting module
@@ -60,6 +78,26 @@ export async function postJournalDraft(
   return service.postJournalDraft(draftId, companyId, userId);
 }
 
+export async function voidPostedManualJournal(
+  journalId: number,
+  companyId: number,
+  reason: string,
+  userId?: number
+): Promise<JournalEntryResponse> {
+  const service = getJournalsService();
+  assertVoidResolverAvailable(service);
+  return service.voidPostedManualJournal(journalId, companyId, reason, userId);
+}
+
+export async function resolveVoidTargetJournal(
+  journalId: number,
+  companyId: number
+): Promise<ResolvedVoidTargetJournal> {
+  const service = getJournalsService();
+  assertVoidResolverAvailable(service);
+  return service.resolveVoidTargetJournal(journalId, companyId);
+}
+
 export async function getJournalBatch(
   batchId: number,
   companyId: number
@@ -99,6 +137,10 @@ export {
   InvalidJournalLineError,
   JournalDraftNotFoundError,
   JournalAlreadyPostedError,
+  JournalAlreadyVoidedError,
+  JournalCannotVoidDraftError,
+  JournalVoidNotAllowedError,
+  InvalidJournalVoidReasonError,
   JournalDuplicateClientRefError,
   InvalidJournalOutletError,
   InvalidJournalAccountError,
