@@ -1,6 +1,6 @@
 # Epic 70: Hardening — Accessibility, Internationalization, Testing, CI, Rollout
 
-**Status:** planned (queued — requires explicit backoffice unfreeze before execution)
+**Status:** ready-for-dev (backoffice unfreeze authorized by Ahmad on 2026-05-21)
 **Sprint/Timebox:** Weeks 11–12 (of Backoffice Frontend Program)
 **Theme:** Final program hardening for the redesigned backoffice: WCAG 2.2 AA accessibility, English/Indonesian internationalization, Playwright + axe coverage, typed-contract smoke tests, CI gates, CSP/browser hardening, bundle/performance verification, and rollout runbooks.
 **Primary Modules:** `apps/backoffice`, `.github/workflows`, `docs/`
@@ -77,7 +77,7 @@ This epic is a hardening and validation epic. It MUST NOT introduce new domain f
 
 ### Story 70-1 — WCAG 2.2 AA accessibility audit and remediation
 
-**Status:** planned
+**Status:** ready-for-dev
 **Type:** release hardening
 **Risk:** High
 **Dependencies:** Epics 65–69 UI surfaces complete
@@ -229,12 +229,53 @@ Perform final program closeout:
 
 | # | Precondition | Enforcement | Status |
 |---|--------------|-------------|--------|
-| 1 | Backoffice unfreeze authorized | Written authorization | ❌ (HOLDING) |
-| 2 | Epics 65–69 complete with no unresolved P0/P1 blockers | sprint-status.yaml + review evidence | ❌ (HOLDING) |
-| 3 | Critical redesigned route list finalized | Program plan | ❌ (HOLDING) |
-| 4 | Bundle baseline captured in Epic 65 or early Epic 70 | Vite report artifact | ❌ (HOLDING) |
-| 5 | Staging environment available for CSP/WebSocket/SSE verification | Deployment checklist | ❌ (HOLDING) |
-| 6 | SOLID/DRY/KISS kickoff gate scored | Manual review | ❌ (HOLDING) |
+| 1 | Backoffice unfreeze authorized | Written authorization | ✅ Authorized by Ahmad on 2026-05-21 (Option A) |
+| 2 | Epics 65–69 complete with no unresolved P0/P1 blockers | sprint-status.yaml + review evidence | ✅ Epics 65–69 marked done in sprint-status.yaml |
+| 3 | Critical redesigned route list finalized | Program plan | ⚠️ Assigned to Story 70-1 before implementation starts |
+| 4 | Bundle baseline captured in Epic 65 or early Epic 70 | Vite report artifact | ⚠️ Assigned to Story 70-4; kickoff build warning tracked as P2 |
+| 5 | Staging environment available for CSP/WebSocket/SSE verification | Deployment checklist | ⚠️ Assigned to Stories 70-4 and 70-5 |
+| 6 | SOLID/DRY/KISS kickoff gate scored | Manual review | ✅ Scored during kickoff; SOLID Unknown, DRY Pass, KISS Pass |
+
+### 5.1 Kickoff Evidence — 2026-05-21
+
+| Gate | Evidence | Result |
+|------|----------|--------|
+| Scope freeze override | Ahmad selected Option A for Epic 70 backoffice unfreeze | ✅ Pass |
+| Backoffice lint | `npm run lint -w @jurnapod/backoffice` | ✅ Pass |
+| API lint | `npm run lint -w @jurnapod/api` | ✅ Pass with existing warnings: 163 `no-explicit-any`, 0 errors |
+| Shared library build | `npm run build:libs` | ✅ Pass |
+| API typecheck | `npm run typecheck -w @jurnapod/api` | ✅ Pass |
+| Backoffice typecheck | `npm run typecheck -w @jurnapod/backoffice` | ✅ Pass |
+| Backoffice build | `npm run build -w @jurnapod/backoffice` | ✅ Pass with P2 chunk-size warning |
+| Sprint tracking | Epic 70 appended to `sprint-status.yaml` using append-only process and canonical update utility for story entries | ✅ Pass |
+
+### 5.2 SOLID / DRY / KISS Kickoff Score — 2026-05-21
+
+| Area | Score | Rationale |
+|------|-------|-----------|
+| SOLID | Unknown | Available kickoff evidence did not include a code-level audit of backoffice primitives/routes. Story 70-1 MUST audit shared primitives before remediation. |
+| DRY | Pass | The epic requires shared primitive remediation and MUST NOT patch each consumer independently. |
+| KISS | Pass | The epic is hardening-only and MUST NOT introduce net-new domain features. |
+
+### 5.3 Kickoff Risk Updates — 2026-05-21
+
+| Risk ID | Severity | Status | Evidence / Required Action |
+|---------|----------|--------|----------------------------|
+| R70-KO-001 | P1 | Open | Critical redesigned route list MUST be finalized before Story 70-1 implementation begins. |
+| R70-KO-002 | P2 | Open | Backoffice build passes but emits chunk-size warning: `pages` chunk `556.83 kB`; Story 70-4 MUST capture bundle baseline and enforce budgets. |
+| R70-KO-003 | P1 | Open | CSP/WebSocket/SSE staging verification remains pending; Stories 70-4 and 70-5 MUST identify environment and owner. |
+| R70-KO-004 | P3 | Open | API lint pre-flight passes with 163 existing `no-explicit-any` warnings and 0 errors; this is outside Epic 70 scope unless API files are touched. |
+
+### 5.4 Epic 69 Carry-Forward Closeout Checklist
+
+The first implementation story MUST reference and satisfy this checklist before completion:
+
+- Story-level unfreeze evidence MUST be recorded.
+- Contract verification MUST be recorded for any API-backed flow exercised by the story.
+- Verified audit-link semantics MUST be recorded for any audit or financial evidence UI touched by the story.
+- Reviewer GO MUST be recorded with no unresolved P0/P1 findings.
+- Story owner sign-off MUST be recorded.
+- Sprint-status validation MUST pass after status updates.
 
 ---
 

@@ -789,3 +789,11 @@ development_status:
   69-3-e-fiscal-period-close-ux: done
   69-3-f-financial-reports-csv-export: done
 
+  # Epic 70: Backoffice Hardening — Accessibility, Internationalization, Testing, CI, Rollout
+  epic-70: ready-for-dev
+  70-1-wcag-22-aa-accessibility-audit-and-remediation: in-progress
+  70-2-internationalization-framework-and-english-indonesian-locale-packs: backlog
+  70-3-test-pyramid-completion-unit-component-e2e-accessibility-contract-smoke: backlog
+  70-4-ci-gates-csp-browser-hardening-bundle-performance-budgets: backlog
+  70-5-production-rollout-rollback-observability-and-runbook: backlog
+  70-6-program-closeout-adversarial-review-and-release-signoff: backlog
